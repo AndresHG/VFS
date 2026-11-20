@@ -33,7 +33,7 @@ use rusqlite::{params_from_iter, Connection, ErrorCode, OptionalExtension, Row};
 use crate::db::join_rel;
 use crate::error::{Error, Result};
 use crate::fold::fold_key;
-use crate::fuzzy::{self, FUZZY_MIN_LEN};
+use crate::fuzzy::{self, FUZZY_MAX_LEN, FUZZY_MIN_LEN};
 use crate::rank::{self, Candidate};
 use crate::types::{
     FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
@@ -47,6 +47,10 @@ const MAX_HITS: usize = 2000;
 /// order while its tier has at most this many matches.
 const NAME_READ_CAP: usize = 4_000;
 const MAX_TERMS: usize = 8;
+/// Bytes of query text read; the rest is ignored (the search box allows no more).
+const MAX_QUERY_BYTES: usize = 1024;
+/// Characters kept of each term; a longer one is cut, which only widens what it matches.
+const MAX_TERM_CHARS: usize = 128;
 /// Directories read by a directory-driven stage.
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
@@ -89,8 +93,18 @@ pub(crate) fn search(
     let start = Instant::now();
     let limit = query.limit.clamp(1, MAX_LIMIT) as usize;
     let offset = query.offset as usize;
-    let folded = fold_key(&query.text.replace('\\', "/"));
-    let folded = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Bounded input: at most MAX_QUERY_BYTES of text and MAX_TERM_CHARS per term, so no
+    // query costs more than a typed one, whatever is pasted.
+    let mut text_end = query.text.len().min(MAX_QUERY_BYTES);
+    while !query.text.is_char_boundary(text_end) {
+        text_end -= 1;
+    }
+    let folded = fold_key(&query.text[..text_end].replace('\\', "/"));
+    let folded = folded
+        .split_whitespace()
+        .map(|t| t.chars().take(MAX_TERM_CHARS).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut terms: Vec<String> = Vec::new();
     for t in folded.split(' ').filter(|t| !t.is_empty()) {
         if terms.len() == MAX_TERMS {
@@ -605,8 +619,9 @@ impl Ctx {
     }
 }
 
+/// Terms that tolerate a typo: from `FUZZY_MIN_LEN` up to `FUZZY_MAX_LEN` characters.
 fn is_long_for_fuzzy(t: &str) -> bool {
-    t.chars().count() >= FUZZY_MIN_LEN
+    (FUZZY_MIN_LEN..=FUZZY_MAX_LEN).contains(&t.chars().count())
 }
 
 /// File verification: every term in the name or the directory path; with `fuzzy`, terms
@@ -1017,6 +1032,7 @@ fn with_params(first: Option<Value>, clause: &Clause) -> Vec<Value> {
 /// covering set halves the time of an intersection for a few percent more candidates.
 fn all_trigrams<S: AsRef<str>>(terms: &[S]) -> String {
     let mut grams: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     for t in terms {
         let c: Vec<char> = t.as_ref().chars().collect();
         let Some(last) = c.len().checked_sub(3) else {
@@ -1024,7 +1040,7 @@ fn all_trigrams<S: AsRef<str>>(terms: &[S]) -> String {
         };
         for i in (0..=last).step_by(3).chain([last]) {
             let g = phrase(&c[i..i + 3].iter().collect::<String>());
-            if !grams.contains(&g) {
+            if seen.insert(g.clone()) {
                 grams.push(g);
             }
         }

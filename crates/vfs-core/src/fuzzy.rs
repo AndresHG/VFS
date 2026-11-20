@@ -2,13 +2,16 @@
 
 /// Minimum folded term length for typo tolerance; shorter terms match exactly.
 pub(crate) const FUZZY_MIN_LEN: usize = 6;
+/// Longest term that gets typo tolerance: candidate generation is quadratic in memory and
+/// cubic in time in the term's length, and no real word is this long.
+pub(crate) const FUZZY_MAX_LEN: usize = 64;
 
 /// Shortest part kept in a candidate query: FTS5 trigram cannot match fewer characters.
 const MIN_PART: usize = 3;
 
 /// FTS5 `MATCH` expressions whose union contains every string within one insertion,
 /// deletion, substitution or transposition of the folded `term`: [`candidate_parts`], each
-/// alternative as `"a" AND "b"`. Empty when `term` is shorter than [`FUZZY_MIN_LEN`].
+/// alternative as `"a" AND "b"`. Empty outside [`FUZZY_MIN_LEN`]..=[`FUZZY_MAX_LEN`].
 pub(crate) fn candidate_queries(term: &str) -> Vec<String> {
     candidate_parts(term)
         .iter()
@@ -24,12 +27,12 @@ pub(crate) fn candidate_queries(term: &str) -> Vec<String> {
 
 /// Alternatives of substrings, at least one of which a string within one edit of the
 /// folded `term` contains in full: for each edit position i, `t[..i]` and `t[i+1..]` (plus
-/// `t[i+2..]` for transpositions), parts shorter than 3 characters dropped. Empty when
-/// `term` is shorter than [`FUZZY_MIN_LEN`].
+/// `t[i+2..]` for transpositions), parts shorter than 3 characters dropped. Empty outside
+/// [`FUZZY_MIN_LEN`]..=[`FUZZY_MAX_LEN`] characters.
 pub(crate) fn candidate_parts(term: &str) -> Vec<Vec<String>> {
     let t: Vec<char> = term.chars().collect();
     let n = t.len();
-    if n < FUZZY_MIN_LEN {
+    if !(FUZZY_MIN_LEN..=FUZZY_MAX_LEN).contains(&n) {
         return Vec::new();
     }
     let mut out: Vec<Vec<String>> = Vec::new();
@@ -60,11 +63,11 @@ pub(crate) fn candidate_parts(term: &str) -> Vec<Vec<String>> {
 
 /// The distinct strings one deletion or one adjacent transposition away from the folded
 /// `term`, at least [`MIN_PART`] chars long: the spellings a typed typo most often hides
-/// (an extra or a swapped letter). Empty when `term` is shorter than [`FUZZY_MIN_LEN`].
+/// (an extra or a swapped letter). Empty outside [`FUZZY_MIN_LEN`]..=[`FUZZY_MAX_LEN`].
 pub(crate) fn near_variants(term: &str) -> Vec<String> {
     let t: Vec<char> = term.chars().collect();
     let n = t.len();
-    if n < FUZZY_MIN_LEN {
+    if !(FUZZY_MIN_LEN..=FUZZY_MAX_LEN).contains(&n) {
         return Vec::new();
     }
     let mut out: Vec<String> = Vec::new();
@@ -204,6 +207,18 @@ mod tests {
             assert!(candidate_queries(t).is_empty(), "{t}");
         }
         assert!(!candidate_queries("notari").is_empty());
+    }
+
+    /// VFS-1 AC-9, AC-10, S9: terms over `FUZZY_MAX_LEN` get no typo work, which would grow with
+    /// the cube of their length.
+    #[test]
+    fn overlong_terms_have_no_queries() {
+        let max = "notaria".repeat(10)[..FUZZY_MAX_LEN].to_string();
+        assert!(!candidate_parts(&max).is_empty());
+        let over = format!("{max}x");
+        assert!(candidate_parts(&over).is_empty());
+        assert!(candidate_queries(&over).is_empty());
+        assert!(near_variants(&over).is_empty());
     }
 
     /// VFS-1 AC-10: the queries follow the per-position split, dropping parts under 3 chars.

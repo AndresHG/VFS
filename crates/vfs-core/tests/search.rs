@@ -742,3 +742,33 @@ fn ac11_folder_filter_is_applied_before_the_cap() {
     assert_eq!(only(&fx.search("escritura", inside.clone())).id, target);
     assert_eq!(only(&fx.search("escritura notaria", inside)).id, target);
 }
+
+/// VFS-1 AC-9, S3, S9: a pasted 5,000-character word cannot hang search outside the deadline
+/// (typo work on it would grow with the cube of its length), and the next query is not held
+/// up behind it.
+#[test]
+fn huge_term_returns_within_the_deadline() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let dir = w.dir(root, top, "Notaría", 1);
+    let escritura = w.file(dir, "escritura.pdf", 10, 1);
+    let vfs = fx.vfs.clone();
+    let huge = "notaria".repeat(715); // 5,005 characters, one word
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let r = vfs.search(&SearchQuery {
+            text: huge,
+            filters: SearchFilters::default(),
+            limit: 100,
+            offset: 0,
+        });
+        let _ = tx.send(r.map(|r| r.total));
+    });
+    rx.recv_timeout(Duration::from_secs(3))
+        .expect("a huge term must not run past the deadline")
+        .unwrap();
+    let next = std::time::Instant::now();
+    assert_eq!(ids(&fx.text("escritura")), files(&[escritura]));
+    assert!(next.elapsed() < Duration::from_secs(1));
+}
