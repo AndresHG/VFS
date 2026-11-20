@@ -1,5 +1,5 @@
-//! Extension point for document content search (VFS-1 AC-15; milestone Fase 3). No implementation
-//! and no caller in v1.
+//! Extension point for document content search (VFS-1 AC-15; milestone Fase 3). The app has no
+//! caller; the VFS-2 prototype in `crates/vfs-content` implements it behind a CLI feature.
 
 use std::path::Path;
 
