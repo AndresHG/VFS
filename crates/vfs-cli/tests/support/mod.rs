@@ -487,6 +487,7 @@ pub fn index(db: &Path, roots: &[&Path]) {
 pub fn run_until_idle(db: &Path, roots: &[&Path], timeout: Duration) {
     let mut child = Command::new(VFS_BIN)
         .arg("run")
+        .arg("--no-boot-grace")
         .arg("--until-idle")
         .arg("--db")
         .arg(db)
@@ -547,6 +548,7 @@ impl App {
     pub fn start(db: &Path, roots: &[&Path]) -> App {
         let mut child = Command::new(VFS_BIN)
             .arg("run")
+            .arg("--no-boot-grace")
             .arg("--db")
             .arg(db)
             .args(roots)
