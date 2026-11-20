@@ -11,13 +11,14 @@ use crate::error::{Error, Result};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Migrations: entry `i` takes an index from version `i` to `i + 1`.
-const MIGRATIONS: [&str; 3] = [
+const MIGRATIONS: [&str; 4] = [
     include_str!("schema.sql"),
     include_str!("schema_v2.sql"),
     include_str!("schema_v3.sql"),
+    include_str!("schema_v4.sql"),
 ];
 
 /// Page size of a new index, and of an index compacted after its migration to version 3.
@@ -92,7 +93,8 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
         }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
-        if (1..3).contains(&version) {
+        // A migrated index (not a new one) gets the pages its migrations freed back.
+        if version > 0 {
             if let Err(e) = compact(&conn) {
                 // Still a valid index: the freed pages are reused as it grows. WAL is
                 // required, so a failure to return to it is an error.
@@ -104,8 +106,9 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Rewrites the index without the pages the version 3 migration freed (its old FTS tables,
-/// about a fifth of the file) and at `PAGE_SIZE`. SQLite changes the page size only
+/// Rewrites the index without the pages its migrations freed (version 3: the old FTS
+/// tables, about a fifth of the file; version 4: the old `files` table and its name index)
+/// and at `PAGE_SIZE`. SQLite changes the page size only
 /// outside WAL mode, so the journal mode is switched around the `VACUUM`; this fails
 /// harmlessly while another connection has the index open.
 fn compact(conn: &Connection) -> Result<()> {
@@ -751,9 +754,9 @@ mod tests {
         .unwrap();
     }
 
-    /// VFS-4 AC-1, AC-2: opening a version-2 index migrates it to version 3 from the
-    /// existing rows (no rescan), compacts it at `PAGE_SIZE` and leaves it in WAL mode, and
-    /// the migrated rows are found and deleted like new ones.
+    /// VFS-4 AC-1, AC-2, VFS-7 AC-2: opening a version-2 index migrates it to the current
+    /// version (3, then 4) from the existing rows (no rescan), compacts it at `PAGE_SIZE`
+    /// and leaves it in WAL mode, and the migrated rows are found and deleted like new ones.
     #[test]
     fn version_2_index_is_migrated() {
         let dir = tempfile::tempdir().unwrap();
@@ -765,6 +768,16 @@ mod tests {
         let prefix = format!("\"{NAME_START}ba\" AND \"ban\"");
         assert_eq!(path_ids_in(&conn, "files_fts", &prefix), vec![3]);
         assert_eq!(path_ids(&conn, "\"201\" AND \"ban\""), vec![3]);
+        // Version 4 (VFS-7): the files keep their ids, without the name index.
+        let names: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'sqlite_autoindex_files_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(names, 0);
+        assert_eq!(list_children(&conn, 7).unwrap().0.len(), 2902);
         // Compacted at the new page size, with no per-row size tables left.
         assert_eq!(pragma(&conn, "freelist_count"), 0);
         assert_eq!(pragma(&conn, "page_size"), i64::from(PAGE_SIZE));
@@ -786,6 +799,30 @@ mod tests {
         tx.commit().unwrap();
         assert!(path_ids_in(&conn, "files_fts", &prefix).is_empty());
         assert!(path_ids(&conn, "\"201\" AND \"ban\"").is_empty());
+    }
+
+    /// VFS-7 AC-1: files are found by folder through `files_dir`; no index stores their
+    /// names a second time.
+    #[test]
+    fn files_are_listed_by_folder_without_a_name_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'files'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(indexes, vec!["files_dir".to_string()]);
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT id, name, size, mtime FROM files WHERE dir_id = 1",
+                [],
+                |r| r.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("files_dir"), "{plan}");
     }
 
     /// VFS-4 AC-2 (R2): when the compaction after migrating cannot run, because another

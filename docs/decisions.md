@@ -111,10 +111,10 @@ with every page of the AC-9 query set identical (`docs/research/index-footprint.
 pages, folder rows read only when a check or the returned page needs them, `files_fts`
 without positions (a U+0001 start marker and an exact re-check replace phrases and `^`), no
 per-row size tables (rows deleted by value), and a one-time `VACUUM` after migrating.
-Rejected or left open: dropping `UNIQUE(dir_id, name)`, because it changes which of more
-than 2,000 equally ranked path hits are returned (an owner decision); an in-memory name
-buffer, about 150 MB at 5 M names on a memory-starved PC; a single per-file index with
-columns, 818 MiB against 479.
+`UNIQUE(dir_id, name)` was dropped afterwards as schema version 4 (VFS-7, 722 → 670 MiB),
+once the owner accepted that it changes which of more than 2,000 equally ranked hits fill
+the cap. Rejected: an in-memory name buffer, about 150 MB at 5 M names on a memory-starved
+PC; a single per-file index with columns, 818 MiB against 479.
 
 ## A no-hit query proves it cheaply
 

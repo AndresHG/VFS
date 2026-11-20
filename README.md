@@ -105,7 +105,7 @@ cargo run --release -p vfs-cli -- bench --db /tmp/vfs-2m.db
 
 `bench` measures with warm and with cold SQLite page caches; it cannot drop the operating
 system's file cache, so it does not show cold-disk latency on an HDD. The 2 M-file index is
-722 MiB at schema version 3 (889 at version 2, measured, VFS-4); see the status below for
+670 MiB at schema version 4 (889 at version 2, measured, VFS-4 and VFS-7); see the status below for
 the results.
 
 ## Windows installer
@@ -156,7 +156,7 @@ and, after a recovery, `index.db.bad` until the rebuild has finished. Deleting t
 the app is closed resets VFS: the folders have to be added again and are scanned from
 scratch. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
-The index has schema version 3 (version 2 added a per-file path index; version 3 makes the
+The index has schema version 4 (version 2 added a per-file path index; versions 3 and 4 make the
 index about a sixth smaller, VFS-4). An index written by an older build is upgraded in place
 when the app opens it, without a rescan, and then compacted once; one written by a newer
 build is refused, never overwritten.

@@ -51,11 +51,11 @@ peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Reade
 
 ## Schema
 
-`core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2 and
-`core/schema_v3.sql` version 3 (`PRAGMA user_version`). `db::open_rw` runs the missing
+`core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2,
+`core/schema_v3.sql` version 3 and `core/schema_v4.sql` version 4 (`PRAGMA user_version`). `db::open_rw` runs the missing
 migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
 of them, and an older index is migrated from the rows already there, so no rescan is
-needed. After migrating a version 1 or 2 index it compacts the file once (`VACUUM`, at
+needed. After migrating an existing index it compacts the file once (`VACUUM`, at
 `PAGE_SIZE`, 16 KB; a new index is created at that size); if another connection holds the
 index, it stays valid and uncompacted. An index from a newer build fails with
 `schema_too_new` and is never discarded.
@@ -97,7 +97,9 @@ Design points:
 - **No foreign keys.** The indexer deletes subtrees in its own order
   (`ingest::delete_dir_subtree`, `ingest::delete_root`).
 - Indexes: `dirs_pending` (partial, `scan_state <> 0`) is the indexer's work queue;
-  `dirs_parent` serves child listing; `UNIQUE(root_id, rel_path)` and `UNIQUE(dir_id, name)`.
+  `dirs_parent` serves child listing; `UNIQUE(root_id, rel_path)`; `files_dir` (version 4,
+  VFS-7) serves a folder's files. Files have no `(dir_id, name)` uniqueness constraint: the
+  indexer inserts only names its listing of the folder lacks.
 
 `file_kind` (`core/kind.rs`) maps the extension to the type filter. Folders have no stored
 kind; they appear as `FileKind::Folder` (code 5) only in results.
