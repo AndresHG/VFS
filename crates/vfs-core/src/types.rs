@@ -77,7 +77,7 @@ pub struct SearchQuery {
     pub offset: u32,
 }
 
-/// `Content` is reserved for phase 2 (VFS-1 AC-15).
+/// Why a hit matched. Phase-2 content search (VFS-1 AC-15) adds its own variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchKind {
@@ -129,17 +129,21 @@ pub struct SearchResponse {
     pub elapsed_ms: u32,
 }
 
+/// Default wall-clock budget of a search; scans and over-cap generators stop at it and the
+/// response says `truncatedBy = deadline` (VFS-1 AC-9).
+pub const DEFAULT_SEARCH_DEADLINE: Duration = Duration::from_millis(1000);
+
 /// Search tuning; not part of the UI contract.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
-    /// Wall-clock budget for scans and over-cap generators (default 1000 ms).
+    /// Wall-clock budget for scans and over-cap generators ([`DEFAULT_SEARCH_DEADLINE`]).
     pub deadline: Duration,
 }
 
 impl Default for SearchConfig {
     fn default() -> SearchConfig {
         SearchConfig {
-            deadline: Duration::from_millis(1000),
+            deadline: DEFAULT_SEARCH_DEADLINE,
         }
     }
 }
@@ -178,6 +182,18 @@ impl RootStatus {
     }
 }
 
+/// Where a root folder lives, so the UI can warn about network and removable drives, which
+/// v1 does not support (VFS-1 non-goals): their files read as unavailable when disconnected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveKind {
+    Local,
+    Network,
+    Removable,
+    /// The system could not tell (also for a folder that is not reachable now).
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Root {
@@ -187,6 +203,8 @@ pub struct Root {
     pub files: u64,
     pub dirs: u64,
     pub last_full_scan: Option<i64>,
+    /// Asked of the system each time roots are read.
+    pub drive: DriveKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,11 +345,11 @@ mod tests {
             files: 1,
             dirs: 1,
             last_full_scan: Some(9),
+            drive: DriveKind::Removable,
         };
-        assert_eq!(
-            serde_json::to_value(&root).unwrap()["lastFullScan"],
-            json!(9)
-        );
+        let v = serde_json::to_value(&root).unwrap();
+        assert_eq!(v["lastFullScan"], json!(9));
+        assert_eq!(v["drive"], json!("removable"));
         let s = IndexStats {
             files: 1,
             dirs: 2,
@@ -369,15 +387,11 @@ mod tests {
         }
     }
 
-    /// Unknown stored codes read as the safe defaults, and the search deadline defaults to
-    /// 1000 ms.
+    /// Unknown stored codes read as the safe defaults. (What the search deadline does is
+    /// tested in `tests/search.rs`: `ac9_truncation_by_deadline_is_reported`.)
     #[test]
-    fn unknown_codes_and_config_default() {
+    fn unknown_codes_read_as_safe_defaults() {
         assert_eq!(FileKind::from_code(42), FileKind::Other);
         assert_eq!(RootStatus::from_code(-1), RootStatus::Pending);
-        assert_eq!(
-            SearchConfig::default().deadline,
-            Duration::from_millis(1000)
-        );
     }
 }

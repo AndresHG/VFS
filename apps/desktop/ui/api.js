@@ -1,15 +1,15 @@
-// Backend bridge (VFS-1 plan §4.4). In the app every call goes to the Tauri commands through
+// Backend bridge (VFS-1 spec, "Tauri commands and events"). In the app every call goes to the Tauri commands through
 // `window.__TAURI__` (withGlobalTauri). A rejected call yields an ApiError {code, message}.
 //
 // Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds):
 //   SearchQuery    {text, filters: {kinds[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
 //   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: null|'cap'|'deadline', elapsedMs}
 //   SearchHit      {id, name, dir, kind, size, modified, matched: 'name'|'path'|'fuzzy', isDir}
-//   Root           {id, path, status, files, dirs, lastFullScan}
+//   Root           {id, path, status, files, dirs, lastFullScan, drive: 'local'|'network'|'removable'|'unknown'}
 //   IndexProgress  {state: 'idle'|'scanning'|'paused', filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
 //
-// Development-only fake backend (addendum U5). It lives in `apps/desktop/ui-dev/`, outside the
+// Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
 // bundled `ui/` folder (frontendDist), so it is not in the packaged app at all. On top of that
 // the dynamic import below runs only when ALL of these hold:
 //   1. there is no Tauri runtime (`__TAURI__` and `__TAURI_INTERNALS__` are both absent);
@@ -33,7 +33,6 @@ function tauriBackend(t) {
     getProgress: () => invoke('get_progress'),
     rescan: (id) => invoke('rescan', { id }),
     setPaused: (paused) => invoke('set_paused', { paused }),
-    getStats: () => invoke('get_stats'),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -52,7 +51,7 @@ function missingBackend() {
     isFake: false,
     missing: true,
     listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
-    reveal: fail, getProgress: fail, rescan: fail, setPaused: fail, getStats: fail,
+    reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
   };
 }

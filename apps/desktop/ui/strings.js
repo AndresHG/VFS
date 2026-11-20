@@ -1,5 +1,5 @@
 // Every user-visible string (VFS-1 R9). Spanish, impersonal/usted, plain words: never
-// "indexar", "índice" or "reindexar" (addendum D4). Functions take already-formatted values.
+// "indexar", "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values.
 
 export const S = {
   searchLabel: 'Buscar por nombre de archivo o de carpeta',
@@ -103,7 +103,7 @@ export const S = {
   rootNeverChecked: 'Aún no se ha terminado de revisar',
   rescanStarted: 'Se volverá a revisar en segundo plano.',
   rootAdded: (p) => `Se añadió «${p}». Se está revisando; puede buscar mientras tanto.`,
-  remoteWarning: 'Esta carpeta parece estar en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
+  remoteWarning: 'Esta carpeta está en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
   removeTitle: '¿Quitar esta carpeta?',
   removeBody: 'Dejará de aparecer en las búsquedas. Sus archivos no se borran del disco.',
   cancel: 'Cancelar',

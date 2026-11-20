@@ -14,9 +14,11 @@ use crate::types::{Root, RootStatus};
 const ROOT_COLS: &str = "id, path, status, files_count, dirs_count, last_full_scan_at";
 
 fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
+    let path: String = r.get(1)?;
     Ok(Root {
         id: r.get(0)?,
-        path: r.get(1)?,
+        drive: platform::drive_kind(Path::new(&path)),
+        path,
         status: RootStatus::from_code(r.get(2)?),
         files: r.get::<_, i64>(3)?.max(0) as u64,
         dirs: r.get::<_, i64>(4)?.max(0) as u64,
@@ -42,7 +44,12 @@ fn is_below(path: &str, ancestor: &str) -> bool {
 /// Canonicalizes `path` (`dunce`), rejects a missing path (`NotFound`), a file
 /// (`NotADirectory`) and a path equal to, inside or containing an existing root
 /// (`OverlappingRoot`), then inserts it with `db::ingest::insert_root` and
-/// `platform::volume_key`. The facade notifies the indexer afterwards.
+/// `platform::volume_key`. The facade notifies the indexer afterwards. The returned root
+/// carries its `drive`, so the UI can warn about a network or removable drive.
+///
+/// Roots being removed do not count as overlapping: search and the watcher already ignore
+/// them. Re-adding the same folder while it is being removed supersedes the removal: the
+/// old root's remaining rows are deleted in this transaction and the folder is added anew.
 ///
 /// The `OverlappingRoot` payload is `"<relation> <existing root path>"`, the relation being
 /// `same`, `inside` (the new folder is inside that root) or `contains` (the new folder
@@ -66,11 +73,20 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     {
-        let mut stmt = tx.prepare("SELECT path, path_key FROM roots ORDER BY id")?;
+        let mut stmt = tx.prepare("SELECT id, path, path_key, status FROM roots ORDER BY id")?;
         let mut rows = stmt.query([])?;
+        let mut superseded = Vec::new();
         while let Some(row) = rows.next()? {
-            let (existing, existing_key): (String, String) = (row.get(0)?, row.get(1)?);
-            let relation = if key.trim_end_matches('/') == existing_key.trim_end_matches('/') {
+            let (id, existing, existing_key): (i64, String, String) =
+                (row.get(0)?, row.get(1)?, row.get(2)?);
+            let same = key.trim_end_matches('/') == existing_key.trim_end_matches('/');
+            if RootStatus::from_code(row.get(3)?) == RootStatus::Removing {
+                if same {
+                    superseded.push(id);
+                }
+                continue;
+            }
+            let relation = if same {
                 "same"
             } else if is_below(&key, &existing_key) {
                 "inside"
@@ -80,6 +96,10 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
                 continue;
             };
             return Err(Error::OverlappingRoot(format!("{relation} {existing}")));
+        }
+        drop(rows);
+        for id in superseded {
+            ingest::delete_root(&tx, id)?;
         }
     }
     let id = ingest::insert_root(&tx, &platform::volume_key(&canon), &path_str)?;

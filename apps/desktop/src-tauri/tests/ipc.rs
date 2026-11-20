@@ -1,4 +1,4 @@
-//! IPC tests of the desktop commands on Tauri's mock runtime (VFS-1 addendum X1): the
+//! IPC tests of the desktop commands on Tauri's mock runtime (VFS-1 X1): the
 //! frontend's exact `invoke` payloads go through the real command handler and managed state.
 
 use std::path::Path;
@@ -10,6 +10,7 @@ use tauri::test::MockRuntime;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow, WebviewWindowBuilder};
+use vfs_core::Error;
 use vfs_desktop_lib::{commands, init_core, AppState, INDEX_FILE};
 
 fn mock_app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
@@ -47,29 +48,24 @@ fn invoke(webview: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Resul
     .map(|body| body.deserialize::<Value>().expect("json response"))
 }
 
-/// VFS-1 AC-5: stats and progress commands answer through IPC with the contract's
-/// camelCase shapes, and an unknown root id rejects with an `ApiError` code.
+/// VFS-1 AC-5: the progress command answers through IPC with the contract's camelCase
+/// shape, and failures reject with an `ApiError` code.
 #[test]
-fn stats_and_progress_over_ipc() {
+fn progress_and_errors_over_ipc() {
     let data = tempfile::tempdir().unwrap();
     let (app, webview) = mock_app();
     let vfs = vfs_core::Vfs::open(&data.path().join(INDEX_FILE)).unwrap();
     app.manage(AppState { vfs });
-
-    let stats = invoke(&webview, "get_stats", json!({})).unwrap();
-    assert_eq!(stats["files"], json!(0));
-    assert_eq!(stats["roots"], json!(0));
-    assert!(stats["schemaVersion"].as_u64().unwrap() >= 1);
 
     let progress = invoke(&webview, "get_progress", json!({})).unwrap();
     assert_eq!(progress["state"], json!("idle"));
     assert_eq!(progress["filesIndexed"], json!(0));
 
     let err = invoke(&webview, "rescan", json!({ "id": null })).unwrap_err();
-    assert_eq!(err["code"], json!("unavailable"));
+    assert_eq!(err["code"], json!(Error::Unavailable(String::new()).code()));
 
     let err = invoke(&webview, "reveal", json!({ "id": 999, "isDir": false })).unwrap_err();
-    assert_eq!(err["code"], json!("not_found"));
+    assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
 }
 
 fn write_file(path: &Path) {
@@ -77,7 +73,7 @@ fn write_file(path: &Path) {
     std::fs::write(path, b"x").unwrap();
 }
 
-/// VFS-1 AC-4 + AC-5 + AC-10 (addendum X1): add_root -> search -> get_progress end to end
+/// VFS-1 AC-4 + AC-5 + AC-10 (X1): add_root -> search -> get_progress end to end
 /// over IPC, with the real indexer thread on a temporary tree.
 #[test]
 fn add_root_search_progress_end_to_end() {
@@ -103,6 +99,11 @@ fn add_root_search_progress_end_to_end() {
     )
     .expect("add_root");
     assert_eq!(added["path"], json!(root.to_string_lossy()));
+    assert_eq!(
+        added["drive"],
+        json!("local"),
+        "a temp folder is on the system disk"
+    );
     let root_id = added["id"].as_i64().unwrap();
 
     let roots = invoke(&webview, "list_roots", json!({})).unwrap();

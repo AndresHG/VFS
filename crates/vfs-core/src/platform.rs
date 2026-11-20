@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::types::DriveKind;
+
 /// Windows: volume GUID path (`GetVolumePathNameW` + `GetVolumeNameForVolumeMountPointW`,
 /// falling back to the volume path, then the drive prefix); macOS: `statfs.f_mntonname`.
 /// Elsewhere, or when the system call fails, the path's first component.
@@ -18,19 +20,8 @@ fn first_component(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Where a folder lives, so the UI can warn about network and removable drives (VFS-1 U4).
-#[allow(dead_code)] // Consumed by the roots/UI layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DriveKind {
-    Local,
-    Network,
-    Removable,
-    Unknown,
-}
-
 /// Windows: `GetDriveTypeW` on the volume path; macOS: `statfs.f_flags` (`MNT_LOCAL`,
 /// `MNT_REMOVABLE`). A USB hard disk usually reports `Local` on both systems.
-#[allow(dead_code)] // Consumed by the roots/UI layer.
 pub(crate) fn drive_kind(path: &Path) -> DriveKind {
     imp::drive_kind(path)
 }
@@ -76,7 +67,6 @@ pub(crate) fn long_path(path: &Path) -> PathBuf {
 
 /// Puts the calling thread in background CPU and I/O priority; failures are logged and
 /// ignored.
-#[allow(dead_code)] // T3a calls this at the start of the indexer thread.
 pub(crate) fn enter_background_priority() {
     imp::enter_background_priority();
 }

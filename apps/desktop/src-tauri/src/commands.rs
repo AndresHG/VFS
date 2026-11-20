@@ -7,17 +7,14 @@ use tauri::ipc::Invoke;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 use vfs_core::api::{ApiError, RevealOutcome};
-use vfs_core::{IndexProgress, IndexStats, Root, SearchQuery, SearchResponse};
+use vfs_core::{IndexProgress, Root, SearchQuery, SearchResponse};
 
 use crate::{reveal, AppState};
 
 type CmdResult<T> = Result<T, ApiError>;
 
 fn io_error(e: impl std::fmt::Display) -> ApiError {
-    ApiError {
-        code: "io".into(),
-        message: e.to_string(),
-    }
+    vfs_core::Error::Io(std::io::Error::other(e.to_string())).into()
 }
 
 /// Every command of the contract, for `Builder::invoke_handler`.
@@ -32,7 +29,6 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         get_progress,
         rescan,
         set_paused,
-        get_stats,
     ]
 }
 
@@ -107,9 +103,4 @@ pub fn rescan(state: State<'_, AppState>, id: Option<i64>) -> CmdResult<()> {
 pub fn set_paused(state: State<'_, AppState>, paused: bool) -> CmdResult<()> {
     state.vfs.set_paused(paused);
     Ok(())
-}
-
-#[tauri::command(async)]
-pub fn get_stats(state: State<'_, AppState>) -> CmdResult<IndexStats> {
-    Ok(state.vfs.stats()?)
 }

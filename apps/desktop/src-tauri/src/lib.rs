@@ -13,7 +13,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub use vfs_core::api::{ApiError, RevealOutcome, EVENT_INDEX_CHANGED, EVENT_INDEX_PROGRESS};
 pub use vfs_core::{
-    FileKind, IndexProgress, IndexStats, IndexerState, MatchKind, Root, RootProgress, RootStatus,
+    DriveKind, FileKind, IndexProgress, IndexerState, MatchKind, Root, RootProgress, RootStatus,
     SearchFilters, SearchHit, SearchQuery, SearchResponse, TruncatedBy,
 };
 

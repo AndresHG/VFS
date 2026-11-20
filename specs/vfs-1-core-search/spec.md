@@ -158,10 +158,59 @@ Every command runs off the main thread and rejects with `ApiError { code, messag
 | `get_progress` | — | `IndexProgress` |
 | `rescan` | `id: number \| null` | `null` |
 | `set_paused` | `paused: boolean` | `null` |
-| `get_stats` | — | `IndexStats` |
 
 Events: `index-progress` (payload `IndexProgress`, at most every 500 ms) and `index-changed`
 (payload `null`, at most every 2 s, after the indexer commits).
+
+Every `Root` carries `drive` (`"local"`, `"network"`, `"removable"` or `"unknown"`), asked of
+the system when roots are read, so the UI warns when a chosen folder is on a network or
+removable drive (U4). A root being removed does not block adding the same folder again:
+the new root supersedes the removal.
+
+## Implementation decisions
+
+Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 above.
+
+- C4. The search deadline comes from `SearchConfig` (default 1000 ms).
+- C5. An index that cannot be opened or fails `quick_check` (run only after an unclean
+  shutdown) is renamed to `index.db.bad` and rebuilt from its roots.
+- S1. For each root, query terms already contained in the root's own path are ignored,
+  unless none would remain.
+- S2. Generation is driven by the rarest terms (at most 3), counted in both FTS tables:
+  folders whose row has all of them, and per split of them between file name and directory
+  path, the files matching both sides, driven by the smaller side. Every candidate is
+  verified against all terms.
+- S3. The deadline applies to scans and to generators over the probe cap (5000 rows); a
+  generator under it runs to completion, bounded at about 2 s.
+- S4. Typo tolerance: for each edit position, FTS candidates from the two parts of the term
+  around it (parts shorter than 3 characters dropped), verified within one edit.
+- S5. Terms shorter than 3 characters cannot use the trigram index: they are verified in
+  Rust, or scanned when they are the only terms.
+- S6. A new query interrupts the running one; `\` is folded to `/`; filter-only queries list
+  newest first; the folder filter is a directory range in SQL.
+- S7. The last ranked list is cached by (query, filters, index version), so pages are
+  consistent.
+- I1. A watcher event never downgrades a directory pending a deep re-list.
+- I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
+  queues a re-walk of the root. macOS: FSEvents through `notify`, honouring its rescan flag.
+- I3. Watcher events under the app data directory are ignored.
+- I4. Roots are re-walked every 7 days while the watcher is healthy, and at once after an
+  overflow.
+- I5. The indexer commits every ~20,000 changed rows or 5 s.
+- I6. Roots left in `removing` are finished at start (also by the CLI).
+- I7. The watcher tests run on Windows CI too, polling up to 30 s.
+- U1. A deadline-cut search with no hits says "La búsqueda no terminó; inténtelo de nuevo.",
+  never "Sin resultados", and is not cached.
+- U2. During the first scan the UI says the user can search meanwhile and that closing the
+  program resumes the scan later.
+- U3. Results from unavailable roots are marked, and the banner names the missing folder.
+- U4. Adding a folder that overlaps a root names the relation (same, inside, contains);
+  a folder on a network or removable drive gets a warning.
+- U5. The development fake backend lives outside the bundled frontend and cannot load in
+  the app.
+- X1. One desktop test drives add_root, search and get_progress over IPC on Tauri's mock
+  runtime, on both systems in CI.
+- X2. CI also runs the CLAUDE.md budget check.
 
 ## Technical context
 

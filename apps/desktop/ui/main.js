@@ -720,7 +720,7 @@ async function rescanRoot(id) {
 $('rescan-all').addEventListener('click', () => rescanRoot(null));
 $('add-folder').addEventListener('click', () => addFolder());
 
-/** Explains an overlap precisely (addendum U4) from the folders the UI already knows. */
+/** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows. */
 function overlapText(path) {
   const inside = state.roots.find((r) => F.isUnder(path, r.path));
   if (inside) return S.overlapInside(inside.path);
@@ -729,11 +729,9 @@ function overlapText(path) {
   return S.overlapGeneric;
 }
 
-/** Network shares (\\server\…) and, on macOS, other volumes (/Volumes/…). The core does not
- * report the drive type, so removable drives with a letter (E:\) cannot be told apart here. */
-function looksRemote(path) {
-  return /^\\\\|^\/\//.test(path) || /^\/Volumes\//.test(path);
-}
+/** The core reports the kind of drive a folder is on; network and removable ones get a
+ * warning (their files read as unavailable while disconnected). */
+const REMOTE_DRIVES = new Set(['network', 'removable']);
 
 async function addFolder() {
   let path;
@@ -742,14 +740,15 @@ async function addFolder() {
   } catch (err) { showError(errorText(err)); return; }
   if (!path) return;
   try {
-    await api.addRoot(path);
+    const root = await api.addRoot(path);
     await refreshRoots();
     const msg = S.rootAdded(path);
+    const remote = REMOTE_DRIVES.has(root.drive);
     if (foldersDialog.open) {
-      folderMessage(looksRemote(path) ? `${msg} ${S.remoteWarning}` : msg, looksRemote(path) ? 'warn' : 'info');
+      folderMessage(remote ? `${msg} ${S.remoteWarning}` : msg, remote ? 'warn' : 'info');
     } else {
       toast(msg);
-      if (looksRemote(path)) showError(S.remoteWarning);
+      if (remote) showError(S.remoteWarning);
     }
   } catch (err) {
     showError(err?.code === 'overlapping_root' ? overlapText(path) : errorText(err, 'addRoot'));
@@ -813,7 +812,7 @@ function onProgress(p) {
 
 function onIndexChanged() {
   // New files arrived. Refresh the list only when it is scrolled to the top, so rows never
-  // jump under the user's eyes (plan §5).
+  // jump under the user's eyes.
   if (hasQuery() && state.searchState === 'done' && list.atTop()) runSearch({ quiet: true });
 }
 

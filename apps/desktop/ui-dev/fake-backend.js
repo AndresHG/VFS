@@ -1,7 +1,7 @@
 // DEVELOPMENT ONLY. A fake of the Tauri commands and events so the UI can be opened in a
 // normal browser with realistic data. It lives outside `ui/` (the bundled frontendDist), and
 // `ui/api.js` imports it only without a Tauri runtime, on http://localhost|127.0.0.1, with
-// `?fake` in the URL (addendum U5).
+// `?fake` in the URL (VFS-1 U5).
 //
 // Run:  python3 -m http.server 8765 --directory apps/desktop
 // Open: http://localhost:8765/ui/?fake
@@ -54,7 +54,7 @@ function makeRoots(scenario) {
   return [
     { id: 1, path: 'C:\\Users\\Carmen\\Documents', status: firstScan ? 'scanning' : 'ready', files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 3 * DAY, weight: 0.3 },
     { id: 2, path: 'D:\\Archivo familiar', status: 'scanning', files: 0, dirs: 0, lastFullScan: null, weight: 0.6 },
-    { id: 3, path: 'E:\\Copias antiguas', status: firstScan ? 'scanning' : 'unavailable', files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 400 * DAY, weight: 0.1 },
+    { id: 3, path: 'E:\\Copias antiguas', status: firstScan ? 'scanning' : 'unavailable', files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 400 * DAY, weight: 0.1, drive: 'removable' },
   ];
 }
 
@@ -167,7 +167,7 @@ export function createFakeBackend(params) {
 
   function rootView(r) {
     const n = done.get(r.id) || 0;
-    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan };
+    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? 'local' };
   }
 
   function progress() {
@@ -259,7 +259,8 @@ export function createFakeBackend(params) {
       const norm = (p) => fold(p).replace(/\/+$/, '');
       const clash = roots.find((r) => norm(path) === norm(r.path) || norm(path).startsWith(norm(r.path) + '/') || norm(r.path).startsWith(norm(path) + '/'));
       if (clash) throw { code: 'overlapping_root', message: `overlaps an indexed folder: ${clash.path}` };
-      const r = { id: 100 + roots.length, path, status: 'pending', files: 0, dirs: 0, lastFullScan: null };
+      const drive = path.startsWith('\\\\') ? 'network' : 'local';
+      const r = { id: 100 + roots.length, path, status: 'pending', files: 0, dirs: 0, lastFullScan: null, drive };
       roots.push(r); done.set(r.id, 0); pending.set(r.id, 40);
       return rootView(r);
     },
@@ -309,10 +310,6 @@ export function createFakeBackend(params) {
       for (const r of roots) if ((id == null || r.id === id) && r.status === 'ready') { r.status = 'scanning'; pending.set(r.id, 30); }
     },
     async setPaused(p) { paused = p; },
-    async getStats() {
-      const p = progress();
-      return { files: p.filesIndexed, dirs: Math.round(p.filesIndexed / 22), roots: roots.length, dbBytes: p.filesIndexed * 310, schemaVersion: 1 };
-    },
     async onProgress(cb) { progressCbs.add(cb); return () => progressCbs.delete(cb); },
     async onIndexChanged(cb) { changedCbs.add(cb); return () => changedCbs.delete(cb); },
   };
