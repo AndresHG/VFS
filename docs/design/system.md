@@ -24,7 +24,7 @@ Base size is the system size (`1rem`); the body runs one step above it.
 | `--t-name` | 1.125rem | 1.35 | 700 | Result name |
 | `--t-body` | 1.125rem | 1.5 | 400 | Body copy, buttons, notices |
 | `--t-meta` | 1rem | 1.4 | 400 | Path, date, size, filter controls, status |
-| `--t-small` | 0.875rem | 1.3 | 700 | Badges only ("No disponible", "Carpeta") |
+| `--t-small` | 0.875rem | 1.3 | 700 | Badges only ("No disponible") |
 
 Rules: never below `--t-small`; no light weights; no all-caps; `text-wrap: balance` on
 headlines and `pretty` on paragraphs; tabular numerals for dates and sizes.
@@ -75,7 +75,7 @@ Implementation: raw values as custom properties, switched under
 | Search box | surface, 1.5px `--line-strong`, radius 0.875rem | — | 3px `--focus` ring, 2px offset | — | — |
 | Primary button | accent fill, on-accent text | 8 % darker | ring | 2 % darker | 55 % opacity, no pointer |
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
-| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, ✓ or value shown, × to clear | — |
+| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
@@ -125,7 +125,7 @@ Three static mockups use the same tokens and sample data. Open them by serving
 
 (The phase 1 UI today shows 2 rows at 900×600 and none at 150 %.)
 
-**Recommendation: A · Papel.** It is the direction that answers the owner's brief — simple,
+**Chosen: A · Papel** (the owner's pick; the built screen in every audited state, named as in [`audit/`](audit/) for before/after comparison, is in [`papel/`](papel/)). It is the direction that answers the owner's brief — simple,
 clean, calm, in the spirit of claude.ai — and it fixes the audit's top findings at once: the
 results get the screen, one action instead of a column of buttons, no boxes in boxes, warm
 colour, a quiet idle page that says what to do. It keeps every filter visible on one line (R9)
