@@ -1,0 +1,20 @@
+# VFS-8: unit tests of the e2e scripts (tree generator, WebDriver helpers) on every PR that
+# touches them. Linux only: the scripts are plain Python and Linux minutes are the cheapest.
+name: e2e-scripts
+
+on:
+  pull_request:
+    paths: ["scripts/e2e/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: E2E script tests (VFS-8 AC-8)
+        run: python3 -m unittest discover -s scripts/e2e -p "test_*.py"

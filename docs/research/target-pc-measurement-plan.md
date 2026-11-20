@@ -10,12 +10,12 @@ Everything here runs as the PC's normal **standard user**. Steps marked *(admin,
 need an administrator account only to obtain a reference value. The product must not depend
 on them, and they are skipped if nobody has the password.
 
-**Status of the tool.** [`tools/vfs-probe.ps1`](tools/vfs-probe.ps1) was written on macOS. Its
-PowerShell parses with PowerShell 7.7, and its embedded C# compiles at C# language level 5
-(the level of Windows PowerShell 5.1). It has **never been run on Windows**. Before the visit,
-run it once on any Windows 10/11 machine (`-Step all -Minutes 1 -WalkMinutes 1`) and fix what
-breaks. Every step catches its own errors and the next one still runs, so one broken step does
-not waste the visit.
+**Status of the tool.** [`tools/vfs-probe.ps1`](tools/vfs-probe.ps1) was rehearsed with
+`-Step all` on a Windows Server 2025 GitHub runner, as a standard user created for the purpose
+([`windows-e2e-results.md`](windows-e2e-results.md), VFS-8). Every step runs there. Two things
+behave differently for a standard user: step 1 cannot list services (`sync_services` holds the
+error), and step 6 may see no disk performance counters (see step 6). Every step catches its own
+errors and the next one still runs, so one broken step does not waste the visit.
 
 ## What to take
 
@@ -42,7 +42,7 @@ not waste the visit.
 | N11 | Watcher events per minute and buffer overflows: VFS filter vs names-only filter | `watch.json` (6) | R6 (watcher overflows and filter) |
 | N12 | RAM: total, free with Firefox open, VFS + WebView2 working set open and minimised | `info.json` (1), step 9 | R7, R8 (page caches, WebView2); issue 19 |
 | N13 | First full index: duration, index size, disk use while it runs | step 8 | Issues 17, 33 |
-| N14 | Which Synology product and which folders it syncs or backs up; is `%APPDATA%` included? | step 7 (by hand) | R2 (index location); issue 36 |
+| N14 | Which Synology product and which folders it syncs or backs up; is `%LOCALAPPDATA%` included? | step 7 (by hand) | R2 (index location); issue 36 |
 | N15 | Defender state, other antivirus, WebView2 runtime version, long-path setting | `info.json` (1) | R8 (memory API needs runtime 114+); issue 21 |
 | N16 | Does VFS's own walk behave as VFS-5 assumes: walk rate, time backed off, commit and checkpoint cost, catch-up delay after boot? | `vfs.log` (8, 9, and weeks later) | VFS-5 thresholds (`specs/vfs-5-windows-tuning/spec.md`, Configuration) |
 
@@ -136,6 +136,9 @@ It works only inside a new folder `D:\vfs-probe-<timestamp>` that it creates and
 afterwards. It refuses to run if that folder already exists, and deletes nothing else. Expected (see
 `windows-io.md` §3.3): the directory mtime changes for create, rename and delete, and does not
 change for an append to a file or for a grandchild. Any other result changes the design of R9.
+Each line gives the folder's mtime twice: as its parent's listing shows it (what a re-walk
+sees) and as the folder itself reports it. On the runner the listed value lagged for a delete:
+unchanged at once, changed after 3 s.
 The two "listed size" lines show N7.
 
 ### 5. Flush cost and seek latency (5 min) → N8, N9
@@ -169,6 +172,11 @@ for read and write latency) because PDH counter paths are localised on a Spanish
 The per-process I/O query is itself not free on a slow PC: expect the probe to add some CPU
 load, and do not read small differences into it.
 
+On the runner rehearsal (VFS-8) a standard user saw no disk counter instances: the log
+says `perf: no PhysicalDisk counter instances visible to this user` and `perf.csv` keeps only
+its header. If that happens on the target PC, run this step again from an administrator window
+*(admin, optional)*; the watcher counts in `watch.json` do not depend on it.
+
 What VFS-5 assumes from this step (its back-off: study R3, spec R4): the indexer pauses when the **average
 queue length** of the physical disk holding the roots is **2 or more in 3 of 5 one-second
 samples**, pauses at most 8 s and then works at least 2 s. From `perf.csv` (column
@@ -183,8 +191,8 @@ From the photographs in step 0 and the client UI, answer:
 
 1. Product: Synology Drive Client (sync), Drive Client backup task, or Active Backup for
    Business agent? Which version?
-2. Is any sync or backup task rooted at `C:\Users\<user>` or `%APPDATA%`? If so,
-   `%APPDATA%\app.vfs.desktop\` (where the index lives today) would be uploaded.
+2. Is any sync or backup task rooted at `C:\Users\<user>` or `%LOCALAPPDATA%`? If so,
+   `%LOCALAPPDATA%\app.vfs.desktop\` (where the index lives) would be uploaded.
 3. Is On-demand sync on for any task on the data disk? The `placeholders` count in step 3 is
    the cross-check.
 4. Does the client show "Scanning" or "Indexing" after a reboot, and for how long? That tells

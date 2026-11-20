@@ -266,7 +266,8 @@ the deep listing then cascades through the whole tree. Re-walks also happen when
 asks (`rescan`, "Buscar cambios ahora"), when an unavailable root becomes reachable, once a
 root that could not be watched is watched (I12), at every start, and while running after 7
 days. If the watcher cannot start, indexing still runs and these re-walks still catch
-changes. The Windows loop has never run (see "Not yet run").
+changes. The Windows loop has run only on a GitHub runner (VFS-8), where it followed create,
+rename and delete within about 2 s.
 
 ### Session marker and recovery
 
@@ -468,9 +469,10 @@ that fails `open -R` on the nearest existing ancestor, which Finder shows select
 than opening it (an ancestor that is an `.app` bundle is never launched). Windows runs
 `explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
 the path is over 259 UTF-16 units; a trailing backslash (a drive root) is doubled so it
-cannot escape the closing quote under the Windows command-line rules (`explorer_arg`,
-unverified on a real Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No file is
-opened with its application.
+cannot escape the closing quote under the Windows command-line rules (`explorer_arg`; the
+drive-root case is unverified on Windows). On a Windows runner (VFS-8) Explorer opens the
+right folder but does not select the item (issue 107); the long-path fallback works. See
+`apps/desktop/src-tauri/src/reveal.rs`. No file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
 log plugin), rotated at 1 MB with four old files kept. Below warning level only the
@@ -536,18 +538,17 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
 
 ## Not yet run
 
-Nothing under `cfg(windows)` has executed; it is only type-checked on the Mac by
-`cargo xwin clippy` for `x86_64-pc-windows-msvc` (the CI workflow has not run on GitHub
-yet): the `ReadDirectoryChangesW` loop, volume GUID lookup, drive type, background thread
-mode, long-path handling in the watcher, the Explorer reveal, and for VFS-6 the copy of a
-`places.sqlite` that Firefox holds open on Windows, the Microsoft Store profile path and
-`ShellExecuteW` for "Abrir en Firefox". The move of an index out
-of the roaming folder has run only in unit tests, where both folders are temporary ones.
-The NSIS installer has never been built. Performance at 2 million
+The `cfg(windows)` code has run only on GitHub's Windows Server 2025 runners (CI, and the
+VFS-8 end-to-end journey on an SSD; `docs/research/windows-e2e-results.md`): the installer,
+the watcher, the catch-up at start and the Explorer reveal ran there; never on Windows 10/11,
+on an HDD, or on the target PC. Never run on Windows at all: for VFS-6, the copy of a
+`places.sqlite` that Firefox holds open, the Microsoft Store profile path and `ShellExecuteW`
+for "Abrir en Firefox". The move of an index out of the roaming folder has run only in unit
+tests, where both folders are temporary ones. Performance at 2 million
 files is checked only by `vfs bench` on a synthetic database on the development Mac (Apple
 Silicon, SSD), with warm OS file caches. There the warm p95 is close to the 150 ms limit:
 before the no-hit probe, two of three runs passed and the worst failed by under 10 ms on
 two query classes; with it, three of three runs passed, with load averages of 4.4–5.1 from
 other work and the slowest class at 114–133 ms per run; peak RSS is about 123 MB (all
-measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). Nothing has been
-measured on Windows or on an HDD.
+measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). On Windows only the
+runner figures of VFS-8 exist; nothing has been measured on an HDD.

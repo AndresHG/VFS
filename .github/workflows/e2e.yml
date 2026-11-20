@@ -1,0 +1,223 @@
+# VFS-8: the real app, installed and driven on Windows (and a short run on macOS), plus the
+# slow-disk measurements and the target-PC probe rehearsal. Not on every push: Windows minutes
+# cost 2x and macOS 10x in a private repository. Nightly runs the Windows journey only; the
+# weekly run and a manual dispatch add the measurements and macOS. Actions are pinned by commit
+# SHA (tag in the comment). Every job uploads what it gathered, also when a step fails.
+name: e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      measurements:
+        description: Slow-disk runs and the probe rehearsal (Windows, ~60 min)
+        type: boolean
+        default: true
+      macos:
+        description: Short journey on macOS (10x minutes)
+        type: boolean
+        default: true
+  schedule:
+    - cron: "30 2 * * *" # nightly: Windows journey
+    - cron: "30 3 * * 0" # weekly: everything
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  TAURI_CLI_VERSION: 2.12.6
+  PY_PACKAGES: psutil==7.2.2 pillow==13.0.0
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain (pinned in rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: e2e-windows
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - name: Release installer (unsigned, exactly as release.yml builds it)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis -- --locked
+      - name: Keep it apart
+        shell: bash
+        run: mkdir -p bin/release && mv target/release/bundle/nsis/*-setup.exe bin/release/
+      - name: Installer of the webdriver build (embedded W3C server; e2e only)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis --features webdriver -- --locked
+      - name: CLI
+        shell: bash
+        run: |
+          cargo build --release --locked -p vfs-cli
+          mkdir -p bin/webdriver
+          mv target/release/bundle/nsis/*-setup.exe bin/webdriver/
+          cp target/release/vfs.exe bin/
+      - name: VFS-8 AC-9 - the release build carries no WebDriver server
+        shell: bash
+        run: |
+          if cargo tree --locked -p vfs-desktop -e normal | grep -q wdio; then
+            echo "tauri-plugin-wdio-webdriver is in the default dependency graph"; exit 1; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-windows-bin
+          path: bin/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-journey:
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-windows-bin
+          path: ${{ runner.temp }}/bin
+      - name: Python packages
+        run: python -m pip install --disable-pip-version-check $env:PY_PACKAGES.Split(' ') pywinauto==0.6.9
+      - name: Hide the runner's console windows, so screenshots show the app
+        run: (New-Object -ComObject Shell.Application).MinimizeAll()
+      - name: Release installer - install silently, per user, and verify (AC-1)
+        run: |
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\release\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/release | Select-Object -Last 1
+          "RELEASE_EXE=$exe" >> $env:GITHUB_ENV
+      - name: Release build - launch and screenshot (AC-1)
+        run: python scripts/e2e/windows_smoke.py --app "$env:RELEASE_EXE" --out out/release
+      - name: Release build - uninstall and verify (AC-1)
+        if: always() && env.RELEASE_EXE != ''
+        run: |
+          Get-Process | Where-Object { $_.Path -eq $env:RELEASE_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue
+          & scripts/e2e/windows-install.ps1 -Uninstall -Out out/release
+          Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'app.vfs.desktop') -ErrorAction SilentlyContinue
+      - name: Webdriver build - install
+        run: |
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\webdriver\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/webdriver | Select-Object -Last 1
+          "VFS_EXE=$exe" >> $env:GITHUB_ENV
+      - name: Generate the tree (~100,000 files)
+        run: python scripts/e2e/gen_tree.py "$env:RUNNER_TEMP\e2e\Archivo" --manifest "$env:RUNNER_TEMP\e2e\manifest.json"
+      - name: Journey (AC-2, AC-3, AC-4)
+        run: |
+          (New-Object -ComObject Shell.Application).MinimizeAll()
+          python scripts/e2e/journey.py --app "$env:VFS_EXE" --manifest "$env:RUNNER_TEMP\e2e\manifest.json" --out out/journey
+      - name: App log and index files
+        if: always()
+        run: |
+          $d = Join-Path $env:LOCALAPPDATA 'app.vfs.desktop'
+          New-Item -ItemType Directory -Force out/app | Out-Null
+          Copy-Item -Recurse -Force "$d\logs" out/app/ -ErrorAction SilentlyContinue
+          Get-ChildItem $d -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length | ConvertTo-Json | Set-Content out/app/files.json
+      - name: Webdriver build - uninstall
+        if: always() && env.VFS_EXE != ''
+        run: |
+          Get-Process | Where-Object { $_.Path -eq $env:VFS_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue
+          & scripts/e2e/windows-install.ps1 -Uninstall -Out out/webdriver
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-windows-journey
+          path: out/
+          retention-days: 30
+
+  windows-slow-disk:
+    needs: build-windows
+    if: inputs.measurements || github.event.schedule == '30 3 * * 0'
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-windows-bin
+          path: ${{ runner.temp }}/bin
+      - name: Python packages
+        run: python -m pip install --disable-pip-version-check $env:PY_PACKAGES.Split(' ')
+      - name: Install the webdriver build
+        run: |
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\webdriver\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/install | Select-Object -Last 1
+          "VFS_EXE=$exe" >> $env:GITHUB_ENV
+      - name: Slow-disk runs, quiet and busy (AC-6)
+        timeout-minutes: 60
+        run: scripts/e2e/slow-disk.ps1 -Exe $env:VFS_EXE -Cli "$env:RUNNER_TEMP\bin\vfs.exe" -Out out/slow-disk
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-windows-slow-disk
+          path: out/
+          retention-days: 30
+
+  windows-probe:
+    if: inputs.measurements || github.event.schedule == '30 3 * * 0'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: A small tree to probe
+        run: python scripts/e2e/gen_tree.py C:\probe-data\Archivo --files 20000 --manifest C:\probe-data\manifest.json
+      - name: vfs-probe.ps1 as a standard user (AC-7)
+        run: scripts/e2e/probe-as-user.ps1 -Probe docs/research/tools/vfs-probe.ps1 -DataRoot C:\probe-data\Archivo -Out out/probe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-windows-probe
+          path: out/
+          retention-days: 30
+
+  macos-journey:
+    if: inputs.macos || github.event.schedule == '30 3 * * 0'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain (pinned in rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: e2e-macos
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - name: App with the embedded WebDriver server (no external driver exists for WKWebView)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles app --features webdriver -- --locked
+      - name: Python packages
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --disable-pip-version-check $PY_PACKAGES
+      - name: Short journey (AC-5)
+        run: |
+          app=$(ls target/release/bundle/macos/VFS.app/Contents/MacOS/* | head -1)
+          "$RUNNER_TEMP/venv/bin/python" scripts/e2e/gen_tree.py "$RUNNER_TEMP/e2e/Archivo" --files 20000 --manifest "$RUNNER_TEMP/e2e/manifest.json"
+          "$RUNNER_TEMP/venv/bin/python" scripts/e2e/journey.py --app "$app" --manifest "$RUNNER_TEMP/e2e/manifest.json" --out out/journey --short
+      - name: App log
+        if: always()
+        run: cp -R "$HOME/Library/Logs/app.vfs.desktop" "$HOME/Library/Application Support/app.vfs.desktop/logs" out/ 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-macos-journey
+          path: out/
+          retention-days: 30
