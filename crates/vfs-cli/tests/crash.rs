@@ -379,8 +379,9 @@ fn kill_during_migration() {
 }
 
 /// One random torn write or corruption of the database, its WAL or the session marker.
-/// Returns its description and whether it overwrote database bytes with junk: SQLite keeps
-/// no checksum on database pages, so such junk can pass every check undetected (#103).
+/// Returns its description and whether it touched the database or its WAL: SQLite keeps no
+/// checksum on database pages, and damage inside a WAL that was partly checkpointed rolls
+/// back only some pages, so such damage can pass every check undetected (#103).
 fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
     let mut wal = db.as_os_str().to_owned();
     wal.push("-wal");
@@ -420,7 +421,7 @@ fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
             "zeroed page"
         }
     };
-    let undetectable = what == "overwritten" && target == db;
+    let undetectable = !target.starts_with(Path::new(&session));
     (
         format!("{what} {} at {offset} of {len}", target.display()),
         undetectable,
@@ -429,8 +430,9 @@ fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
 
 /// VFS-3 AC-5, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
 /// the database, the WAL or the marker is truncated or corrupted at a random offset. The
-/// next open never fails, and the index is consistent and converges to the disk (rebuilt
-/// from the salvaged roots when it had to be discarded).
+/// next open never fails, SQLite's check passes, searches never fail and the index
+/// converges to the disk; when SQLite detected the damage (the index was rebuilt from the
+/// salvaged roots) or only the marker was hit, every structural invariant holds as well.
 #[test]
 fn torn_writes_are_recovered() {
     let iterations = scaled(12, 300);
@@ -452,13 +454,15 @@ fn torn_writes_are_recovered() {
         let vfs = vfs_core::Vfs::open(&s.db).unwrap_or_else(|e| panic!("{context}: open: {e}"));
         let roots = vfs.list_roots().unwrap();
         drop(vfs);
+        // Recovery ran (SQLite detected the damage): the rebuilt index must agree fully.
+        let recovered = vfs_core::db::bad_path(&s.db).exists();
         if roots.is_empty() {
             // The root row itself was destroyed with the page that held it: nothing left
             // to salvage. The user adds the folder again; the index must accept it.
             index(&s.db, &[&s.tree]);
         }
-        if undetectable {
-            // Junk SQLite cannot detect may leave stale FTS entries (#103): search stays
+        if undetectable && !recovered {
+            // Damage SQLite cannot detect may leave stale FTS entries (#103): search stays
             // correct and the folders converge, but the FTS agreement is not promised.
             converge_searchable(&s, &context);
         } else {
