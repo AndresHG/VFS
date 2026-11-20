@@ -484,6 +484,15 @@ input[type="date"] {
   line-height: 1.6;
 }
 .badge-unavailable { background: var(--warn-bg); color: var(--warn-ink); }
+/* VFS-19: "en N sitios", a button that lists the places of a file's copies. */
+.row .badge-copies {
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+}
+.row .badge-copies:hover { border-color: var(--accent); color: var(--accent); }
 .row:has(.badge-unavailable) .name-text { color: var(--ink-2); }
 .row .path {
   display: flex;

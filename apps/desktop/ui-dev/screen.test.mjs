@@ -6,8 +6,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { S } from '../ui/strings.js';
-import { FileKind } from '../ui/contract.js';
+import { FileKind, Source } from '../ui/contract.js';
 import { DateChoice, SizeChoice } from '../ui/choices.js';
+import { placesOf } from '../ui/copies.js';
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
 
@@ -65,4 +66,27 @@ test('type button names the chosen types', () => {
 test('type checklist is a popover owned by the type button', () => {
   assert.match(html, /<button id="f-type"[^>]*popovertarget="f-type-pop"/);
   assert.match(html, /<div id="f-type-pop"[^>]*popover>\s*<fieldset[^>]*>[\s\S]*?id="kind-chips"[\s\S]*?<\/fieldset>\s*<\/div>/);
+});
+
+/** VFS-19 AC-5: a result with copies stands for every place, itself first; folders,
+ *  bookmarks and results without copies stand for one place or none. */
+test('a result with copies lists every place', () => {
+  const hit = { id: 1, dir: '/a', modified: 3, isDir: false, copies: [{ id: 2, dir: '/b', modified: 2 }] };
+  assert.deepEqual(placesOf(hit), [{ id: 1, dir: '/a', modified: 3 }, { id: 2, dir: '/b', modified: 2 }]);
+  assert.equal(placesOf({ id: 1, dir: '/a', modified: 3, isDir: false }).length, 1);
+  assert.deepEqual(placesOf({ id: 1, dir: '/a', isDir: true, copies: [] }), []);
+  assert.deepEqual(placesOf({ id: 1, source: Source.BOOKMARKS }), []);
+  assert.deepEqual(placesOf(undefined), []);
+});
+
+/** VFS-19 AC-5: the "en N sitios" mark, the row label and the list of places are in Spanish,
+ *  and the list is a labelled dialog. */
+test('copies have their Spanish copy and dialog', () => {
+  assert.equal(S.copiesBadge(3), 'en 3 sitios');
+  assert.match(S.copiesTitle('Boda.mp4', 3), /Boda\.mp4.*3 sitios/);
+  assert.match(S.rowLabel('a', 'Vídeo', '/d', '1 mar', '1 KB', false, 3), /está en 3 sitios/);
+  assert.doesNotMatch(S.rowLabel('a', 'Vídeo', '/d', '1 mar', '1 KB', false, 1), /sitios/);
+  assert.ok(S.copiesIntro && S.copiesBadgeLabel(2) && S.copiesModified('1 mar'));
+  assert.match(html, /<dialog id="copies"[^>]*aria-labelledby="copies-title"/);
+  assert.match(html, /<ul class="roots" id="copies-list"/);
 });

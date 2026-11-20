@@ -5,7 +5,9 @@
 // the enum values are the sets of contract.js):
 //   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
 //   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs}
-//   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir}
+//   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir,
+//                   copies?: FileCopy[]}  (VFS-19; left out when empty, never on folders)
+//   FileCopy       {id, dir, modified}    (another place of the same file; id is a files.id)
 //   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
 //   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}

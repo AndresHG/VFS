@@ -103,6 +103,21 @@ pub struct SearchHit {
     pub matched: MatchKind,
     /// The hit is a folder (VFS-1 decision 13).
     pub is_dir: bool,
+    /// Other files with the same folded name and size in the ranked list, best first: the
+    /// same file kept in other places (VFS-19). Empty for folders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub copies: Vec<FileCopy>,
+}
+
+/// Another place of a file hit (VFS-19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCopy {
+    /// `files.id`, what `reveal` takes.
+    pub id: i64,
+    /// Absolute path of the containing directory, native separators.
+    pub dir: String,
+    pub modified: i64,
 }
 
 /// What cut a search short.
@@ -287,7 +302,8 @@ mod tests {
         assert!(bare.filters.kinds.is_empty());
     }
 
-    /// Responses serialize with the field and enum spellings of the command contract.
+    /// Responses serialize with the field and enum spellings of the command contract
+    /// (VFS-19: `copies`, omitted when empty).
     #[test]
     fn search_response_serializes_camel_case() {
         let r = SearchResponse {
@@ -300,6 +316,11 @@ mod tests {
                 modified: 4,
                 matched: MatchKind::Fuzzy,
                 is_dir: false,
+                copies: vec![FileCopy {
+                    id: 9,
+                    dir: "/c".into(),
+                    modified: 5,
+                }],
             }],
             total: 1,
             truncated: true,
@@ -310,7 +331,8 @@ mod tests {
             serde_json::to_value(&r).unwrap(),
             json!({
                 "hits": [{ "id": 7, "name": "Notaría.pdf", "dir": "/a/b", "kind": "document",
-                           "size": 3, "modified": 4, "matched": "fuzzy", "isDir": false }],
+                           "size": 3, "modified": 4, "matched": "fuzzy", "isDir": false,
+                           "copies": [{ "id": 9, "dir": "/c", "modified": 5 }] }],
                 "total": 1, "truncated": true, "truncatedBy": "deadline", "elapsedMs": 2
             })
         );

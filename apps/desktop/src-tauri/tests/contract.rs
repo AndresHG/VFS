@@ -238,6 +238,7 @@ fn source_hit_tags_are_the_source_values() {
         modified: 0,
         matched: MatchKind::Name,
         is_dir: false,
+        copies: Vec::new(),
     });
     let mark = SourceHit::Bookmarks(vfs_bookmarks::BookmarkHit {
         id: 2,

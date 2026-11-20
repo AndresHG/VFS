@@ -82,9 +82,16 @@ export const S = {
     [title, kind, `en ${path}`, site, date && `guardado el ${date}`].filter(Boolean).join(', '),
   detailsBookmark: 'Dirección:',
   detailsBookmarkFolder: 'Guardado en:',
-  rowLabel: (name, kind, dir, date, size, unavailable) =>
-    [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible']
+  rowLabel: (name, kind, dir, date, size, unavailable, places = 1) =>
+    [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible',
+      places > 1 && `está en ${places} sitios, Mayúsculas más Intro para verlos`]
       .filter(Boolean).join(', '),
+  // VFS-19: copies of a file (same name and size) shown as one result.
+  copiesBadge: (n) => `en ${n} sitios`,
+  copiesBadgeLabel: (n) => `Ver los ${n} sitios donde está`,
+  copiesTitle: (name, n) => `«${name}» está en ${n} sitios`,
+  copiesIntro: 'Son archivos con el mismo nombre y el mismo tamaño: casi seguro, copias del mismo archivo. Elija cuál quiere ver.',
+  copiesModified: (date) => `Modificado el ${date}`,
   detailsLabel: 'Ubicación:',
 
   emptyNoRootsTitle: 'Añada una carpeta para empezar',

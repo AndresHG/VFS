@@ -395,9 +395,20 @@ lower id, and files before folders:
 
 A query with filters and no terms lists newest first (S6).
 
+### Copies of a file (VFS-19)
+
+After ranking, `search::group_copies` folds every file into the first (best-ranked) file
+with the same folded name and the same size: it becomes one result whose `copies` hold the
+others (id, folder, modification date) in ranking order. Folders are never grouped, nor
+files whose size differs, so `IMG_0001.jpg` from two cameras stays two results. The final
+cut to 2,000 counts results; the read caps of the tiers still count files, so a list full of
+copies can hold fewer than 2,000 results with `truncatedBy = cap`. A copy's folder is read like a hit's: only for the page
+returned. The UI marks such a result "en N sitios" and lists every place, each with its own
+"Mostrar en carpeta" (`ui/copies.js`, the `copies` dialog).
+
 ### Paging and cache
 
-The whole ranked list (at most 2,000) is computed once; `offset` and `limit` (default 100,
+The whole ranked list (at most 2,000 results) is computed once; `offset` and `limit` (default 100,
 at most 500) slice it. The last list is cached on the search connection, keyed by the folded
 query, the filters and SQLite's `PRAGMA data_version`, so the next page comes from the same
 list unless the index changed (S7).
@@ -435,8 +446,10 @@ Key shapes:
 
 - `SearchQuery { text, filters: { kinds, modifiedFrom, modifiedTo, sizeMin, sizeMax, folder },
   limit, offset }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes.
-- `SearchHit { id, name, dir, kind, size, modified, matched, isDir }`. `id` is a `files.id`,
-  or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs both.
+- `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies? }`. `id` is a
+  `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs both.
+  `copies` (VFS-19) is left out when empty and never set on folders.
+- `FileCopy { id, dir, modified }`: another place of a file hit; `id` is a `files.id`.
 - `SearchResponse { hits, total, truncated, truncatedBy, elapsedMs }`.
 
 `reveal` builds the path from the index. If it no longer exists on disk, it marks the folder

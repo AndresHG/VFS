@@ -123,6 +123,20 @@ function makeEntry(root, R) {
   return { dir: `${root.path}\\Varios`, name: `${R.pick(['copia', 'backup', 'programa', 'datos'])}_${R.int(1, 999)}.${R.pick(['zip', 'exe', 'dat', 'iso'])}`, kind: FileKind.OTHER, size: R.int(1_000, 900_000_000), modified: t };
 }
 
+/** VFS-19, as the core: files with the same folded name and size follow the first. */
+function groupCopies(list) {
+  const out = [];
+  const first = new Map();
+  for (const item of list) {
+    const k = item.e.isDir ? null : `${item.e.fName}\u0000${item.e.size}`;
+    if (k !== null && first.has(k)) { first.get(k).copies.push(item.e); continue; }
+    const row = { ...item, copies: [] };
+    if (k !== null) first.set(k, row);
+    out.push(row);
+  }
+  return out;
+}
+
 function buildCorpus(roots, R) {
   const files = [];
   const dirs = new Map(); // path -> entry
@@ -137,6 +151,11 @@ function buildCorpus(roots, R) {
     const seq = seqPerRoot.get(root.id);
     seqPerRoot.set(root.id, seq + 1);
     files.push({ id: i + 1, rootId: root.id, seq, isDir: false, matched: null, ...e, fName: fold(e.name), fDir: fold(e.dir) });
+    // VFS-19: some files also kept in a backup folder, same name and size (copies).
+    if (i % 25 === 0) {
+      const dir = `${root.path}\\Copia de seguridad\\${e.dir.slice(e.dir.lastIndexOf('\\') + 1)}`;
+      files.push({ id: TOTAL_FILES + i + 1, rootId: root.id, seq, isDir: false, matched: null, ...e, dir, modified: e.modified - 86_400 * 30, fName: fold(e.name), fDir: fold(dir) });
+    }
     // Register every folder between the root and the file as a folder entry (decision D1).
     let d = e.dir;
     while (d.length > root.path.length && !dirs.has(d)) {
@@ -317,14 +336,15 @@ export function createFakeBackend(params) {
         return { hits: [], total: 0, truncated: true, truncatedBy: TruncatedBy.DEADLINE, elapsedMs: 1000 };
       }
       const key = JSON.stringify([text, f, generation]);
-      if (!cache || cache.key !== key) cache = { key, list: rank(text, f) };
+      if (!cache || cache.key !== key) cache = { key, list: groupCopies(rank(text, f)) };
       const list = cache.list;
       const capped = list.length > 2000;
       const total = Math.min(list.length, 2000);
       const offset = q.offset || 0;
       const limit = Math.max(1, Math.min(500, q.limit || 100));
-      const hits = list.slice(offset, Math.min(total, offset + limit)).map(({ e, m }) => ({
+      const hits = list.slice(offset, Math.min(total, offset + limit)).map(({ e, m, copies }) => ({
         id: e.id, name: e.name, dir: e.dir, kind: e.kind, size: e.size, modified: e.modified, matched: m, isDir: e.isDir,
+        ...(copies.length ? { copies: copies.map((c) => ({ id: c.id, dir: c.dir, modified: c.modified })) } : {}),
       }));
       return { hits, total, truncated: capped, truncatedBy: capped ? TruncatedBy.CAP : null, elapsedMs: R.int(8, 90) };
     },
