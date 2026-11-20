@@ -16,13 +16,15 @@ title, address and folder. It reads; it never changes a source. See the
 
 Most people accumulate a lifetime of material in many places: folders of documents and
 photos, browser bookmarks, chat apps, notes and lists. VFS aims to turn all of it into one
-**personal knowledge base** that runs on your own Windows or Mac computer:
+**personal knowledge base** that runs on your own Windows or Mac computer, as one
+all-in-one product a non-technical person can use without assembling tools:
 
 1. **Find** anything, across every source, by name, folder, content or topic.
 2. **Ask** questions over it (retrieval-augmented generation, RAG): answers built from your
    own files and notes, each pointing back to the file or message it came from.
 3. **Connect** it: a graph of related documents, people, places and topics, in the spirit
-   of Obsidian, built from the archive instead of typed by hand.
+   of Obsidian's knowledge graph, but generated automatically by language models from the
+   archive instead of linked by hand.
 4. **Grow** it: add things over time (a note, a link, a list, a new source) and have them
    join the same search, answers and graph.
 
@@ -33,15 +35,20 @@ does not answer those; content, concept and cross-source search do.
 
 ## Principles that hold as the scope grows
 
-- **Local and private.** The archive and the index stay on the user's computer. Any model
-  (embeddings, an LLM for answers) runs locally or is an explicit, optional opt-in.
+- **Your data stays local; the intelligence comes from an API.** The archive, the index and
+  the user's notes stay on the user's computer. Language-model work (answers, graph
+  generation, enrichment) goes through a model API the user configures with their own key
+  (Anthropic, OpenAI or another provider), not a model running on the PC. The API is
+  opt-in and the user sees what is sent (roadmap, issue 38).
 - **Read-only over sources.** VFS never moves, edits, reorganises or deletes anything in a
   source (files, bookmarks, chats). What the user adds (notes, links, tags) lives in VFS's
   own store, apart from the sources.
 - **Every answer is traceable.** A result or an answer always links back to the original
   file, bookmark or message ("mostrar en carpeta").
-- **Built for a slow PC and a non-technical user.** Footprint, background-friendliness and a
-  simple Spanish interface come before features.
+- **One product, for non-technical users.** Everything (sources, search, answers, graph,
+  notes) is inside VFS on Windows and macOS; no plugins, vaults or manual linking to set
+  up. Footprint on a slow PC, background-friendliness and a simple interface come before
+  features.
 - **Sources are a first-class concept.** The user chooses which sources to include and can
   search one, several or all of them.
 
@@ -69,8 +76,9 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 
 - Text inside documents (Word, PDF): milestone Fase 3, designed in
   [`docs/content-search-design.md`](content-search-design.md).
-- Semantic search with small local embeddings, so a query finds a concept even when the
-  words differ, once issue 41 has measured them on the target PC.
+- Semantic search with embeddings, so a query finds a concept even when the words differ:
+  through the configured model API, or a small local model once issue 41 has measured one
+  on the target PC.
 - Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
@@ -78,22 +86,29 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 
 - Natural-language questions answered from the user's own content, with citations to the
   exact files and messages used.
-- The retrieval layer is the same index and embeddings as search; the model that writes the
-  answer is pluggable (local first; a cloud model only if the user opts in).
+- The retrieval layer is the same index as search; the answer is written by the model API
+  the user configured (Anthropic, OpenAI or another provider), which is pluggable.
 
 ### Knowledge graph
 
 - Links between items: same topic, same people, same place, same time, references between
   documents.
 - A graph or "related items" view to browse the archive by connection, not only by query.
-- How this fits with Obsidian is open: export the graph and notes as an Obsidian vault,
-  read a vault as one more source, or offer an Obsidian-like view inside VFS (see open
+- Built automatically: the configured model API extracts topics, people, places and links
+  in the background, so the user never links notes by hand.
+- Obsidian is the inspiration for the concept, not a dependency: VFS does not require or
+  wrap Obsidian. What Obsidian and its ecosystem (plugins, AI skills) already do, and
+  whether VFS should interoperate with it, is a research line for later (see open
   questions).
 
 ### Adding to the knowledge base
 
-- Capture inside VFS: a note, a link, a list, tags or a collection, stored in VFS's own data
-  and searched like any source.
+- Capture inside VFS: a note, a link, a list, tags or a collection, searched like any
+  source.
+- What the user adds is stored as plain Markdown files in VFS's own folder, never in a
+  source. They are knowledge-base material, written for VFS and for systems built on top
+  of it (models, agents, Obsidian-like tools) to read, not documents meant to be opened
+  and polished like a Word file.
 - An interface for curating: grouping results into collections, annotating them, and seeing
   what was added when.
 
@@ -105,10 +120,9 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 
 ## Open questions
 
-- Obsidian: interoperate (Markdown vault in or out) or provide our own graph view? Both?
-- Which local model sizes are realistic for RAG on the target PC. (Optional cloud model
-  access is already defined in the roadmap: off by default, the owner's own key, a consent
-  preview; issue 38.)
-- Where user-added notes live, and in what format, so they stay portable (plain Markdown?).
+- Obsidian: what it and its ecosystem already offer (graph, plugins, AI skills), and
+  whether VFS should read or write an Obsidian vault. Research for later, issue 119.
+- How the Markdown notes are laid out (one file per note, front matter for tags and links)
+  and how well Windows tools handle them.
 - Chats: which apps and phones hold what the user wants (they are read only from official
   exports; see the roadmap).

@@ -54,10 +54,12 @@ ordinary or fast machines. The product spec is
 
 ## Where it is heading
 
-The long-term aim is a local, private **personal knowledge base** built from what a person
-already has: files, bookmarks, chats and notes on their own Windows or Mac computer. Find
-anything across every source, ask questions over it with answers that cite the original
-files (RAG), browse it as an Obsidian-like graph of connections, and keep adding to it.
+The long-term aim is one all-in-one **personal knowledge base** for non-technical Windows
+and Mac users, built from what a person already has: files, bookmarks, chats and notes.
+Find anything across every source, ask questions over it with answers that cite the
+original files (RAG), browse an Obsidian-like graph of connections generated automatically,
+and keep adding notes (stored as Markdown). The data stays on the user's computer; language
+models are reached through an API the user configures (Anthropic, OpenAI or another).
 Sources stay read-only throughout. The direction, principles and future lines of work are
 in [`docs/vision.md`](docs/vision.md).
 
