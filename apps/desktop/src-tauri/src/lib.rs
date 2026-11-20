@@ -94,6 +94,7 @@ pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> taur
             }))
             .level(log::LevelFilter::Warn)
             .level_for(vfs_core::DIAG_TARGET, log::LevelFilter::Info)
+            .level_for("vfs::probe", log::LevelFilter::Debug)
             .max_file_size(LOG_MAX_BYTES)
             .rotation_strategy(RotationStrategy::KeepSome(LOG_KEEP))
             .build(),
@@ -227,6 +228,10 @@ pub fn run() {
             let _ = w.set_focus();
         }
     }));
+
+    // VFS-8: e2e builds only (`--features webdriver`); listens on TAURI_WEBDRIVER_PORT.
+    #[cfg(feature = "webdriver")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
 
     let app = builder
         .plugin(tauri_plugin_dialog::init())
