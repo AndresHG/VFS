@@ -32,6 +32,10 @@ jobs:
           & $exe "$base\treeA" "$base\dbA\index.db" out\A-fresh-tree.log 100000 0
           # B: same tree, new index, after 60 s of calm
           & $exe "$base\treeA" "$base\dbB\index.db" out\B-calm-tree.log 100000 60
+          # C: same tree, new index, whole indexer thread in background mode (pre-VFS-5)
+          $env:VFS_PROBE_BG = "1"
+          & $exe "$base\treeA" "$base\dbC\index.db" out\C-background-mode.log 100000 30
+          Remove-Item Env:VFS_PROBE_BG
           Stop-Process -Id $tp.Id
           Get-ChildItem out | Format-Table Name,Length
           Select-String -Path out\*.log -Pattern 'summary|pass_end'

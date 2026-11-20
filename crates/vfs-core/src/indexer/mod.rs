@@ -944,6 +944,11 @@ impl Worker {
         // The walk profile is the thread's base state; background mode is only entered
         // around single listings of incremental work (VFS-5 R1, R2).
         self.sched.walk_profile();
+        if std::env::var_os("VFS_PROBE_BG").is_some() {
+            // Probe only: the pre-VFS-5 policy, whole thread in background mode.
+            self.sched.probe_background();
+            log::debug!(target: "vfs::probe", "whole thread in background mode");
+        }
         if let Err(e) = self.init() {
             log::error!("indexer start: {e}");
         }

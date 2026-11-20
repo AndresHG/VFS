@@ -491,6 +491,10 @@ impl Sched {
         self.prio.walk_profile();
     }
 
+    pub(crate) fn probe_background(&mut self) {
+        self.prio.begin_background();
+    }
+
     pub(crate) fn has_probe(&self) -> bool {
         self.load.is_some()
     }
