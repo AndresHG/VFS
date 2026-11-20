@@ -286,7 +286,7 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
 /// never discarded.
 pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
     let (session, unclean) = begin_session(db_path)?;
-    if !db_path.exists() && fresh_path(db_path).exists() {
+    if !db_path.exists() && fresh_path(db_path).exists() && bad_path(db_path).exists() {
         // A recovery was killed after moving the damaged index aside.
         finish_recovery(db_path)?;
     }

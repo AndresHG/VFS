@@ -18,7 +18,7 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
   ignoring case and accents ("notaria" finds "Notaría"; NFC and NFD names match). Results
   are gathered best first: names that start with the first word, names holding every word,
   then files whose folders and name together hold them, then typos.
-- Tolerates one typo in words of 6 or more letters, when the exact search finds fewer than
+- Tolerates one typo in words of 6 to 64 letters, when the exact search finds fewer than
   20 results. Shorter words match exactly.
 - Shows folders as results too, marked as folders.
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.

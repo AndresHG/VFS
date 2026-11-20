@@ -34,4 +34,19 @@ impl Error {
     }
 }
 
+/// Relation words that open an `OverlappingRoot` payload, `"<relation> <existing root>"`:
+/// the new folder is the same as, inside, or contains that root (`roots::add_root`).
+pub(crate) const OVERLAP_SAME: &str = "same";
+pub(crate) const OVERLAP_INSIDE: &str = "inside";
+pub(crate) const OVERLAP_CONTAINS: &str = "contains";
+
+impl Error {
+    /// True when `add_root` refused the folder because it is already a root (so a caller
+    /// resuming work on it can carry on).
+    pub fn is_same_root(&self) -> bool {
+        matches!(self, Error::OverlappingRoot(why)
+            if why.split_once(' ').is_some_and(|(relation, _)| relation == OVERLAP_SAME))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
