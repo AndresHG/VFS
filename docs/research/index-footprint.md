@@ -236,18 +236,22 @@ Not implemented, in order of expected benefit:
    that are `dirs` rows and ~65 MiB. A new spec.
 7. **Sequential pre-read of `files` + `dirs` at start**: potentially most of the remaining
    cold reads, if the OS keeps the cache. Needs the real PC.
-8. **Plain `files(dir_id)` index instead of `UNIQUE(dir_id, name)`**: −63 MiB. Owner decision.
+8. **Plain `files(dir_id)` index instead of `UNIQUE(dir_id, name)`**: decided by the owner
+   and implemented as schema version 4 (VFS-7): 722 → 670 MiB measured.
 9. **`dirs_fts` without positions**: −56 MiB; needs exact re-checks before its capped reads.
 10. **Smaller SQLite cache** (16 MB): −64 MB RSS here; needs the real PC.
 
 ## Owner decisions (change which results are returned)
 
-- **Dropping `UNIQUE(dir_id, name)`**: the single-word path tier reads a matching folder's
-  files in index order and stops at the 2,000-hit cap. With the unique index that order is
-  by name; with a plain `dir_id` index it is by file id. For `whatsapp` (a 60,000-file
-  folder) the 2,000 path hits returned differ: same tier, same rank rule, a different subset
-  of the 60,000 equally good matches. Nothing a user would call wrong, but different. Gain:
-  −63 MiB (−9% of version 3) and denser folder-driven reads.
+- **Dropping `UNIQUE(dir_id, name)`** (decided 2026-11-20, implemented in VFS-7, schema
+  version 4): the single-word path tier reads a matching folder's files in index order and
+  stops at the 2,000-hit cap. With the unique index that order was by name; with the plain
+  `files(dir_id)` index it is by file id. Measured on the 2 M-file index with a 60 s
+  deadline: 3 of the 59 bench queries return a different subset of their equally ranked
+  matches (`whatsapp`: 1,931 of 2,000 path hits, `gestoria/ano`: 13, the Gestoría folder
+  filter: 2), with the same totals and truncation; the other 56 are identical. File size
+  722 → 670 MiB (−52 MiB: −85 for the name index, +22 for `files_dir`, the rest page
+  packing); pages read over the set 66,041 → 65,382.
 
 ## What only the real PC can tell
 
