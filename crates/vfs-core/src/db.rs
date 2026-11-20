@@ -56,7 +56,21 @@ const SHM_SUFFIX: &str = "-shm";
 /// page caches (VFS-1 AC-9).
 fn apply_common_pragmas(conn: &Connection) -> Result<()> {
     conn.busy_timeout(READER_BUSY_TIMEOUT)?;
-    let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+    // Two processes creating the index at once race to switch it to WAL, and SQLite reports
+    // that race as busy without calling the busy handler: retry it ourselves (VFS-3 AC-9).
+    let started = std::time::Instant::now();
+    loop {
+        match conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get::<_, String>(0)) {
+            Ok(_) => break,
+            Err(e)
+                if e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy)
+                    && started.elapsed() < READER_BUSY_TIMEOUT =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
     conn.execute_batch(
         "PRAGMA synchronous=NORMAL;
          PRAGMA temp_store=MEMORY;
@@ -95,7 +109,13 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
         return Err(Error::SchemaTooNew);
     }
     if version < SCHEMA_VERSION {
-        let tx = conn.transaction()?;
+        // Another process may be migrating the same index: take the write lock first and
+        // read the version again under it, so each migration runs once (VFS-3 AC-9).
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let version = schema_version(&tx)?;
+        if version > SCHEMA_VERSION {
+            return Err(Error::SchemaTooNew);
+        }
         for sql in &MIGRATIONS[version as usize..] {
             tx.execute_batch(sql)?;
         }
@@ -266,6 +286,10 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
 /// never discarded.
 pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
     let (session, unclean) = begin_session(db_path)?;
+    if !db_path.exists() && fresh_path(db_path).exists() {
+        // A recovery was killed after moving the damaged index aside.
+        finish_recovery(db_path)?;
+    }
     let opened = open_rw(db_path).and_then(|c| {
         if unclean {
             quick_check(&c)?;
@@ -274,7 +298,9 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
     });
     let (conn, recovered) = match opened {
         Ok(conn) => (conn, false),
-        Err(Error::SchemaTooNew) => return Err(Error::SchemaTooNew),
+        // A busy, locked or unreadable index is not a damaged one: moving it aside would
+        // discard a healthy index another process is using (VFS-3 AC-9).
+        Err(e) if !is_damage(&e) => return Err(e),
         Err(e) => {
             log::warn!("index {} unusable ({e}); recreating it", db_path.display());
             (recover(db_path)?, true)
@@ -288,6 +314,18 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
 pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
     let (conn, recovered, _session) = open_session(db_path)?;
     Ok((conn, recovered))
+}
+
+/// True for the errors that prove the index file itself is damaged: SQLite's "corrupt" and
+/// "not a database", and a failed `quick_check`.
+fn is_damage(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Db(err) if matches!(
+            err.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+        )
+    )
 }
 
 fn quick_check(conn: &Connection) -> Result<()> {
@@ -313,30 +351,79 @@ fn salvage_root_paths(db_path: &Path) -> Vec<String> {
     read().unwrap_or_default()
 }
 
-/// Moves the index (and its `-wal`/`-shm` files) to `<db_path>.bad`, creates a fresh one and
-/// re-adds the salvaged roots pending deep.
+/// `<db_path>.new`, where [`recover`] builds the replacement index before swapping it in.
+fn fresh_path(db_path: &Path) -> PathBuf {
+    let mut p = db_path.as_os_str().to_owned();
+    p.push(".new");
+    PathBuf::from(p)
+}
+
+/// `path` with a SQLite companion suffix appended.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut p = path.as_os_str().to_owned();
+    p.push(suffix);
+    PathBuf::from(p)
+}
+
+/// Moves the index to `<db_path>.bad` and puts a fresh one holding the salvaged roots
+/// (pending deep) in its place. A kill at any moment leaves either the damaged index in
+/// place (the next open recovers again) or a complete replacement at `<db_path>.new` that
+/// the next open adopts ([`finish_recovery`]): the root list is never lost to a crash
+/// (VFS-3 AC-3).
 pub(crate) fn recover(db_path: &Path) -> Result<Connection> {
+    build_fresh(db_path)?;
+    move_aside(db_path)?;
+    finish_recovery(db_path)?;
+    open_rw(db_path)
+}
+
+/// Step 1: writes the replacement index at `<db_path>.new` (replacing what an interrupted
+/// recovery left there) with every root path readable from the damaged index, checkpointed
+/// so the single file is complete.
+fn build_fresh(db_path: &Path) -> Result<()> {
     let roots = salvage_root_paths(db_path);
-    let bad = bad_path(db_path);
+    let fresh = fresh_path(db_path);
     for suffix in ["", WAL_SUFFIX, SHM_SUFFIX] {
-        let mut from = db_path.as_os_str().to_owned();
-        from.push(suffix);
-        let mut to = bad.as_os_str().to_owned();
-        to.push(suffix);
-        if Path::new(&from).exists() {
-            std::fs::rename(&from, &to)?;
-        } else if Path::new(&to).exists() {
-            std::fs::remove_file(&to)?;
+        let p = with_suffix(&fresh, suffix);
+        if p.exists() {
+            std::fs::remove_file(&p)?;
         }
     }
-    let mut conn = open_rw(db_path)?;
+    let mut conn = open_rw(&fresh)?;
     let tx = conn.transaction()?;
     for path in &roots {
         let volume = crate::platform::volume_key(Path::new(path));
         ingest::insert_root(&tx, &volume, path)?;
     }
     tx.commit()?;
-    Ok(conn)
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    Ok(())
+}
+
+/// Step 2: moves the damaged index file to `<db_path>.bad`.
+fn move_aside(db_path: &Path) -> Result<()> {
+    if db_path.exists() {
+        std::fs::rename(db_path, bad_path(db_path))?;
+    }
+    Ok(())
+}
+
+/// Step 3, also run by the next open after a kill between steps 2 and 3: moves the damaged
+/// index's `-wal`/`-shm` next to `<db_path>.bad` (dropping older ones there), so they are
+/// never applied to the new index, then renames `<db_path>.new` into place.
+fn finish_recovery(db_path: &Path) -> Result<()> {
+    let bad = bad_path(db_path);
+    for suffix in [WAL_SUFFIX, SHM_SUFFIX] {
+        let from = with_suffix(db_path, suffix);
+        let to = with_suffix(&bad, suffix);
+        if from.exists() {
+            std::fs::rename(&from, &to)?;
+        } else if to.exists() {
+            std::fs::remove_file(&to)?;
+        }
+    }
+    std::fs::rename(fresh_path(db_path), db_path)?;
+    Ok(())
 }
 
 /// Absolute path of a directory: `roots.path` joined with the components of `rel_path`.
@@ -1204,6 +1291,83 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, 1);
+    }
+
+    /// VFS-3 AC-3, VFS-1 AC-6: recovery killed after any of its steps (replacement built,
+    /// damaged index moved aside, replacement swapped in), with the damaged index's WAL
+    /// still next to it, loses neither the root list nor applies the old WAL to the new
+    /// index: the next open (an unclean one, the marker of the killed session left behind)
+    /// yields a sound index holding the root, pending a full scan. Before this, a kill
+    /// after the new empty index was created but before its roots were committed, or
+    /// between moving the index and moving its WAL, lost every root.
+    #[test]
+    fn recovery_killed_after_any_step_keeps_roots() {
+        type Step = fn(&Path) -> Result<()>;
+        let steps: [Step; 3] = [build_fresh, move_aside, finish_recovery];
+        for done in 0..=steps.len() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("index.db");
+            let mut conn = open_rw(&path).unwrap();
+            conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+            let tx = conn.transaction().unwrap();
+            insert_root(&tx, "/", "/datos/Fotos").unwrap();
+            tx.commit().unwrap();
+            // Keep the root only in the WAL, as after a kill: copy both files while open.
+            let wal = with_suffix(&path, WAL_SUFFIX);
+            let (db_bytes, wal_bytes) =
+                (std::fs::read(&path).unwrap(), std::fs::read(&wal).unwrap());
+            drop(conn);
+            std::fs::write(&path, db_bytes).unwrap();
+            std::fs::write(&wal, wal_bytes).unwrap();
+            for step in &steps[..done] {
+                step(&path).unwrap();
+            }
+            let session = session_dir(&path);
+            std::fs::create_dir_all(&session).unwrap();
+            std::fs::write(session.join("999999-0.lock"), b"").unwrap();
+
+            let (conn, _recovered) = open_or_recover(&path).unwrap();
+            let roots: Vec<String> = conn
+                .prepare("SELECT path FROM roots")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            assert_eq!(roots, vec!["/datos/Fotos"], "killed after {done} steps");
+            assert_eq!(
+                count(&conn, "SELECT COUNT(*) FROM dirs WHERE rel_path = ''"),
+                1
+            );
+            quick_check(&conn).unwrap();
+        }
+    }
+
+    /// VFS-3 AC-9, VFS-1 AC-6: the app and the command line creating the same new index at
+    /// the same moment both get it, and neither mistakes the other's half-created schema
+    /// for damage. Before this, the loser re-ran the version-1 schema ("table meta already
+    /// exists"), took that for corruption and moved the winner's live index to `.bad`.
+    #[test]
+    fn concurrent_first_opens_never_recover() {
+        for round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("index.db");
+            let barrier = std::sync::Barrier::new(4);
+            std::thread::scope(|s| {
+                for _ in 0..4 {
+                    s.spawn(|| {
+                        barrier.wait();
+                        let (conn, recovered) = open_or_recover(&path).unwrap();
+                        assert!(
+                            !recovered,
+                            "round {round}: a healthy new index was recovered"
+                        );
+                        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+                    });
+                }
+            });
+            assert!(!bad_path(&path).exists(), "round {round}");
+        }
     }
 
     /// An index from a newer build is never moved aside.

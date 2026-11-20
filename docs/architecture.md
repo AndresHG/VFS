@@ -270,12 +270,15 @@ changes. The Windows loop has never run (see "Not yet run").
 `<index>.session/<pid>-<n>.lock`. A clean shutdown (`Vfs::shutdown`, or dropping the last
 `Vfs` clone) unlocks and removes it. On the next open, a marker that no live process holds
 locked means the previous session ended uncleanly; only then does the core run
-`PRAGMA quick_check(1)`. An index that cannot be opened or fails the check is renamed to
-`index.db.bad` (with its `-wal` and `-shm`), a fresh index is created, and every root path
-that can still be read from the bad file is re-added pending deep (C5). Once every root
-is ready with a finished full scan, the indexer deletes the `.bad` file and its companions
-(`discard_recovered_copy`). Several processes
-(the app and the CLI) can share one index; each holds its own marker.
+`PRAGMA quick_check(1)`. An index that SQLite reports as corrupt or not a database, or that
+fails the check, is replaced: a fresh index holding every root path still readable from it
+(pending deep, C5) is built at `index.db.new`, the damaged one is renamed to `index.db.bad`
+(with its `-wal` and `-shm`), and `index.db.new` takes its place. A kill between the last two
+steps is finished by the next open, so the root list survives a crash during recovery
+(VFS-3 AC-3). Once every root is ready with a finished full scan, the indexer deletes the
+`.bad` file and its companions (`discard_recovered_copy`). Any other open error (busy, locked, I/O) is returned, never recovered. Several
+processes (the app and the CLI) can share one index; each holds its own marker, and the
+migration takes the write lock before reading the schema version (VFS-3 AC-9).
 
 ## From a query to results
 
