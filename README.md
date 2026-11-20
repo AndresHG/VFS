@@ -208,8 +208,8 @@ build is refused, never overwritten.
 - **Run on Windows only on a GitHub runner** (VFS-8, Windows Server 2025, SSD; results in
   `docs/research/windows-e2e-results.md`): the NSIS installer installs and uninstalls per
   user, the window opens, the watcher follows create, rename and delete, the catch-up at start
-  works, and "Mostrar en carpeta" opens the right folder but does not select the item
-  (issue 107). Never run on Windows: for VFS-6, the copy of a `places.sqlite` that Firefox
+  works, and "Mostrar en carpeta" leaves the file or folder selected in Explorer
+  (`apps/desktop/src-tauri/tests/windows_shell.rs`, issue 107). Never run on Windows: for VFS-6, the copy of a `places.sqlite` that Firefox
   holds open, the Microsoft Store profile folder and "Abrir en Firefox" (`ShellExecuteW`).
 - Measured on Windows only on that runner (first scan, memory, latency); nothing on an HDD or
   on the target PC (slow 8 TB HDD). Milestone Fase 2 exists for that.
