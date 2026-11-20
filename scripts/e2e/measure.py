@@ -17,14 +17,11 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from journey import App, now, scan_done, wait_for  # noqa: E402
+from journey import NO_FILTERS, App, now, scan_done, wait_for  # noqa: E402
 import gen_tree  # noqa: E402
 
 QUERIES = ["notaria valdepenas", "remedios extracto", "factura", "img", "boda iñigo ainhoa",
            "notaria valdepeñaz", "peñiscola", "2019", "copia de seguridad", "cumpleaños abuela"]
-NO_FILTERS = {"kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": None,
-              "sizeMax": None, "folder": None}
-
 
 def search(wd, text):
     t = now()

@@ -38,6 +38,14 @@ STATE_IDLE = "idle"
 STATE_SCANNING = "scanning"
 ROOT_READY = "ready"
 
+# A `SearchQuery.filters` with no filter set.
+NO_FILTERS = {"kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": None,
+              "sizeMax": None, "folder": None}
+
+# Values of the date and size selects (`DateChoice`, `SizeChoice` in apps/desktop/ui/choices.js).
+DATE_WEEK = "week"
+SIZE_MEDIUM, SIZE_LARGE, SIZE_HUGE = "medium", "large", "huge"
+
 # What "Mostrar en carpeta" must show: the item selected, or (path over 260 chars) an ancestor.
 EXPECT_SELECT = "select"
 EXPECT_PARENT = "parent"
@@ -306,9 +314,7 @@ class Journey:
         return found
 
     def engine_ms(self, query, filters=None):
-        r = self.wd.invoke("search", {"query": {"text": query, "filters": filters or {
-            "kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": None,
-            "sizeMax": None, "folder": None}, "limit": 200, "offset": 0}})
+        r = self.wd.invoke("search", {"query": {"text": query, "filters": filters or NO_FILTERS, "limit": 200, "offset": 0}})
         return r["elapsedMs"], r["total"]
 
     def set_select(self, css, value):
@@ -414,7 +420,7 @@ class Journey:
             ms, total = self.engine_ms(query)
             r.update({"query": query, "engine_ms": ms, "total": total})
             self.metrics.setdefault("searches", {})[label] = r
-            if key == "folder":
+            if target["kind"] == gen_tree.KIND_FOLDER:
                 kinds = [row["kind"] for row in self.rows() if nfc(row["name"]) == nfc(
                     target["name"])]
                 r["kind_shown"] = kinds[0] if kinds else None
@@ -448,8 +454,9 @@ class Journey:
         def run():
             target = self.t[key]
             self.clear_filters()
-            query = {"name": "notaria valdepenas", "long": "informe pericial ibanez",
-                     "folder": "boda inigo ainhoa"}[key]
+            query = {gen_tree.T_NAME: "notaria valdepenas",
+                     gen_tree.T_LONG: "informe pericial ibanez",
+                     gen_tree.T_FOLDER: "boda inigo ainhoa"}[key]
             self.search_ui(query, target["name"])
             idx = [nfc(r["name"]) for r in self.rows()].index(nfc(target["name"]))
             row = self.wd.find(f"#results .row[data-index='{idx}']")
@@ -523,7 +530,7 @@ class Journey:
         for i in range(50):
             gen_tree.write_file(os.path.join(d, f"Cambio mientras cerrado {i:03d}.txt"), 0,
                                 time.time())
-        gone = self.t["audio"]["path"]
+        gone = self.t[gen_tree.T_AUDIO]["path"]
         os.remove(gen_tree.fs_path(gone))
         return {"created": 50, "deleted": os.path.basename(gone)}
 
@@ -561,33 +568,39 @@ class Journey:
         self.step("scan-progress", self.s_scan_progress)
         self.step("search-during-scan", self.s_search_during_scan)
         self.step("scan-finished", self.s_scan_finishes, critical=True)
-        self.step("search-name", self.search_case("name", "Notaría Valdepeñas", "name"))
+        self.step("search-name",
+                  self.search_case("name", "Notaría Valdepeñas", gen_tree.T_NAME))
         self.step("search-middle-segment",
-                  self.search_case("middle", "remedios extracto", "middle"))
+                  self.search_case("middle", "remedios extracto", gen_tree.T_MIDDLE))
         self.step("search-no-accents",
-                  self.search_case("no_accents", "notaria valdepenas", "name"))
-        self.step("search-typo", self.search_case("typo", "notaria valdepeñaz", "name"))
-        self.step("search-folder", self.search_case("folder", "boda iñigo ainhoa", "folder"))
+                  self.search_case("no_accents", "notaria valdepenas", gen_tree.T_NAME))
+        self.step("search-typo",
+                  self.search_case("typo", "notaria valdepeñaz", gen_tree.T_NAME))
+        self.step("search-folder",
+                  self.search_case("folder", "boda iñigo ainhoa", gen_tree.T_FOLDER))
         self.step("filter-type-audio", self.filter_case(
-            "type_audio", self.apply_kind("audio"), "cuna", "audio"))
+            "type_audio", self.apply_kind(gen_tree.KIND_AUDIO), "cuna", gen_tree.T_AUDIO))
         self.step("filter-date-week", self.filter_case(
-            "date_week", lambda: self.set_select("#f-date", "week"), "peñiscola playa", "week"))
+            "date_week", lambda: self.set_select("#f-date", DATE_WEEK), "peñiscola playa",
+            gen_tree.T_WEEK))
         if not short:
             self.step("filter-size-medium", self.filter_case(
-                "size_medium", lambda: self.set_select("#f-size", "medium"), "jubilacion",
-                "medium"))
+                "size_medium", lambda: self.set_select("#f-size", SIZE_MEDIUM), "jubilacion",
+                gen_tree.T_MEDIUM))
             self.step("filter-size-large", self.filter_case(
-                "size_large", lambda: self.set_select("#f-size", "large"), "covadonga",
-                "large"))
+                "size_large", lambda: self.set_select("#f-size", SIZE_LARGE), "covadonga",
+                gen_tree.T_LARGE))
             self.step("filter-size-huge", self.filter_case(
-                "size_huge", lambda: self.set_select("#f-size", "huge"), "", "huge"))
+                "size_huge", lambda: self.set_select("#f-size", SIZE_HUGE), "",
+                gen_tree.T_HUGE))
             self.step("filter-folder", self.filter_case(
-                "folder", lambda: self.set_select("#f-folder", self.wd.invoke("list_roots")[0]["path"]), "extracto",
-                "middle"))
-        self.step("reveal-file", self.s_reveal("name", EXPECT_SELECT))
+                "folder",
+                lambda: self.set_select("#f-folder", self.wd.invoke("list_roots")[0]["path"]),
+                "extracto", gen_tree.T_MIDDLE))
+        self.step("reveal-file", self.s_reveal(gen_tree.T_NAME, EXPECT_SELECT))
         if not short:
-            self.step("reveal-folder", self.s_reveal("folder", EXPECT_SELECT))
-            self.step("reveal-long-path", self.s_reveal("long", EXPECT_PARENT))
+            self.step("reveal-folder", self.s_reveal(gen_tree.T_FOLDER, EXPECT_SELECT))
+            self.step("reveal-long-path", self.s_reveal(gen_tree.T_LONG, EXPECT_PARENT))
             self.step("live-create", self.s_live_create)
             self.step("live-rename", self.s_live_rename)
             self.step("live-delete", self.s_live_delete)

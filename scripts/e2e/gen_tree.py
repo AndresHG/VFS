@@ -26,6 +26,18 @@ MAX_DEPTH = 12
 MB = 1024 * 1024
 DAY = 86400
 
+# File kinds: the serde values of `FileKind` (crates/vfs-core/src/types.rs).
+KIND_DOCUMENT = "document"
+KIND_PHOTO = "photo"
+KIND_VIDEO = "video"
+KIND_AUDIO = "audio"
+KIND_OTHER = "other"
+KIND_FOLDER = "folder"
+
+# Keys of the planted targets in manifest.json; journey.py and measure.py read them.
+T_NAME, T_MIDDLE, T_FOLDER, T_WEEK = "name", "middle", "folder", "week"
+T_MEDIUM, T_LARGE, T_HUGE, T_AUDIO, T_LONG = "medium", "large", "huge", "audio", "long"
+
 TOP = ["Documentos", "Fotos", "Vídeos", "Música", "Gestoría", "Descargas", "Escritorio",
        "Copia de seguridad portátil", "Fotos del móvil", "Trabajo", "Casa", "Colegio niños"]
 WORDS = ["año", "niño", "señora", "España", "Peñalara", "Córdoba", "Málaga", "Cádiz", "Ávila",
@@ -39,12 +51,12 @@ WORDS = ["año", "niño", "señora", "España", "Peñalara", "Córdoba", "Málag
          "apuntes", "lección", "música", "canción", "película", "vídeo", "foto", "álbum",
          "viaje", "playa", "montaña", "campo", "pueblo", "abuela", "abuelo", "tía", "primo",
          "comunidad", "vecinos", "acta", "junta", "electricidad", "agua", "teléfono"]
-EXT = {"document": [".pdf", ".docx", ".doc", ".xlsx", ".odt", ".txt", ".pptx"],
-       "photo": [".jpg", ".jpeg", ".png", ".heic"],
-       "video": [".mp4", ".mov", ".avi"],
-       "audio": [".mp3", ".m4a", ".wav"],
-       "other": [".zip", ".dat", ".bak"]}
-KIND_WEIGHTS = [("document", 40), ("photo", 40), ("video", 5), ("audio", 7), ("other", 8)]
+EXT = {KIND_DOCUMENT: [".pdf", ".docx", ".doc", ".xlsx", ".odt", ".txt", ".pptx"],
+       KIND_PHOTO: [".jpg", ".jpeg", ".png", ".heic"],
+       KIND_VIDEO: [".mp4", ".mov", ".avi"],
+       KIND_AUDIO: [".mp3", ".m4a", ".wav"],
+       KIND_OTHER: [".zip", ".dat", ".bak"]}
+KIND_WEIGHTS = [(KIND_DOCUMENT, 40), (KIND_PHOTO, 40), (KIND_VIDEO, 5), (KIND_AUDIO, 7), (KIND_OTHER, 8)]
 
 # One segment of the over-260-character chain (an old backup copied inside a backup).
 LONG_SEGMENT = "Copia de seguridad del portátil de la oficina antigua"
@@ -55,19 +67,19 @@ LONG_EXTRA = 4
 # kind, size in bytes, age in days or None for a fixed old date). The journey reads them from
 # manifest.json; keep the keys stable.
 TARGETS = {
-    "name": ("Gestoría/Año 2019", "Notaría Valdepeñas escritura 2019.pdf", "document", 0, None),
-    "middle": ("Casa/Herencia tía Remedios/Papeles banco", "extracto.pdf", "document", 0,
+    T_NAME: ("Gestoría/Año 2019", "Notaría Valdepeñas escritura 2019.pdf", KIND_DOCUMENT, 0, None),
+    T_MIDDLE: ("Casa/Herencia tía Remedios/Papeles banco", "extracto.pdf", KIND_DOCUMENT, 0,
                None),
-    "folder": ("Vídeos/2014/Boda Íñigo y Ainhoa", None, "folder", 0, None),
-    "week": ("Fotos/2025/Vacaciones Peñíscola", "Peñíscola playa atardecer.jpg", "photo", 0, 2),
-    "medium": ("Trabajo/Jubilación", "Presentación jubilación Ramón.pptx", "document", 2 * MB,
+    T_FOLDER: ("Vídeos/2014/Boda Íñigo y Ainhoa", None, KIND_FOLDER, 0, None),
+    T_WEEK: ("Fotos/2025/Vacaciones Peñíscola", "Peñíscola playa atardecer.jpg", KIND_PHOTO, 0, 2),
+    T_MEDIUM: ("Trabajo/Jubilación", "Presentación jubilación Ramón.pptx", KIND_DOCUMENT, 2 * MB,
                None),
-    "large": ("Vídeos/2019", "Excursión Covadonga.mp4", "video", 150 * MB, None),
-    "huge": ("Vídeos/Antiguos", "Película familiar Navidad 1998.mp4", "video", 1100 * MB,
+    T_LARGE: ("Vídeos/2019", "Excursión Covadonga.mp4", KIND_VIDEO, 150 * MB, None),
+    T_HUGE: ("Vídeos/Antiguos", "Película familiar Navidad 1998.mp4", KIND_VIDEO, 1100 * MB,
              None),
-    "audio": ("Música/Familia", "Canción de cuna María.mp3", "audio", 0, None),
-    "long": ("/".join([LONG_SEGMENT] * LONG_LEVELS), "Informe pericial Ibáñez definitivo.docx",
-             "document", 0, None),
+    T_AUDIO: ("Música/Familia", "Canción de cuna María.mp3", KIND_AUDIO, 0, None),
+    T_LONG: ("/".join([LONG_SEGMENT] * LONG_LEVELS), "Informe pericial Ibáñez definitivo.docx",
+             KIND_DOCUMENT, 0, None),
 }
 # Files the journey creates, renames and deletes while the app is open (live changes).
 LIVE_NAME = "Carta urgente Muñoz.docx"
@@ -88,7 +100,7 @@ def random_name(rng, kind):
     n = rng.choice([2, 3, 3, 4, 5])
     words = [rng.choice(WORDS) for _ in range(n)]
     roll = rng.random()
-    if kind == "photo" and roll < 0.5:
+    if kind == KIND_PHOTO and roll < 0.5:
         stem = rng.choice(["IMG_%04d" % rng.randrange(10000), "DSC%05d" % rng.randrange(100000),
                            "IMG-%d%02d%02d-WA%04d" % (rng.randrange(2010, 2026),
                                                        rng.randrange(1, 13),
@@ -125,7 +137,7 @@ def pick_kind(rng):
         if r < w:
             return kind
         r -= w
-    return "other"
+    return KIND_OTHER
 
 
 def random_mtime(rng):
@@ -184,7 +196,7 @@ def generate(root, files=100_000, seed=42):
         targets[key] = {"path": path, "dir": dpath, "name": name or os.path.basename(dpath),
                         "kind": kind, "size": size, "mtime": int(mtime)}
     written = sum(3 if t[1] is None else 1 for t in TARGETS.values())
-    long_dir = targets["long"]["dir"]
+    long_dir = targets[T_LONG]["dir"]
     for i in range(LONG_EXTRA):  # more paths over 260 characters, beside the long target
         write_file(os.path.join(long_dir, "Anexo %d escaneado.pdf" % (i + 1)), 0,
                    random_mtime(rng))

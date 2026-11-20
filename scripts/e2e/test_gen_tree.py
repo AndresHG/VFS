@@ -45,7 +45,7 @@ class GenTreeTest(unittest.TestCase):
         for key, t in self.m["targets"].items():
             p = gen_tree.fs_path(t["path"])
             self.assertTrue(os.path.exists(p), key)
-            if t["kind"] == "folder":
+            if t["kind"] == gen_tree.KIND_FOLDER:
                 self.assertTrue(os.path.isdir(p))
                 continue
             st = os.stat(p)
