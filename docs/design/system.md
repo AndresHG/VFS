@@ -1,6 +1,6 @@
 # VFS visual system
 
-Small on purpose: one typeface, one accent, six text sizes, an 8-step spacing scale, a dozen
+Small on purpose (the mockups' `tokens.css` implements only what they show): one typeface, one accent, six text sizes, an 8-step spacing scale, a dozen
 colour tokens per theme. Everything else is derived. Grounded in [references.md](references.md)
 and the problems listed in [audit.md](audit.md).
 
@@ -33,9 +33,9 @@ headlines and `pretty` on paragraphs; tabular numerals for dates and sizes.
 
 A 4 px base in `rem`: `--s1` 0.25 · `--s2` 0.5 · `--s3` 0.75 · `--s4` 1 · `--s5` 1.5 ·
 `--s6` 2 · `--s7` 3 · `--s8` 4 (rem). Page gutter `clamp(--s4, 2.5vw, --s6)`. Content
-measure: the search box and list share one left edge and cap at 72rem.
+measure: the search box and list share one left edge and cap at 60rem.
 
-Targets: every control is at least 2.75rem (44 px at 100 %) tall; rows are at least 3.5rem.
+Targets: every control is at least 2.75rem (44 px at 100 %) tall; rows are at least 3.5rem (3rem in the one-line table of direction C).
 
 ## Colour
 
@@ -77,7 +77,7 @@ Implementation: raw values as custom properties, switched under
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
 | Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, ✓ or value shown, × to clear | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
-| Badge | sunk bg, ink-2, `--t-small` | — | — | — | — |
+| Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
 
 The reveal action appears on the selected row and on hover; Return and double-click perform it

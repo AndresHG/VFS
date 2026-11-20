@@ -1,5 +1,5 @@
 // DEVELOPMENT ONLY. Fills a static mockup with sample rows so the three directions show the
-// same data. `?state=idle|results|scan` picks the screen state. No backend, no behaviour.
+// same data. `?state=idle|results` picks the screen state. No backend, no behaviour.
 
 const ROWS = [
   { kind: 'folder', name: 'Boda de Lucía y Andrés', dir: 'D:\\Archivo familiar\\Fotos\\2025', date: '8 nov 2025', size: '' },
