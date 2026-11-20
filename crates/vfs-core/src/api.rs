@@ -51,10 +51,14 @@ mod tests {
             serde_json::to_value(RevealOutcome::Revealed).unwrap(),
             json!("revealed")
         );
-        let e: ApiError = Error::OverlappingRoot("/a".into()).into();
+        let e: ApiError = Error::OverlappingRoot {
+            relation: crate::OverlapRelation::Inside,
+            existing: "/a".into(),
+        }
+        .into();
         assert_eq!(
             serde_json::to_value(&e).unwrap(),
-            json!({ "code": "overlapping_root", "message": "overlaps an indexed folder: /a" })
+            json!({ "code": "overlapping_root", "message": "overlaps an indexed folder: inside /a" })
         );
     }
 
@@ -64,7 +68,13 @@ mod tests {
         let cases = [
             (Error::NotFound("x".into()), "not_found"),
             (Error::NotADirectory("x".into()), "not_a_directory"),
-            (Error::OverlappingRoot("x".into()), "overlapping_root"),
+            (
+                Error::OverlappingRoot {
+                    relation: crate::OverlapRelation::Same,
+                    existing: "x".into(),
+                },
+                "overlapping_root",
+            ),
             (Error::Unavailable("x".into()), "unavailable"),
             (Error::SchemaTooNew, "schema_too_new"),
             (Error::Db(rusqlite::Error::InvalidQuery), "db"),

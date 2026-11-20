@@ -135,7 +135,9 @@ from 6 characters one side of every edit position is that long, so every one-edi
 has an indexed query (`fuzzy::candidate_queries`). In shorter words some edits leave no
 such part, and one edit is a large share of the word: "boda" is one edit from "bota",
 "toda", "moda" and "bodas", which would bury the exact results. Rejected: tolerance for
-every word of 3 or more characters.
+every word of 3 or more characters. Words longer than 64 characters (`FUZZY_MAX_LEN`, a
+pasted path or URL) match exactly: their typo alternatives grow faster than quadratically
+and are not bounded by the deadline (VFS-3, #53).
 
 ## A catch-up re-walk at every start
 
