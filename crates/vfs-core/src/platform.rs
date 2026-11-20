@@ -1,7 +1,6 @@
 //! Platform specifics: volume identity, drive kind, long paths, indexer thread priority, disk
 //! load, uptime and memory (VFS-5).
-//! Owned by task T3b; only this file, `indexer/walk.rs`, `indexer/watch.rs` and the desktop
-//! `reveal.rs` contain `cfg(windows)` code.
+//! Most of the crate's `cfg(windows)` code lives here.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

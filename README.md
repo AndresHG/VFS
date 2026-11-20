@@ -9,8 +9,9 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 
 ## What it does
 
-- Indexes only the folders the user chooses ("carpetas"), in the background, at low CPU and
-  disk priority. Closing the app and opening it again resumes the scan where it stopped.
+- Indexes only the folders the user chooses ("carpetas"), in the background, at low CPU
+  priority, pausing while the disk is busy; small updates use very-low disk priority.
+  Closing the app and opening it again resumes the scan where it stopped.
 - Reads names, sizes and dates from the directory listing. It never opens, moves or changes
   a user file.
 - Searches as the user types. Every word must appear in the file name or in the folder path,

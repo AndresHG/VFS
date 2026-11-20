@@ -185,6 +185,27 @@ impl CheckpointStats {
     }
 }
 
+/// Replaces `wal_autocheckpoint` on the indexer's connection with the same passive
+/// checkpoint at `pages` WAL pages, timed into `stats` for the diagnostic log (VFS-5 R7).
+/// Installing a WAL hook turns SQLite's automatic checkpoint off, so this is the only one.
+/// A failed checkpoint is logged, never turned into a failed commit.
+pub(crate) fn install_checkpoint_hook(
+    conn: &mut rusqlite::Connection,
+    stats: Arc<CheckpointStats>,
+    pages: i64,
+) -> rusqlite::Result<()> {
+    conn.wal_hook(Some(move |wal: &mut rusqlite::hooks::Wal, n: i32| {
+        if i64::from(n) >= pages {
+            let start = Instant::now();
+            if let Err(e) = wal.checkpoint() {
+                log::warn!("checkpoint: {e}");
+            }
+            stats.record(start.elapsed());
+        }
+        Ok(())
+    }))
+}
+
 /// Counters of one diagnostic period.
 #[derive(Default, Clone)]
 struct Period {
@@ -498,6 +519,36 @@ impl Sched {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// VFS-5 AC-8, R7: the hook that replaces `wal_autocheckpoint` checkpoints once the WAL
+    /// reaches its page threshold and counts each checkpoint, so the WAL stays bounded.
+    #[test]
+    fn checkpoint_hook_checkpoints_and_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("index.db");
+        let mut conn = crate::db::open_rw(&db).unwrap();
+        let stats = Arc::new(CheckpointStats::default());
+        let pages = 8;
+        install_checkpoint_hook(&mut conn, Arc::clone(&stats), pages).unwrap();
+        conn.execute_batch("CREATE TABLE t(b BLOB)").unwrap();
+        let page: i64 = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .unwrap();
+        for _ in 0..50 {
+            conn.execute("INSERT INTO t VALUES (zeroblob(?1))", [page * 2])
+                .unwrap();
+        }
+        let (count, _, _) = stats.take();
+        assert!(count >= 1, "no checkpoint recorded");
+        // Without checkpoints the WAL would hold every one of the ~100+ pages written.
+        let wal = std::fs::metadata(dir.path().join("index.db-wal"))
+            .unwrap()
+            .len();
+        assert!(
+            wal < (page * pages * 4) as u64,
+            "WAL grew to {wal} bytes, checkpoints did not reset it"
+        );
+    }
 
     fn cfg() -> SchedConfig {
         SchedConfig::default()

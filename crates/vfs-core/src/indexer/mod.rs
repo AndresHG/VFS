@@ -257,6 +257,7 @@ fn run(
             }
             root.status = RootStatus::Scanning;
             pass.back_online = true;
+            sched.mode = sched::Mode::Walk;
         }
         match scan_root(
             conn,
@@ -776,20 +777,11 @@ impl IndexerHandle {
         uptime: Option<Duration>,
     ) -> Result<IndexerHandle> {
         let mut conn = db::open_rw(&db_path)?;
-        let stats = Arc::clone(&sched.checkpoints);
-        // Same passive checkpoint at the same WAL size as `wal_autocheckpoint`, which this
-        // hook replaces, but timed for the diagnostic log (VFS-5 R7). A failed checkpoint is
-        // logged, never turned into a failed commit.
-        conn.wal_hook(Some(move |wal: &mut rusqlite::hooks::Wal, pages: i32| {
-            if i64::from(pages) >= db::WAL_AUTOCHECKPOINT_PAGES {
-                let start = Instant::now();
-                if let Err(e) = wal.checkpoint() {
-                    log::warn!("checkpoint: {e}");
-                }
-                stats.record(start.elapsed());
-            }
-            Ok(())
-        }))?;
+        sched::install_checkpoint_hook(
+            &mut conn,
+            Arc::clone(&sched.checkpoints),
+            db::WAL_AUTOCHECKPOINT_PAGES,
+        )?;
         let catchup_delay = sched::catchup_delay(uptime, sched.cfg.boot_grace);
         prepare_data_dir(&db_path, &mut sched, uptime, catchup_delay);
         let (tx, rx) = mpsc::channel();
