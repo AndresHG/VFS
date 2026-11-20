@@ -196,6 +196,8 @@ pub(crate) const SESSION_DIR_SUFFIX: &str = ".session";
 pub(crate) const SESSION_MARKER_EXT: &str = "lock";
 /// Extension of a marker while it is being created and locked.
 const SESSION_TMP_EXT: &str = "tmp";
+/// How long `begin_session` retries Windows' transient access-denied errors on markers.
+const SESSION_RETRY: Duration = Duration::from_secs(5);
 
 /// `<db_path>.session/`: one marker file per open session, held under an OS file lock for
 /// the session's lifetime, so a CLI and the app can share an index.
@@ -249,10 +251,26 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
     }
     let pid = std::process::id();
     let mut n = 0u32;
+    // On Windows a marker or session directory that a closing session just deleted stays
+    // "delete pending" while another opener still holds a handle on it, and creating a file
+    // in it or renaming onto its name fails with access denied until that handle closes.
+    // Such a failure is retried, with the next `n`, for up to `SESSION_RETRY` (VFS-3 AC-9).
+    let started = std::time::Instant::now();
+    let transient = |e: &std::io::Error| {
+        e.kind() == std::io::ErrorKind::PermissionDenied && started.elapsed() < SESSION_RETRY
+    };
+    let pause = || std::thread::sleep(Duration::from_millis(10));
     loop {
         let tmp = dir.join(format!("{pid}-{n}.{SESSION_TMP_EXT}"));
         let path = dir.join(format!("{pid}-{n}.{SESSION_MARKER_EXT}"));
-        std::fs::create_dir_all(&dir)?;
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if transient(&e) => {
+                pause();
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        }
         match File::options().write(true).create_new(true).open(&tmp) {
             Ok(file) if path.exists() => {
                 // Another session of this process owns `n`.
@@ -262,16 +280,30 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
             }
             Ok(file) => {
                 file.lock()?;
-                std::fs::rename(&tmp, &path)?;
-                let session = Session {
-                    file: Some(file),
-                    path,
-                };
-                return Ok((session, unclean));
+                match std::fs::rename(&tmp, &path) {
+                    Ok(()) => {
+                        let session = Session {
+                            file: Some(file),
+                            path,
+                        };
+                        return Ok((session, unclean));
+                    }
+                    Err(e) if transient(&e) => {
+                        drop(file);
+                        let _ = std::fs::remove_file(&tmp);
+                        n += 1;
+                        pause();
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
             // A closing session removed the empty directory in between: create it again.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if transient(&e) => {
+                n += 1;
+                pause();
+            }
             Err(e) => return Err(e.into()),
         }
     }
