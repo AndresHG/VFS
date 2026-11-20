@@ -102,6 +102,20 @@ multi-TB archive from an HDD. Rejected: discarding an older index and scanning a
 is simple but costs hours on the target PC. An index from a newer build is refused, never
 overwritten.
 
+## A smaller index that reads fewer pages, same results (VFS-4)
+
+On the target PC a cold query pays about one disk seek per page read, and 83% of those pages
+were `files` and `dirs` rows, not FTS. Schema version 3 and its search code cut the 2 M-file
+index from 889 to 722 MiB and the pages a query reads by 55% at the median and 75% at p95,
+with every page of the AC-9 query set identical (`docs/research/index-footprint.md`): 16 KB
+pages, folder rows read only when a check or the returned page needs them, `files_fts`
+without positions (a U+0001 start marker and an exact re-check replace phrases and `^`), no
+per-row size tables (rows deleted by value), and a one-time `VACUUM` after migrating.
+Rejected or left open: dropping `UNIQUE(dir_id, name)`, because it changes which of more
+than 2,000 equally ranked path hits are returned (an owner decision); an in-memory name
+buffer, about 150 MB at 5 M names on a memory-starved PC; a single per-file index with
+columns, 818 MiB against 479.
+
 ## A no-hit query proves it cheaply
 
 Before the typo tiers, a query that has found nothing probes the path index once for a row

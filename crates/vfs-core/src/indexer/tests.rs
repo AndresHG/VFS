@@ -378,7 +378,8 @@ fn dirs_fts(conn: &Connection, query: &str) -> Vec<i64> {
     rows.collect::<rusqlite::Result<_>>().unwrap()
 }
 
-/// VFS-1 AC-7, I9: a folder moved and renamed inside a root is applied as a path update:
+/// VFS-4 AC-4, VFS-1 AC-7, I9: a folder moved and renamed inside a root is applied as a
+/// path update:
 /// directory ids and file rows are kept, paths and folder search entries follow the new
 /// place, and re-listing both parents afterwards adds or removes nothing. While the source
 /// still exists on disk nothing changes.

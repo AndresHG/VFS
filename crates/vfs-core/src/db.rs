@@ -11,10 +11,19 @@ use crate::error::{Error, Result};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Migrations: entry `i` takes an index from version `i` to `i + 1`.
-const MIGRATIONS: [&str; 2] = [include_str!("schema.sql"), include_str!("schema_v2.sql")];
+const MIGRATIONS: [&str; 3] = [
+    include_str!("schema.sql"),
+    include_str!("schema_v2.sql"),
+    include_str!("schema_v3.sql"),
+];
+
+/// Page size of a new index, and of an index compacted after its migration to version 3.
+/// A cold spinning disk pays about one seek per page read: larger pages read fewer pages
+/// per query (docs/research/index-footprint.md, VFS-4).
+pub(crate) const PAGE_SIZE: u32 = 16384;
 
 /// Readers wait this long for a lock.
 const READER_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -58,6 +67,8 @@ fn schema_version(conn: &Connection) -> Result<u32> {
 /// migrates the schema. Fails with `SchemaTooNew` for an index from a newer build.
 pub fn open_rw(db_path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(db_path)?;
+    // Takes effect only on a new, empty database (before WAL writes its header).
+    conn.execute_batch(&format!("PRAGMA page_size={PAGE_SIZE}"))?;
     apply_common_pragmas(&conn)?;
     conn.busy_timeout(WRITER_BUSY_TIMEOUT)?;
     conn.set_prepared_statement_cache_capacity(WRITER_STATEMENT_CACHE);
@@ -81,8 +92,27 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
         }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
+        if (1..3).contains(&version) {
+            if let Err(e) = compact(&conn) {
+                // Still a valid index: the freed pages are reused as it grows. WAL is
+                // required, so a failure to return to it is an error.
+                log::warn!("index not compacted after migration: {e}");
+                let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+            }
+        }
     }
     Ok(conn)
+}
+
+/// Rewrites the index without the pages the version 3 migration freed (its old FTS tables,
+/// about a fifth of the file) and at `PAGE_SIZE`. SQLite changes the page size only
+/// outside WAL mode, so the journal mode is switched around the `VACUUM`; this fails
+/// harmlessly while another connection has the index open.
+fn compact(conn: &Connection) -> Result<()> {
+    let _mode: String = conn.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
+    let vacuum = conn.execute_batch(&format!("PRAGMA page_size={PAGE_SIZE}; VACUUM;"));
+    let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+    Ok(vacuum?)
 }
 
 /// Opens an existing index for reading only (`query_only=1`).
@@ -322,7 +352,13 @@ pub mod ingest {
     use crate::error::{Error, Result};
     use crate::fold::fold_key;
     use crate::kind::file_kind;
+    use crate::search::NAME_START;
     use crate::types::RootStatus;
+
+    /// A file's `file_paths_fts` value from its row `f` and its directory `d`: the folder's
+    /// folded path and the folded name, or the name alone in the root directory.
+    pub(crate) const FILE_PATH_SQL: &str =
+        "CASE d.path_key WHEN '' THEN f.name_key ELSE d.path_key || '/' || f.name_key END";
 
     /// Value of `dirs.scan_state`; the persistent work queue of the indexer.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,13 +492,13 @@ pub mod ingest {
                 i64::from(file.lossy),
             ])?;
         let id = tx.last_insert_rowid();
-        tx.prepare_cached("INSERT INTO files_fts(rowid, name_key) VALUES (?1, ?2)")?
-            .execute(params![id, name_key])?;
-        tx.prepare_cached(
-            "INSERT INTO file_paths_fts(rowid, path) SELECT ?1, \
-             CASE path_key WHEN '' THEN ?2 ELSE path_key || '/' || ?2 END FROM dirs WHERE id = ?3",
-        )?
-        .execute(params![id, name_key, dir_id])?;
+        tx.prepare_cached("INSERT INTO files_fts(rowid, name) VALUES (?1, ?2)")?
+            .execute(params![id, format!("{NAME_START}{name_key}")])?;
+        tx.prepare_cached(&format!(
+            "INSERT INTO file_paths_fts(rowid, path) SELECT f.id, {FILE_PATH_SQL} \
+             FROM files f JOIN dirs d ON d.id = f.dir_id WHERE f.id = ?1"
+        ))?
+        .execute([id])?;
         Ok(id)
     }
 
@@ -472,12 +508,47 @@ pub mod ingest {
         Ok(())
     }
 
+    /// Deletes the `files_fts` and `file_paths_fts` rows of the files `f` that `files_where`
+    /// selects (a condition on `f`, joined to its directory `d`), by the values they were
+    /// indexed under: both tables are contentless without `contentless_delete` (schema v3),
+    /// so the files and their directories must still hold those values. Returns the number
+    /// of files.
+    pub(crate) fn delete_files_fts<P: rusqlite::Params + Copy>(
+        tx: &Connection,
+        files_where: &str,
+        params: P,
+    ) -> Result<usize> {
+        let n = tx
+            .prepare_cached(&format!(
+                "INSERT INTO files_fts(files_fts, rowid, name) \
+                 SELECT 'delete', f.id, char({}) || f.name_key FROM files f WHERE {files_where}",
+                u32::from(NAME_START)
+            ))?
+            .execute(params)?;
+        delete_file_paths_fts(tx, files_where, params)?;
+        Ok(n)
+    }
+
+    /// Deletes the `file_paths_fts` rows of the files `f` that `files_where` selects, by
+    /// their indexed value (see `delete_files_fts`); a folder rename calls it before the
+    /// folder's path changes.
+    pub(crate) fn delete_file_paths_fts<P: rusqlite::Params>(
+        tx: &Connection,
+        files_where: &str,
+        params: P,
+    ) -> Result<()> {
+        tx.prepare_cached(&format!(
+            "INSERT INTO file_paths_fts(file_paths_fts, rowid, path) \
+             SELECT 'delete', f.id, {FILE_PATH_SQL} FROM files f JOIN dirs d ON d.id = f.dir_id \
+             WHERE {files_where}"
+        ))?
+        .execute(params)?;
+        Ok(())
+    }
+
     /// Deletes a file and its FTS rows.
     pub fn delete_file(tx: &Transaction, file_id: i64) -> Result<()> {
-        tx.prepare_cached("DELETE FROM files_fts WHERE rowid = ?1")?
-            .execute([file_id])?;
-        tx.prepare_cached("DELETE FROM file_paths_fts WHERE rowid = ?1")?
-            .execute([file_id])?;
+        delete_files_fts(tx, "f.id = ?1", [file_id])?;
         tx.prepare_cached("DELETE FROM files WHERE id = ?1")?
             .execute([file_id])?;
         Ok(())
@@ -508,15 +579,7 @@ pub mod ingest {
             p,
             |r| r.get(0),
         )?;
-        for fts in ["files_fts", "file_paths_fts"] {
-            tx.execute(
-                &format!(
-                    "DELETE FROM {fts} WHERE rowid IN \
-                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
-                ),
-                p,
-            )?;
-        }
+        delete_files_fts(tx, &format!("f.dir_id IN ({subtree})"), p)?;
         tx.execute(&format!("DELETE FROM files WHERE dir_id IN ({subtree})"), p)?;
         tx.execute(
             &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
@@ -529,15 +592,7 @@ pub mod ingest {
     /// Deletes a root with all its directories, files and FTS rows at once.
     pub fn delete_root(tx: &Transaction, root_id: i64) -> Result<()> {
         let subtree = "SELECT id FROM dirs WHERE root_id = ?1";
-        for fts in ["files_fts", "file_paths_fts"] {
-            tx.execute(
-                &format!(
-                    "DELETE FROM {fts} WHERE rowid IN \
-                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
-                ),
-                [root_id],
-            )?;
-        }
+        delete_files_fts(tx, &format!("f.dir_id IN ({subtree})"), [root_id])?;
         tx.execute(
             &format!("DELETE FROM files WHERE dir_id IN ({subtree})"),
             [root_id],
@@ -594,12 +649,24 @@ pub mod ingest {
 mod tests {
     use super::ingest::*;
     use super::*;
+    use crate::search::NAME_START;
     use crate::types::{FileKind, RootStatus};
 
+    /// Rowids of an FTS table holding `term`: a phrase, or for `files_fts` (detail=none,
+    /// schema v3) every trigram of the term.
     fn fts_ids(conn: &Connection, table: &str, term: &str) -> Vec<i64> {
         let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid");
         let mut stmt = conn.prepare(&sql).unwrap();
-        stmt.query_map([format!("\"{term}\"")], |r| r.get(0))
+        let expr = if table == "files_fts" {
+            let c: Vec<char> = term.chars().collect();
+            c.windows(3)
+                .map(|w| format!("\"{}\"", w.iter().collect::<String>()))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        } else {
+            format!("\"{term}\"")
+        };
+        stmt.query_map([expr], |r| r.get(0))
             .unwrap()
             .collect::<rusqlite::Result<Vec<i64>>>()
             .unwrap()
@@ -640,15 +707,116 @@ mod tests {
     }
 
     fn path_ids(conn: &Connection, grams: &str) -> Vec<i64> {
-        let mut stmt = conn
-            .prepare(
-                "SELECT rowid FROM file_paths_fts WHERE file_paths_fts MATCH ?1 ORDER BY rowid",
-            )
-            .unwrap();
-        stmt.query_map([grams], |r| r.get(0))
+        path_ids_in(conn, "file_paths_fts", grams)
+    }
+
+    fn path_ids_in(conn: &Connection, table: &str, expr: &str) -> Vec<i64> {
+        let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid");
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map([expr], |r| r.get(0))
             .unwrap()
             .collect::<rusqlite::Result<Vec<i64>>>()
             .unwrap()
+    }
+
+    /// A version-2 index at 4 KB pages: file 3 `Año 2019/Banco.pdf` and 2,901 more files,
+    /// with their version-2 FTS rows.
+    fn version_2_index(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch("PRAGMA page_size=4096; PRAGMA journal_mode=WAL;")
+            .unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.execute_batch(
+            "INSERT INTO dirs(id, root_id, parent_id, rel_path, path_key, name_key) \
+                   VALUES (7, 1, NULL, 'Año 2019', 'ano 2019', 'ano 2019');
+                 INSERT INTO files(id, dir_id, name, name_key, kind, size, mtime) \
+                   VALUES (3, 7, 'Banco.pdf', 'banco.pdf', 1, 1, 1);
+                 INSERT INTO files_fts(rowid, name_key) VALUES (3, 'banco.pdf');
+                 INSERT INTO file_paths_fts(rowid, path) VALUES (3, 'ano 2019/banco.pdf');",
+        )
+        .unwrap();
+        // Enough rows that the old FTS tables leave free pages behind.
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 3000) \
+                 INSERT INTO files(id, dir_id, name, name_key, kind, size, mtime) \
+                   SELECT i, 7, 'archivo ' || i || '.txt', 'archivo ' || i || '.txt', 0, 1, 1 \
+                   FROM n;
+                 INSERT INTO files_fts(rowid, name_key) SELECT id, name_key FROM files \
+                   WHERE id >= 100;
+                 INSERT INTO file_paths_fts(rowid, path) SELECT id, 'ano 2019/' || name_key \
+                   FROM files WHERE id >= 100;",
+        )
+        .unwrap();
+    }
+
+    /// VFS-4 AC-1, AC-2: opening a version-2 index migrates it to version 3 from the
+    /// existing rows (no rescan), compacts it at `PAGE_SIZE` and leaves it in WAL mode, and
+    /// the migrated rows are found and deleted like new ones.
+    #[test]
+    fn version_2_index_is_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        version_2_index(&path);
+        let conn = open_rw(&path).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        // Names keep their start marker: a prefix is found without positions.
+        let prefix = format!("\"{NAME_START}ba\" AND \"ban\"");
+        assert_eq!(path_ids_in(&conn, "files_fts", &prefix), vec![3]);
+        assert_eq!(path_ids(&conn, "\"201\" AND \"ban\""), vec![3]);
+        // Compacted at the new page size, with no per-row size tables left.
+        assert_eq!(pragma(&conn, "freelist_count"), 0);
+        assert_eq!(pragma(&conn, "page_size"), i64::from(PAGE_SIZE));
+        let docsize: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'file%_docsize'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(docsize, 0);
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        // Rows migrated from version 2 are deleted by the values they were indexed under.
+        let tx = Connection::unchecked_transaction(&conn).unwrap();
+        delete_file(&tx, 3).unwrap();
+        tx.commit().unwrap();
+        assert!(path_ids_in(&conn, "files_fts", &prefix).is_empty());
+        assert!(path_ids(&conn, "\"201\" AND \"ban\"").is_empty());
+    }
+
+    /// VFS-4 AC-2 (R2): when the compaction after migrating cannot run, because another
+    /// connection holds the index open, the index is still migrated, open, in WAL mode and
+    /// searchable; only the page size stays as it was.
+    #[test]
+    fn migration_survives_a_failed_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        version_2_index(&path);
+        let other = Connection::open(&path).unwrap();
+        other.execute_batch("BEGIN").unwrap();
+        let _n: i64 = other
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        let conn = open_rw(&path).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        assert_eq!(pragma(&conn, "page_size"), 4096);
+        assert!(pragma(&conn, "freelist_count") > 0, "not compacted");
+        let prefix = format!("\"{NAME_START}ba\" AND \"ban\"");
+        assert_eq!(path_ids_in(&conn, "files_fts", &prefix), vec![3]);
+        drop(other);
+        let tx = Connection::unchecked_transaction(&conn).unwrap();
+        delete_file(&tx, 3).unwrap();
+        tx.commit().unwrap();
+        assert!(path_ids_in(&conn, "files_fts", &prefix).is_empty());
+        assert!(path_ids(&conn, "\"201\" AND \"ban\"").is_empty());
     }
 
     /// VFS-1 S2, AC-9: opening a version-1 index migrates it to version 2 and fills the
@@ -726,9 +894,9 @@ mod tests {
         assert!(open_ro(&dir.path().join("missing.db")).is_err());
     }
 
-    /// VFS-1 AC-4, AC-8, AC-10: ingest round trip — roots, directories and files are stored
-    /// with folded keys and FTS rows, listed back, updated, and a subtree delete removes
-    /// exactly the subtree (siblings sharing a name prefix survive).
+    /// VFS-1 AC-4, AC-8, AC-10, VFS-4 AC-4: ingest round trip — roots, directories and
+    /// files are stored with folded keys and FTS rows, listed back, updated, and a subtree
+    /// delete removes exactly the subtree (siblings sharing a name prefix survive).
     #[test]
     fn ingest_round_trip() {
         let dir = tempfile::tempdir().unwrap();

@@ -10,6 +10,8 @@ pub(crate) struct Candidate {
     pub hit: SearchHit,
     /// `fold_key` of the file or folder name.
     pub name_key: String,
+    /// A file hit whose `hit.dir` is filled in only if its page is returned: its directory.
+    pub dir_id: Option<i64>,
 }
 
 /// Sorts `candidates` best first: whole-query or stem match on the name, all terms in the
@@ -84,6 +86,7 @@ mod tests {
                 is_dir,
             },
             name_key: fold_key(name),
+            dir_id: None,
         }
     }
 

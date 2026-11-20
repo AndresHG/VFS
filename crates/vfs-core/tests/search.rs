@@ -9,7 +9,8 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    FileKind, MatchKind, SearchConfig, SearchFilters, SearchQuery, SearchResponse, TruncatedBy, Vfs,
+    FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchQuery, SearchResponse,
+    TruncatedBy, Vfs,
 };
 
 struct Fixture {
@@ -771,4 +772,70 @@ fn huge_term_returns_within_the_deadline() {
     let next = std::time::Instant::now();
     assert_eq!(ids(&fx.text("escritura")), files(&[escritura]));
     assert!(next.elapsed() < Duration::from_secs(1));
+}
+
+/// VFS-4 AC-3: a file hit read without its folder row still names its folder, on the first
+/// page and on later pages served from the kept list; a root being removed keeps its files
+/// out of the results.
+#[test]
+fn vfs4_every_page_names_the_folder_of_its_hits() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let gestoria = w.dir(root, top, "Gestoría", 1);
+    let ano = w.dir(root, gestoria, "Gestoría/Año 2019", 1);
+    let expected: Vec<(i64, String)> = [
+        (top, ""),
+        (gestoria, "Gestoría"),
+        (ano, "Gestoría/Año 2019"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (dir, path))| {
+        (
+            w.file(dir, &format!("informe {i}.pdf"), 1, 1),
+            // Native separators, as the hit's folder is shown (`\` on Windows).
+            db::join_rel("/datos", path).to_string_lossy().into_owned(),
+        )
+    })
+    .collect();
+    let (gone, gone_top) = w.root("/viejo");
+    let gone_file = w.file(gone_top, "informe viejo.pdf", 1, 1);
+    let pages = || {
+        let mut seen = Vec::new();
+        for offset in 0..5 {
+            let r = fx
+                .vfs
+                .search(&SearchQuery {
+                    text: "informe".into(),
+                    filters: SearchFilters::default(),
+                    limit: 1,
+                    offset,
+                })
+                .unwrap();
+            for h in &r.hits {
+                let dir = expected
+                    .iter()
+                    .find(|e| e.0 == h.id)
+                    .map_or("/viejo", |e| e.1.as_str());
+                assert_eq!(h.dir, dir, "{}", h.name);
+                seen.push(h.id);
+            }
+        }
+        seen.sort();
+        seen
+    };
+    // Every root searched and none being removed: names first, folders only per page.
+    let mut all: Vec<i64> = expected.iter().map(|e| e.0).chain([gone_file]).collect();
+    all.sort();
+    assert_eq!(pages(), all);
+    // A root being removed: its files are excluded.
+    w.conn
+        .execute(
+            "UPDATE roots SET status = ?2 WHERE id = ?1",
+            [gone, RootStatus::Removing.code()],
+        )
+        .unwrap();
+    all.retain(|&id| id != gone_file);
+    assert_eq!(pages(), all);
 }

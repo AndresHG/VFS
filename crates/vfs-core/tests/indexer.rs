@@ -91,6 +91,22 @@ impl Fixture {
         self.reader().query_row(sql, [], |r| r.get(0)).unwrap()
     }
 
+    /// Rows holding at least one trigram in `files_fts`, which keeps no row list of its own
+    /// (contentless, columnsize=0, schema v3): counted through an `fts5vocab` table.
+    fn files_fts_rows(&self) -> i64 {
+        let conn = Connection::open(&self.db_path).unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE temp.files_vocab USING fts5vocab(main, files_fts, instance)",
+        )
+        .unwrap();
+        conn.query_row(
+            "SELECT COUNT(DISTINCT doc) FROM temp.files_vocab",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
     /// Directories still waiting to be listed.
     fn pending_dirs(&self) -> i64 {
         self.reader()
@@ -140,10 +156,21 @@ fn find_files(conn: &Connection, term: &str) -> Vec<String> {
              WHERE files_fts MATCH ?1 ORDER BY f.name",
         )
         .unwrap();
-    let rows = stmt
-        .query_map([format!("\"{}\"", fold_key(term))], |r| r.get(0))
-        .unwrap();
-    rows.collect::<rusqlite::Result<_>>().unwrap()
+    // files_fts keeps no positions (schema v3): every trigram of the term, then the exact
+    // substring check.
+    let key: Vec<char> = fold_key(term).chars().collect();
+    let expr = key
+        .windows(3)
+        .map(|w| format!("\"{}\"", w.iter().collect::<String>()))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let rows = stmt.query_map([expr], |r| r.get(0)).unwrap();
+    let names: Vec<String> = rows.collect::<rusqlite::Result<_>>().unwrap();
+    let key: String = key.into_iter().collect();
+    names
+        .into_iter()
+        .filter(|n| fold_key(n).contains(&key))
+        .collect()
 }
 
 fn all_files(conn: &Connection) -> Vec<String> {
@@ -338,8 +365,9 @@ fn resume_after_stop_mid_scan() {
     assert_eq!(fx.status(), RootStatus::Ready);
 }
 
-/// VFS-1 AC-7: a full re-walk requested from the running indexer reflects files added,
-/// deleted, renamed, moved and changed in size, and folders renamed, moved and deleted.
+/// VFS-1 AC-7, VFS-4 AC-4: a full re-walk requested from the running indexer reflects files
+/// added, deleted, renamed, moved and changed in size, and folders renamed, moved and
+/// deleted.
 #[test]
 fn rewalk_detects_changes() {
     let fx = Fixture::new();
@@ -390,7 +418,7 @@ fn rewalk_detects_changes() {
     assert!(fx.find_files("renombrar").is_empty());
     assert!(fx.find_files("borrar").is_empty());
     assert_eq!(fx.find_files("profundo"), vec!["profundo.txt"]);
-    assert_eq!(fx.count("SELECT COUNT(*) FROM files_fts"), 6);
+    assert_eq!(fx.files_fts_rows(), 6);
     assert_eq!(fx.count("SELECT files_count FROM roots"), 6);
     assert_eq!(fx.status(), RootStatus::Ready);
 }
@@ -646,7 +674,8 @@ fn search_while_scanning() {
     assert_eq!(all_files(&reader).len(), 1000);
 }
 
-/// VFS-1 AC-4: a root marked `removing` is deleted completely by the next scan.
+/// VFS-1 AC-4, VFS-4 AC-4: a root marked `removing` is deleted completely by the next scan,
+/// its FTS rows included.
 #[test]
 fn removing_root_is_finished() {
     let fx = Fixture::new();
@@ -654,13 +683,14 @@ fn removing_root_is_finished() {
     fx.scan();
     fx.vfs.remove_root(fx.root_id).unwrap();
     fx.scan();
-    for table in ["roots", "dirs", "files", "files_fts", "dirs_fts"] {
+    for table in ["roots", "dirs", "files", "dirs_fts"] {
         assert_eq!(
             fx.count(&format!("SELECT COUNT(*) FROM {table}")),
             0,
             "{table}"
         );
     }
+    assert_eq!(fx.files_fts_rows(), 0);
 }
 
 /// VFS-1 AC-6: an unreachable root becomes `unavailable` and keeps its rows.
