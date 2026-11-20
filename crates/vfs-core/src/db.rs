@@ -21,7 +21,7 @@ const MIGRATIONS: [&str; 4] = [
     include_str!("schema_v4.sql"),
 ];
 
-/// Page size of a new index, and of an index compacted after its migration to version 3.
+/// Page size of a new index, and of an existing index compacted after a migration.
 /// A cold spinning disk pays about one seek per page read: larger pages read fewer pages
 /// per query (docs/research/index-footprint.md, VFS-4).
 pub(crate) const PAGE_SIZE: u32 = 16384;
