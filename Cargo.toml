@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vfs-core", "crates/vfs-cli"]
+members = ["crates/vfs-core", "crates/vfs-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

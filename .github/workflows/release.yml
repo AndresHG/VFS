@@ -1,0 +1,72 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  TAURI_CLI_VERSION: 2.12.6
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Build (unsigned)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles ${{ matrix.bundles }}
+
+      - name: Collect Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(target/release/bundle/nsis/*-setup.exe)
+          [ ${#files[@]} -eq 1 ] || { echo "expected one installer, found: ${files[*]}"; exit 1; }
+          mkdir -p out && cp "${files[0]}" out/
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: vfs-windows-installer
+          path: out/*-setup.exe
+          if-no-files-found: error
+
+      - name: Zip macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent target/release/bundle/macos/VFS.app "VFS-macos-$(uname -m).zip"
+      - name: Upload macOS app
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: vfs-macos
+          path: VFS-macos-*.zip
+          if-no-files-found: error
