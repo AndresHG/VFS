@@ -105,7 +105,8 @@ cargo run --release -p vfs-cli -- bench --db /tmp/vfs-2m.db
 
 `bench` measures with warm and with cold SQLite page caches; it cannot drop the operating
 system's file cache, so it does not show cold-disk latency on an HDD. The 2 M-file index is
-889 MB (measured); see the status below for the results.
+722 MiB at schema version 3 (889 at version 2, measured, VFS-4); see the status below for
+the results.
 
 ## Windows installer
 
@@ -155,9 +156,10 @@ and, after a recovery, `index.db.bad` until the rebuild has finished. Deleting t
 the app is closed resets VFS: the folders have to be added again and are scanned from
 scratch. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
-The index has schema version 2 (it adds a per-file path index). An index written by an
-older build is upgraded in place when the app opens it, without a rescan; one written by a
-newer build is refused, never overwritten.
+The index has schema version 3 (version 2 added a per-file path index; version 3 makes the
+index about a sixth smaller, VFS-4). An index written by an older build is upgraded in place
+when the app opens it, without a rescan, and then compacted once; one written by a newer
+build is refused, never overwritten.
 
 ## Status: what has and has not been run
 
@@ -169,7 +171,8 @@ newer build is refused, never overwritten.
   deleted while it was closed, and the watcher indexed a new folder within seconds. Its
   window was not inspected.
 - AC-9 benchmark, measured on the 2 M-file synthetic index on an Apple Silicon Mac with an
-  SSD, warm OS file cache: peak RSS about 123 MB. The warm p95 sits close to the 150 ms
+  SSD, warm OS file cache: peak RSS about 123 MB at schema version 2 (138 MB at version 3
+  with 16 KB pages, VFS-4). The warm p95 sits close to the 150 ms
   limit: before the no-hit probe two of three runs passed and the worst failed by under
   10 ms on two query classes; with it three of three passed, the slowest class at 114–133
   ms per run, while other work kept the load average at 4.4–5.1. Treat it as marginal.

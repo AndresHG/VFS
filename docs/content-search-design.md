@@ -48,7 +48,7 @@ Constraints that follow:
   page caches may grow to 160 MiB (32 writer + 64 reader + 64 search), 192 MiB while a
   folder is added or removed (a short-lived second writer of 32 MiB), set in
   `crates/vfs-core/src/db.rs`, as in [architecture](architecture.md). Measured: the 2 M-file
-  benchmark process peaks at about 123 MB RSS.
+  benchmark process peaks at about 138 MB RSS (schema version 3; 123 MB at version 2).
   Content search cannot add another large cache inside the app
   process; extraction must run in a separate process with its own cap.
 - **Hostile input.** A decades-old archive holds corrupt, truncated, password-protected and
@@ -189,9 +189,9 @@ test `extension_point_is_present_and_unused`):
 
 What content search still has to add:
 
-- A migration to schema version 3. `db::open_rw` already applies missing migrations in
-  order (`MIGRATIONS` in `db.rs`; version 2 added the per-file path index), so this is one
-  more SQL file.
+- A migration to schema version 4. `db::open_rw` already applies missing migrations in
+  order (`MIGRATIONS` in `db.rs`; version 2 added the per-file path index, version 3 made
+  the index smaller, VFS-4), so this is one more SQL file.
 - An index on the queue, e.g. a partial index `WHERE content_state = 1`; v1 has none,
   because nothing reads the column.
 - The content FTS table (or Tantivy directory), the snippet store, the worker executable,

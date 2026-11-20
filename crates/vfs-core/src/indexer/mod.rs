@@ -559,15 +559,7 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
             }
             let mut rows = 0u64;
             for dir_id in dirs {
-                rows += tx.execute(
-                    "DELETE FROM files_fts WHERE rowid IN (SELECT id FROM files WHERE dir_id = ?1)",
-                    [dir_id],
-                )? as u64;
-                tx.execute(
-                    "DELETE FROM file_paths_fts WHERE rowid IN \
-                     (SELECT id FROM files WHERE dir_id = ?1)",
-                    [dir_id],
-                )?;
+                rows += ingest::delete_files_fts(&tx, "f.dir_id = ?1", [dir_id])? as u64;
                 tx.execute("DELETE FROM files WHERE dir_id = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs_fts WHERE rowid = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs WHERE id = ?1", [dir_id])?;
@@ -1132,9 +1124,6 @@ pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Resul
         let mut fts_insert = tx.prepare_cached(
             "INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)",
         )?;
-        let mut file_paths_delete = tx.prepare_cached(
-            "DELETE FROM file_paths_fts WHERE rowid IN (SELECT id FROM files WHERE dir_id = ?1)",
-        )?;
         let mut file_paths_insert = tx.prepare_cached(
             "INSERT INTO file_paths_fts(rowid, path) \
              SELECT id, ?2 || '/' || name_key FROM files WHERE dir_id = ?1",
@@ -1147,11 +1136,12 @@ pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Resul
             } else {
                 name_key
             };
+            // The files' path rows are deleted by their old value, before the update.
+            ingest::delete_file_paths_fts(&tx, "f.dir_id = ?1", [id])?;
             update.execute(params![id, new_rel, path_key, name_key])?;
             fts_delete.execute([id])?;
             fts_insert.execute(params![id, path_key, name_key])?;
             // `new_rel` is never empty, so every row is "folder path_key/name_key".
-            file_paths_delete.execute([id])?;
             file_paths_insert.execute(params![id, path_key])?;
         }
     }

@@ -46,16 +46,19 @@ The app is one process. The core opens these SQLite connections to the same file
 
 All connections set `journal_mode=WAL`, `synchronous=NORMAL` and `mmap_size=0`, so resident
 memory is bounded by the page caches (AC-9 budget: under 300 MB; the 2 M-file benchmark
-peaks at about 123 MB, measured). Readers set
+peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Readers set
 `query_only=1`. A writer waits up to 30 s for the other writer; readers wait up to 5 s.
 
 ## Schema
 
-`core/schema.sql` is schema version 1 and `core/schema_v2.sql` version 2 (`PRAGMA
-user_version`). `db::open_rw` runs the missing migrations (`MIGRATIONS` in `core/db.rs`) in
-order, in one transaction: a new file gets both, and a version-1 index gets version 2, whose
-SQL fills `file_paths_fts` from the rows already there, so no rescan is needed. An index
-from a newer build fails with `schema_too_new` and is never discarded.
+`core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2 and
+`core/schema_v3.sql` version 3 (`PRAGMA user_version`). `db::open_rw` runs the missing
+migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
+of them, and an older index is migrated from the rows already there, so no rescan is
+needed. After migrating a version 1 or 2 index it compacts the file once (`VACUUM`, at
+`PAGE_SIZE`, 16 KB; a new index is created at that size); if another connection holds the
+index, it stays valid and uncompacted. An index from a newer build fails with
+`schema_too_new` and is never discarded.
 
 | Table | Holds |
 |---|---|
@@ -64,7 +67,7 @@ from a newer build fails with `schema_too_new` and is never discarded.
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state` |
 | `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode), `content_state` (document content search, milestone Fase 3; always 0) |
-| `files_fts` | FTS5 trigram index over `files.name_key`, `rowid = files.id` |
+| `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
 | `file_paths_fts` | version 2: FTS5 trigram index over each file's folded relative path and name (`<dir path_key>/<name_key>`, or `name_key` alone in the root directory), `detail=none` (rowids only, no positions), `rowid = files.id` |
 
@@ -78,10 +81,19 @@ Design points:
   matching folder. Without positions it adds 311 MB to the 2 M-file synthetic index (577 MB
   → 889 MB, measured); position-less trigrams cannot check adjacency, so its candidates are
   verified like all others. A directory rename (I9) rewrites the rows of the files below it.
-- **All FTS tables are contentless** (`content=''`, `contentless_delete=1`) with
-  `tokenize='trigram case_sensitive 1'`. Keys are folded before they are stored, so the
-  tokenizer does no case or accent work. There are no triggers: every FTS row is written by
-  `db::ingest` in the same transaction as its base row.
+- **All FTS tables are contentless** (`content=''`) with `tokenize='trigram case_sensitive
+  1'`. Keys are folded before they are stored, so the tokenizer does no case or accent work
+  (its `remove_diacritics` does no NFKD and leaves the combining marks of NFD names). There
+  are no triggers: every FTS row is written by `db::ingest` in the same transaction as its
+  base row. `dirs_fts` keeps positions and `contentless_delete=1`; `files_fts` and
+  `file_paths_fts` keep neither positions nor per-row sizes (`columnsize=0`, schema version
+  3), so their rows are deleted with FTS5's `'delete'` command and the indexed value
+  (`ingest::delete_files_fts`), before the base rows change.
+- **File hits are read without their folder row when nothing needs it** (VFS-4): the name
+  tiers read `files` alone when every root is searched and none is being removed and there
+  is no folder filter; the folder row is read to check a word missing from the name, and to
+  fill `dir` only for the page returned (`search::resolve_dirs`). On a cold disk each folder
+  row is about one seek.
 - **No foreign keys.** The indexer deletes subtrees in its own order
   (`ingest::delete_dir_subtree`, `ingest::delete_root`).
 - Indexes: `dirs_pending` (partial, `scan_state <> 0`) is the indexer's work queue;
@@ -290,9 +302,11 @@ Roots with the same effective terms form a group. Candidates are read in the ord
 ranking tiers, so a full list never pushes out a better tier (S2, `run_query`):
 
 1. **Name starts with the first term**, all terms in the name: one `files_fts`
-   intersection with the first term anchored (`^"term"`), and the same on folder names in
-   `dirs_fts` (`name_tier`).
-2. **All terms in the name**: the same intersection without the anchor. Tiers 1 and 2 read
+   intersection of covering trigrams, the first term's taken after the U+0001 start marker
+   every name is stored behind (`files_fts` keeps no positions, schema version 3), narrowed
+   in Rust to exactly the names the phrases would match (`NameCond::holds`); on folder names,
+   the phrases with the first term anchored (`^"term"`) in `dirs_fts` (`name_tier`).
+2. **All terms in the name**: the same without the anchor. Tiers 1 and 2 read
    up to 4,000 candidates, all ranked before the cut to 2,000 hits, so a better name match
    is never lost to rowid order. Date and size filters have no index, so with them these
    tiers stop at 2,000.
@@ -339,8 +353,9 @@ exactly. Two typo stages follow the exact tiers:
 - **Split-term candidates**, only when nothing has matched at all: for each edit position
   the parts of the term before and after it, joined with `AND`, parts shorter than 3
   characters dropped (`fuzzy::candidate_queries`), so every string within one insertion,
-  deletion, substitution or transposition contains one of them. This pass reads at most
-  5,000 rows in all.
+  deletion, substitution or transposition contains one of them. This pass keeps at most
+  5,000 candidates in all; on `files_fts` (no positions) it reads every name holding the
+  parts' trigrams and counts only those holding the parts themselves.
 
 Both verify with `fuzzy::contains_within_one` (approximate substring search, optimal string
 alignment distance 1); their hits are `matched = "fuzzy"`.
@@ -444,4 +459,5 @@ Silicon, SSD), with warm OS file caches. There the warm p95 is close to the 150 
 before the no-hit probe, two of three runs passed and the worst failed by under 10 ms on
 two query classes; with it, three of three runs passed, with load averages of 4.4–5.1 from
 other work and the slowest class at 114–133 ms per run; peak RSS is about 123 MB (all
-measured). Nothing has been measured on Windows or on an HDD.
+measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). Nothing has been
+measured on Windows or on an HDD.

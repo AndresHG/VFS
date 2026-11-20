@@ -62,10 +62,15 @@ const UNDER_CAP_BUDGET: Duration = Duration::from_secs(2);
 const MAX_LIMIT: u32 = 500;
 /// VM steps between deadline checks.
 const PROGRESS_OPS: i32 = 1000;
+/// Stored before every name in `files_fts` (schema v3): the trigrams of `NAME_START` + term
+/// find the names starting with the term without positions.
+pub(crate) const NAME_START: char = '\u{1}';
 
 const FILE_COLS: &str =
     "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, d.root_id, d.rel_path, d.path_key";
 const DIR_COLS: &str = "d.id, d.root_id, d.rel_path, d.path_key, d.name_key, d.mtime";
+/// File columns without the directory row (`Ctx::lazy_dirs`).
+const LAZY_FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, f.dir_id";
 
 /// State kept between searches on the search connection: the last ranked list keyed by
 /// (query, filters, `PRAGMA data_version`), so paging is consistent (S7).
@@ -78,6 +83,8 @@ struct Cached {
     key: String,
     data_version: i64,
     hits: Vec<SearchHit>,
+    /// Per hit: the directory still to be written into `hit.dir` (see `resolve_dirs`).
+    pending: Vec<Option<i64>>,
     truncated_by: Option<TruncatedBy>,
 }
 
@@ -85,6 +92,35 @@ struct Cached {
 /// `InterruptHandle::interrupt` on this connection before each new query, so a running
 /// query sees `SQLITE_INTERRUPT` and returns what it has with `truncated_by` set.
 pub(crate) fn search(
+    conn: &mut Connection,
+    state: &mut SearchState,
+    config: &SearchConfig,
+    query: &SearchQuery,
+) -> Result<SearchResponse> {
+    // One read transaction per search: the candidates, the kept list's `data_version` and
+    // the folders read afterwards for the returned page (`resolve_dirs`) all see one
+    // snapshot, so a folder the indexer deletes meanwhile is still there (VFS-4 AC-3).
+    let begin = match conn.is_autocommit() {
+        true => conn.execute_batch("BEGIN"),
+        false => conn.execute_batch("ROLLBACK; BEGIN"),
+    };
+    match begin {
+        Ok(()) => {}
+        Err(e) if is_interrupt(&e) => {
+            let start = Instant::now();
+            let limit = query.limit.clamp(1, MAX_LIMIT) as usize;
+            return Ok(interrupted(query.offset as usize, limit, start));
+        }
+        Err(e) => return Err(e.into()),
+    }
+    let response = search_snapshot(conn, state, config, query);
+    if conn.execute_batch("COMMIT").is_err() {
+        conn.execute_batch("ROLLBACK")?;
+    }
+    response
+}
+
+fn search_snapshot(
     conn: &mut Connection,
     state: &mut SearchState,
     config: &SearchConfig,
@@ -128,23 +164,22 @@ pub(crate) fn search(
     let key = format!("{folded}\u{1f}{f:?}");
     let data_version: i64 = match conn.query_row("PRAGMA data_version", [], |r| r.get(0)) {
         Ok(v) => v,
-        Err(e) if is_interrupt(&e) => {
-            return Ok(respond(
-                &[],
-                Some(TruncatedBy::Deadline),
-                offset,
-                limit,
-                start,
-            ))
-        }
+        Err(e) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
         Err(e) => return Err(e.into()),
     };
     if let Some(c) = state
         .cache
-        .as_ref()
+        .as_mut()
         .filter(|c| c.key == key && c.data_version == data_version)
     {
-        return Ok(respond(&c.hits, c.truncated_by, offset, limit, start));
+        let page = offset.min(c.hits.len())..(offset + limit).min(c.hits.len());
+        return Ok(
+            match resolve_dirs(conn, &mut c.hits[page.clone()], &mut c.pending[page]) {
+                Ok(()) => respond(&c.hits, c.truncated_by, offset, limit, start),
+                Err(Error::Db(e)) if is_interrupt(&e) => interrupted(offset, limit, start),
+                Err(e) => return Err(e),
+            },
+        );
     }
 
     let mut run = Run {
@@ -178,7 +213,14 @@ pub(crate) fn search(
         candidates.truncate(MAX_HITS);
         run.truncated.get_or_insert(TruncatedBy::Cap);
     }
-    let hits: Vec<SearchHit> = candidates.into_iter().map(|c| c.hit).collect();
+    let (mut hits, mut pending): (Vec<SearchHit>, Vec<Option<i64>>) =
+        candidates.into_iter().map(|c| (c.hit, c.dir_id)).unzip();
+    let page = offset.min(hits.len())..(offset + limit).min(hits.len());
+    match resolve_dirs(conn, &mut hits[page.clone()], &mut pending[page]) {
+        Ok(()) => {}
+        Err(Error::Db(e)) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
+        Err(e) => return Err(e),
+    }
     let response = respond(&hits, run.truncated, offset, limit, start);
     // A deadline-cut list is not cached: trying again must search again (U1).
     if run.truncated != Some(TruncatedBy::Deadline) {
@@ -186,10 +228,40 @@ pub(crate) fn search(
             key,
             data_version,
             hits,
+            pending,
             truncated_by: run.truncated,
         });
     }
     Ok(response)
+}
+
+/// Writes the directory of the file hits read without their directory row (`dir_id`
+/// pending) into `hit.dir`, for the hits of the page being returned only: ranking never
+/// reads it, and a cold disk pays about one seek per directory row (VFS-1 AC-9).
+fn resolve_dirs(
+    conn: &Connection,
+    hits: &mut [SearchHit],
+    pending: &mut [Option<i64>],
+) -> Result<()> {
+    for (hit, dir) in hits.iter_mut().zip(pending.iter_mut()) {
+        // Cleared only once written: an interrupted lookup leaves it to the next request
+        // for the page, which the kept list serves.
+        let Some(id) = *dir else { continue };
+        let (root, rel): (String, String) = conn
+            .prepare_cached(
+                "SELECT r.path, d.rel_path FROM dirs d JOIN roots r ON r.id = d.root_id \
+                 WHERE d.id = ?1",
+            )?
+            .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        hit.dir = join_rel(&root, &rel).to_string_lossy().into_owned();
+        *dir = None;
+    }
+    Ok(())
+}
+
+/// The response of a search a newer one interrupted outside the candidate loops.
+fn interrupted(offset: usize, limit: usize, start: Instant) -> SearchResponse {
+    respond(&[], Some(TruncatedBy::Deadline), offset, limit, start)
 }
 
 fn respond(
@@ -266,9 +338,11 @@ fn each_row<F>(
     mut f: F,
 ) -> Result<()>
 where
-    F: FnMut(&mut Run, &Row<'_>) -> rusqlite::Result<bool>,
+    F: FnMut(&mut Run, &Connection, &Row<'_>) -> rusqlite::Result<bool>,
 {
-    if run.stopped {
+    // A full list already marked `cap` cannot change: every further hit would be refused
+    // (VFS-1 AC-9; a folder scan after a full file scan read every directory for nothing).
+    if run.stopped || (run.hits.len() >= run.limit && run.truncated.is_some()) {
         return Ok(());
     }
     conn.progress_handler(PROGRESS_OPS, Some(move || Instant::now() >= deadline))?;
@@ -281,7 +355,7 @@ where
                 run.stop(TruncatedBy::Deadline);
                 break;
             }
-            if !f(run, row)? {
+            if !f(run, conn, row)? {
                 break;
             }
         }
@@ -511,6 +585,10 @@ struct Ctx {
     /// `file_paths_fts` condition every file inside it meets, added to the path tier's
     /// intersection so it reads only rows from that subtree.
     scope_grams: Option<String>,
+    /// A folder filter is set.
+    scoped: bool,
+    /// No root is being removed: every directory belongs to a root in `roots`.
+    all_roots_active: bool,
 }
 
 struct FileRow {
@@ -580,7 +658,15 @@ impl Ctx {
                 is_dir: false,
             },
             name_key: r.name_key,
+            dir_id: None,
         })
+    }
+
+    /// Whether the files of `g` can be read without their directory row: no condition on
+    /// the directory (every root searched, none being removed, no folder filter). The row
+    /// is then read only to verify a term missing from the name, and for the returned page.
+    fn lazy_dirs(&self, g: &Group) -> bool {
+        !self.scoped && self.all_roots_active && g.root_ids.len() == self.roots.len()
     }
 
     fn dir_hit(&self, r: DirRow, matched: MatchKind) -> Option<Candidate> {
@@ -615,6 +701,7 @@ impl Ctx {
                 is_dir: true,
             },
             name_key: r.name_key,
+            dir_id: None,
         })
     }
 }
@@ -723,6 +810,10 @@ fn run_query(
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
+    let all_roots: i64 = conn
+        .prepare_cached("SELECT COUNT(*) FROM roots")?
+        .query_row([], |r| r.get(0))?;
+    let all_roots_active = all_roots == roots.len() as i64;
     let scopes = match &f.folder {
         Some(folder) => Some(resolve_scopes(conn, &roots, folder)?),
         None => None,
@@ -763,6 +854,8 @@ fn run_query(
         dirs: dir_clause(f, scopes.as_deref()),
         roots: roots.into_iter().map(|r| (r.id, r)).collect(),
         scope_grams,
+        scoped: scopes.is_some(),
+        all_roots_active,
     };
     // Retrieval in ranking-tier order (rank.rs), so a filled list never pushes out a better
     // tier: names starting with the first term, then names holding every term (both read up
@@ -867,22 +960,13 @@ fn name_tier(
     if long.is_empty() || (prefix && long[0] != &g.terms[0]) {
         return Ok(());
     }
-    let mut expr = long
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            if prefix && i == 0 {
-                format!("^{}", phrase(t))
-            } else {
-                phrase(t)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    if !prefix && long[0] == &g.terms[0] {
+    let cond = NameCond {
+        alts: vec![long[0].clone()],
+        anchored: prefix,
+        all: long[1..].iter().map(|t| t.to_string()).collect(),
         // The prefix stage already read these.
-        expr = format!("({expr}) NOT ^{}", phrase(long[0]));
-    }
+        not_prefix: (!prefix && long[0] == &g.terms[0]).then(|| long[0].clone()),
+    };
     if let Some(scope) = &ctx.scope_grams {
         // Inside one folder: the files holding every term anywhere in their path within
         // that folder, as one intersection (read once, in the prefix stage, and ranked);
@@ -896,9 +980,9 @@ fn name_tier(
                 &format!("{} AND {scope}", all_trigrams(&long)),
             )?;
         }
-        return name_matches(conn, run, ctx, g, &expr, false, false);
+        return name_matches(conn, run, ctx, g, &cond, false, false);
     }
-    name_matches(conn, run, ctx, g, &expr, false, true)
+    name_matches(conn, run, ctx, g, &cond, false, true)
 }
 
 /// Typo tiers: one term of at least `FUZZY_MIN_LEN` replaced by its deletions and adjacent
@@ -921,20 +1005,18 @@ fn fuzzy_variants(
         if variants.is_empty() {
             continue;
         }
-        let anchor = if prefix { "^" } else { "" };
-        let alt = variants
-            .iter()
-            .map(|v| format!("{anchor}{}", phrase(v)))
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        let mut parts = vec![format!("({alt})")];
-        parts.extend(
-            long.iter()
+        let cond = NameCond {
+            alts: variants,
+            anchored: prefix,
+            all: long
+                .iter()
                 .enumerate()
                 .filter(|(j, _)| *j != i)
-                .map(|(_, o)| phrase(o)),
-        );
-        name_matches(conn, run, ctx, g, &parts.join(" AND "), true, true)?;
+                .map(|(_, o)| o.to_string())
+                .collect(),
+            not_prefix: None,
+        };
+        name_matches(conn, run, ctx, g, &cond, true, true)?;
     }
     Ok(())
 }
@@ -959,7 +1041,7 @@ fn scoped_files(
     );
     let params = with_params(Some(Value::Text(expr.to_string())), clause);
     let deadline = run.hard;
-    each_row(conn, run, &sql, &params, deadline, |run, row| {
+    each_row(conn, run, &sql, &params, deadline, |run, _, row| {
         let r = FileRow::read(row)?;
         Ok(
             match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
@@ -970,28 +1052,137 @@ fn scoped_files(
     })
 }
 
-/// Runs a name-only FTS expression on folder names and, with `files`, on file names, with
-/// the filters in SQL, verifying every candidate against all terms of the group.
+/// A condition on a name: it holds one of `alts` (at its start when `anchored`) and every
+/// term of `all`, and does not start with `not_prefix`. All strings have 3 or more
+/// characters.
+struct NameCond {
+    alts: Vec<String>,
+    anchored: bool,
+    all: Vec<String>,
+    not_prefix: Option<String>,
+}
+
+impl NameCond {
+    /// FTS5 expression for `dirs_fts.name_key` (positions kept): exact.
+    fn phrases(&self) -> String {
+        let anchor = if self.anchored { "^" } else { "" };
+        let alts: Vec<String> = self
+            .alts
+            .iter()
+            .map(|v| format!("{anchor}{}", phrase(v)))
+            .collect();
+        let mut parts = vec![format!("({})", alts.join(" OR "))];
+        parts.extend(self.all.iter().map(|t| phrase(t)));
+        let expr = parts.join(" AND ");
+        match &self.not_prefix {
+            Some(p) => format!("({expr}) NOT ^{}", phrase(p)),
+            None => expr,
+        }
+    }
+
+    /// FTS5 expression for `files_fts` (detail=none, every name stored after `NAME_START`):
+    /// covering trigrams, a superset of the names meeting the condition, in rowid order.
+    fn trigrams(&self) -> String {
+        let alts: Vec<String> = self
+            .alts
+            .iter()
+            .map(|v| {
+                let v = if self.anchored {
+                    format!("{NAME_START}{v}")
+                } else {
+                    v.clone()
+                };
+                format!("({})", all_trigrams(&[v]))
+            })
+            .collect();
+        let mut parts = vec![format!("({})", alts.join(" OR "))];
+        if !self.all.is_empty() {
+            parts.push(all_trigrams(&self.all));
+        }
+        parts.join(" AND ")
+    }
+
+    /// Exactly the names `phrases` matches: applied to the `trigrams` candidates, it keeps
+    /// the same rows in the same order, so caps and ranking see what positions gave.
+    fn holds(&self, name: &str) -> bool {
+        self.alts.iter().any(|v| {
+            if self.anchored {
+                name.starts_with(v.as_str())
+            } else {
+                name.contains(v.as_str())
+            }
+        }) && self.all.iter().all(|t| name.contains(t.as_str()))
+            && self
+                .not_prefix
+                .as_ref()
+                .is_none_or(|p| !name.starts_with(p.as_str()))
+    }
+}
+
+/// Runs a name condition on folder names and, with `files`, on file names, with the
+/// filters in SQL, verifying every candidate against all terms of the group.
 fn name_matches(
     conn: &mut Connection,
     run: &mut Run,
     ctx: &Ctx,
     g: &Group,
-    expr: &str,
+    cond: &NameCond,
     fuzzy: bool,
     files: bool,
 ) -> Result<()> {
     let roots = g.roots_sql();
     let deadline = run.hard;
-    if let Some(clause) = ctx.files.as_ref().filter(|_| files) {
+    if let Some(clause) = ctx.files.as_ref().filter(|_| files && ctx.lazy_dirs(g)) {
+        let sql = format!(
+            "SELECT {LAZY_FILE_COLS} FROM files_fts CROSS JOIN files f \
+             ON f.id = files_fts.rowid WHERE files_fts MATCH ?{}",
+            clause.sql
+        );
+        let params = with_params(Some(Value::Text(cond.trigrams())), clause);
+        each_row(conn, run, &sql, &params, deadline, |run, conn, row| {
+            let dir_id: i64 = row.get(6)?;
+            let name_key: String = row.get(2)?;
+            if !cond.holds(&name_key) {
+                return Ok(true);
+            }
+            let matched = if g.terms.iter().all(|t| name_key.contains(t.as_str())) {
+                Some(MatchKind::Name)
+            } else {
+                let path: String = conn
+                    .prepare_cached("SELECT path_key FROM dirs WHERE id = ?1")?
+                    .query_row([dir_id], |r| r.get(0))?;
+                verify_file(&g.terms, &name_key, &path, fuzzy)
+            };
+            let Some(matched) = matched else {
+                return Ok(true);
+            };
+            Ok(run.accept(Candidate {
+                hit: SearchHit {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    dir: String::new(),
+                    kind: FileKind::from_code(row.get(3)?),
+                    size: row.get::<_, i64>(4)?.max(0) as u64,
+                    modified: row.get(5)?,
+                    matched,
+                    is_dir: false,
+                },
+                name_key,
+                dir_id: Some(dir_id),
+            }))
+        })?;
+    } else if let Some(clause) = ctx.files.as_ref().filter(|_| files) {
         let sql = format!(
             "SELECT {FILE_COLS} FROM files_fts CROSS JOIN files f ON f.id = files_fts.rowid \
              CROSS JOIN dirs d ON d.id = f.dir_id WHERE files_fts MATCH ?{roots}{}",
             clause.sql
         );
-        let params = with_params(Some(Value::Text(expr.to_string())), clause);
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        let params = with_params(Some(Value::Text(cond.trigrams())), clause);
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let r = FileRow::read(row)?;
+            if !cond.holds(&r.name_key) {
+                return Ok(true);
+            }
             Ok(
                 match verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy) {
                     Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
@@ -1006,8 +1197,11 @@ fn name_matches(
              CROSS JOIN dirs d ON d.id = m.id WHERE 1{roots}{}",
             clause.sql
         );
-        let params = with_params(Some(Value::Text(format!("name_key : ({expr})"))), clause);
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        let params = with_params(
+            Some(Value::Text(format!("name_key : ({})", cond.phrases()))),
+            clause,
+        );
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
             Ok(match verify_dir(&g.terms, &d, fuzzy) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
@@ -1089,7 +1283,7 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
             )
         };
         let params = with_params(Some(Value::Text(expr)), clause);
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let r = FileRow::read(row)?;
             Ok(
                 match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
@@ -1120,7 +1314,7 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
             clause.sql
         );
         let params = with_params(Some(Value::Text(expr)), clause);
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
             Ok(match verify_dir(&g.terms, &d, false) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
@@ -1146,7 +1340,7 @@ fn scan_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Res
             sql.push_str(" AND (instr(f.name_key, ?) > 0 OR instr(d.path_key, ?) > 0)");
             params.extend([Value::Text(t.clone()), Value::Text(t.clone())]);
         }
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let r = FileRow::read(row)?;
             Ok(
                 match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
@@ -1165,7 +1359,7 @@ fn scan_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Res
             );
             params.push(Value::Text(t.clone()));
         }
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
+        each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
             Ok(match verify_dir(&g.terms, &d, false) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
@@ -1176,6 +1370,14 @@ fn scan_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Res
     Ok(())
 }
 
+/// Where a `fuzzy_pass` statement reads its candidates.
+#[derive(Clone, Copy, PartialEq)]
+enum Source {
+    FileNames,
+    Dirs,
+    DirFiles,
+}
+
 /// One-typo pass (T2b's `fuzzy` helpers): candidates from the split-term `MATCH`
 /// expressions, at most `SCAN_CAP_FUZZY` rows read in all, verified within one edit.
 fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group]) -> Result<()> {
@@ -1184,21 +1386,27 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
     for g in groups {
         let roots = g.roots_sql();
         for t in g.terms.iter().filter(|t| is_long_for_fuzzy(t)) {
-            for expr in fuzzy::candidate_queries(t) {
+            for (expr, parts) in fuzzy::candidate_queries(t)
+                .into_iter()
+                .zip(fuzzy::candidate_parts(t))
+            {
                 if budget == 0 || run.stopped {
                     return Ok(());
                 }
+                // `files_fts` keeps no positions: its candidates are the parts' trigrams,
+                // narrowed in Rust to the names holding every part (what `expr` matches).
+                let grams = all_trigrams(&parts);
                 let matching_dirs = matching_dirs(budget);
                 let queries = [
                     ctx.files.as_ref().map(|c| {
                         (
                             format!(
                                 "SELECT {FILE_COLS} FROM files_fts JOIN files f ON f.id = files_fts.rowid \
-                                 JOIN dirs d ON d.id = f.dir_id WHERE files_fts MATCH ?{roots}{} LIMIT {budget}",
+                                 JOIN dirs d ON d.id = f.dir_id WHERE files_fts MATCH ?{roots}{}",
                                 c.sql
                             ),
                             c,
-                            false,
+                            Source::FileNames,
                         )
                     }),
                     ctx.dirs.as_ref().map(|c| {
@@ -1208,7 +1416,7 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                                 c.sql
                             ),
                             c,
-                            true,
+                            Source::Dirs,
                         )
                     }),
                     ctx.files.as_ref().map(|c| {
@@ -1219,15 +1427,25 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                                 c.sql
                             ),
                             c,
-                            false,
+                            Source::DirFiles,
                         )
                     }),
                 ];
-                for (sql, clause, is_dir) in queries.into_iter().flatten() {
-                    let params = with_params(Some(Value::Text(expr.clone())), clause);
-                    each_row(conn, run, &sql, &params, deadline, |run, row| {
+                for (sql, clause, source) in queries.into_iter().flatten() {
+                    let text = match source {
+                        Source::FileNames => grams.clone(),
+                        Source::Dirs | Source::DirFiles => expr.clone(),
+                    };
+                    let params = with_params(Some(Value::Text(text)), clause);
+                    each_row(conn, run, &sql, &params, deadline, |run, _, row| {
+                        if source == Source::FileNames {
+                            let name_key: String = row.get(2)?;
+                            if !parts.iter().all(|p| name_key.contains(p.as_str())) {
+                                return Ok(true);
+                            }
+                        }
                         budget = budget.saturating_sub(1);
-                        let hit = if is_dir {
+                        let hit = if source == Source::Dirs {
                             let d = DirRow::read(row)?;
                             verify_dir(&g.terms, &d, true).and_then(|m| ctx.dir_hit(d, m))
                         } else {
@@ -1249,12 +1467,14 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
+    use rusqlite::params;
+
     use super::*;
     use crate::db::{self, ingest};
 
-    /// VFS-1 AC-10 (S6): a newer query interrupting a running one makes it return what it
-    /// has with `truncated_by = deadline` instead of an error, and the connection stays
-    /// usable for the next query.
+    /// VFS-1 AC-10 (S6), VFS-4 AC-3: a newer query interrupting a running one makes it
+    /// return what it has with `truncated_by = deadline` instead of an error, also while it
+    /// reads the folders of the returned page, and the connection stays usable.
     #[test]
     fn interrupted_query_returns_partial_result() {
         let dir = tempfile::tempdir().unwrap();
@@ -1294,6 +1514,19 @@ mod tests {
         let config = SearchConfig {
             deadline: Duration::from_secs(60),
         };
+        // A text query, its folders read for the returned page only (VFS-4 AC-3): an
+        // interruption at any point, the folder lookups included, is a response, never an
+        // error, and never leaves the search's read transaction open.
+        let text = SearchQuery {
+            text: "archivo".into(),
+            filters: SearchFilters::default(),
+            limit: 10,
+            offset: 0,
+        };
+        for _ in 0..200 {
+            search(&mut conn, &mut SearchState::default(), &config, &text).unwrap();
+            assert!(conn.is_autocommit());
+        }
         // Filter-only, matching nothing: a full scan that only an interruption can cut.
         let mut q = SearchQuery {
             text: String::new(),
@@ -1384,6 +1617,193 @@ mod tests {
             "cadzi",
         ] {
             assert!(!possible(q), "{q}");
+        }
+    }
+
+    /// VFS-4 AC-3: a folder lookup that fails (an interruption, here a missing row) keeps
+    /// the hits not yet resolved pending, so the next request for the page, served from the
+    /// kept list, still fills their folder; resolved hits are not looked up again.
+    #[test]
+    fn unresolved_folders_stay_pending_after_a_failed_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut w = db::open_rw(&path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sub = ingest::insert_dir(&tx, root, top, "Gestoría", 0).unwrap();
+        tx.commit().unwrap();
+        let hit = || SearchHit {
+            id: 1,
+            name: "a.pdf".into(),
+            dir: String::new(),
+            kind: FileKind::Document,
+            size: 0,
+            modified: 0,
+            matched: MatchKind::Name,
+            is_dir: false,
+        };
+        let mut hits = vec![hit(), hit(), hit()];
+        let mut pending = vec![Some(top), Some(sub + 1000), Some(sub)];
+        assert!(resolve_dirs(&w, &mut hits, &mut pending).is_err());
+        assert_eq!(hits[0].dir, "/datos");
+        assert_eq!(pending, vec![None, Some(sub + 1000), Some(sub)]);
+        pending[1] = Some(sub);
+        resolve_dirs(&w, &mut hits, &mut pending).unwrap();
+        assert_eq!(pending, vec![None, None, None]);
+        let expected = join_rel("/datos", "Gestoría")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            (hits[1].dir.as_str(), hits[2].dir.as_str()),
+            (expected.as_str(), expected.as_str())
+        );
+    }
+
+    /// VFS-4 AC-5 (R5): once the list is full and marked truncated by the cap, no further
+    /// statement is even prepared (here an invalid one), and a list not yet capped still
+    /// runs its statements.
+    #[test]
+    fn a_full_capped_list_runs_no_further_statement() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let now = Instant::now();
+        let mut run = Run {
+            soft: now + Duration::from_secs(60),
+            hard: now + Duration::from_secs(60),
+            hits: Vec::new(),
+            seen_files: HashSet::new(),
+            seen_dirs: HashSet::new(),
+            truncated: Some(TruncatedBy::Cap),
+            stopped: false,
+            limit: 0,
+        };
+        let deadline = run.hard;
+        let mut calls = 0;
+        each_row(&mut conn, &mut run, "NOT SQL", &[], deadline, |_, _, _| {
+            calls += 1;
+            Ok(true)
+        })
+        .unwrap();
+        assert_eq!(calls, 0);
+        run.truncated = None;
+        assert!(
+            each_row(&mut conn, &mut run, "NOT SQL", &[], deadline, |_, _, _| Ok(
+                true
+            ))
+            .is_err()
+        );
+    }
+
+    /// VFS-4 AC-1: on `files_fts` (detail=none, names after `NAME_START`) a name condition's
+    /// trigram candidates narrowed by `holds` are exactly, in the same order, the rows its
+    /// phrase expression matches with positions, for prefixes, excluded prefixes, typo
+    /// alternatives and the typo pass's split parts; so caps and ranking see the same rows.
+    #[test]
+    fn name_condition_matches_exactly_what_phrases_matched() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE full USING fts5(n, tokenize='trigram case_sensitive 1');
+             CREATE VIRTUAL TABLE none USING fts5(n, content='', columnsize=0, detail='none',
+               tokenize='trigram case_sensitive 1');",
+        )
+        .unwrap();
+        let names = [
+            "notaria perez.pdf",
+            "perez notaria.pdf",
+            "xnotaria.txt",
+            "notxaria.txt",
+            "aria not.txt",
+            "notarianotaria",
+            "nota",
+            "notari",
+            "ntaria",
+            "escritura 2019 notaria",
+            "aaaa",
+            "aaa",
+            "ab",
+            "riano tar ia",
+            "\"notaria\".doc",
+        ];
+        for (i, n) in (0_i64..).zip(names) {
+            conn.execute("INSERT INTO full(rowid, n) VALUES (?1, ?2)", params![i, n])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO none(rowid, n) VALUES (?1, ?2)",
+                params![i, format!("{NAME_START}{n}")],
+            )
+            .unwrap();
+        }
+        let ids = |table: &str, expr: &str| -> Vec<i64> {
+            let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid");
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows = stmt.query_map([expr], |r| r.get(0)).unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        let strings = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let conds = [
+            NameCond {
+                alts: strings(&["notaria"]),
+                anchored: true,
+                all: vec![],
+                not_prefix: None,
+            },
+            NameCond {
+                alts: strings(&["notaria"]),
+                anchored: false,
+                all: vec![],
+                not_prefix: None,
+            },
+            NameCond {
+                alts: strings(&["notaria"]),
+                anchored: false,
+                all: strings(&["perez"]),
+                not_prefix: Some("notaria".into()),
+            },
+            NameCond {
+                alts: strings(&["aaa"]),
+                anchored: true,
+                all: vec![],
+                not_prefix: None,
+            },
+            NameCond {
+                alts: strings(&["\"notaria\""]),
+                anchored: false,
+                all: vec![],
+                not_prefix: None,
+            },
+            NameCond {
+                alts: fuzzy::near_variants("notaira"),
+                anchored: true,
+                all: vec![],
+                not_prefix: None,
+            },
+            NameCond {
+                alts: fuzzy::near_variants("notaira"),
+                anchored: false,
+                all: strings(&["2019"]),
+                not_prefix: None,
+            },
+        ];
+        for c in &conds {
+            let kept: Vec<i64> = ids("none", &c.trigrams())
+                .into_iter()
+                .filter(|&i| c.holds(names[i as usize]))
+                .collect();
+            assert_eq!(kept, ids("full", &c.phrases()), "{}", c.phrases());
+        }
+        for (expr, parts) in fuzzy::candidate_queries("notaira")
+            .into_iter()
+            .zip(fuzzy::candidate_parts("notaira"))
+        {
+            let kept: Vec<i64> = ids("none", &all_trigrams(&parts))
+                .into_iter()
+                .filter(|&i| parts.iter().all(|p| names[i as usize].contains(p.as_str())))
+                .collect();
+            assert_eq!(kept, ids("full", &expr), "{expr}");
         }
     }
 
