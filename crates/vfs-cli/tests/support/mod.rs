@@ -319,13 +319,16 @@ pub fn check_structure(db: &Path, sample: usize, context: &str) {
         "{context}: rows whose folder or root is gone"
     );
     let limit = if sample == 0 { -1 } else { sample as i64 };
-    for (fts, sql) in [
+    // (FTS table, column filter for the name, rows to look up).
+    for (fts, column, sql) in [
         (
             "files_fts",
+            "",
             "SELECT id, name_key FROM files ORDER BY random() LIMIT ?1",
         ),
         (
             "dirs_fts",
+            "name_key : ",
             "SELECT id, name_key FROM dirs ORDER BY random() LIMIT ?1",
         ),
     ] {
@@ -336,11 +339,6 @@ pub fn check_structure(db: &Path, sample: usize, context: &str) {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        let column = if *fts == *"dirs_fts" {
-            "name_key : "
-        } else {
-            ""
-        };
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT 1 FROM {fts} WHERE {fts} MATCH ?1 AND rowid = ?2"

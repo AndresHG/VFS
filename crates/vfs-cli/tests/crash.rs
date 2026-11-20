@@ -55,9 +55,25 @@ fn delay(rng: &mut Rng, max: Duration) -> Duration {
     Duration::from_micros(rng.below(max.as_micros() as u64 + 1))
 }
 
-fn args<'a>(cmd: &'a str, db: &'a Path, tree: &'a Path) -> Vec<&'a OsStr> {
+/// The `vfs` subcommands the scenarios kill: the foreground scan and the app's indexer.
+#[derive(Debug, Clone, Copy)]
+enum Cmd {
+    Index,
+    Run,
+}
+
+impl Cmd {
+    fn arg(self) -> &'static str {
+        match self {
+            Cmd::Index => "index",
+            Cmd::Run => "run",
+        }
+    }
+}
+
+fn args<'a>(cmd: Cmd, db: &'a Path, tree: &'a Path) -> Vec<&'a OsStr> {
     vec![
-        OsStr::new(cmd),
+        OsStr::new(cmd.arg()),
         OsStr::new("--db"),
         db.as_os_str(),
         tree.as_os_str(),
@@ -84,13 +100,12 @@ fn check_and_converge(s: &Setup, context: &str) {
 }
 
 /// Time of one uninterrupted run of `cmd` from an empty index.
-fn measure(s: &Setup, cmd: &str) -> Duration {
+fn measure(s: &Setup, cmd: Cmd) -> Duration {
     remove_index(&s.db);
     let t = Instant::now();
-    if cmd == "index" {
-        index(&s.db, &[&s.tree]);
-    } else {
-        run_until_idle(&s.db, &[&s.tree], CONVERGE);
+    match cmd {
+        Cmd::Index => index(&s.db, &[&s.tree]),
+        Cmd::Run => run_until_idle(&s.db, &[&s.tree], CONVERGE),
     }
     t.elapsed()
 }
@@ -102,24 +117,24 @@ fn measure(s: &Setup, cmd: &str) -> Duration {
 fn kill_during_first_scan_then_resume() {
     let iterations = scaled(6, 200);
     let s = setup(1, scaled(3_000, 60_000));
-    let full = measure(&s, "index");
+    let full = measure(&s, Cmd::Index);
     let mut rng = Rng::new(0xC0FFEE);
     for i in 0..iterations {
         remove_index(&s.db);
-        let cmd = if i % 2 == 0 { "index" } else { "run" };
+        let cmd = if i % 2 == 0 { Cmd::Index } else { Cmd::Run };
         let child = spawn(&args(cmd, &s.db, &s.tree));
         std::thread::sleep(delay(&mut rng, full));
         kill(child);
         if rng.chance(30) && s.db.exists() {
             // Interrupt the resume as well.
-            let child = spawn(&args("index", &s.db, &s.tree));
+            let child = spawn(&args(Cmd::Index, &s.db, &s.tree));
             std::thread::sleep(delay(&mut rng, full / 2));
             kill(child);
         }
         if !s.db.exists() {
             continue; // killed before the index was created
         }
-        check_and_converge(&s, &format!("first scan, iteration {i} ({cmd})"));
+        check_and_converge(&s, &format!("first scan, iteration {i} ({cmd:?})"));
     }
 }
 
@@ -163,13 +178,13 @@ fn churn(tree: &Path, rng: &mut Rng, round: u64) {
 fn kill_during_rewalk_and_rename() {
     let iterations = scaled(6, 150);
     let s = setup(2, scaled(2_000, 30_000));
-    let full = measure(&s, "run");
+    let full = measure(&s, Cmd::Run);
     let mut rng = Rng::new(0xBADC0DE);
     for i in 0..iterations {
         churn(&s.tree, &mut rng, i as u64);
         if i % 2 == 0 {
             // Killed during the catch-up re-walk that applies changes made while closed.
-            let child = spawn(&args("run", &s.db, &s.tree));
+            let child = spawn(&args(Cmd::Run, &s.db, &s.tree));
             std::thread::sleep(delay(&mut rng, full));
             kill(child);
         } else {
@@ -283,7 +298,7 @@ fn kill_during_migration() {
     let mut rng = Rng::new(0x5EED);
     for i in 0..iterations {
         restore();
-        let child = spawn(&args("index", &s.db, &s.tree));
+        let child = spawn(&args(Cmd::Index, &s.db, &s.tree));
         std::thread::sleep(delay(&mut rng, full));
         kill(child);
         let conn = raw_conn(&s.db);
@@ -359,7 +374,7 @@ fn tear(db: &Path, rng: &mut Rng) -> String {
 fn torn_writes_are_recovered() {
     let iterations = scaled(12, 300);
     let s = setup(5, scaled(1_500, 20_000));
-    let full = measure(&s, "index");
+    let full = measure(&s, Cmd::Index);
     let mut rng = Rng::new(0x7EA2);
     for i in 0..iterations {
         // A complete index, then an interrupted re-index, so a WAL and a marker remain.
@@ -368,7 +383,7 @@ fn torn_writes_are_recovered() {
             index(&s.db, &[&s.tree]);
         }
         churn(&s.tree, &mut rng, 1_000 + i as u64);
-        let child = spawn(&args("run", &s.db, &s.tree));
+        let child = spawn(&args(Cmd::Run, &s.db, &s.tree));
         std::thread::sleep(full / 2 + delay(&mut rng, full));
         kill(child);
         let what = tear(&s.db, &mut rng);
