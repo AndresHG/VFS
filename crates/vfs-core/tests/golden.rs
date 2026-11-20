@@ -442,6 +442,7 @@ fn ranked(g: &Golden, text: &str) -> Vec<String> {
             filters: SearchFilters::default(),
             limit: 50,
             offset: 0,
+            sort: Default::default(),
         })
         .unwrap();
     r.hits.iter().map(rel).collect()

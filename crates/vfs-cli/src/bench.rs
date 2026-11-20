@@ -104,6 +104,7 @@ pub fn query_set() -> Vec<BenchQuery> {
                 filters,
                 limit: 100,
                 offset: 0,
+                sort: Default::default(),
             },
             canary,
         });
@@ -653,6 +654,7 @@ mod tests {
             filters: SearchFilters::default(),
             limit: 1,
             offset: 0,
+            sort: Default::default(),
         };
         let page = 10;
         assert_eq!(

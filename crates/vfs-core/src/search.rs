@@ -39,7 +39,7 @@ use crate::matching::FUZZY_TRIGGER;
 use crate::rank::{self, Candidate};
 use crate::types::{
     FileCopy, FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
-    SearchResponse, TruncatedBy,
+    SearchResponse, SortOrder, TruncatedBy,
 };
 
 /// Hits per query after ranking; more sets `truncated_by = cap`.
@@ -48,6 +48,11 @@ const MAX_HITS: usize = 2000;
 /// the list is cut to `MAX_HITS`, so a better-ranked name match is never lost to rowid
 /// order while its tier has at most this many matches.
 const NAME_READ_CAP: usize = 4_000;
+/// Candidates read by every tier when the order is not relevance (or the query is
+/// filter-only): all of them are sorted before the cut to `MAX_HITS`, so the order is exact
+/// while a query has at most this many matches; past it the response says
+/// `approximate_order` (VFS-12 AC-2, AC-3).
+const SORT_READ_CAP: usize = 20_000;
 /// Directories read by a directory-driven stage.
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
@@ -83,6 +88,7 @@ struct Cached {
     /// Per hit, per copy: the directory still to be written into its `dir` (VFS-19).
     copy_pending: Vec<Vec<Option<i64>>>,
     truncated_by: Option<TruncatedBy>,
+    approximate_order: bool,
 }
 
 /// Runs one query on the dedicated search connection. The facade calls
@@ -135,10 +141,10 @@ fn search_snapshot(
         || f.size_max.is_some()
         || f.folder.is_some();
     if terms.is_empty() && !has_filter {
-        return Ok(respond(&[], None, offset, limit, start));
+        return Ok(respond(&[], None, false, offset, limit, start));
     }
 
-    let key = format!("{folded}\u{1f}{f:?}");
+    let key = format!("{folded}\u{1f}{f:?}\u{1f}{:?}", query.sort);
     let data_version: i64 = match conn.query_row("PRAGMA data_version", [], |r| r.get(0)) {
         Ok(v) => v,
         Err(e) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
@@ -152,7 +158,14 @@ fn search_snapshot(
         let page = offset.min(c.hits.len())..(offset + limit).min(c.hits.len());
         return Ok(
             match resolve_page(conn, &mut c.hits, &mut c.pending, &mut c.copy_pending, page) {
-                Ok(()) => respond(&c.hits, c.truncated_by, offset, limit, start),
+                Ok(()) => respond(
+                    &c.hits,
+                    c.truncated_by,
+                    c.approximate_order,
+                    offset,
+                    limit,
+                    start,
+                ),
                 Err(Error::Db(e)) if is_interrupt(&e) => interrupted(offset, limit, start),
                 Err(e) => return Err(e),
             },
@@ -169,7 +182,10 @@ fn search_snapshot(
         stopped: false,
         limit: MAX_HITS,
     };
-    let outcome = run_query(conn, &mut run, &terms, f);
+    // VFS-12: an order other than relevance, or a filter-only query (newest first), reads up
+    // to `SORT_READ_CAP` candidates and sorts them all before the cut.
+    let sorted = query.sort != SortOrder::Relevance || terms.is_empty();
+    let outcome = run_query(conn, &mut run, &terms, f, sorted);
     conn.progress_handler(0, None::<fn() -> bool>)?;
     match outcome {
         // Statements outside `each_row` (roots, folder lookup) can be interrupted too.
@@ -186,6 +202,8 @@ fn search_snapshot(
     } else if candidates.len() > 1 {
         rank::rank(&mut candidates, &folded, &terms);
     }
+    rank::sort_by_order(&mut candidates, query.sort);
+    let approximate_order = sorted && run.truncated.is_some();
     let (mut hits, mut pending, mut copy_pending) = group_copies(candidates);
     if hits.len() > MAX_HITS {
         hits.truncate(MAX_HITS);
@@ -199,7 +217,14 @@ fn search_snapshot(
         Err(Error::Db(e)) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
         Err(e) => return Err(e),
     }
-    let response = respond(&hits, run.truncated, offset, limit, start);
+    let response = respond(
+        &hits,
+        run.truncated,
+        approximate_order,
+        offset,
+        limit,
+        start,
+    );
     // A deadline-cut list is not cached: trying again must search again (U1).
     if run.truncated != Some(TruncatedBy::Deadline) {
         state.cache = Some(Cached {
@@ -209,6 +234,7 @@ fn search_snapshot(
             pending,
             copy_pending,
             truncated_by: run.truncated,
+            approximate_order,
         });
     }
     Ok(response)
@@ -304,12 +330,20 @@ fn resolve_dirs(
 
 /// The response of a search a newer one interrupted outside the candidate loops.
 fn interrupted(offset: usize, limit: usize, start: Instant) -> SearchResponse {
-    respond(&[], Some(TruncatedBy::Deadline), offset, limit, start)
+    respond(
+        &[],
+        Some(TruncatedBy::Deadline),
+        false,
+        offset,
+        limit,
+        start,
+    )
 }
 
 fn respond(
     hits: &[SearchHit],
     truncated_by: Option<TruncatedBy>,
+    approximate_order: bool,
     offset: usize,
     limit: usize,
     start: Instant,
@@ -320,6 +354,7 @@ fn respond(
         truncated: truncated_by.is_some(),
         truncated_by,
         elapsed_ms: start.elapsed().as_millis().min(u128::from(u32::MAX)) as u32,
+        approximate_order,
     }
 }
 
@@ -845,6 +880,7 @@ fn run_query(
     run: &mut Run,
     terms: &[String],
     f: &SearchFilters,
+    sorted: bool,
 ) -> Result<()> {
     let roots: Vec<RootRow> = {
         let mut stmt = conn.prepare_cached(
@@ -915,14 +951,20 @@ fn run_query(
         || f.modified_to.is_some()
         || f.size_min.is_some()
         || f.size_max.is_some();
-    run.limit = if unindexed { MAX_HITS } else { NAME_READ_CAP };
+    run.limit = if sorted {
+        SORT_READ_CAP
+    } else if unindexed {
+        MAX_HITS
+    } else {
+        NAME_READ_CAP
+    };
     for prefix in [true, false] {
         for g in &groups {
             name_tier(conn, run, &ctx, g, prefix)?;
         }
     }
-    run.limit = MAX_HITS;
-    if run.hits.len() < MAX_HITS {
+    run.limit = if sorted { SORT_READ_CAP } else { MAX_HITS };
+    if run.hits.len() < run.limit {
         for g in &groups {
             exact_group(conn, run, &ctx, g)?;
         }
@@ -1572,6 +1614,7 @@ mod tests {
             filters: SearchFilters::default(),
             limit: 10,
             offset: 0,
+            sort: Default::default(),
         };
         for _ in 0..200 {
             search(&mut conn, &mut SearchState::default(), &config, &text).unwrap();
@@ -1586,6 +1629,7 @@ mod tests {
             },
             limit: 10,
             offset: 0,
+            sort: Default::default(),
         };
         let mut state = SearchState::default();
         let mut cut = None;

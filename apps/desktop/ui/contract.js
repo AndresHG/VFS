@@ -57,7 +57,9 @@ export const ReadState = Object.freeze({
 });
 
 /** Order of a search over several sources (VFS-6). */
-export const SortOrder = Object.freeze({ RELEVANCE: 'relevance', NEWEST: 'newest', SOURCE: 'source' });
+export const SortOrder = Object.freeze({
+  RELEVANCE: 'relevance', NEWEST: 'newest', OLDEST: 'oldest', NAME: 'name', SIZE: 'size', SOURCE: 'source',
+});
 
 /** `ApiError.code`: every code a command can reject with (`Error::code` in error.rs). */
 export const ErrorCode = Object.freeze({

@@ -4,7 +4,8 @@
 // Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds;
 // the enum values are the sets of contract.js):
 //   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
-//   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs}
+//                  (the order travels in search_sources' options.sort; VFS-12)
+//   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs, approximateOrder}
 //   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir,
 //                   copies?: FileCopy[]}  (VFS-19; left out when empty, never on folders)
 //   FileCopy       {id, dir, modified}    (another place of the same file; id is a files.id)
@@ -13,7 +14,7 @@
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
 //   (VFS-6) search_sources(query, options: {sources: Source[], bookmarkFolder, sort: SortOrder})
 //     -> {hits: (SearchHit & {source: 'files'} | BookmarkHit & {source: 'bookmarks'})[], total,
-//     truncated, truncatedBy, elapsedMs}
+//     truncated, truncatedBy, elapsedMs, approximateOrder}
 //   BookmarkHit    {id, isFolder, title, url, root: BookmarkRoot, folder: string[], profile, added,
 //                   matched, openable}
 //   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead, roots: {id, root, profile}[]}

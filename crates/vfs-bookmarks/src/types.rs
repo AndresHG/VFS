@@ -115,10 +115,30 @@ pub enum SortOrder {
     /// folder's own order.
     #[default]
     Relevance,
-    /// Newest first: a file's modification date, a bookmark's date saved.
+    /// Newest first: a file's modification date, a bookmark's date saved; unknown dates last.
     Newest,
+    /// Oldest first, by the same dates; unknown dates last (VFS-12).
+    Oldest,
+    /// A file's or folder's name, a bookmark's title, A to Z (VFS-12).
+    Name,
+    /// Largest file first; folders, then bookmarks (no size), after every file (VFS-12).
+    Size,
     /// Files first, then bookmarks, each by relevance.
     Source,
+}
+
+impl SortOrder {
+    /// The order the core applies to the file list (VFS-12): by source, files keep their
+    /// relevance order.
+    pub fn files(self) -> vfs_core::SortOrder {
+        match self {
+            SortOrder::Relevance | SortOrder::Source => vfs_core::SortOrder::Relevance,
+            SortOrder::Newest => vfs_core::SortOrder::Newest,
+            SortOrder::Oldest => vfs_core::SortOrder::Oldest,
+            SortOrder::Name => vfs_core::SortOrder::Name,
+            SortOrder::Size => vfs_core::SortOrder::Size,
+        }
+    }
 }
 
 /// What a search over several sources covers and how it is ordered.
@@ -224,4 +244,6 @@ pub struct SourcesResponse {
     pub truncated: bool,
     pub truncated_by: Option<TruncatedBy>,
     pub elapsed_ms: u32,
+    /// The file list's order covers only the matches read (`SearchResponse`, VFS-12 AC-3).
+    pub approximate_order: bool,
 }

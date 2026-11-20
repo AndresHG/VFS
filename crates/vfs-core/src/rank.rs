@@ -3,7 +3,7 @@
 use std::cmp::Reverse;
 
 use crate::fuzzy::starts_within_one;
-use crate::types::{MatchKind, SearchHit};
+use crate::types::{MatchKind, SearchHit, SortOrder};
 
 /// A verified hit plus what ranking needs. Built by `search.rs` (T2a).
 pub(crate) struct Candidate {
@@ -38,6 +38,20 @@ pub(crate) fn rank(candidates: &mut [Candidate], folded_query: &str, terms: &[St
         };
         (tier, len, Reverse(c.hit.modified), c.hit.id, c.hit.is_dir)
     });
+}
+
+/// Re-sorts ranked `candidates` by `order` (VFS-12 AC-1); a stable sort, so ties keep the
+/// relevance order. `Relevance` leaves them as they are.
+pub(crate) fn sort_by_order(candidates: &mut [Candidate], order: SortOrder) {
+    match order {
+        SortOrder::Relevance => {}
+        SortOrder::Newest => {
+            candidates.sort_by_key(|c| (c.hit.modified == 0, Reverse(c.hit.modified)))
+        }
+        SortOrder::Oldest => candidates.sort_by_key(|c| (c.hit.modified == 0, c.hit.modified)),
+        SortOrder::Name => candidates.sort_by(|a, b| a.name_key.cmp(&b.name_key)),
+        SortOrder::Size => candidates.sort_by_key(|c| Reverse(c.hit.size)),
+    }
 }
 
 /// 0 = whole query or stem, 1 = all terms in the name with the first as prefix, 2 = all

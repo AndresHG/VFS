@@ -120,6 +120,7 @@ fn q(text: &str) -> SearchQuery {
         filters: Default::default(),
         limit: 500,
         offset: 0,
+        sort: Default::default(),
     }
 }
 

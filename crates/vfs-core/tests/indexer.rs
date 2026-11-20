@@ -144,6 +144,7 @@ impl Fixture {
                 filters,
                 limit: 500,
                 offset: 0,
+                sort: Default::default(),
             })
             .unwrap()
     }

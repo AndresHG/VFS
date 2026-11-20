@@ -11,7 +11,7 @@ import { S } from '../ui/strings.js';
 import { BookmarkRoot, ReadState, SortOrder, Source } from '../ui/contract.js';
 import { SourceChoice } from '../ui/choices.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sortChoices, sortFor, sourcesFor,
 } from '../ui/sources.js';
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
@@ -58,16 +58,29 @@ test('site of a bookmark address', () => {
 });
 
 /** VFS-6 AC-11: every choice, root, read state and sort order has Spanish copy; "Buscar en"
- *  and "Orden" start hidden (shown only while the setting is on). */
+ *  starts hidden (shown only while the setting is on). VFS-12 AC-5: "Orden" is always shown. */
 test('copy and markup for the bookmark source', () => {
   assert.deepEqual(Object.keys(S.sourceOptions).sort(), Object.values(SourceChoice).sort());
   assert.deepEqual(Object.keys(S.sortOptions).sort(), Object.values(SortOrder).sort());
   for (const r of Object.values(BookmarkRoot)) assert.ok(S.bookmarkRoots[r], r);
   assert.deepEqual(Object.keys(S.bookmarksState).sort(), Object.values(ReadState).sort());
   assert.match(html, /<label class="filter filter-select" id="f-source-pill" hidden>/);
-  assert.match(html, /<label class="filter filter-select" id="f-sort-pill" hidden>/);
+  assert.match(html, /<label class="filter filter-select" id="f-sort-pill">/);
   assert.match(html, /id="bookmarks-on"/);
   for (const key of ['bookmarksToggle', 'folderContentsButton', 'bookmarkKind', 'bookmarkFolderKind', 'fSource', 'fSort']) {
     assert.equal(typeof S[key], 'string', key);
   }
+});
+
+/** VFS-12 AC-5: five orders always, in display order, plus "by source" while bookmarks are
+ *  included; a choice no longer offered is sent as relevance. */
+test('sort choices follow the bookmark setting', () => {
+  const plain = [SortOrder.RELEVANCE, SortOrder.NEWEST, SortOrder.OLDEST, SortOrder.NAME, SortOrder.SIZE];
+  assert.deepEqual(sortChoices(false), plain);
+  assert.deepEqual(sortChoices(true), [...plain, SortOrder.SOURCE]);
+  assert.deepEqual(Object.keys(S.sortOptions), [...plain, SortOrder.SOURCE]);
+  assert.equal(sortFor(SortOrder.SOURCE, false), SortOrder.RELEVANCE);
+  assert.equal(sortFor(SortOrder.SOURCE, true), SortOrder.SOURCE);
+  assert.equal(sortFor(SortOrder.SIZE, false), SortOrder.SIZE);
+  assert.match(S.resultsApproximate('2.000'), /ordenarlos todos/);
 });

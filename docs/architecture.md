@@ -336,7 +336,8 @@ ranking tiers, so a full list never pushes out a better tier (S2, `run_query`):
 2. **All terms in the name**: the same without the anchor. Tiers 1 and 2 read
    up to 4,000 candidates, all ranked before the cut to 2,000 hits, so a better name match
    is never lost to rowid order. Date and size filters have no index, so with them these
-   tiers stop at 2,000.
+   tiers stop at 2,000. Under an order other than relevance, or with filters and no terms,
+   every tier reads up to 20,000 candidates instead (VFS-12, below).
 3. **Path**: files whose relative path and name together hold every term, as one
    intersection in `file_paths_fts` (`exact_group`). Because that table has no positions,
    the expression is the trigrams that cover each term without overlap, ANDed; candidates
@@ -355,6 +356,17 @@ verification; when a group has only short terms, or the query has filters and no
 group is a filtered scan with `instr` in SQL (`scan_group`).
 
 At most 2,000 hits are kept; more sets `truncatedBy = "cap"`.
+
+### Sort orders (VFS-12)
+
+`SearchQuery.sort` is relevance (the default, the tiers below), newest, oldest, name or size.
+Any order but relevance, and a filter-only query (newest first), reads up to 20,000 verified
+candidates (`SORT_READ_CAP`), ranks them, re-sorts them stably by the order
+(`rank::sort_by_order`: an unknown date last in both date orders, folders last by size,
+ties in relevance order) and only then cuts to 2,000, so the newest file is first even when
+2,000 better-ranked files exist. When a cap or the deadline cut the read, the response sets
+`approximateOrder` and the screen says so. `search_sources` passes the order to the core and
+merges bookmarks into the sorted file list (dates saved, titles; no size, so after files).
 
 ### Deadline
 
