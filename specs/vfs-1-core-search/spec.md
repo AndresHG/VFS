@@ -196,10 +196,28 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   consistent.
 - I1. A watcher event never downgrades a directory pending a deep re-list.
 - I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
-  queues a re-walk of the root. macOS: FSEvents through `notify`, honouring its rescan flag.
+  requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its
+  rescan flag.
 - I3. Watcher events under the app data directory are ignored.
-- I4. Roots are re-walked every 7 days while the watcher is healthy, and at once after an
-  overflow.
+- I4. Until a change journal is read, every start owes each root a catch-up re-walk
+  (resumable, low priority, searchable meanwhile); while running, roots are re-walked when
+  their last full scan is 7 days old or stored in the future (a clock set back).
+- I8. One exclusion list (`walk::is_excluded`: system names, `.SynologyWorkingDirectory`,
+  `@eaDir`, `#recycle`, `#snapshot`, `~$*`, `.~lock.*#`, `~*.tmp`, ...) serves the walker and
+  the watcher, which drops events for any excluded component below the root before
+  anything is marked dirty.
+- I9. A directory rename or move inside a root that the Windows watcher reports as an
+  old/new pair is applied as a path update of the subtree's `dirs` rows and folder search
+  entries in one transaction; anything else falls back to re-listing both parents.
+- I10. Full re-walks run one at a time and a walk in progress is never restarted: a request
+  for a root being walked owes one more pass after it. Requests from lost events
+  (overflow, a watch that failed), and those owed by a root that was being walked, wait
+  until that root's last full scan is 1 hour old; start-up and manual requests do not.
+- I11. A directory that fails to list keeps its rows, stays pending and counts as an error;
+  it is retried after 1 min, doubling, and after 6 failures waits for the next full walk.
+- I12. A root that cannot be watched is retried every minute and as soon as it is
+  reachable again; once watched it owes a re-walk (I10). Marking a folder dirty from the
+  app (a missing file at "mostrar en carpeta") wakes the indexer at once.
 - I5. The indexer commits every ~20,000 changed rows or 5 s.
 - I6. Roots left in `removing` are finished at start (also by the CLI).
 - I7. The watcher tests run on Windows CI too, polling up to 30 s.
@@ -212,9 +230,13 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   a folder on a network or removable drive gets a warning.
 - U5. The development fake backend lives outside the bundled frontend and cannot load in
   the app.
+- U6. The status bar says "Revisando carpetas…" during the first scan, "Comprobando
+  cambios…" during any later scan (the catch-up at start included) and, when idle,
+  "Última revisión: hoy 9:14" with the oldest completed check of the reachable folders;
+  the manual button reads "Buscar cambios ahora".
 - X1. One desktop test drives add_root, search and get_progress over IPC on Tauri's mock
   runtime, on both systems in CI.
-- X2. CI also runs the CLAUDE.md budget check.
+- X2. CI also runs the CLAUDE.md budget check and the UI status tests (`node --test`).
 
 ## Technical context
 

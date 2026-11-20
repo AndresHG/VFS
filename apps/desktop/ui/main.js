@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
+import { statusText, firstScanRunning as firstScanOf } from './status.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 100;
@@ -452,7 +453,7 @@ function renderSummary() {
 }
 
 function firstScanRunning() {
-  return state.roots.length > 0 && !state.roots.some((r) => r.lastFullScan != null || r.status === 'ready');
+  return firstScanOf(state.roots);
 }
 
 function renderEmpty() {
@@ -608,20 +609,14 @@ function renderStatus() {
   if (api.missing) { text.textContent = ''; return; }
   if (!state.rootsLoaded) { text.textContent = S.statusConnecting; return; }
   if (!state.roots.length) { text.textContent = S.statusNoRoots; return; }
-  const files = F.count(p?.filesIndexed ?? state.roots.reduce((s, r) => s + r.files, 0));
+  text.textContent = statusText(p, state.roots);
   if (p?.state === 'scanning') {
-    const dirs = p.roots.reduce((s, r) => s + r.dirsPending, 0);
-    text.textContent = S.statusScanning(files, F.count(dirs));
     bar.hidden = false;
     pause.hidden = false;
     pause.textContent = S.pause;
   } else if (p?.state === 'paused') {
-    text.textContent = S.statusPaused(files);
     pause.hidden = false;
     pause.textContent = S.resume;
-  } else {
-    const n = state.roots.filter((r) => r.status === 'unavailable').length;
-    text.textContent = n ? S.statusReadyUnavailable(files, n) : S.statusReady(files);
   }
   $('banner-scan').hidden = !(firstScanRunning() && hasQuery());
 }
