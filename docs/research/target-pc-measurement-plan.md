@@ -169,7 +169,7 @@ for read and write latency) because PDH counter paths are localised on a Spanish
 The per-process I/O query is itself not free on a slow PC: expect the probe to add some CPU
 load, and do not read small differences into it.
 
-What VFS-5 assumes from this step (its back-off, R3): the indexer pauses when the **average
+What VFS-5 assumes from this step (its back-off: study R3, spec R4): the indexer pauses when the **average
 queue length** of the physical disk holding the roots is **2 or more in 3 of 5 one-second
 samples**, pauses at most 8 s and then works at least 2 s. From `perf.csv` (column
 `AvgDiskQueueLength`), write down for the data disk: the share of samples with queue ≥ 2,
@@ -218,7 +218,10 @@ From the photographs in step 0 and the client UI, answer:
 8. Boot grace (VFS-5 R5): after the first index has finished, reboot, log in and open VFS at
    once. Its `start` line shows `uptime_s` and `catchup_deferred_s`; the catch-up `pass` lines
    must begin about 10 minutes after boot, not at once. Note whether Synology still showed
-   "Scanning" at that moment (step 7.4): if it did, the grace is too short.
+   "Scanning" at that moment (step 7.4): if it did, the grace is too short. Then do it again
+   with a normal **Apagar** and power on, the way the owner starts the PC. With Fast Startup
+   (default on Windows 10) `uptime_s` may not reset; if `catchup_deferred_s` is 0 after that
+   start, the boot grace never applies in daily use (spec VFS-5, Open questions).
 
 ### 9. VFS memory, open and minimised (10 min) → N12
 
@@ -229,13 +232,15 @@ Get-Process vfs*, msedgewebview2 | Select ProcessName, Id, @{n='WS_MB';e={[math]
 ```
 
 Run it three times: open and idle; 5 min after minimising; 5 min after restoring and making a
-search. Since VFS-5 a minimised VFS hides its WebView2 and asks it to suspend (R8): the
-`msedgewebview2` working sets should drop clearly in the second reading and recover in the
-third. If they do not drop, the suspend call is not working on this runtime: note the WebView2
-version from step 1. The log's `memory` lines (every 10 min: `working_set_mb`, `wal_mb`,
-`index_mb`) give the same figure for `vfs.exe` over weeks. `msedgewebview2` processes belonging to other apps (Teams, Widgets) appear too.
+search. `msedgewebview2` processes belonging to other apps (Teams, Widgets) appear too.
 Process Explorer or Task Manager's "Command line" column tells them apart: VFS's processes
 carry `app.vfs.desktop` in their `--user-data-dir`.
+
+Since VFS-5 a minimised VFS hides its WebView2 and asks it to suspend (study R8, spec R11):
+the `msedgewebview2` working sets should drop clearly in the second reading and recover in
+the third. If they do not drop, the suspend call is not working on this runtime: note the
+WebView2 version from step 1. The log's `memory` lines (every 10 min: `working_set_mb`,
+`wal_mb`, `index_mb`) give the same figure for `vfs.exe` over weeks.
 
 ### 10. Journal growth rate (end of the visit, 1 min) → N2
 

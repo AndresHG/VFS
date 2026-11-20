@@ -70,9 +70,9 @@ measurement named next to it exists.
 | `max_backoff` | 8 s | Longest continuous pause | N10, N13 |
 | `min_work` | 2 s | Work slice forced after `max_backoff`; with 8 s it guarantees at least 20 % duty, so a permanently busy disk makes the first index at most 5× slower instead of stalling | N10, N13 |
 | `boot_grace` | 10 min | Synology and Defender do their own start-up scanning in the first minutes after login (estimate, `windows-recommendations.md` R3) | step 7.4, step 8 log |
-| `DIAG_EVERY` | 60 s | One line per minute of work: about 300 KB per day of continuous indexing | — |
-| `DIAG_MEMORY_EVERY` | 10 min | Working set and WAL size over weeks, ~15 KB per day | — |
-| `LOG_KEEP` | 4 old files of 1 MB | At most 5 MB on disk; about two weeks of mostly idle use, three days of continuous indexing | — |
+| `diag_every` | 60 s | One line per minute of work: about 300 KB per day of continuous indexing | — |
+| `diag_memory_every` | 10 min | Working set and WAL size over weeks, ~15 KB per day | — |
+| `LOG_KEEP` (desktop shell) | 4 old files of 1 MB | At most 5 MB on disk; about two weeks of mostly idle use, three days of continuous indexing | — |
 | `WRITER_CHUNK_BYTES` | 32 MiB, Windows only | `SQLITE_FCNTL_CHUNK_SIZE` "may reduce" fragmentation of a file that grows while Synology writes to the same disk (`windows-recommendations.md` R7). On Windows SQLite extends with `SetEndOfFile`, which allocates without writing; on macOS it writes a byte per block, so it is off there | N12 |
 | Reader page caches | unchanged, 64 MiB per reader (Decisions 6) | Bounded RSS on a PC that already swaps; a cut to 32 MiB waits for a measurement that can resolve its cost | N12 |
 
@@ -180,3 +180,9 @@ first visit checks; the plan's step numbers are in `target-pc-measurement-plan.m
 ## Open questions
 
 None blocking. Every default above is replaced by the measurement named next to it.
+
+Known risk: uptime comes from `GetTickCount64`. With Fast Startup (on by default in Windows
+10), a normal shut down and power on resumes the kernel session, so uptime does not reset and
+the boot grace may rarely apply after such a start. Measurement-plan step 8.8 checks both a
+reboot and a normal shut down; if the second shows no deferral, the clock should become the
+logon session's start.
