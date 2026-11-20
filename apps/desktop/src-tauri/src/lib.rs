@@ -1,4 +1,4 @@
-//! VFS desktop shell (VFS-1): opens the core index in the per-user app data directory, runs
+//! VFS desktop shell (VFS-1): opens the core index in the per-user local app data directory, runs
 //! the background indexer, and exposes the command and event contract of `vfs_core::api` to
 //! the static frontend in `apps/desktop/ui`.
 
@@ -19,8 +19,32 @@ pub use vfs_core::{
 
 use vfs_core::{ProgressSink, SearchConfig, Vfs};
 
-/// File name of the index inside the app data directory.
+/// File name of the index inside the local app data directory.
 pub const INDEX_FILE: &str = "index.db";
+
+/// Moves an index that an earlier build left in `old_dir` (on Windows the roaming app data
+/// directory, which can be synced or backed up) to `new_dir`, the local app data directory.
+/// Runs only when `old_dir` holds an index and `new_dir` does not, so it happens once. The
+/// main file moves first; its WAL, shared memory, session folder and `.bad` copy follow.
+/// Returns whether an index was moved. If the main file cannot be renamed (for example a
+/// redirected roaming folder on another volume), nothing moves and the error is returned;
+/// the caller then builds a new index in `new_dir`.
+pub fn move_legacy_index(old_dir: &Path, new_dir: &Path) -> std::io::Result<bool> {
+    let old_index = old_dir.join(INDEX_FILE);
+    if old_dir == new_dir || !old_index.is_file() || new_dir.join(INDEX_FILE).exists() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(new_dir)?;
+    std::fs::rename(&old_index, new_dir.join(INDEX_FILE))?;
+    for entry in std::fs::read_dir(old_dir)? {
+        let name = entry?.file_name();
+        if name.to_string_lossy().starts_with(INDEX_FILE) {
+            std::fs::rename(old_dir.join(&name), new_dir.join(&name))?;
+        }
+    }
+    let _ = std::fs::remove_dir(old_dir); // only succeeds when nothing else is left there
+    Ok(true)
+}
 
 /// Managed state shared by every command.
 pub struct AppState {
@@ -96,11 +120,20 @@ pub fn run() {
         .invoke_handler(commands::handler())
         .setup(|app| {
             let handle = app.handle().clone();
+            // The index lives in the local (never roaming) app data directory: a multi-GB
+            // file must not be synced to a NAS or backed up with the user's profile.
             let started = app
                 .path()
-                .app_data_dir()
+                .app_local_data_dir()
                 .map_err(|e| e.to_string())
-                .and_then(|dir| init_core(&handle, &dir.join(INDEX_FILE)));
+                .and_then(|dir| {
+                    if let Ok(old_dir) = app.path().app_data_dir() {
+                        if let Err(e) = move_legacy_index(&old_dir, &dir) {
+                            log::warn!("index not moved from {}: {e}", old_dir.display());
+                        }
+                    }
+                    init_core(&handle, &dir.join(INDEX_FILE))
+                });
             if let Err(detail) = started {
                 fail_startup(&handle, &detail);
             }
@@ -124,4 +157,52 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VFS-1: an index left in the old (roaming) directory moves with its sibling files and
+    /// its session folder, the emptied old directory goes away, and a second call does nothing.
+    #[test]
+    fn legacy_index_is_moved_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (old, new) = (tmp.path().join("Roaming"), tmp.path().join("Local"));
+        std::fs::create_dir_all(old.join("index.db.session")).unwrap();
+        for name in ["index.db", "index.db-wal", "index.db-shm"] {
+            std::fs::write(old.join(name), name).unwrap();
+        }
+        assert!(move_legacy_index(&old, &new).unwrap());
+        for name in ["index.db", "index.db-wal", "index.db-shm"] {
+            assert_eq!(std::fs::read_to_string(new.join(name)).unwrap(), name);
+        }
+        assert!(new.join("index.db.session").is_dir());
+        assert!(!old.exists());
+        assert!(!move_legacy_index(&old, &new).unwrap());
+    }
+
+    /// VFS-1: an index already in the new directory is never overwritten by an old one,
+    /// other files in the old directory stay there, and identical directories move nothing.
+    #[test]
+    fn existing_index_wins_over_legacy_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (old, new) = (tmp.path().join("Roaming"), tmp.path().join("Local"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(old.join("index.db"), "old").unwrap();
+        std::fs::write(old.join("otro.txt"), "x").unwrap();
+        std::fs::write(new.join("index.db"), "new").unwrap();
+        assert!(!move_legacy_index(&old, &new).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(new.join("index.db")).unwrap(),
+            "new"
+        );
+        assert!(old.join("index.db").exists());
+
+        std::fs::remove_file(new.join("index.db")).unwrap();
+        assert!(move_legacy_index(&old, &new).unwrap());
+        assert!(old.join("otro.txt").exists());
+        assert!(!move_legacy_index(&old, &old).unwrap());
+    }
 }
