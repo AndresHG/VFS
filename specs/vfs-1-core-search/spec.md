@@ -81,7 +81,7 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
   any segment of the path, ignores case and accents ("notaria" finds "Notaría") and tolerates
   one typo.
 - AC-11 (R8) Given indexed files, When the user combines filters by type (document, photo,
-  video, audio, other), date, size and folder, Then only files matching all of them are shown.
+  video, audio, other, folder), date, size and folder, Then only files matching all of them are shown.
 - AC-12 (R9) Given the app is open, When the user looks at it, Then there is one screen with a
   search box, results as they type, visible filters and Spanish copy.
 - AC-13 (R10) Given a result, When the user chooses "mostrar en carpeta", Then Finder/Explorer

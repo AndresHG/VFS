@@ -1,7 +1,9 @@
 //! Connections, pragmas, migrations and the write helpers shared by the indexer and the
 //! synthetic database generator (`ingest`), so both produce exactly the same layout.
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -81,35 +83,100 @@ pub fn bad_path(db_path: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-/// `<db_path>.session`: exists while a session is open. Found at open, it means the
-/// previous session did not shut down cleanly.
-fn session_marker(db_path: &Path) -> PathBuf {
+/// `<db_path>.session/`: one `<pid>-<n>.lock` file per open session, held under an OS file
+/// lock for the session's lifetime, so a CLI and the app can share an index.
+pub(crate) fn session_dir(db_path: &Path) -> PathBuf {
     let mut p = db_path.as_os_str().to_owned();
     p.push(".session");
     PathBuf::from(p)
 }
 
-/// Ends a session opened by [`open_or_recover`]: the next open skips the integrity check.
-pub(crate) fn close_session(db_path: &Path) {
-    let _ = std::fs::remove_file(session_marker(db_path));
+/// An open session on an index. Dropping it is the clean shutdown: its marker file is
+/// unlocked and removed (and the session directory too, once empty).
+pub(crate) struct Session {
+    file: Option<File>,
+    path: PathBuf,
 }
 
-/// [`open_rw`] that starts a session. `PRAGMA quick_check` reads the whole index, so it runs
-/// only when the previous session did not end with [`close_session`]. If the index cannot be
-/// opened or fails the check, it is moved to `<db_path>.bad` (replacing an older one), a
-/// fresh index is created, and every root path that could still be read from the bad file
-/// is re-added pending deep, so the next scan rebuilds it (VFS-1 AC-6). Returns the
-/// connection and whether recovery ran. `SchemaTooNew` is returned as is: a newer build's
-/// index is never discarded.
-pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
-    let unclean = session_marker(db_path).exists();
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            let _ = file.unlock();
+        }
+        let _ = std::fs::remove_file(&self.path);
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::remove_dir(dir); // fails while other sessions are open
+        }
+    }
+}
+
+/// Starts a session and reports whether an earlier one ended uncleanly: a marker file that
+/// no live session holds locked (its process died) is stale; it is removed. A marker is
+/// created and locked under a temporary name, then renamed, so no other opener can mistake
+/// it for stale.
+pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = session_dir(db_path);
+    let mut unclean = false;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().is_none_or(|e| e != "lock") {
+                continue;
+            }
+            let Ok(file) = File::options().read(true).write(true).open(&path) else {
+                continue;
+            };
+            if file.try_lock().is_ok() {
+                unclean = true;
+                let _ = file.unlock();
+                drop(file);
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let stem = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let tmp = dir.join(format!("{stem}.tmp"));
+    let path = dir.join(format!("{stem}.lock"));
+    std::fs::create_dir_all(&dir)?;
+    // A closing session may remove the empty directory in between: retry once.
+    let file = match File::create(&tmp) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(&dir)?;
+            File::create(&tmp)?
+        }
+        other => other?,
+    };
+    file.lock()?;
+    std::fs::rename(&tmp, &path)?;
+    Ok((
+        Session {
+            file: Some(file),
+            path,
+        },
+        unclean,
+    ))
+}
+
+/// [`open_rw`] with integrity handling, for a caller that ends its session itself.
+/// `PRAGMA quick_check` reads the whole index, so it runs only when an earlier session did
+/// not end cleanly. If the index cannot be opened or fails the check, it is moved to
+/// `<db_path>.bad` (replacing an older one), a fresh index is created, and every root path
+/// that could still be read from the bad file is re-added pending deep, so the next scan
+/// rebuilds it (VFS-1 AC-6). `SchemaTooNew` is returned as is: a newer build's index is
+/// never discarded.
+pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
+    let (session, unclean) = begin_session(db_path)?;
     let opened = open_rw(db_path).and_then(|c| {
         if unclean {
             quick_check(&c)?;
         }
         Ok(c)
     });
-    let result = match opened {
+    let (conn, recovered) = match opened {
         Ok(conn) => (conn, false),
         Err(Error::SchemaTooNew) => return Err(Error::SchemaTooNew),
         Err(e) => {
@@ -117,8 +184,14 @@ pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
             (recover(db_path)?, true)
         }
     };
-    std::fs::write(session_marker(db_path), b"")?;
-    Ok(result)
+    Ok((conn, recovered, session))
+}
+
+/// [`open_session`] whose session ends when this returns (one-shot tools). Returns the
+/// connection and whether recovery ran.
+pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
+    let (conn, recovered, _session) = open_session(db_path)?;
+    Ok((conn, recovered))
 }
 
 fn quick_check(conn: &Connection) -> Result<()> {
@@ -828,23 +901,45 @@ mod tests {
         let path = dir.path().join("index.db");
         corrupt_tail_index(&path);
 
-        let (_conn, recovered) = open_or_recover(&path).unwrap();
+        let (conn, recovered) = open_or_recover(&path).unwrap();
         assert!(
             !recovered,
-            "no session marker: the damaged tail is not read at open"
+            "no earlier session: the damaged tail is not read at open"
         );
-        drop(_conn);
-        close_session(&path);
+        drop(conn);
         let (conn, recovered) = open_or_recover(&path).unwrap();
         assert!(!recovered, "clean reopen does not run quick_check");
         drop(conn);
-        assert!(session_marker(&path).exists());
+        assert!(!session_dir(&path).exists());
 
-        // The session above was not closed: the next open checks and recovers.
+        // A marker nobody holds locked is what a crashed session leaves behind.
+        std::fs::create_dir_all(session_dir(&path)).unwrap();
+        std::fs::write(session_dir(&path).join("99999-0.lock"), b"").unwrap();
         let (conn, recovered) = open_or_recover(&path).unwrap();
         assert!(recovered);
         assert!(bad_path(&path).exists());
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM roots"), 1);
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 0);
+        assert!(!session_dir(&path).exists(), "the stale marker was removed");
+    }
+
+    /// Two sessions on one index (CLI and app): the first to close leaves the other's marker
+    /// alone, and a live session is never taken for a crashed one.
+    #[test]
+    fn concurrent_sessions_keep_each_others_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let (a, unclean_a) = begin_session(&path).unwrap();
+        let (b, unclean_b) = begin_session(&path).unwrap();
+        assert!(!unclean_a && !unclean_b, "a live session is not stale");
+        let b_path = b.path.clone();
+        drop(a);
+        assert!(b_path.exists());
+        let (c, unclean_c) = begin_session(&path).unwrap();
+        assert!(!unclean_c);
+        drop(c);
+        assert!(b_path.exists());
+        drop(b);
+        assert!(!session_dir(&path).exists());
     }
 }

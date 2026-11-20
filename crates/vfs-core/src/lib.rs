@@ -50,12 +50,8 @@ struct Inner {
     searcher: Mutex<(Connection, SearchState)>,
     search_interrupt: InterruptHandle,
     indexer: Mutex<Option<IndexerHandle>>,
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        db::close_session(&self.db_path);
-    }
+    /// Open session marker; dropped by `shutdown` or with the last clone (clean shutdown).
+    session: Mutex<Option<db::Session>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -72,7 +68,8 @@ impl Vfs {
     /// Opens or creates the index and applies migrations; an unreadable index is moved to
     /// `index.db.bad` and rebuilt from its roots (`db::open_or_recover`). Starts no thread.
     pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {
-        drop(db::open_or_recover(db_path)?);
+        let (conn, _recovered, session) = db::open_session(db_path)?;
+        drop(conn);
         let reader = db::open_ro(db_path)?;
         let search_conn = db::open_ro(db_path)?;
         let search_interrupt = search_conn.get_interrupt_handle();
@@ -84,6 +81,7 @@ impl Vfs {
                 searcher: Mutex::new((search_conn, SearchState::default())),
                 search_interrupt,
                 indexer: Mutex::new(None),
+                session: Mutex::new(Some(session)),
             }),
         })
     }
@@ -201,7 +199,7 @@ impl Vfs {
         if let Some(h) = lock(&self.inner.indexer).take() {
             h.shutdown();
         }
-        db::close_session(&self.inner.db_path);
+        drop(lock(&self.inner.session).take());
     }
 
     /// Foreground variant for the CLI and tests: processes pending directories on the calling
@@ -283,6 +281,50 @@ mod tests {
             Path::new("/datos").join("Año 2019").join("Notaría.pdf")
         );
         assert!(matches!(vfs.file_path(sub + 100), Err(Error::NotFound(_))));
+    }
+
+    /// VFS-1 AC-6: a session marker exists while the index is open and is removed by
+    /// `shutdown()` or by dropping the last clone, so the next open skips the integrity check.
+    #[test]
+    fn session_marker_ends_on_shutdown_and_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let marker = dir.path().join("index.db.session");
+
+        let vfs = Vfs::open(&path).unwrap();
+        assert!(marker.exists());
+        vfs.shutdown();
+        assert!(!marker.exists());
+        drop(vfs);
+
+        let vfs = Vfs::open(&path).unwrap();
+        let clone = vfs.clone();
+        drop(vfs);
+        assert!(marker.exists(), "a clone keeps the session open");
+        drop(clone);
+        assert!(!marker.exists());
+    }
+
+    /// VFS-1 AC-6: two handles on one index; closing one keeps the other's session marker
+    /// and does not make the next open look like a crash recovery.
+    #[test]
+    fn two_handles_share_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let marker = dir.path().join("index.db.session");
+        let app = Vfs::open(&path).unwrap();
+        let cli = Vfs::open(&path).unwrap();
+        cli.shutdown();
+        assert!(marker.exists(), "the app's session is still open");
+        let (probe, unclean) = db::begin_session(&path).unwrap();
+        assert!(
+            !unclean,
+            "the app's live session is not taken for a crashed one"
+        );
+        drop(probe);
+        assert!(marker.exists());
+        drop(app);
+        assert!(!marker.exists());
     }
 
     /// The facade is shareable across threads (Tauri state, indexer callbacks).
