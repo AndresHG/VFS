@@ -197,6 +197,11 @@ mod imp {
     }
 
     pub(super) fn drive_kind(path: &Path) -> DriveKind {
+        // `GetVolumePathNameW` answers for paths that no longer exist; a missing folder is
+        // unknown on every platform, so an unplugged or deleted root is never called local.
+        if std::fs::symlink_metadata(path).is_err() {
+            return DriveKind::Unknown;
+        }
         let Some(vol) = volume_path(path) else {
             return DriveKind::Unknown;
         };
