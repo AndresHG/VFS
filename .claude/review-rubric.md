@@ -30,7 +30,7 @@ from; they are stack-agnostic.
 - **R6. Committed text is fit for a public open-source repo.** No details about the authors,
   their relatives or their private life in code, docs, specs, fixtures, mockups, commit
   messages or the PR body; users are "the user" / "they", and sample data is invented.
-  `scripts/personal_refs.py` catches the obvious phrases in CI; judge the rest (#120).
+  `scripts/personal_refs.py` catches the obvious phrases in CI; judge the rest (#121).
 
 ## Worth flagging — not blocking
 
