@@ -27,6 +27,10 @@ from; they are stack-agnostic.
 - **R5. A `CLAUDE.md`, spec or doc the change makes wrong is edited in the same PR**,
   replacing the rule rather than appending; an implemented spec is not edited — a new spec
   supersedes it (inherited).
+- **R6. Committed text is fit for a public open-source repo.** No details about the authors,
+  their relatives or their private life in code, docs, specs, fixtures, mockups, commit
+  messages or the PR body; users are "the user" / "they", and sample data is invented.
+  `scripts/personal_refs.py` catches the obvious phrases in CI; judge the rest (#120).
 
 ## Worth flagging — not blocking
 

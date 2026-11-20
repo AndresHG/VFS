@@ -44,6 +44,10 @@ jobs:
         run: python3 scripts/claude_md_budget.py
       - name: Harness hook tests
         run: python3 -m unittest discover -s .claude/hooks -p "test_*.py"
+      - name: No personal references
+        run: python3 scripts/personal_refs.py
+      - name: Script tests
+        run: python3 -m unittest discover -s scripts -p "test_*.py"
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

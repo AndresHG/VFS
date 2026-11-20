@@ -80,7 +80,7 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
   [`docs/content-search-design.md`](content-search-design.md).
 - Semantic search with embeddings, so a query finds a concept even when the words differ:
   through the configured model API, or a small local model once issue 41 has measured one
-  on the target PC.
+  on the reference machine.
 - Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
