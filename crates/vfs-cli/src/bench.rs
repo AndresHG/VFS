@@ -269,9 +269,10 @@ pub struct QueryReport {
     pub total: u32,
     pub truncated_by: Option<TruncatedBy>,
     pub warm_p50_ms: f64,
+    pub warm_max_ms: f64,
     pub cold_ms: f64,
     pub canary: Option<String>,
-    /// 1-based rank of the canary in the returned page; `None` when absent.
+    /// 1-based rank of the canary in the whole ranked list; `None` when not returned.
     pub canary_rank: Option<usize>,
 }
 
@@ -332,6 +333,41 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+/// Order of the measured warm runs: `runs` rounds over the whole query set, so no query
+/// runs twice in a row and none is served by the search's cache of the last ranked list.
+pub fn warm_order(queries: usize, runs: u32) -> Vec<usize> {
+    (0..runs).flat_map(|_| 0..queries).collect()
+}
+
+/// 1-based rank of the file named `canary` in the whole ranked list of `query` (every page,
+/// up to the hit cap); `None` when the search does not return it.
+/// Pages of `page_size` hits are requested.
+pub fn canary_rank(
+    vfs: &Vfs,
+    query: &SearchQuery,
+    canary: &str,
+    page_size: u32,
+) -> vfs_core::Result<Option<usize>> {
+    let mut page = SearchQuery {
+        limit: page_size,
+        offset: 0,
+        ..query.clone()
+    };
+    loop {
+        let r = vfs.search(&page)?;
+        if let Some(p) = r.hits.iter().position(|h| !h.is_dir && h.name == canary) {
+            return Ok(Some(page.offset as usize + p + 1));
+        }
+        page.offset += page_size;
+        if r.hits.is_empty() || page.offset >= r.total {
+            return Ok(None);
+        }
+    }
+}
+
+/// Page size used to walk a ranked list (the search's maximum).
+const PAGE: u32 = 500;
+
 pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
     if !db.is_file() {
         return Err(format!(
@@ -367,30 +403,26 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
         .collect::<vfs_core::Result<Vec<_>>>()?;
     let mut warm: Vec<Vec<f64>> = vec![Vec::with_capacity(runs as usize); queries.len()];
     let mut deadline = vec![0usize; queries.len()];
-    for _ in 0..runs {
-        for (i, q) in queries.iter().enumerate() {
-            let t = Instant::now();
-            let r = vfs.search(&q.query)?;
-            warm[i].push(ms(t));
-            deadline[i] += usize::from(r.truncated_by == Some(TruncatedBy::Deadline));
-        }
+    for i in warm_order(queries.len(), runs) {
+        let t = Instant::now();
+        let r = vfs.search(&queries[i].query)?;
+        warm[i].push(ms(t));
+        deadline[i] += usize::from(r.truncated_by == Some(TruncatedBy::Deadline));
     }
     let mut reports = Vec::with_capacity(queries.len());
     for (i, (q, first)) in queries.iter().zip(&firsts).enumerate() {
         let samples = &warm[i];
-        let canary_rank = q.canary.and_then(|c| {
-            first
-                .hits
-                .iter()
-                .position(|h| !h.is_dir && h.name == c)
-                .map(|p| p + 1)
-        });
+        let canary_rank = match q.canary {
+            Some(c) => canary_rank(&vfs, &q.query, c, PAGE)?,
+            None => None,
+        };
         reports.push(QueryReport {
             class: q.class.to_string(),
             query: q.label.clone(),
             total: first.total,
             truncated_by: first.truncated_by,
             warm_p50_ms: Latency::of(samples).p50_ms,
+            warm_max_ms: Latency::of(samples).max_ms,
             cold_ms: cold[i],
             canary: q.canary.map(str::to_string),
             canary_rank,
@@ -539,6 +571,51 @@ mod tests {
             .iter()
             .filter(|q| q.class == "filter_only")
             .all(|q| q.query.text.is_empty()));
+    }
+
+    /// VFS-1 AC-9: warm runs go round-robin, so consecutive measured searches always differ
+    /// (a repeated query would be served from the cached ranked list, not measured).
+    #[test]
+    fn warm_runs_never_repeat_a_query_back_to_back() {
+        let n = query_set().len();
+        let order = warm_order(n, 5);
+        assert_eq!(order.len(), n * 5);
+        assert!(order.windows(2).all(|w| w[0] != w[1]));
+        for i in 0..n {
+            assert_eq!(order.iter().filter(|&&j| j == i).count(), 5);
+        }
+    }
+
+    /// VFS-1 AC-9, AC-10: a canary's rank is its position in the whole ranked list, found
+    /// across pages; a file the search does not return has no rank.
+    #[test]
+    fn canary_rank_walks_every_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("index.db");
+        crate::gen::gen_db(&db, 3_000, 7, false).unwrap();
+        let vfs = Vfs::open(&db).unwrap();
+        let (_, name) = crate::gen::CANARIES[0];
+        let q = |text: &str| SearchQuery {
+            text: text.into(),
+            filters: SearchFilters::default(),
+            limit: 1,
+            offset: 0,
+        };
+        let page = 10;
+        assert_eq!(
+            canary_rank(&vfs, &q("notaría pérez 2019"), name, page).unwrap(),
+            Some(1)
+        );
+        let all = vfs
+            .search(&SearchQuery {
+                limit: 500,
+                ..q("pdf")
+            })
+            .unwrap();
+        let expected = all.hits.iter().position(|h| h.name == name).map(|p| p + 1);
+        assert!(expected.is_some_and(|r| r > page as usize), "{expected:?}");
+        assert_eq!(canary_rank(&vfs, &q("pdf"), name, page).unwrap(), expected);
+        assert_eq!(canary_rank(&vfs, &q("zzqxj"), name, page).unwrap(), None);
     }
 
     /// VFS-1 AC-9: p95 is the nearest-rank percentile.

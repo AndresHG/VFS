@@ -299,6 +299,10 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
             "INSERT INTO dirs_fts(dirs_fts, rank) VALUES('merge', 500)",
             [],
         )?;
+        tx.execute(
+            "INSERT INTO file_paths_fts(file_paths_fts, rank) VALUES('merge', 500)",
+            [],
+        )?;
     }
     tx.commit()?;
     tally.files_delta = 0;
@@ -372,6 +376,11 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
                     "DELETE FROM files_fts WHERE rowid IN (SELECT id FROM files WHERE dir_id = ?1)",
                     [dir_id],
                 )? as u64;
+                tx.execute(
+                    "DELETE FROM file_paths_fts WHERE rowid IN \
+                     (SELECT id FROM files WHERE dir_id = ?1)",
+                    [dir_id],
+                )?;
                 tx.execute("DELETE FROM files WHERE dir_id = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs_fts WHERE rowid = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs WHERE id = ?1", [dir_id])?;

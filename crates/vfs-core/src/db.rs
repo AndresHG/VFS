@@ -11,9 +11,10 @@ use crate::error::{Error, Result};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as phase-2 content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
-const SCHEMA_V1: &str = include_str!("schema.sql");
+/// Migrations: entry `i` takes an index from version `i` to `i + 1`.
+const MIGRATIONS: [&str; 2] = [include_str!("schema.sql"), include_str!("schema_v2.sql")];
 
 /// Readers wait this long for a lock.
 const READER_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -23,10 +24,6 @@ const WRITER_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 /// these bound the index's resident memory (VFS-1 AC-9).
 const WRITER_CACHE_KIB: i64 = 32 * 1024;
 const READER_CACHE_KIB: i64 = 64 * 1024;
-/// The search connection keeps more of the FTS index and the rows it reads, so repeated
-/// and related searches stay fast when the system has little file cache to spare. With the
-/// writer and the other reader, the page caches stay under 230 MB (AC-9: < 300 MB).
-const SEARCH_CACHE_KIB: i64 = 128 * 1024;
 /// WAL pages before an automatic checkpoint.
 const WAL_AUTOCHECKPOINT_PAGES: i64 = 4000;
 /// The WAL is truncated to this size after a checkpoint.
@@ -77,9 +74,11 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
     if version > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew);
     }
-    if version == 0 {
+    if version < SCHEMA_VERSION {
         let tx = conn.transaction()?;
-        tx.execute_batch(SCHEMA_V1)?;
+        for sql in &MIGRATIONS[version as usize..] {
+            tx.execute_batch(sql)?;
+        }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
     }
@@ -100,13 +99,6 @@ pub fn open_ro(db_path: &Path) -> Result<Connection> {
     if schema_version(&conn)? > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew);
     }
-    Ok(conn)
-}
-
-/// [`open_ro`] with the larger page cache of the search connection.
-pub(crate) fn open_search(db_path: &Path) -> Result<Connection> {
-    let conn = open_ro(db_path)?;
-    conn.execute_batch(&format!("PRAGMA cache_size=-{SEARCH_CACHE_KIB};"))?;
     Ok(conn)
 }
 
@@ -321,7 +313,7 @@ pub fn join_rel(root: &str, rel_path: &str) -> PathBuf {
 }
 
 /// Write helpers. Every FTS row is written here, in the caller's transaction, next to its
-/// base row (`files_fts.rowid = files.id`, `dirs_fts.rowid = dirs.id`).
+/// base row (`files_fts.rowid = file_paths_fts.rowid = files.id`, `dirs_fts.rowid = dirs.id`).
 pub mod ingest {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -447,7 +439,8 @@ pub mod ingest {
         Ok(())
     }
 
-    /// Inserts a file and its `files_fts` row; computes `name_key` and `kind`.
+    /// Inserts a file with its `files_fts` and `file_paths_fts` rows; computes `name_key`
+    /// and `kind`.
     pub fn insert_file(tx: &Transaction, dir_id: i64, file: &NewFile) -> Result<i64> {
         let name_key = fold_key(file.name);
         tx.prepare_cached(
@@ -465,6 +458,11 @@ pub mod ingest {
         let id = tx.last_insert_rowid();
         tx.prepare_cached("INSERT INTO files_fts(rowid, name_key) VALUES (?1, ?2)")?
             .execute(params![id, name_key])?;
+        tx.prepare_cached(
+            "INSERT INTO file_paths_fts(rowid, path) SELECT ?1, \
+             CASE path_key WHEN '' THEN ?2 ELSE path_key || '/' || ?2 END FROM dirs WHERE id = ?3",
+        )?
+        .execute(params![id, name_key, dir_id])?;
         Ok(id)
     }
 
@@ -474,9 +472,11 @@ pub mod ingest {
         Ok(())
     }
 
-    /// Deletes a file and its `files_fts` row.
+    /// Deletes a file and its FTS rows.
     pub fn delete_file(tx: &Transaction, file_id: i64) -> Result<()> {
         tx.prepare_cached("DELETE FROM files_fts WHERE rowid = ?1")?
+            .execute([file_id])?;
+        tx.prepare_cached("DELETE FROM file_paths_fts WHERE rowid = ?1")?
             .execute([file_id])?;
         tx.prepare_cached("DELETE FROM files WHERE id = ?1")?
             .execute([file_id])?;
@@ -508,13 +508,15 @@ pub mod ingest {
             p,
             |r| r.get(0),
         )?;
-        tx.execute(
-            &format!(
-                "DELETE FROM files_fts WHERE rowid IN \
-                 (SELECT id FROM files WHERE dir_id IN ({subtree}))"
-            ),
-            p,
-        )?;
+        for fts in ["files_fts", "file_paths_fts"] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {fts} WHERE rowid IN \
+                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+                ),
+                p,
+            )?;
+        }
         tx.execute(&format!("DELETE FROM files WHERE dir_id IN ({subtree})"), p)?;
         tx.execute(
             &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
@@ -527,13 +529,15 @@ pub mod ingest {
     /// Deletes a root with all its directories, files and FTS rows at once.
     pub fn delete_root(tx: &Transaction, root_id: i64) -> Result<()> {
         let subtree = "SELECT id FROM dirs WHERE root_id = ?1";
-        tx.execute(
-            &format!(
-                "DELETE FROM files_fts WHERE rowid IN \
-                 (SELECT id FROM files WHERE dir_id IN ({subtree}))"
-            ),
-            [root_id],
-        )?;
+        for fts in ["files_fts", "file_paths_fts"] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {fts} WHERE rowid IN \
+                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+                ),
+                [root_id],
+            )?;
+        }
         tx.execute(
             &format!("DELETE FROM files WHERE dir_id IN ({subtree})"),
             [root_id],
@@ -633,6 +637,73 @@ mod tests {
             ro.execute("DELETE FROM roots", []).is_err(),
             "reader is query-only"
         );
+    }
+
+    fn path_ids(conn: &Connection, grams: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT rowid FROM file_paths_fts WHERE file_paths_fts MATCH ?1 ORDER BY rowid",
+            )
+            .unwrap();
+        stmt.query_map([grams], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<i64>>>()
+            .unwrap()
+    }
+
+    /// VFS-1 S2, AC-9: opening a version-1 index migrates it to version 2 and fills the
+    /// per-file path index from the existing rows, so path searches work without a rescan.
+    #[test]
+    fn version_1_index_is_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute_batch(
+                "INSERT INTO dirs(id, root_id, parent_id, rel_path, path_key, name_key) \
+                   VALUES (7, 1, NULL, 'Año 2019', 'ano 2019', 'ano 2019');
+                 INSERT INTO files(id, dir_id, name, name_key, kind, size, mtime) \
+                   VALUES (3, 7, 'Banco.pdf', 'banco.pdf', 1, 1, 1);",
+            )
+            .unwrap();
+        }
+        let conn = open_rw(&path).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(path_ids(&conn, "\"201\" AND \"ban\""), vec![3]);
+    }
+
+    /// VFS-1 S2: every file write keeps its row in the per-file path index ("folder path /
+    /// name"), and deleting the file or its folder removes it.
+    #[test]
+    fn path_index_follows_file_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sub = insert_dir(&tx, root, top, "Viaje Cádiz", 1).unwrap();
+        let file = |name| NewFile {
+            name,
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        let a = insert_file(&tx, sub, &file("playa 2008.jpg")).unwrap();
+        let b = insert_file(&tx, top, &file("cadiz.txt")).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(path_ids(&conn, "\"cad\" AND \"008\""), vec![a]);
+        assert_eq!(path_ids(&conn, "\"adi\""), vec![a, b]);
+        let tx = conn.transaction().unwrap();
+        delete_file(&tx, b).unwrap();
+        delete_dir_subtree(&tx, sub).unwrap();
+        tx.commit().unwrap();
+        assert!(path_ids(&conn, "\"adi\"").is_empty());
     }
 
     /// An index written by a newer build is refused, not overwritten.

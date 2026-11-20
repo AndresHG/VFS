@@ -72,7 +72,7 @@ impl Vfs {
         let (conn, _recovered, session) = db::open_session(db_path)?;
         drop(conn);
         let reader = db::open_ro(db_path)?;
-        let search_conn = db::open_search(db_path)?;
+        let search_conn = db::open_ro(db_path)?;
         let search_interrupt = search_conn.get_interrupt_handle();
         Ok(Vfs {
             inner: Arc::new(Inner {

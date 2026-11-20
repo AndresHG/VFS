@@ -2,6 +2,7 @@
 
 use std::cmp::Reverse;
 
+use crate::fuzzy::starts_within_one;
 use crate::types::{MatchKind, SearchHit};
 
 /// A verified hit plus what ranking needs. Built by `search.rs` (T2a).
@@ -12,8 +13,9 @@ pub(crate) struct Candidate {
 }
 
 /// Sorts `candidates` best first: whole-query or stem match on the name, all terms in the
-/// name with the first as prefix, all terms in the name, some term only in the path, fuzzy;
-/// ties by shorter name, newer `modified`, lower id. `folded_query` is the whole folded
+/// name with the first as prefix, all terms in the name, some term only in the path, typo
+/// with the name starting near the first term, other typos; ties by shorter name, newer
+/// `modified`, lower id. `folded_query` is the whole folded
 /// query text and `terms` its folded terms.
 ///
 /// Folders (VFS-1 D1) rank by the same rules on their own name; on a full tie a file sorts
@@ -34,12 +36,17 @@ pub(crate) fn rank(candidates: &mut [Candidate], folded_query: &str, terms: &[St
 }
 
 /// 0 = whole query or stem, 1 = all terms in the name with the first as prefix, 2 = all
-/// terms in the name, 3 = some term only in the path, 4 = fuzzy.
+/// terms in the name, 3 = some term only in the path, 4 = typo with the name starting
+/// within one edit of the first term, 5 = other typos.
 fn tier(c: &Candidate, trimmed: &str, whole: &str, terms: &[String]) -> u8 {
-    if c.hit.matched == MatchKind::Fuzzy {
-        return 4;
-    }
     let name = c.name_key.as_str();
+    if c.hit.matched == MatchKind::Fuzzy {
+        return if starts_within_one(name, &terms[0]) {
+            4
+        } else {
+            5
+        };
+    }
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
     if [name, stem].iter().any(|n| *n == trimmed || *n == whole) {
         return 0;
@@ -135,6 +142,22 @@ mod tests {
                 (7, false),
                 (1, false)
             ]
+        );
+    }
+
+    /// VFS-1 AC-10: among typo matches, a name that starts near the first term ranks first
+    /// ("notaira" puts "Notaría Pérez" before the shorter "Escritura notaría").
+    #[test]
+    fn typo_at_the_start_of_the_name_ranks_first() {
+        use MatchKind::*;
+        let c = vec![
+            cand(1, "Escritura notaría.zip", 50, Fuzzy, false),
+            cand(2, "Notaría Pérez escritura 2019.pdf", 10, Fuzzy, false),
+            cand(3, "acta.pdf", 10, Path, false),
+        ];
+        assert_eq!(
+            ranked(c, "notaira"),
+            vec![(3, false), (2, false), (1, false)]
         );
     }
 

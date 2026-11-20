@@ -176,14 +176,18 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   shutdown) is renamed to `index.db.bad` and rebuilt from its roots.
 - S1. For each root, query terms already contained in the root's own path are ignored,
   unless none would remain.
-- S2. The generator term is the one with the fewest matches in both FTS tables (counted
-  exactly up to 50,000): candidates are the files whose name contains it and the folders
-  whose path contains it, with their files, read by rowid from the FTS match. Every
-  candidate is verified against all terms.
-- S3. The deadline applies to scans and to generators over the probe cap (5000 rows); a
-  generator under it runs to completion, bounded at about 2 s.
-- S4. Typo tolerance: for each edit position, FTS candidates from the two parts of the term
-  around it (parts shorter than 3 characters dropped), verified within one edit.
+- S2. Candidates are retrieved in ranking-tier order, so a full list never pushes out a
+  better tier: names starting with the first term, then names holding every term (read up
+  to 4,000 and ranked before the cut to 2,000 hits), then files whose relative path and
+  name hold every term (one intersection in `file_paths_fts`, schema version 2), then
+  typos. Filters are SQL predicates of every stage. Every candidate is verified against all
+  terms.
+- S3. The deadline applies to scans; FTS-driven stages run to completion, bounded at about
+  2 s.
+- S4. Typo tolerance: first the deletions and adjacent transpositions of a term (anchored at
+  the start of the name, then anywhere in it), then, for each edit position, FTS candidates
+  from the two parts of the term around it (parts shorter than 3 characters dropped); all
+  verified within one edit. A typo whose name starts near the first term ranks first.
 - S5. Terms shorter than 3 characters cannot use the trigram index: they are verified in
   Rust, or scanned when they are the only terms.
 - S6. A new query interrupts the running one; `\` is folded to `/`; filter-only queries list
@@ -216,7 +220,9 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 
 - Planned design: flat directory walk (one I/O stream per HDD), SQLite WAL + FTS5 trigram over
   the accent-folded name, directory paths in their own table, volumes identified by GUID or
-  serial. Unmeasured risks: HDD scan time and FTS5 trigram at several million names
+  serial. Schema version 2 adds `file_paths_fts`, each file's folded relative path and name
+  as trigrams without positions (`detail=none`): +322 MB at 2 M files (577 MB → about
+  940 MB), against +1066 MB with positions. Unmeasured risks: HDD scan time and FTS5 trigram at several million names
   (alternative: an in-memory name buffer).
 - Phase 2 content search: extraction in an isolated worker, Spanish BM25; small embeddings
   optional. BM25 outperforms dense models on long Spanish documents.

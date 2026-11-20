@@ -41,6 +41,42 @@ pub(crate) fn candidate_queries(term: &str) -> Vec<String> {
     out
 }
 
+/// The distinct strings one deletion or one adjacent transposition away from the folded
+/// `term`, at least [`MIN_PART`] chars long: the spellings a typed typo most often hides
+/// (an extra or a swapped letter). Empty when `term` is shorter than [`FUZZY_MIN_LEN`].
+pub(crate) fn near_variants(term: &str) -> Vec<String> {
+    let t: Vec<char> = term.chars().collect();
+    let n = t.len();
+    if n < FUZZY_MIN_LEN {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |v: Vec<char>| {
+        let s: String = v.into_iter().collect();
+        if s != term && s.chars().count() >= MIN_PART && !out.contains(&s) {
+            out.push(s);
+        }
+    };
+    for i in 0..n {
+        let mut v = t.clone();
+        v.remove(i);
+        push(v);
+    }
+    for i in 0..n - 1 {
+        let mut v = t.clone();
+        v.swap(i, i + 1);
+        push(v);
+    }
+    out
+}
+
+/// True when `name` starts with a string within one edit of `term` (the typo analogue of
+/// "the name starts with the first term").
+pub(crate) fn starts_within_one(name: &str, term: &str) -> bool {
+    let window: String = name.chars().take(term.chars().count() + 1).collect();
+    contains_within_one(&window, term)
+}
+
 /// `"a" AND "b"` over the parts of at least [`MIN_PART`] chars; `None` when none is left.
 fn join_parts(parts: &[&[char]]) -> Option<String> {
     let kept: Vec<String> = parts
@@ -279,5 +315,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// VFS-1 AC-10: near variants are the single deletions and adjacent transpositions of
+    /// a long term, so the intended spelling of "notaira" (a swap) and "notariaa" (an extra
+    /// letter) is among them; short terms get none.
+    #[test]
+    fn near_variants_cover_swaps_and_extra_letters() {
+        let v = near_variants("notaira");
+        assert!(v.contains(&"notaria".to_string()));
+        assert!(v.contains(&"otaira".to_string()));
+        assert!(!v.contains(&"notaira".to_string()));
+        assert!(near_variants("notariaa").contains(&"notaria".to_string()));
+        assert!(near_variants("nota").is_empty());
+        let mut sorted = v.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), v.len(), "no duplicates");
+    }
+
+    /// VFS-1 AC-10: a name starts within one edit of a term only when the edit is at its
+    /// start, not when the near match is further in.
+    #[test]
+    fn starts_within_one_is_anchored() {
+        assert!(starts_within_one("notaria perez.pdf", "notaira"));
+        assert!(starts_within_one("notria.pdf", "notaria"));
+        assert!(!starts_within_one("escritura notaria.zip", "notaira"));
     }
 }

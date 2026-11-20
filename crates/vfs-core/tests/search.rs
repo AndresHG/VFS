@@ -500,7 +500,7 @@ fn ac9_truncation_by_cap_is_reported() {
 }
 
 /// VFS-1 AC-9 (U1, S3): an expired deadline cuts scans and reports `truncatedBy = deadline`;
-/// a generator under its cap still runs to completion.
+/// an FTS-driven stage still runs to completion.
 #[test]
 fn ac9_truncation_by_deadline_is_reported() {
     let fx = fixture_with(SearchConfig {
@@ -525,7 +525,7 @@ fn ac9_truncation_by_deadline_is_reported() {
     assert_eq!(r.truncated_by, Some(TruncatedBy::Deadline), "a scan");
     let r = fx.text("zq txt");
     assert_eq!(only(&r).id, zq);
-    assert!(r.truncated_by.is_none(), "under-cap generator");
+    assert!(r.truncated_by.is_none(), "FTS-driven stage");
 }
 
 /// VFS-1 AC-10: an empty query without filters returns nothing, quickly and untruncated;
@@ -596,4 +596,149 @@ fn ac10_one_typo() {
     let r = a.fx.text("notaira");
     assert_eq!(only(&r).id, a.notaria);
     assert_eq!(r.hits[0].matched, MatchKind::Fuzzy);
+}
+
+/// More decoys than the 2000-hit cap.
+const DECOYS: i64 = 2_100;
+
+impl Writer {
+    /// `n` files named by `name(i)` in `dir`, in one transaction.
+    fn many(&mut self, dir: i64, n: i64, name: impl Fn(i64) -> String) {
+        let tx = self.conn.transaction().unwrap();
+        for i in 0..n {
+            let name = name(i);
+            let f = ingest::NewFile {
+                name: &name,
+                size: 1,
+                mtime: i,
+                lossy: false,
+            };
+            ingest::insert_file(&tx, dir, &f).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+}
+
+/// VFS-1 AC-10: a multi-word, accent-less query finds the file with every word in its name
+/// first, although more than the hit cap of other files match with a word only in their
+/// folder (inserted earlier, so first in rowid order).
+#[test]
+fn ac10_name_match_beats_more_than_the_cap_of_path_matches() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let begona = w.dir(root, top, "Fotos de Begoña", 1);
+    w.many(begona, DECOYS, |i| format!("Íñigo {i}.jpg"));
+    let target = w.file(top, "Boda Íñigo y Begoña ceremonia completa.mp4", 1, 1);
+    drop(w);
+    let r = fx.text("inigo begona");
+    assert_eq!(r.hits[0].id, target, "{:?}", r.hits[0]);
+    assert_eq!(r.hits[0].matched, MatchKind::Name);
+    assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
+}
+
+/// VFS-1 AC-10: within names holding every word, the name starting with the first word is
+/// found first, although more than the cap of names hold the words further in.
+#[test]
+fn ac10_prefix_match_beats_more_than_the_cap_of_name_matches() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (_, top) = w.root("/datos");
+    w.many(top, DECOYS, |i| format!("foto {i} boda begona.jpg"));
+    let target = w.file(
+        top,
+        "Boda de Begoña, vídeo completo de la ceremonia.mp4",
+        1,
+        1,
+    );
+    drop(w);
+    let r = fx.text("boda begona");
+    assert_eq!(r.hits[0].id, target);
+    assert_eq!(r.total, 2000);
+}
+
+/// VFS-1 AC-10: one typo finds the file whose name starts near the typed word, although
+/// more than the cap of other names contain the word further in.
+#[test]
+fn ac10_typo_finds_the_name_starting_near_the_word() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (_, top) = w.root("/datos");
+    w.many(top, DECOYS, |i| format!("Escritura notaría {i}.zip"));
+    let target = w.file(top, "Notaría Pérez escritura 2019.pdf", 1, 1);
+    drop(w);
+    let r = fx.text("notaira");
+    assert_eq!(r.hits[0].id, target, "{:?}", r.hits[0]);
+    assert_eq!(r.hits[0].matched, MatchKind::Fuzzy);
+}
+
+/// VFS-1 AC-11: a word plus a type filter finds the one file of that type, although more
+/// than the cap of files of other types match the word.
+#[test]
+fn ac11_kind_filter_is_applied_before_the_cap() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (_, top) = w.root("/datos");
+    w.many(top, DECOYS, |i| format!("boda {i}.jpg"));
+    let target = w.file(top, "boda ceremonia completa.mp4", 1, 1);
+    drop(w);
+    let video = SearchFilters {
+        kinds: vec![FileKind::Video],
+        ..Default::default()
+    };
+    assert_eq!(only(&fx.search("boda", video)).id, target);
+}
+
+/// VFS-1 AC-11, decision D1: a word plus the folder type finds the folder, although more
+/// than the cap of files match the word.
+#[test]
+fn ac11_folder_kind_is_applied_before_the_cap() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    w.many(top, DECOYS, |i| format!("facturas {i}.pdf"));
+    let target = w.dir(root, top, "Facturas 2019", 1);
+    drop(w);
+    let folders = SearchFilters {
+        kinds: vec![FileKind::Folder],
+        ..Default::default()
+    };
+    let r = fx.search("facturas", folders);
+    let hit = only(&r);
+    assert!(hit.is_dir);
+    assert_eq!(hit.id, target);
+}
+
+/// VFS-1 AC-10: terms split between the folders and the name are found through the
+/// per-file path index, including a term that spans a folder boundary.
+#[test]
+fn ac10_terms_split_between_folders_and_name() {
+    let a = archive();
+    for q in ["gestoria 2019 extracto", "banco extr", "9/banco extracto"] {
+        let r = a.fx.text(q);
+        assert_eq!(only(&r).id, a.extracto, "query {q:?}");
+        assert_eq!(r.hits[0].matched, MatchKind::Path);
+    }
+}
+
+/// VFS-1 AC-11: a word plus a folder filter finds the file in that folder, although more
+/// than the cap of files elsewhere match the word (inserted first, so first in rowid
+/// order).
+#[test]
+fn ac11_folder_filter_is_applied_before_the_cap() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let otros = w.dir(root, top, "Otros", 1);
+    w.many(otros, DECOYS, |i| format!("escritura {i}.pdf"));
+    let gestoria = w.dir(root, top, "Gestoría", 1);
+    let ano = w.dir(root, gestoria, "Gestoría/Año 2019", 1);
+    let target = w.file(ano, "Notaría Pérez escritura 2019.pdf", 1, 1);
+    drop(w);
+    let inside = SearchFilters {
+        folder: Some("/datos/Gestoría".into()),
+        ..Default::default()
+    };
+    assert_eq!(only(&fx.search("escritura", inside.clone())).id, target);
+    assert_eq!(only(&fx.search("escritura notaria", inside)).id, target);
 }

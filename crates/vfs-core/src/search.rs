@@ -8,14 +8,17 @@
 //! already contained in a root's `path_key` are ignored for that root, unless that would
 //! leave no term (S1). Folders are results; empty folders included.
 //!
-//! Evaluation is candidate generation in SQL plus verification in Rust. Per group of roots
-//! with the same effective terms, the generator term is the one with the fewest matches in
-//! a capped count probe of both FTS tables (S2). Candidates: files whose name contains it
-//! (G1), and folders whose path contains it with their files (G2). Terms shorter than 3
-//! characters cannot use the trigram index (S5): they are verified in Rust, and when only
-//! short terms remain the group is a filtered scan. The wall-clock deadline applies to scans
-//! and to generators over their cap; a generator under its cap runs to completion, bounded
-//! at about 2 s (S3). A newer query interrupts this one through the connection's interrupt
+//! Evaluation is candidate generation in SQL plus verification in Rust, in ranking-tier
+//! order (S2) so that a full list never pushes out a better tier: names starting with the
+//! first term, names holding every term (one `files_fts` intersection each, read up to
+//! `NAME_READ_CAP` and ranked before the cut to `MAX_HITS`), then path matches (one
+//! intersection in `file_paths_fts`, the folded relative path and name of every file), then
+//! typos (near spellings in the name, then split-term candidates). Filters are SQL
+//! predicates of every stage, so a filtered query never spends the cap on rows the filter
+//! drops. Terms shorter than 3 characters cannot use the trigram index (S5): they are
+//! verified in Rust, and when only short terms remain the group is a filtered scan. The
+//! wall-clock deadline applies to scans; FTS-driven stages run to completion, bounded at
+//! about 2 s (S3). A newer query interrupts this one through the connection's interrupt
 //! handle (S6); both interruptions return what was found with `truncated_by = deadline`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -35,19 +38,17 @@ use crate::types::{
     SearchResponse, TruncatedBy,
 };
 
-/// Accepted hits per query; one more sets `truncated_by = cap`.
+/// Hits per query after ranking; more sets `truncated_by = cap`.
 const MAX_HITS: usize = 2000;
+/// Candidates read by the name tiers (every term in the name). They are all ranked before
+/// the list is cut to `MAX_HITS`, so a better-ranked name match is never lost to rowid
+/// order while its tier has at most this many matches.
+const NAME_READ_CAP: usize = 4_000;
 const MAX_TERMS: usize = 8;
-/// Directories read by the directory-driven generator.
+/// Directories read by a directory-driven stage.
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
 const SCAN_CAP_FUZZY: usize = 5_000;
-/// A generator term with more matches than this is "over cap" (S3): the configured deadline
-/// applies to it.
-const PROBE_CAP: i64 = 5_000;
-/// Count probes (S2) stop here. Counting FTS rowids is cheap, so the counts stay exact far
-/// beyond `PROBE_CAP` and still tell a common generator term from a very common one.
-const COUNT_CAP: i64 = 50_000;
 /// The fuzzy pass runs only when the exact pass found fewer hits.
 const FUZZY_TRIGGER: usize = 20;
 /// Bound on work that is not subject to the configured deadline (S3).
@@ -138,6 +139,7 @@ pub(crate) fn search(
         seen_dirs: HashSet::new(),
         truncated: None,
         stopped: false,
+        limit: MAX_HITS,
     };
     let outcome = run_query(conn, &mut run, &terms, f);
     conn.progress_handler(0, None::<fn() -> bool>)?;
@@ -155,6 +157,10 @@ pub(crate) fn search(
         });
     } else if candidates.len() > 1 {
         rank::rank(&mut candidates, &folded, &terms);
+    }
+    if candidates.len() > MAX_HITS {
+        candidates.truncate(MAX_HITS);
+        run.truncated.get_or_insert(TruncatedBy::Cap);
     }
     let hits: Vec<SearchHit> = candidates.into_iter().map(|c| c.hit).collect();
     let response = respond(&hits, run.truncated, offset, limit, start);
@@ -188,7 +194,7 @@ fn respond(
 
 /// Accumulated hits and the reason the search was cut short, if any.
 struct Run {
-    /// Deadline for scans and over-cap generators.
+    /// Deadline for scans.
     soft: Instant,
     /// Deadline for everything else.
     hard: Instant,
@@ -196,7 +202,10 @@ struct Run {
     seen_files: HashSet<i64>,
     seen_dirs: HashSet<i64>,
     truncated: Option<TruncatedBy>,
+    /// Set by the deadline or an interruption: nothing more runs.
     stopped: bool,
+    /// Candidates the current tier may bring the list up to.
+    limit: usize,
 }
 
 impl Run {
@@ -205,8 +214,8 @@ impl Run {
         self.truncated.get_or_insert(why);
     }
 
-    /// Adds a verified hit unless already present; returns false once the hit cap stops the
-    /// search.
+    /// Adds a verified hit unless already present; returns false once the current tier's
+    /// limit is reached (more matches exist: `truncated_by = cap`).
     fn accept(&mut self, c: Candidate) -> bool {
         let seen = if c.hit.is_dir {
             &self.seen_dirs
@@ -216,8 +225,8 @@ impl Run {
         if seen.contains(&c.hit.id) {
             return true;
         }
-        if self.hits.len() >= MAX_HITS {
-            self.stop(TruncatedBy::Cap);
+        if self.hits.len() >= self.limit {
+            self.truncated.get_or_insert(TruncatedBy::Cap);
             return false;
         }
         if c.hit.is_dir {
@@ -482,6 +491,10 @@ struct Ctx {
     roots: HashMap<i64, RootRow>,
     files: Option<Clause>,
     dirs: Option<Clause>,
+    /// With a folder filter on one folder below a root: the trigrams of its folded path, a
+    /// `file_paths_fts` condition every file inside it meets, added to the path tier's
+    /// intersection so it reads only rows from that subtree.
+    scope_grams: Option<String>,
 }
 
 struct FileRow {
@@ -721,16 +734,216 @@ fn run_query(
         .map(|(terms, root_ids)| Group { terms, root_ids })
         .collect();
 
+    let scope_grams = match scopes.as_deref() {
+        Some([Scope { rel: Some(rel), .. }]) => {
+            let key = fold_key(rel);
+            (key.chars().count() >= 3).then(|| all_trigrams(&[&key]))
+        }
+        _ => None,
+    };
     let ctx = Ctx {
         files: file_clause(f, scopes.as_deref()),
         dirs: dir_clause(f, scopes.as_deref()),
         roots: roots.into_iter().map(|r| (r.id, r)).collect(),
+        scope_grams,
     };
-    for g in &groups {
-        exact_group(conn, run, &ctx, g)?;
+    // Retrieval in ranking-tier order (rank.rs), so a filled list never pushes out a better
+    // tier: names starting with the first term, then names holding every term (both read up
+    // to NAME_READ_CAP and ranked before the cut), then path matches, then typos.
+    // Date and size have no index: every extra name hit under them costs reading the rows
+    // the filter drops, so their name tiers stop at the hit cap.
+    let unindexed = f.modified_from.is_some()
+        || f.modified_to.is_some()
+        || f.size_min.is_some()
+        || f.size_max.is_some();
+    run.limit = if unindexed { MAX_HITS } else { NAME_READ_CAP };
+    for prefix in [true, false] {
+        for g in &groups {
+            name_tier(conn, run, &ctx, g, prefix)?;
+        }
+    }
+    run.limit = MAX_HITS;
+    if run.hits.len() < MAX_HITS {
+        for g in &groups {
+            exact_group(conn, run, &ctx, g)?;
+        }
     }
     if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
+        for prefix in [true, false] {
+            for g in &groups {
+                fuzzy_variants(conn, run, &ctx, g, prefix)?;
+            }
+        }
+    }
+    // The split-term pass reads many candidates per term: only when nothing matched at all
+    // (substitutions and missing letters, which the near spellings do not cover).
+    if !terms.is_empty() && !run.stopped && run.hits.is_empty() {
         fuzzy_pass(conn, run, &ctx, &groups)?;
+    }
+    Ok(())
+}
+
+/// Files and folders whose own name holds every term of 3 or more characters, as one FTS
+/// intersection (shorter terms are verified). With `prefix`, the name must also start with
+/// the group's first term (rank tiers 0 and 1).
+fn name_tier(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    prefix: bool,
+) -> Result<()> {
+    let long: Vec<&String> = g.terms.iter().filter(|t| t.chars().count() >= 3).collect();
+    if long.is_empty() || (prefix && long[0] != &g.terms[0]) {
+        return Ok(());
+    }
+    let mut expr = long
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if prefix && i == 0 {
+                format!("^{}", phrase(t))
+            } else {
+                phrase(t)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    if !prefix && long[0] == &g.terms[0] {
+        // The prefix stage already read these.
+        expr = format!("({expr}) NOT ^{}", phrase(long[0]));
+    }
+    if let Some(scope) = &ctx.scope_grams {
+        // Inside one folder: the files holding every term anywhere in their path within
+        // that folder, as one intersection (read once, in the prefix stage, and ranked);
+        // a common name would otherwise read every match in the index to keep a few.
+        if prefix {
+            scoped_files(
+                conn,
+                run,
+                ctx,
+                g,
+                &format!("{} AND {scope}", all_trigrams(&long)),
+            )?;
+        }
+        return name_matches(conn, run, ctx, g, &expr, false, false);
+    }
+    name_matches(conn, run, ctx, g, &expr, false, true)
+}
+
+/// Typo tiers: one term of at least `FUZZY_MIN_LEN` replaced by its deletions and adjacent
+/// transpositions (`fuzzy::near_variants`), the other terms exact, all in the name; with
+/// `prefix` only for the first term and anchored at the start of the name. Substitutions
+/// and insertions are left to `fuzzy_pass`.
+fn fuzzy_variants(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    prefix: bool,
+) -> Result<()> {
+    let long: Vec<&String> = g.terms.iter().filter(|t| t.chars().count() >= 3).collect();
+    for (i, t) in long.iter().enumerate() {
+        if prefix && (i > 0 || *t != &g.terms[0]) {
+            break;
+        }
+        let variants = fuzzy::near_variants(t);
+        if variants.is_empty() {
+            continue;
+        }
+        let anchor = if prefix { "^" } else { "" };
+        let alt = variants
+            .iter()
+            .map(|v| format!("{anchor}{}", phrase(v)))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let mut parts = vec![format!("({alt})")];
+        parts.extend(
+            long.iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, o)| phrase(o)),
+        );
+        name_matches(conn, run, ctx, g, &parts.join(" AND "), true, true)?;
+    }
+    Ok(())
+}
+
+/// Files matching a `file_paths_fts` expression, with the filters in SQL, verified.
+fn scoped_files(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    expr: &str,
+) -> Result<()> {
+    let Some(clause) = &ctx.files else {
+        return Ok(());
+    };
+    let roots = g.roots_sql();
+    let sql = format!(
+        "SELECT {FILE_COLS} FROM (SELECT rowid AS id FROM file_paths_fts \
+         WHERE file_paths_fts MATCH ?) m CROSS JOIN files f ON f.id = m.id \
+         CROSS JOIN dirs d ON d.id = f.dir_id WHERE 1{roots}{}",
+        clause.sql
+    );
+    let params = with_params(Some(Value::Text(expr.to_string())), clause);
+    let deadline = run.hard;
+    each_row(conn, run, &sql, &params, deadline, |run, row| {
+        let r = FileRow::read(row)?;
+        Ok(
+            match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
+                Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
+                None => true,
+            },
+        )
+    })
+}
+
+/// Runs a name-only FTS expression on folder names and, with `files`, on file names, with
+/// the filters in SQL, verifying every candidate against all terms of the group.
+fn name_matches(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    expr: &str,
+    fuzzy: bool,
+    files: bool,
+) -> Result<()> {
+    let roots = g.roots_sql();
+    let deadline = run.hard;
+    if let Some(clause) = ctx.files.as_ref().filter(|_| files) {
+        let sql = format!(
+            "SELECT {FILE_COLS} FROM files_fts CROSS JOIN files f ON f.id = files_fts.rowid \
+             CROSS JOIN dirs d ON d.id = f.dir_id WHERE files_fts MATCH ?{roots}{}",
+            clause.sql
+        );
+        let params = with_params(Some(Value::Text(expr.to_string())), clause);
+        each_row(conn, run, &sql, &params, deadline, |run, row| {
+            let r = FileRow::read(row)?;
+            Ok(
+                match verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy) {
+                    Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
+                    None => true,
+                },
+            )
+        })?;
+    }
+    if let Some(clause) = &ctx.dirs {
+        let sql = format!(
+            "SELECT {DIR_COLS} FROM (SELECT rowid AS id FROM dirs_fts WHERE dirs_fts MATCH ?) m \
+             CROSS JOIN dirs d ON d.id = m.id WHERE 1{roots}{}",
+            clause.sql
+        );
+        let params = with_params(Some(Value::Text(format!("name_key : ({expr})"))), clause);
+        each_row(conn, run, &sql, &params, deadline, |run, row| {
+            let d = DirRow::read(row)?;
+            Ok(match verify_dir(&g.terms, &d, fuzzy) {
+                Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
+                None => true,
+            })
+        })?;
     }
     Ok(())
 }
@@ -742,68 +955,64 @@ fn with_params(first: Option<Value>, clause: &Clause) -> Vec<Value> {
         .collect()
 }
 
-/// Number of rows of `table` matching `phrase`, counted up to `COUNT_CAP` + 1 (S2).
-fn probe(conn: &mut Connection, run: &mut Run, table: &str, phrase: &str) -> Result<i64> {
-    let sql = format!(
-        "SELECT count(*) FROM (SELECT 1 FROM {table} WHERE {table} MATCH ? LIMIT {})",
-        COUNT_CAP + 1
-    );
-    let mut n = 0;
-    let deadline = run.hard;
-    each_row(
-        conn,
-        run,
-        &sql,
-        &[Value::Text(phrase.to_string())],
-        deadline,
-        |_, row| {
-            n = row.get(0)?;
-            Ok(false)
-        },
-    )?;
-    Ok(n)
+/// FTS5 expression for `file_paths_fts` (detail=none, so no phrases): every trigram of
+/// every term, ANDed. A superset of the files whose folded path and name contain every
+/// term; candidates are verified.
+fn all_trigrams<S: AsRef<str>>(terms: &[S]) -> String {
+    let mut grams: Vec<String> = Vec::new();
+    for t in terms {
+        let c: Vec<char> = t.as_ref().chars().collect();
+        for w in c.windows(3) {
+            let g = phrase(&w.iter().collect::<String>());
+            if !grams.contains(&g) {
+                grams.push(g);
+            }
+        }
+    }
+    grams.join(" AND ")
 }
 
+/// Path tier (S2): files whose relative path and name together hold every term of 3 or
+/// more characters, as one intersection in `file_paths_fts` (no table row is read before
+/// the intersection), and folders whose path holds every term with one in their own name.
+/// Groups whose terms are all shorter than 3 characters are a filtered scan instead.
 fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Result<()> {
     let long: Vec<&String> = g.terms.iter().filter(|t| t.chars().count() >= 3).collect();
     if long.is_empty() {
         return scan_group(conn, run, ctx, g);
     }
     let roots = g.roots_sql();
-
-    // S2: the generator term is the one with the fewest matches; ties go to the longer.
-    let mut best: Option<(i64, i64, &String)> = None;
-    for t in long {
-        let p = phrase(t);
-        let fc = probe(conn, run, "files_fts", &p)?;
-        let dc = probe(conn, run, "dirs_fts", &p)?;
-        let better = match best {
-            None => true,
-            Some((bf, bd, bt)) => {
-                (fc + dc, std::cmp::Reverse(t.len())) < (bf + bd, std::cmp::Reverse(bt.len()))
-            }
-        };
-        if better {
-            best = Some((fc, dc, t));
-        }
-    }
-    let Some((fc, dc, gen)) = best else {
-        return Ok(());
-    };
-    if run.stopped {
-        return Ok(());
-    }
-    let p = phrase(gen);
-
-    // G1: files whose name contains the generator term.
+    // S3: FTS-driven generation is bounded by the hit cap, not by the configured deadline.
+    let deadline = run.hard;
     if let Some(clause) = &ctx.files {
-        let sql = format!(
-            "SELECT {FILE_COLS} FROM files_fts JOIN files f ON f.id = files_fts.rowid \
-             JOIN dirs d ON d.id = f.dir_id WHERE files_fts MATCH ?{roots}{}",
-            clause.sql
-        );
-        let deadline = if fc > PROBE_CAP { run.soft } else { run.hard };
-        let params = with_params(Some(Value::Text(p.clone())), clause);
+        // One term: its exact phrase in the folder paths, then their files (precise; the
+        // position-less path index would admit names holding its trigrams anywhere).
+        // Several terms: one intersection in `file_paths_fts`.
+        let (sql, expr) = if long.len() == 1 {
+            (
+                format!(
+                    "SELECT {FILE_COLS} FROM {} CROSS JOIN files f ON f.dir_id = d.id \
+                     WHERE d.rel_path <> ''{roots}{}",
+                    matching_dirs(SCAN_CAP_DIR),
+                    clause.sql
+                ),
+                phrase(long[0]),
+            )
+        } else {
+            (
+                format!(
+                    "SELECT {FILE_COLS} FROM (SELECT rowid AS id FROM file_paths_fts \
+                     WHERE file_paths_fts MATCH ?) m CROSS JOIN files f ON f.id = m.id \
+                     CROSS JOIN dirs d ON d.id = f.dir_id WHERE 1{roots}{}",
+                    clause.sql
+                ),
+                match &ctx.scope_grams {
+                    Some(grams) => format!("{} AND {grams}", all_trigrams(&long)),
+                    None => all_trigrams(&long),
+                },
+            )
+        };
+        let params = with_params(Some(Value::Text(expr)), clause);
         each_row(conn, run, &sql, &params, deadline, |run, row| {
             let r = FileRow::read(row)?;
             Ok(
@@ -814,61 +1023,33 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
             )
         })?;
     }
-
-    // G2: folders whose path contains the generator term, then their files.
-    let deadline = if dc > PROBE_CAP { run.soft } else { run.hard };
-    if dc > PROBE_CAP {
-        let sql = format!(
-            "SELECT count(*) FROM (SELECT 1 FROM dirs_fts WHERE dirs_fts MATCH ? LIMIT {})",
-            SCAN_CAP_DIR + 1
-        );
-        let mut n = 0usize;
-        each_row(
-            conn,
-            run,
-            &sql,
-            &[Value::Text(p.clone())],
-            deadline,
-            |_, row| {
-                n = row.get::<_, i64>(0)? as usize;
-                Ok(false)
-            },
-        )?;
-        if n > SCAN_CAP_DIR {
-            run.truncated.get_or_insert(TruncatedBy::Cap);
-        }
-    }
-    let matching_dirs = matching_dirs(SCAN_CAP_DIR);
     if let Some(clause) = &ctx.dirs {
+        let mut expr = long
+            .iter()
+            .map(|t| phrase(t))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        // D1: a folder needs a term in its own name. When every term can use the index,
+        // FTS applies that too, so the subfolders of a matching folder are not read.
+        if long.len() == g.terms.len() {
+            let in_name: Vec<String> = long
+                .iter()
+                .map(|t| format!("name_key : {}", phrase(t)))
+                .collect();
+            expr = format!("{expr} AND ({})", in_name.join(" OR "));
+        }
         let sql = format!(
-            "SELECT {DIR_COLS} FROM {matching_dirs} WHERE 1{roots}{}",
+            "SELECT {DIR_COLS} FROM {} WHERE 1{roots}{}",
+            matching_dirs(SCAN_CAP_DIR),
             clause.sql
         );
-        let params = with_params(Some(Value::Text(p.clone())), clause);
+        let params = with_params(Some(Value::Text(expr)), clause);
         each_row(conn, run, &sql, &params, deadline, |run, row| {
             let d = DirRow::read(row)?;
             Ok(match verify_dir(&g.terms, &d, false) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
                 None => true,
             })
-        })?;
-    }
-    if let Some(clause) = &ctx.files {
-        // The root directory's path is empty: its files are covered by G1.
-        let sql = format!(
-            "SELECT {FILE_COLS} FROM {matching_dirs} CROSS JOIN files f ON f.dir_id = d.id \
-             WHERE d.rel_path <> ''{roots}{}",
-            clause.sql
-        );
-        let params = with_params(Some(Value::Text(p)), clause);
-        each_row(conn, run, &sql, &params, deadline, |run, row| {
-            let r = FileRow::read(row)?;
-            Ok(
-                match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
-                    Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
-                    None => true,
-                },
-            )
         })?;
     }
     Ok(())
