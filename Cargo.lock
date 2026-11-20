@@ -4704,6 +4704,7 @@ name = "vfs-desktop"
 version = "0.1.0"
 dependencies = [
  "dunce",
+ "embed-resource",
  "log",
  "rusqlite",
  "serde",
