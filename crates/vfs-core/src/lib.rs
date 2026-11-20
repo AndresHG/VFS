@@ -16,7 +16,7 @@ mod roots;
 mod search;
 mod types;
 
-pub use error::{Error, Result};
+pub use error::{Error, OverlapRelation, Result};
 pub use fold::fold_key;
 pub use indexer::{IndexerOptions, DIAG_TARGET};
 pub use kind::file_kind;

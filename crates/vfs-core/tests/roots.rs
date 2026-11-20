@@ -5,15 +5,15 @@ use std::path::Path;
 
 use vfs_core::db::ingest::ScanState;
 use vfs_core::db::{self, ingest};
-use vfs_core::{DriveKind, Error, RootStatus, SearchFilters, SearchQuery, Vfs};
+use vfs_core::{DriveKind, Error, OverlapRelation, RootStatus, SearchFilters, SearchQuery, Vfs};
 
 fn open(dir: &Path) -> Vfs {
     Vfs::open(&dir.join("index.db")).unwrap()
 }
 
-fn overlap(e: Error) -> String {
+fn overlap(e: Error) -> (OverlapRelation, String) {
     match e {
-        Error::OverlappingRoot(m) => m,
+        Error::OverlappingRoot { relation, existing } => (relation, existing),
         other => panic!("expected OverlappingRoot, got {other:?}"),
     }
 }
@@ -79,13 +79,24 @@ fn ac4_u4_overlapping_roots() {
     let vfs = open(tmp.path());
     let root = vfs.add_root(&fotos).unwrap();
 
-    let same = overlap(vfs.add_root(&fotos).unwrap_err());
-    assert_eq!(same, format!("same {}", root.path));
+    let same = vfs.add_root(&fotos).unwrap_err();
+    assert_eq!(
+        same.to_string(),
+        format!("overlaps an indexed folder: same {}", root.path)
+    );
+    assert_eq!(same.code(), "overlapping_root");
+    assert_eq!(overlap(same), (OverlapRelation::Same, root.path.clone()));
     let inside = overlap(vfs.add_root(&child).unwrap_err());
-    assert_eq!(inside, format!("inside {}", root.path));
-    let contains = overlap(vfs.add_root(&parent).unwrap_err());
-    assert_eq!(contains, format!("contains {}", root.path));
-    assert_eq!(Error::OverlappingRoot(contains).code(), "overlapping_root");
+    assert_eq!(inside, (OverlapRelation::Inside, root.path.clone()));
+    let contains = vfs.add_root(&parent).unwrap_err();
+    assert_eq!(
+        contains.to_string(),
+        format!("overlaps an indexed folder: contains {}", root.path)
+    );
+    assert_eq!(
+        overlap(contains),
+        (OverlapRelation::Contains, root.path.clone())
+    );
 
     let ok = vfs.add_root(&sibling).unwrap();
     assert_ne!(ok.id, root.id);

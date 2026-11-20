@@ -321,6 +321,12 @@ fn app_and_cli_share_an_index() {
         }
     }
     app.stop();
+    let mut bad = t.db.as_os_str().to_owned();
+    bad.push(".bad");
+    assert!(
+        !std::path::Path::new(&bad).exists(),
+        "a healthy shared index was moved aside"
+    );
     check_structure(&t.db, 0, "shared index");
     assert_matches_disk(&raw_conn(&t.db), &stored_root(&t.root), &t.root, "app root");
     assert_matches_disk(&raw_conn(&t.db), &stored_root(&second), &second, "cli root");

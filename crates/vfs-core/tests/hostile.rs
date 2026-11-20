@@ -17,7 +17,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use hostile_tree::*;
 use unicode_normalization::UnicodeNormalization;
-use vfs_core::{Error, RootStatus};
+use vfs_core::{Error, OverlapRelation, RootStatus};
 
 fn nfc(s: &str) -> String {
     s.nfc().collect()
@@ -883,9 +883,9 @@ fn root_renamed_while_scanning() {
     assert_index_matches_disk(&env, root_id, &root, Check { search_sample: 100 });
 }
 
-fn overlap(r: vfs_core::Result<vfs_core::Root>) -> String {
+fn overlap(r: vfs_core::Result<vfs_core::Root>) -> OverlapRelation {
     match r {
-        Err(Error::OverlappingRoot(why)) => why,
+        Err(Error::OverlappingRoot { relation, .. }) => relation,
         other => panic!("expected OverlappingRoot, got {other:?}"),
     }
 }
@@ -897,18 +897,27 @@ fn nested_roots_are_refused() {
     let env = Env::new();
     let (_, root) = env.add_root("A\u{00F1}o");
     fs::create_dir_all(root.join("dentro/mas")).unwrap();
-    assert!(overlap(env.vfs.add_root(&root.join("dentro/mas"))).starts_with("inside "));
-    assert!(overlap(env.vfs.add_root(&env.base())).starts_with("contains "));
+    assert_eq!(
+        overlap(env.vfs.add_root(&root.join("dentro/mas"))),
+        OverlapRelation::Inside
+    );
+    assert_eq!(
+        overlap(env.vfs.add_root(&env.base())),
+        OverlapRelation::Contains
+    );
     let mut trailing = root.clone().into_os_string();
     trailing.push(std::path::MAIN_SEPARATOR_STR);
-    assert!(overlap(env.vfs.add_root(Path::new(&trailing))).starts_with("same "));
+    assert_eq!(
+        overlap(env.vfs.add_root(Path::new(&trailing))),
+        OverlapRelation::Same
+    );
     let base = env.base();
     for variant in ["A\u{00D1}O", "an\u{0303}o"] {
         let p = base.join(variant);
         if p.is_dir() {
             // Same folder spelled differently (case- or normalization-insensitive FS).
             assert!(
-                overlap(env.vfs.add_root(&p)).starts_with("same "),
+                overlap(env.vfs.add_root(&p)) == OverlapRelation::Same,
                 "{variant:?}"
             );
         }
@@ -934,7 +943,7 @@ fn roots_nested_after_rename() {
     assert_eq!(env.root_status(b_id), RootStatus::Unavailable);
     let disk = assert_index_matches_disk(&env, a_id, &a, Check::default());
     assert!(disk.files.contains_key("b/carpeta 000/fichero 00.txt"));
-    assert!(overlap(env.vfs.add_root(&inner)).starts_with("inside "));
+    assert_eq!(overlap(env.vfs.add_root(&inner)), OverlapRelation::Inside);
 
     fs::rename(&inner, &b).unwrap();
     env.force_rewalk(a_id);
