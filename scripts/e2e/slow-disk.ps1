@@ -130,6 +130,13 @@ foreach ($label in @('quiet', 'busy')) {
   Stop-Load
 }
 
+# The same first scan by the CLI: foreground priority, no app, no watcher, for comparison.
+Cycle $false
+New-Item -ItemType Directory -Force -Path 'V:\cli' | Out-Null
+Log 'CLI first scan (foreground, cold V:)'
+& $Cli index --db 'V:\cli\index.db' 'V:\Archivo' | Set-Content (Join-Path $Out 'cli-index-quiet.txt') -Encoding UTF8
+Remove-Item -Recurse -Force 'V:\cli'
+
 Log 'generating the 2,000,000-file synthetic index on V:'
 New-Item -ItemType Directory -Force -Path 'V:\bench' | Out-Null
 $t = [Diagnostics.Stopwatch]::StartNew()

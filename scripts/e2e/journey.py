@@ -671,7 +671,18 @@ def check_file_manager(target, expect, timeout):
             w, secs = wait_for(look, timeout, 0.5, "Explorer window")
             return {"ok": True, "explorer": w, "explorer_after_s": round(secs, 2)}
         except TimeoutError:
-            return {"ok": False, "explorer_windows": windows}
+            res = {"ok": False, "explorer_windows": windows}
+        # Diagnostic: does Explorer select the item when asked directly, outside the app?
+        close_file_manager_windows()
+        subprocess.Popen(f'explorer.exe /select,"{target["path"]}"')
+        try:
+            w, _ = wait_for(look, timeout, 0.5, "Explorer window (direct)")
+            res["explorer_direct_selects"] = True
+        except TimeoutError:
+            res["explorer_direct_selects"] = False
+            res["explorer_direct_windows"] = windows
+        close_file_manager_windows()
+        return res
     if IS_MAC:
         time.sleep(3)
 

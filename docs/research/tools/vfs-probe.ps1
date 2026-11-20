@@ -17,8 +17,9 @@
   Every step writes its results to <OutDir>\<timestamp>\*.json / *.csv and appends to log.txt.
   Compatible with Windows PowerShell 5.1 (the embedded C# keeps to C# 5).
 
-  Status: written and syntax-checked on macOS; never executed on Windows. A failure in one
-  step is logged and the next step still runs.
+  Status: rehearsed with -Step all on a Windows Server 2025 GitHub runner as a standard user
+  (VFS-5, docs/research/windows-e2e-results.md); every step runs. A failure in one step is
+  logged and the next step still runs.
 #>
 [CmdletBinding()]
 param(

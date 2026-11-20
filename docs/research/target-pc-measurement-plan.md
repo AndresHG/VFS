@@ -10,12 +10,12 @@ Everything here runs as the PC's normal **standard user**. Steps marked *(admin,
 need an administrator account only to obtain a reference value. The product must not depend
 on them, and they are skipped if nobody has the password.
 
-**Status of the tool.** [`tools/vfs-probe.ps1`](tools/vfs-probe.ps1) was written on macOS. Its
-PowerShell parses with PowerShell 7.7, and its embedded C# compiles at C# language level 5
-(the level of Windows PowerShell 5.1). It has **never been run on Windows**. Before the visit,
-run it once on any Windows 10/11 machine (`-Step all -Minutes 1 -WalkMinutes 1`) and fix what
-breaks. Every step catches its own errors and the next one still runs, so one broken step does
-not waste the visit.
+**Status of the tool.** [`tools/vfs-probe.ps1`](tools/vfs-probe.ps1) was rehearsed with
+`-Step all` on a Windows Server 2025 GitHub runner, as a standard user created for the purpose
+([`windows-e2e-results.md`](windows-e2e-results.md), VFS-5). Every step runs there. Two things
+behave differently for a standard user: step 1 cannot list services (`sync_services` holds the
+error), and step 6 may see no disk performance counters (see step 6). Every step catches its own
+errors and the next one still runs, so one broken step does not waste the visit.
 
 ## What to take
 
@@ -134,6 +134,9 @@ It works only inside a new folder `D:\vfs-probe-<timestamp>` that it creates and
 afterwards. It refuses to run if that folder already exists, and deletes nothing else. Expected (see
 `windows-io.md` §3.3): the directory mtime changes for create, rename and delete, and does not
 change for an append to a file or for a grandchild. Any other result changes the design of R9.
+Each line gives the folder's mtime twice: as its parent's listing shows it (what a re-walk
+sees) and as the folder itself reports it. On the runner the listed value lagged for a delete:
+unchanged at once, changed after 3 s.
 The two "listed size" lines show N7.
 
 ### 5. Flush cost and seek latency (5 min) → N8, N9
@@ -163,7 +166,10 @@ watchers run on `D:\` meanwhile: one with VFS's current filter (names + size + l
 creation), one with names only. `watch.json` reports the events and overflows of each. The
 counters are read through WMI classes (`Win32_PerfFormattedData_*`, plus `Win32_PerfRawData_*`
 for read and write latency) because PDH counter paths are localised on a Spanish Windows
-(`\Disco físico(...)`). The per-process I/O query is itself not free on a slow PC: expect the
+(`\Disco físico(...)`). On the runner a standard user saw no disk counter instances: the log
+says `perf: no PhysicalDisk counter instances visible to this user` and `perf.csv` keeps only
+its header. If that happens on the target PC, run this step again from an administrator window
+*(admin, optional)*; the watcher counts in `watch.json` do not depend on it. The per-process I/O query is itself not free on a slow PC: expect the
 probe to add some CPU load, and do not read small differences into it.
 
 ### 7. Synology configuration by hand (10 min) → N14
