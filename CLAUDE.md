@@ -17,9 +17,12 @@ non-technical; the UI is Spanish. Product spec: `specs/vfs-1-core-search/spec.md
 
 ## Build and test
 
-<!-- BUILD-COMMANDS: implementation workers replace this block with the real commands
-(build, run the app, test one crate, fmt, clippy, frontend) once the workspace exists. -->
-_To be filled in when the cargo workspace and Tauri app land._
+Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/env" &&`.
+
+- Build: `cargo build --workspace`; CLI: `cargo run -p vfs-cli --`.
+- Test all: `cargo test --workspace`; one crate: `cargo test -p vfs-core`.
+- Lint: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`.
+- The desktop app and frontend commands are added here when `apps/desktop` lands.
 
 ## Git
 

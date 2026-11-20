@@ -1,0 +1,14 @@
+[package]
+name = "vfs-cli"
+description = "VFS command line: index, search, synthetic data and benchmarks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "vfs"
+path = "src/main.rs"
+
+[dependencies]
+vfs-core.workspace = true

@@ -1,0 +1,326 @@
+//! Serde contract types shared by the core, the CLI and the Tauri app (VFS-1).
+//! Structs serialize camelCase and enums snake_case; ids are `i64`, times unix seconds.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileKind {
+    Other,
+    Document,
+    Photo,
+    Video,
+    Audio,
+}
+
+impl FileKind {
+    /// Value stored in `files.kind`.
+    pub fn code(self) -> i64 {
+        match self {
+            FileKind::Other => 0,
+            FileKind::Document => 1,
+            FileKind::Photo => 2,
+            FileKind::Video => 3,
+            FileKind::Audio => 4,
+        }
+    }
+
+    /// Inverse of [`FileKind::code`]; unknown values read as `Other`.
+    pub fn from_code(code: i64) -> FileKind {
+        match code {
+            1 => FileKind::Document,
+            2 => FileKind::Photo,
+            3 => FileKind::Video,
+            4 => FileKind::Audio,
+            _ => FileKind::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SearchFilters {
+    /// Empty = every kind.
+    pub kinds: Vec<FileKind>,
+    /// Inclusive.
+    pub modified_from: Option<i64>,
+    /// Exclusive.
+    pub modified_to: Option<i64>,
+    /// Bytes, inclusive.
+    pub size_min: Option<u64>,
+    /// Bytes, inclusive.
+    pub size_max: Option<u64>,
+    /// Absolute path; hits must be inside it at any depth.
+    pub folder: Option<String>,
+}
+
+fn default_limit() -> u32 {
+    100
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQuery {
+    pub text: String,
+    #[serde(default)]
+    pub filters: SearchFilters,
+    /// Default 100, clamped to 1..=500 by the search.
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+/// `Content` is reserved for phase 2 (VFS-1 AC-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchKind {
+    Name,
+    Path,
+    Fuzzy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: i64,
+    /// Original file name.
+    pub name: String,
+    /// Absolute directory path, native separators.
+    pub dir: String,
+    pub kind: FileKind,
+    pub size: u64,
+    pub modified: i64,
+    pub matched: MatchKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResponse {
+    /// The slice `[offset, offset + limit)` of the ranked list.
+    pub hits: Vec<SearchHit>,
+    /// Length of the ranked list, <= 2000.
+    pub total: u32,
+    /// A cap or the deadline cut the search short.
+    pub truncated: bool,
+    pub elapsed_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootStatus {
+    Pending,
+    Scanning,
+    Ready,
+    Unavailable,
+    Removing,
+}
+
+impl RootStatus {
+    /// Value stored in `roots.status`.
+    pub fn code(self) -> i64 {
+        match self {
+            RootStatus::Pending => 0,
+            RootStatus::Scanning => 1,
+            RootStatus::Ready => 2,
+            RootStatus::Unavailable => 3,
+            RootStatus::Removing => 4,
+        }
+    }
+
+    /// Inverse of [`RootStatus::code`]; unknown values read as `Pending`.
+    pub fn from_code(code: i64) -> RootStatus {
+        match code {
+            1 => RootStatus::Scanning,
+            2 => RootStatus::Ready,
+            3 => RootStatus::Unavailable,
+            4 => RootStatus::Removing,
+            _ => RootStatus::Pending,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Root {
+    pub id: i64,
+    pub path: String,
+    pub status: RootStatus,
+    pub files: u64,
+    pub dirs: u64,
+    pub last_full_scan: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexerState {
+    Idle,
+    Scanning,
+    Paused,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootProgress {
+    pub root_id: i64,
+    pub path: String,
+    pub status: RootStatus,
+    /// Directories listed in the current pass.
+    pub dirs_done: u64,
+    pub dirs_pending: u64,
+    /// Files of this root currently in the index.
+    pub files_indexed: u64,
+    pub current_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexProgress {
+    pub state: IndexerState,
+    /// All roots.
+    pub files_indexed: u64,
+    pub roots: Vec<RootProgress>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexStats {
+    pub files: u64,
+    pub dirs: u64,
+    pub roots: u32,
+    pub db_bytes: u64,
+    pub schema_version: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanSummary {
+    pub dirs_listed: u64,
+    pub files_added: u64,
+    pub files_updated: u64,
+    pub files_removed: u64,
+    pub errors: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// VFS-1 AC-11: the query shape the frontend sends (camelCase filters, omitted fields
+    /// defaulted) deserializes into the contract types.
+    #[test]
+    fn search_query_accepts_frontend_shape() {
+        let q: SearchQuery = serde_json::from_value(json!({
+            "text": "notaria",
+            "filters": { "kinds": ["document", "photo"], "modifiedFrom": 10, "sizeMax": null }
+        }))
+        .unwrap();
+        assert_eq!(q.limit, 100);
+        assert_eq!(q.offset, 0);
+        assert_eq!(q.filters.kinds, vec![FileKind::Document, FileKind::Photo]);
+        assert_eq!(q.filters.modified_from, Some(10));
+        assert_eq!(q.filters.size_max, None);
+        assert!(q.filters.folder.is_none());
+
+        let bare: SearchQuery = serde_json::from_value(json!({ "text": "" })).unwrap();
+        assert!(bare.filters.kinds.is_empty());
+    }
+
+    /// VFS-1 AC-10: responses serialize with the field and enum spellings of the UI contract.
+    #[test]
+    fn search_response_serializes_camel_case() {
+        let r = SearchResponse {
+            hits: vec![SearchHit {
+                id: 7,
+                name: "Notaría.pdf".into(),
+                dir: "/a/b".into(),
+                kind: FileKind::Document,
+                size: 3,
+                modified: 4,
+                matched: MatchKind::Fuzzy,
+            }],
+            total: 1,
+            truncated: false,
+            elapsed_ms: 2,
+        };
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            json!({
+                "hits": [{ "id": 7, "name": "Notaría.pdf", "dir": "/a/b", "kind": "document",
+                           "size": 3, "modified": 4, "matched": "fuzzy" }],
+                "total": 1, "truncated": false, "elapsedMs": 2
+            })
+        );
+    }
+
+    /// VFS-1 AC-5: progress and roots serialize with the UI contract's spellings.
+    #[test]
+    fn progress_and_roots_serialize_camel_case() {
+        let p = IndexProgress {
+            state: IndexerState::Scanning,
+            files_indexed: 5,
+            roots: vec![RootProgress {
+                root_id: 1,
+                path: "/r".into(),
+                status: RootStatus::Unavailable,
+                dirs_done: 2,
+                dirs_pending: 3,
+                files_indexed: 5,
+                current_dir: None,
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(&p).unwrap(),
+            json!({ "state": "scanning", "filesIndexed": 5, "roots": [{
+                "rootId": 1, "path": "/r", "status": "unavailable", "dirsDone": 2,
+                "dirsPending": 3, "filesIndexed": 5, "currentDir": null }] })
+        );
+        let root = Root {
+            id: 1,
+            path: "/r".into(),
+            status: RootStatus::Ready,
+            files: 1,
+            dirs: 1,
+            last_full_scan: Some(9),
+        };
+        assert_eq!(
+            serde_json::to_value(&root).unwrap()["lastFullScan"],
+            json!(9)
+        );
+        let s = IndexStats {
+            files: 1,
+            dirs: 2,
+            roots: 3,
+            db_bytes: 4,
+            schema_version: 1,
+        };
+        assert_eq!(
+            serde_json::to_value(&s).unwrap(),
+            json!({ "files": 1, "dirs": 2, "roots": 3, "dbBytes": 4, "schemaVersion": 1 })
+        );
+    }
+
+    /// VFS-1 AC-11: stored integer codes round-trip for every kind and root status.
+    #[test]
+    fn integer_codes_round_trip() {
+        for k in [
+            FileKind::Other,
+            FileKind::Document,
+            FileKind::Photo,
+            FileKind::Video,
+            FileKind::Audio,
+        ] {
+            assert_eq!(FileKind::from_code(k.code()), k);
+        }
+        for s in [
+            RootStatus::Pending,
+            RootStatus::Scanning,
+            RootStatus::Ready,
+            RootStatus::Unavailable,
+            RootStatus::Removing,
+        ] {
+            assert_eq!(RootStatus::from_code(s.code()), s);
+        }
+    }
+}

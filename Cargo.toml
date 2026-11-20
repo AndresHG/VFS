@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/vfs-core", "crates/vfs-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[workspace.dependencies]
+vfs-core = { path = "crates/vfs-core" }
+rusqlite = { version = "0.43", features = ["bundled", "hooks"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+unicode-normalization = "0.1"
+notify = "8.2"
+dunce = "1"
+log = "0.4"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_ProcessStatus"] }
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
