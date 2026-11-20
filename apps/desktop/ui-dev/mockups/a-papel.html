@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Mockup A · Papel</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="a-papel.css">
+  <script type="module" src="mockup.js"></script>
+</head>
+<body>
+  <!-- Direction A: one calm column. Idle centres the box like a blank page; typing moves it up.
+       Four quiet filter buttons on one line; the action lives on the selected row. -->
+  <div class="app">
+    <header class="top">
+      <h1 class="greeting">¿Qué archivo busca?</h1>
+      <div class="search-field">
+        <svg aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+        <input type="search" aria-label="Buscar por nombre de archivo o de carpeta"
+               placeholder="Parte del nombre o de la carpeta" value="boda">
+        <button class="btn icon" type="button" aria-label="Borrar la búsqueda"><svg aria-hidden="true"><use href="icons.svg#i-close"/></svg></button>
+      </div>
+      <div class="filters" role="group" aria-label="Filtros">
+        <button class="filter only-idle" type="button">Todos los tipos<svg aria-hidden="true"><use href="icons.svg#i-chevron"/></svg></button>
+        <button class="filter is-on only-results" type="button"><svg aria-hidden="true"><use href="icons.svg#i-check"/></svg>Fotos y vídeos<svg aria-hidden="true"><use href="icons.svg#i-close"/></svg></button>
+        <button class="filter" type="button">Cualquier fecha<svg aria-hidden="true"><use href="icons.svg#i-chevron"/></svg></button>
+        <button class="filter" type="button">Cualquier tamaño<svg aria-hidden="true"><use href="icons.svg#i-chevron"/></svg></button>
+        <button class="filter" type="button">Todas las carpetas<svg aria-hidden="true"><use href="icons.svg#i-chevron"/></svg></button>
+      </div>
+      <p class="hint">No importan las mayúsculas, los acentos ni una letra equivocada.</p>
+    </header>
+
+    <main class="results">
+      <div class="notice">
+        <svg aria-hidden="true"><use href="icons.svg#i-warn"/></svg>
+        <p>No se encuentra el disco «E:\Copias antiguas». Sus archivos se muestran como «No disponible».</p>
+        <button class="btn" type="button">Entendido</button>
+      </div>
+      <div class="list" role="listbox" aria-label="Resultados" id="rows"></div>
+    </main>
+
+    <footer class="bottom">
+      <p class="status"><span class="busy" aria-hidden="true"><i></i><i></i><i></i></span><span><strong class="num only-results">1.791 resultados</strong><span class="only-results"> · </span>Comprobando cambios · <span class="num">30.569</span> archivos</span></p>
+      <button class="btn" type="button">Buscar cambios ahora</button>
+      <button class="btn" type="button"><svg aria-hidden="true"><use href="icons.svg#i-folder"/></svg>Carpetas (3)</button>
+    </footer>
+  </div>
+
+  <template id="row">
+    <div class="row" role="option">
+      <span class="ico"><svg aria-hidden="true"><use href=""/></svg></span>
+      <span class="main">
+        <span class="name"><span data-f="name"></span><span class="badge" hidden>No disponible</span></span>
+        <span class="path" data-f="dir"></span>
+      </span>
+      <span class="meta num"><span data-f="date"></span><span data-f="size"></span></span>
+      <button class="btn btn-primary reveal" type="button" tabindex="-1"><svg aria-hidden="true"><use href="icons.svg#i-reveal"/></svg>Mostrar en carpeta <span class="kbd">Intro</span></button>
+    </div>
+  </template>
+</body>
+</html>
