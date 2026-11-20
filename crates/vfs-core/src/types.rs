@@ -13,7 +13,7 @@ pub enum FileKind {
     Photo,
     Video,
     Audio,
-    /// A directory hit (VFS-1 decision D1: folders are results). Never stored in `files.kind`.
+    /// A directory hit (VFS-1 decision 13: folders are results). Never stored in `files.kind`.
     Folder,
 }
 
@@ -101,7 +101,7 @@ pub struct SearchHit {
     pub size: u64,
     pub modified: i64,
     pub matched: MatchKind,
-    /// The hit is a folder (VFS-1 decision D1).
+    /// The hit is a folder (VFS-1 decision 13).
     pub is_dir: bool,
 }
 
@@ -254,7 +254,7 @@ mod tests {
             "filters": { "kinds": ["document", "photo"], "modifiedFrom": 10, "sizeMax": null }
         }))
         .unwrap();
-        assert_eq!(q.limit, 100);
+        assert_eq!(q.limit, default_limit());
         assert_eq!(q.offset, 0);
         assert_eq!(q.filters.kinds, vec![FileKind::Document, FileKind::Photo]);
         assert_eq!(q.filters.modified_from, Some(10));
@@ -269,7 +269,7 @@ mod tests {
         assert!(bare.filters.kinds.is_empty());
     }
 
-    /// VFS-1 AC-10: responses serialize with the field and enum spellings of the UI contract.
+    /// Responses serialize with the field and enum spellings of the command contract.
     #[test]
     fn search_response_serializes_camel_case() {
         let r = SearchResponse {
@@ -298,7 +298,7 @@ mod tests {
         );
     }
 
-    /// VFS-1 AC-5: progress and roots serialize with the UI contract's spellings.
+    /// Progress and roots serialize with the command contract's spellings.
     #[test]
     fn progress_and_roots_serialize_camel_case() {
         let p = IndexProgress {
@@ -345,7 +345,7 @@ mod tests {
         );
     }
 
-    /// VFS-1 AC-11: stored integer codes round-trip for every kind and root status.
+    /// Stored integer codes round-trip for every kind and root status.
     #[test]
     fn integer_codes_round_trip() {
         for k in [

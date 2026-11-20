@@ -132,6 +132,36 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
 | 10 | Ticket system? | None; ids `VFS-n` in `specs/` (default) | owner | 2026-11-20 |
 | 11 | Branch model? | Protected `main` + `feat/<title>` branches, squash merge (default) | owner | 2026-11-20 |
 | 12 | Hook runtime? | Python 3 and bash, on the macOS dev machine only (default) | owner | 2026-11-20 |
+| 13 | Are folders results? | Yes. A folder whose name matches is its own result row (empty folders included), marked as a folder (`isDir` on the hit), with "mostrar en carpeta" revealing the folder; the type filter gains "carpeta" (`folder` kind) | owner | 2026-11-20 |
+| 14 | WebView2 on Windows? | `embedBootstrapper` (small installer): the target PC has internet at install time | owner | 2026-11-20 |
+| 15 | May the live watcher be cut for time? | No; it is the last item in any cut list | owner | 2026-11-20 |
+| 16 | UI wording? | Impersonal (usted) Spanish in plain words; user-facing text avoids "indexar", "índice", "reindexar" ("preparar la búsqueda", "revisar carpetas", "volver a revisar") | owner | 2026-11-20 |
+
+## Tauri commands and events
+
+The desktop app talks to the core only through these commands (Rust names; every argument
+is one word, so JS passes the same keys, except `isDir`, which Tauri maps to `is_dir`).
+Every command runs off the main thread and rejects with `ApiError { code, message }`, where
+`code` is one of `not_found`, `not_a_directory`, `overlapping_root`, `unavailable`,
+`schema_too_new`, `db`, `io`. Payload types are the camelCase serde types of
+`crates/vfs-core/src/types.rs`; `ApiError`, `RevealOutcome` and the event names are in
+`crates/vfs-core/src/api.rs`.
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `list_roots` | — | `Root[]` |
+| `pick_folder` | — (native folder dialog) | `string \| null` |
+| `add_root` | `path: string` | `Root` |
+| `remove_root` | `id: number` | `null` |
+| `search` | `query: SearchQuery` | `SearchResponse` (`hits[].isDir`, `truncatedBy: null \| "cap" \| "deadline"`) |
+| `reveal` | `id: number`, `isDir: boolean` | `RevealOutcome`: `"revealed"` or `"opened_parent"` |
+| `get_progress` | — | `IndexProgress` |
+| `rescan` | `id: number \| null` | `null` |
+| `set_paused` | `paused: boolean` | `null` |
+| `get_stats` | — | `IndexStats` |
+
+Events: `index-progress` (payload `IndexProgress`, at most every 500 ms) and `index-changed`
+(payload `null`, at most every 2 s, after the indexer commits).
 
 ## Technical context
 

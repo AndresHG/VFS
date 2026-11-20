@@ -1,5 +1,5 @@
 //! Phase-2 extension point for document content search (VFS-1 AC-15). No implementation
-//! and no caller in v1; the design is `docs/content-search-design.md`.
+//! and no caller in v1.
 
 use std::path::Path;
 

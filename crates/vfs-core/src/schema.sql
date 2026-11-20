@@ -24,7 +24,7 @@ CREATE TABLE roots(
 );
 
 -- Every directory once (empty ones included). Files never repeat their path. Directories
--- are search results too (VFS-1 decision D1): name_key and dirs_fts.name_key serve that.
+-- are search results too (VFS-1 decision 13): name_key and dirs_fts.name_key serve that.
 CREATE TABLE dirs(
   id          INTEGER PRIMARY KEY,
   root_id     INTEGER NOT NULL,

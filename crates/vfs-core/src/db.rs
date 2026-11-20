@@ -8,8 +8,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::error::{Error, Result};
 
-/// `PRAGMA user_version` written by this build. Version 2 (phase 2, VFS-1 AC-15) adds
-/// `doc_fts` and `content_jobs` without touching existing tables.
+/// `PRAGMA user_version` written by this build. Later versions (such as phase-2 content
+/// search, VFS-1 AC-15) add tables without touching existing ones.
 pub const SCHEMA_VERSION: u32 = 1;
 
 const SCHEMA_V1: &str = include_str!("schema.sql");
@@ -81,20 +81,44 @@ pub fn bad_path(db_path: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-/// [`open_rw`] plus `PRAGMA quick_check`. If the index cannot be opened or fails the check,
-/// it is moved to `<db_path>.bad` (replacing an older one), a fresh index is created, and
-/// every root path that could still be read from the bad file is re-added pending deep, so
-/// the next scan rebuilds it (VFS-1 AC-6). Returns the connection and whether recovery ran.
-/// `SchemaTooNew` is returned as is: a newer build's index is never discarded.
+/// `<db_path>.session`: exists while a session is open. Found at open, it means the
+/// previous session did not shut down cleanly.
+fn session_marker(db_path: &Path) -> PathBuf {
+    let mut p = db_path.as_os_str().to_owned();
+    p.push(".session");
+    PathBuf::from(p)
+}
+
+/// Ends a session opened by [`open_or_recover`]: the next open skips the integrity check.
+pub(crate) fn close_session(db_path: &Path) {
+    let _ = std::fs::remove_file(session_marker(db_path));
+}
+
+/// [`open_rw`] that starts a session. `PRAGMA quick_check` reads the whole index, so it runs
+/// only when the previous session did not end with [`close_session`]. If the index cannot be
+/// opened or fails the check, it is moved to `<db_path>.bad` (replacing an older one), a
+/// fresh index is created, and every root path that could still be read from the bad file
+/// is re-added pending deep, so the next scan rebuilds it (VFS-1 AC-6). Returns the
+/// connection and whether recovery ran. `SchemaTooNew` is returned as is: a newer build's
+/// index is never discarded.
 pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
-    match open_rw(db_path).and_then(|c| quick_check(&c).map(|()| c)) {
-        Ok(conn) => Ok((conn, false)),
-        Err(Error::SchemaTooNew) => Err(Error::SchemaTooNew),
+    let unclean = session_marker(db_path).exists();
+    let opened = open_rw(db_path).and_then(|c| {
+        if unclean {
+            quick_check(&c)?;
+        }
+        Ok(c)
+    });
+    let result = match opened {
+        Ok(conn) => (conn, false),
+        Err(Error::SchemaTooNew) => return Err(Error::SchemaTooNew),
         Err(e) => {
             log::warn!("index {} unusable ({e}); recreating it", db_path.display());
-            Ok((recover(db_path)?, true))
+            (recover(db_path)?, true)
         }
-    }
+    };
+    std::fs::write(session_marker(db_path), b"")?;
+    Ok(result)
 }
 
 fn quick_check(conn: &Connection) -> Result<()> {
@@ -190,6 +214,7 @@ pub mod ingest {
     use crate::error::{Error, Result};
     use crate::fold::fold_key;
     use crate::kind::file_kind;
+    use crate::types::RootStatus;
 
     /// Value of `dirs.scan_state`; the persistent work queue of the indexer.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,8 +270,8 @@ pub mod ingest {
         )?;
         let path_key = fold_key(&path.replace('\\', "/"));
         tx.execute(
-            "INSERT INTO roots(volume_id, path, path_key, status, added_at) VALUES (?1, ?2, ?3, 0, ?4)",
-            params![volume_id, path, path_key, now()],
+            "INSERT INTO roots(volume_id, path, path_key, status, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![volume_id, path, path_key, RootStatus::Pending.code(), now()],
         )?;
         let root_id = tx.last_insert_rowid();
         let root_name = path
@@ -434,7 +459,7 @@ pub mod ingest {
 mod tests {
     use super::ingest::*;
     use super::*;
-    use crate::types::FileKind;
+    use crate::types::{FileKind, RootStatus};
 
     fn fts_ids(conn: &Connection, table: &str, term: &str) -> Vec<i64> {
         let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid");
@@ -479,7 +504,7 @@ mod tests {
         );
     }
 
-    /// VFS-1 AC-6: an index written by a newer build is refused, not overwritten.
+    /// An index written by a newer build is refused, not overwritten.
     #[test]
     fn newer_schema_is_refused() {
         let dir = tempfile::tempdir().unwrap();
@@ -492,7 +517,7 @@ mod tests {
         assert!(matches!(open_ro(&path), Err(Error::SchemaTooNew)));
     }
 
-    /// VFS-1 AC-8: open_ro does not create a missing index.
+    /// open_ro does not create a missing index.
     #[test]
     fn open_ro_requires_existing_index() {
         let dir = tempfile::tempdir().unwrap();
@@ -583,7 +608,7 @@ mod tests {
             vec![gestoria, ano, sibling]
         );
 
-        // Folder hits (decision D1): the name_key column matches the folder's own name only;
+        // Folder hits (VFS-1 decision 13): the name_key column matches the folder's own name only;
         // the root directory is named after the last component of the root path.
         let by_name = |t: &str| {
             let mut stmt = conn
@@ -648,7 +673,7 @@ mod tests {
                 &conn,
                 &format!("SELECT scan_state FROM dirs WHERE id = {gestoria}")
             ),
-            0
+            ScanState::Clean as i64
         );
 
         let tx = conn.transaction().unwrap();
@@ -711,9 +736,13 @@ mod tests {
         let mut conn = open_rw(&path).unwrap();
         let tx = conn.transaction().unwrap();
         let root = insert_root(&tx, "/", "/datos/Fotos").unwrap();
-        tx.execute("UPDATE roots SET status = 2 WHERE id = ?1", [root])
+        tx.execute(
+            "UPDATE roots SET status = ?2 WHERE id = ?1",
+            [root, RootStatus::Ready.code()],
+        )
+        .unwrap();
+        tx.execute("UPDATE dirs SET scan_state = ?1", [ScanState::Clean as i64])
             .unwrap();
-        tx.execute("UPDATE dirs SET scan_state = 0", []).unwrap();
         tx.commit().unwrap();
         drop(conn);
         let conn = recover(&path).unwrap();
@@ -723,17 +752,21 @@ mod tests {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .unwrap();
-        assert_eq!((rpath.as_str(), status), ("/datos/Fotos", 0));
         assert_eq!(
-            count(
-                &conn,
-                "SELECT COUNT(*) FROM dirs WHERE rel_path = '' AND scan_state = 1"
-            ),
-            1
+            (rpath.as_str(), status),
+            ("/datos/Fotos", RootStatus::Pending.code())
         );
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirs WHERE rel_path = '' AND scan_state = ?1",
+                [ScanState::PendingDeep as i64],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 1);
     }
 
-    /// VFS-1 AC-6: an index from a newer build is never moved aside.
+    /// An index from a newer build is never moved aside.
     #[test]
     fn newer_schema_is_not_recovered() {
         let dir = tempfile::tempdir().unwrap();
@@ -746,7 +779,7 @@ mod tests {
         assert!(!bad_path(&path).exists());
     }
 
-    /// VFS-1 AC-8: relative paths are joined component by component with native separators.
+    /// Relative paths are joined component by component with native separators.
     #[test]
     fn join_rel_builds_native_paths() {
         assert_eq!(join_rel("/r", ""), Path::new("/r"));
@@ -754,5 +787,64 @@ mod tests {
             join_rel("/r", "a/b c"),
             Path::new("/r").join("a").join("b c")
         );
+    }
+
+    /// Builds an index whose last page is overwritten: it opens, but fails quick_check.
+    fn corrupt_tail_index(path: &Path) {
+        let mut conn = open_rw(path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        for i in 0..3000 {
+            let name = format!("archivo número {i:05}.pdf");
+            let file = NewFile {
+                name: &name,
+                size: i,
+                mtime: 0,
+                lossy: false,
+            };
+            insert_file(&tx, top, &file).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(conn); // the last connection checkpoints the WAL into the main file
+        let mut bytes = std::fs::read(path).unwrap();
+        let page = 4096;
+        assert!(bytes.len() > 4 * page);
+        let len = bytes.len();
+        bytes[len - page..].fill(0xA5);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// VFS-1 AC-6: after a clean shutdown the next open skips the full integrity check (it
+    /// would read the whole index); after an unclean one the check runs and a damaged index
+    /// is moved to `index.db.bad` and rebuilt from its roots.
+    #[test]
+    fn integrity_check_runs_only_after_unclean_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        corrupt_tail_index(&path);
+
+        let (_conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(
+            !recovered,
+            "no session marker: the damaged tail is not read at open"
+        );
+        drop(_conn);
+        close_session(&path);
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(!recovered, "clean reopen does not run quick_check");
+        drop(conn);
+        assert!(session_marker(&path).exists());
+
+        // The session above was not closed: the next open checks and recovers.
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(recovered);
+        assert!(bad_path(&path).exists());
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM roots"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 0);
     }
 }

@@ -52,6 +52,12 @@ struct Inner {
     indexer: Mutex<Option<IndexerHandle>>,
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        db::close_session(&self.db_path);
+    }
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -188,11 +194,14 @@ impl Vfs {
         }
     }
 
-    /// Stops the indexer after the current directory and joins the thread.
+    /// Stops the indexer after the current directory and joins the thread, then records a
+    /// clean shutdown so the next open skips the integrity check (also done when the last
+    /// clone is dropped).
     pub fn shutdown(&self) {
         if let Some(h) = lock(&self.inner.indexer).take() {
             h.shutdown();
         }
+        db::close_session(&self.inner.db_path);
     }
 
     /// Foreground variant for the CLI and tests: processes pending directories on the calling
@@ -213,7 +222,7 @@ impl Vfs {
 mod tests {
     use super::*;
 
-    /// VFS-1 AC-15: the facade opens a fresh index (schema version 1, empty) and reports it.
+    /// The facade opens a fresh index (current schema version, empty) and reports it.
     #[test]
     fn open_and_stats_on_empty_index() {
         let dir = tempfile::tempdir().unwrap();
@@ -276,7 +285,7 @@ mod tests {
         assert!(matches!(vfs.file_path(sub + 100), Err(Error::NotFound(_))));
     }
 
-    /// VFS-1 AC-5: the facade is shareable across threads (Tauri state, indexer callbacks).
+    /// The facade is shareable across threads (Tauri state, indexer callbacks).
     #[test]
     fn vfs_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync + Clone>() {}

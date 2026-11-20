@@ -1,4 +1,4 @@
-//! Tauri command and event contract (VFS-1 section "Tauri commands and events"): the error
+//! Tauri command and event contract (VFS-1 spec, "Tauri commands and events"): the error
 //! and reveal types the desktop commands return, and the event names. Kept in the core so
 //! the contract compiles and is tested without a webview; `vfs-desktop` re-exports them.
 
@@ -40,7 +40,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// VFS-1 AC-13: reveal outcomes and errors serialize as the UI contract expects.
+    /// Reveal outcomes and errors serialize as the command contract specifies.
     #[test]
     fn contract_shapes() {
         assert_eq!(
@@ -58,7 +58,7 @@ mod tests {
         );
     }
 
-    /// VFS-1 AC-4: every error variant maps to one of the UI's error codes.
+    /// Every error variant maps to one of the contract's error codes.
     #[test]
     fn error_codes() {
         let cases = [
