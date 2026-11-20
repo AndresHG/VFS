@@ -45,8 +45,10 @@ Process-level tests live in `crates/vfs-cli/tests/` (`crash.rs`, `concurrency.rs
 - AC-4 (R1) Given a version-1 index, When the migration is killed, Then the index is wholly
   at version 1 or wholly at the current version, and converges.
 - AC-5 (R2) Given a stale marker and a WAL, When the database, WAL or marker is truncated,
-  overwritten or has a page zeroed at a random offset, Then open succeeds and the index
-  converges.
+  overwritten or has a page zeroed at a random offset, Then open succeeds, searches never
+  fail and the index converges; when SQLite detects the damage (recovery) or only the marker
+  is hit, every structural invariant holds too. Damage SQLite cannot detect may leave stale
+  FTS entries (#103).
 - AC-6 (R3) Given the indexer scanning and a flood of file events, When four threads search
   on two handles, Then no search fails and the index settles on the disk.
 - AC-7 (R3) Given racing queries on one handle, Then every call returns `Ok` and a later
