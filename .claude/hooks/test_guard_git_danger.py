@@ -149,6 +149,18 @@ class HeredocTest(unittest.TestCase):
             decision, _ = self.decision(f"{opener}\ngit push --force origin main\nEOF")
             self.assertEqual(decision, "deny", opener)
 
+    def test_shell_later_in_the_command_still_runs_the_body(self):
+        for command in (
+            "cat <<EOF |\ngit stash pop\nEOF\nbash",
+            "cat <<EOF |\\\nbash\ngit stash pop\nEOF",
+            "cat <<EOF \\\n| bash\ngit stash pop\nEOF",
+            "{ cat <<EOF\ngit stash pop\nEOF\n} | bash",
+            "(cat <<EOF\ngit stash pop\nEOF\n) | sh",
+            'echo "$(echo "a" <<EOF\ngit stash pop\nEOF\n)" | bash',
+        ):
+            decision, _ = self.decision(command)
+            self.assertEqual(decision, "deny", command)
+
     def test_heredoc_piped_to_a_shell_is_analyzed(self):
         decision, _ = self.decision("cat <<EOF | sh\ngh pr merge 95 --auto\nEOF")
         self.assertEqual(decision, "deny")

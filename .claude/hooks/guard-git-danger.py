@@ -494,31 +494,31 @@ def _heredoc_delimiters(line, quote):
 
 
 def _feeds_shell(text):
-    """True when text runs what it is given as commands: `bash <<X`,
-    `cat <<X | sh`, `source /dev/stdin <<X`, `eval "$(…)"`. Any matching word
-    counts, which errs toward analyzing."""
-    words = re.split(r"[\s|;&()<>]+", text)  # `bash<<EOF` has no space
+    """True when text names something that runs its input as commands (a shell,
+    `eval`, `source`, `.`). Any matching word anywhere counts — `bash <<X`,
+    `cat <<X |\\\nbash`, `{ cat <<X; } | sh` — which errs toward analyzing."""
+    words = re.split(r"[\s|;&()<>{}\\]+", text)  # `bash<<EOF` has no space
     return any(os.path.basename(w.strip("'\"")) in SHELLS | {"eval", "source", "."}
                for w in words)
 
 
-def _heredocs(command, run_bodies=False):
-    """Remove heredoc bodies -> (command, text a shell executes).
-
-    A body is data (a commit message, a Python script) unless the opening line
-    feeds it to a shell, or `run_bodies` says the output is run (the command
-    sits in a substitution handed to `eval`/`bash -c`): then it is analyzed as
-    commands. An unquoted delimiter still expands `$(…)` and backticks in the
-    body, so those substitutions are analyzed either way.
-    """
+def _heredocs(command):
+    """Remove heredoc bodies -> (command, [(body, delimiter was quoted)])."""
     if "<<" not in command:
         return command, []
-    lines, kept, executed, quote, i = command.split("\n"), [], [], None, 0
+    lines, kept, bodies, quote, i = command.split("\n"), [], [], None, 0
     while i < len(lines):
         line = lines[i]
         kept.append(line)
         delims, quote = _heredoc_delimiters(line, quote)
         i += 1
+        # A trailing `\` continues the command line; bodies start after it.
+        while delims and not quote and line.endswith("\\") and i < len(lines):
+            line = lines[i]
+            kept.append(line)
+            more, quote = _heredoc_delimiters(line, quote)
+            delims += more
+            i += 1
         for strip_tabs, word, quoted in delims:
             body = []
             while i < len(lines):
@@ -527,18 +527,18 @@ def _heredocs(command, run_bodies=False):
                 if (current.lstrip("\t") if strip_tabs else current) == word:
                     break
                 body.append(current)
-            body = "\n".join(body)
-            if run_bodies or _feeds_shell(line):
-                executed.append(body)
-            elif not quoted:
-                executed += _substitutions(body)
-    return "\n".join(kept), executed
+            bodies.append(("\n".join(body), quoted))
+    return "\n".join(kept), bodies
 
 
-def analyze(command, cwd, depth=0, run_heredocs=False):
+def analyze(command, cwd, depth=0, runs=False):
     """Return a list of (decision, reason) for one command string.
 
-    `run_heredocs`: this command's output is executed, so its heredoc bodies are too.
+    Heredoc bodies are data (a commit message, a Python script) unless the
+    command, outside its bodies and substitutions, names a shell (or `runs`:
+    it sits in a substitution whose output a shell runs); then they are
+    analyzed as commands. An unquoted delimiter still expands `$(…)` and
+    backticks in its body, so those are analyzed either way.
     """
     if depth > MAX_DEPTH or not isinstance(command, str):
         return []
@@ -546,17 +546,17 @@ def analyze(command, cwd, depth=0, run_heredocs=False):
     if len(command) > MAX_COMMAND:
         return []
     verdicts, current_cwd = [], cwd
-    command, executed = _heredocs(command, run_heredocs)
-    for body in executed:
-        verdicts += analyze(body, cwd, depth + 1)
+    command, bodies = _heredocs(command)
+    outside = command
+    for inner in _substitutions(command):
+        outside = outside.replace(inner, "")
+    runs = runs or _feeds_shell(outside)
+    for body, quoted in bodies:
+        for executed in [body] if runs else [] if quoted else _substitutions(body):
+            verdicts += analyze(executed, cwd, depth + 1)
     for segment in _split_segments(command):
-        inners = _substitutions(segment)
-        outside = segment
-        for inner in inners:
-            outside = outside.replace(inner, "")
-        output_runs = _feeds_shell(outside)  # `eval "$(…)"`, `bash -c "$(…)"`
-        for inner in inners:
-            verdicts += analyze(inner, current_cwd, depth + 1, output_runs)
+        for inner in _substitutions(segment):
+            verdicts += analyze(inner, current_cwd, depth + 1, runs)
         try:
             tokens = shlex.split(segment)
         except ValueError:
