@@ -126,7 +126,7 @@ was the slowest of all, because every tier ran to exhaustion: 146 ms warm p95 fo
 (measured). Rejected: a lower read cap on the typo pass, which would also drop real typo
 matches.
 
-## Typos only in words of 6 or more letters
+## Typos only in words of 6 to 64 letters
 
 One typo (insertion, deletion, substitution or adjacent transposition) is tolerated only in
 words of at least 6 characters (`FUZZY_MIN_LEN`, spec S4). The trigram index can only find
