@@ -31,10 +31,12 @@ use rusqlite::{Connection, InterruptHandle};
 use indexer::IndexerHandle;
 use search::SearchState;
 
-/// Lowers the calling thread's CPU and disk priority, as the indexer does (VFS-1 I7); for
+/// Gives the calling thread the indexer's walk profile: lowest CPU and low memory priority,
+/// normal I/O, so its SQLite commits never run at very-low I/O priority (VFS-5 R1). For
 /// readers of other sources (VFS-6 bookmarks).
-pub fn enter_background_priority() {
-    platform::enter_background_priority();
+pub fn lower_thread_priority() {
+    use platform::ThreadPriority;
+    platform::OsThreadPriority::default().walk_profile();
 }
 
 /// Receives indexer progress; implemented by the app (Tauri events) and the CLI.
