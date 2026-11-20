@@ -490,8 +490,9 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
   position, unique per profile and Firefox `guid`, so an item keeps its id across reads. A profile whose
   signature is unchanged is not read again. Turning the setting off deletes every profile
   and bookmark and vacuums the file.
-- **Refreshing**: thread `vfs-bookmarks` at background priority reads at start, when the
-  setting is turned on, on "Buscar cambios ahora", and every 30 minutes.
+- **Refreshing**: thread `vfs-bookmarks`, in the indexer's walk profile (low CPU priority,
+  normal I/O, VFS-5), reads at start, when the setting is turned on, on "Buscar cambios
+  ahora", and every 30 minutes.
 - **Searching** (`search.rs`, `sources.rs`): every stored item is in memory with folded keys
   (title; for a bookmark the address without scheme and `www.`, folder path, tags and
   keyword; for a folder its whole path), its ancestors' ids and its tree key (profile, then
