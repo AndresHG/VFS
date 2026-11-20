@@ -69,7 +69,7 @@ fn ac1_reads_a_profile_with_every_kind_of_entry() {
     );
     p.bookmark(MENU, Some("Bookmarklet"), "javascript:alert(1)", 10);
     p.tag("https://cocina.es/flan", "receta");
-    p.tag("https://cocina.es/flan", "para mamá");
+    p.tag("https://cocina.es/flan", "para Begoña");
     p.keyword("https://banco.es/", "bco");
     drop(conn);
 
@@ -80,7 +80,7 @@ fn ac1_reads_a_profile_with_every_kind_of_entry() {
     let flan = &by_title(&list, "Flan de huevo")[0];
     assert_eq!(flan.root, BookmarkRoot::Menu);
     assert_eq!(flan.folder, vec!["Recetas", "Postres de la abuela"]);
-    assert_eq!(flan.tags, vec!["para mamá", "receta"]);
+    assert_eq!(flan.tags, vec!["para Begoña", "receta"]);
     assert_eq!(flan.added, 1_600_000_000);
     assert_eq!(
         by_title(&list, "Sin ordenar")[0].root,
@@ -104,7 +104,7 @@ fn ac1_reads_a_profile_with_every_kind_of_entry() {
         assert_eq!(by_title(&list, t).len(), 1, "{t}");
     }
     assert_eq!(by_title(&list, "https://sin-titulo.es/").len(), 1);
-    for gone in ["Más visitados", "Bookmarklet", "receta", "para mamá"] {
+    for gone in ["Más visitados", "Bookmarklet", "receta", "para Begoña"] {
         assert!(by_title(&list, gone).is_empty(), "{gone} is not a bookmark");
     }
     // Tag entries (untitled bookmarks inside tag folders) are not bookmarks either.
@@ -243,7 +243,7 @@ fn backup_json(title: &str) -> String {
         r#"{{"guid":"root________","title":"","typeCode":2,"type":"text/x-moz-place-container","root":"placesRoot","children":[
           {{"guid":"menu________","title":"menu","type":"text/x-moz-place-container","root":"bookmarksMenuFolder","children":[
             {{"guid":"f1","title":"Recetas","type":"text/x-moz-place-container","children":[
-              {{"guid":"b1","title":"{title}","type":"text/x-moz-place","uri":"https://copia.es/","tags":"receta,para mamá","keyword":"cp","dateAdded":1600000000000000,"lastModified":1600000000000000}},
+              {{"guid":"b1","title":"{title}","type":"text/x-moz-place","uri":"https://copia.es/","tags":"receta,para Begoña","keyword":"cp","dateAdded":1600000000000000,"lastModified":1600000000000000}},
               {{"guid":"s1","type":"text/x-moz-place-separator"}}]}}]}},
           {{"guid":"unfiled_____","title":"unfiled","type":"text/x-moz-place-container","root":"unfiledBookmarksFolder","children":[
             {{"guid":"b2","title":"Suelto","type":"text/x-moz-place","uri":"https://suelto.es/","dateAdded":1,"lastModified":1}}]}}]}}"#
@@ -283,7 +283,7 @@ fn ac3_damaged_database_falls_back_to_the_newest_backup() {
     assert_eq!(origin, Origin::Backup);
     let nueva = &by_title(&list, "Nueva")[0];
     assert_eq!(nueva.folder, vec!["Recetas"]);
-    assert_eq!(nueva.tags, vec!["para mamá", "receta"]);
+    assert_eq!(nueva.tags, vec!["para Begoña", "receta"]);
     assert_eq!(nueva.keyword.as_deref(), Some("cp"));
     assert_eq!(nueva.added, 1_600_000_000);
     assert_eq!(by_title(&list, "Suelto")[0].root, BookmarkRoot::Unfiled);

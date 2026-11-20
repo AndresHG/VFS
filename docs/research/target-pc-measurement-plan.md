@@ -1,8 +1,8 @@
 # Target-PC measurement plan
 
-One visit to the target PC (Windows 10/11, one 8 TB spinning disk, Synology Drive client
+One field test on a reference machine (Windows 10/11, one 8 TB spinning disk, Synology Drive client
 always syncing) should produce every number the Windows design currently guesses. This is the
-script for that visit. The background study is [`windows-io.md`](windows-io.md) and the ranked
+script for that field test. The background study is [`windows-io.md`](windows-io.md) and the ranked
 changes are in [`windows-recommendations.md`](windows-recommendations.md); each recommendation
 names the step below that confirms or refutes it.
 
@@ -15,7 +15,7 @@ on them, and they are skipped if nobody has the password.
 ([`windows-e2e-results.md`](windows-e2e-results.md), VFS-8). Every step runs there. Two things
 behave differently for a standard user: step 1 cannot list services (`sync_services` holds the
 error), and step 6 may see no disk performance counters (see step 6). Every step catches its own
-errors and the next one still runs, so one broken step does not waste the visit.
+errors and the next one still runs, so one broken step does not waste the field test.
 
 ## What to take
 
@@ -25,7 +25,7 @@ errors and the next one still runs, so one broken step does not waste the visit.
   need the PC in its normal state: Firefox open and Synology syncing.
 - 20 GB free on the data disk for the seek test (step 5). The script skips it otherwise.
 
-## Numbers this visit must produce
+## Numbers this field test must produce
 
 | # | Unknown today | Source (step) | Decides |
 |---|---|---|---|
@@ -174,7 +174,7 @@ load, and do not read small differences into it.
 
 On the runner rehearsal (VFS-8) a standard user saw no disk counter instances: the log
 says `perf: no PhysicalDisk counter instances visible to this user` and `perf.csv` keeps only
-its header. If that happens on the target PC, run this step again from an administrator window
+its header. If that happens on the reference machine, run this step again from an administrator window
 *(admin, optional)*; the watcher counts in `watch.json` do not depend on it.
 
 What VFS-5 assumes from this step (its back-off: study R3, spec R4): the indexer pauses when the **average
@@ -204,7 +204,7 @@ From the photographs in step 0 and the client UI, answer:
 2. Leave the probe sampling disk and memory meanwhile, in a second PowerShell window:
    `... -Step perf -Minutes 240`.
 3. Note the start time. VFS's status bar shows progress. Record when the first scan finishes,
-   or how far it got when the visit ends: the scan resumes at the next start.
+   or how far it got when the field test ends: the scan resumes at the next start.
 4. Index size: `Get-ChildItem "$env:LOCALAPPDATA\app.vfs.desktop" | Select Name, Length`
    (the index is in Local since VFS-1; never in `%APPDATA%`).
 5. Index folder attributes (VFS-5 R9): `attrib "$env:LOCALAPPDATA\app.vfs.desktop"` must
@@ -250,7 +250,7 @@ the third. If they do not drop, the suspend call is not working on this runtime:
 WebView2 version from step 1. The log's `memory` lines (every 10 min: `working_set_mb`,
 `wal_mb`, `index_mb`) give the same figure for `vfs.exe` over weeks.
 
-### 10. Journal growth rate (end of the visit, 1 min) → N2
+### 10. Journal growth rate (end of the field test, 1 min) → N2
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:\ -Step usn-query
@@ -268,12 +268,12 @@ fallback.
 Zip `%LOCALAPPDATA%\VFS-probe`, `%LOCALAPPDATA%\app.vfs.desktop\logs` and the Synology
 photographs. The log's info lines (`start`, `pass`, `pass_end`, `memory`, `watch_overflow`)
 hold only counts, durations, sizes and root numbers; its **warning** lines can name a folder
-that could not be listed, so read them before sharing outside the family. Weeks later, bring
+that could not be listed, so read them before sharing with anyone else. Weeks later, bring
 the log folder back again: it keeps about 5 MB. The probe output holds no file
 contents, only counts, timings, five sample names from the journal (`sample_names` in
-`usn.json`), and process names. Check `usn.json` before sharing it outside the family.
+`usn.json`), and process names. Check `usn.json` before sharing it with anyone else.
 
-## What stays unknowable even after the visit
+## What stays unknowable even after the field test
 
 - Behaviour after weeks of use: index fragmentation on the HDD, WAL growth patterns, how often
   overflow re-walks happen. VFS's diagnostic log (VFS-5, R4) records the WAL size, overflows

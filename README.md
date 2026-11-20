@@ -3,8 +3,10 @@
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS, fully offline, with a Spanish interface.
 
-It is built for one non-technical person whose archive of 4–5 TB lives on a fixed internal
-hard disk of a slow Windows PC, and is designed for 5 million files. The product spec is
+It is a fast, effective file finder for archives of millions of files (designed for 5 million),
+meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
+archive sits on one spinning disk shared with a busy sync client, and runs just as well on
+ordinary or fast machines. The product spec is
 [`specs/vfs-1-core-search/spec.md`](specs/vfs-1-core-search/spec.md).
 
 ## What it does
@@ -212,7 +214,7 @@ build is refused, never overwritten.
   (`apps/desktop/src-tauri/tests/windows_shell.rs`, issue 107). Never run on Windows: for VFS-6, the copy of a `places.sqlite` that Firefox
   holds open, the Microsoft Store profile folder and "Abrir en Firefox" (`ShellExecuteW`).
 - Measured on Windows only on that runner (first scan, memory, latency); nothing on an HDD or
-  on the target PC (slow 8 TB HDD). Milestone Fase 2 exists for that.
+  on the reference machine (slow 8 TB HDD). Milestone Fase 2 exists for that.
 
 ## Phases
 
@@ -222,7 +224,7 @@ Work is tracked as GitHub issues grouped in milestones:
 |---|---|
 | [Fase 0 · Cimientos](https://github.com/AndresHG/VFS/milestone/1) | Spec, research, engineering system, repository. |
 | [Fase 1 · Búsqueda por nombre y ruta](https://github.com/AndresHG/VFS/milestone/2) | Core, indexer, watcher, app, UI, CI, Windows installer (spec VFS-1). |
-| [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the target PC; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
+| [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the reference machine; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
 | [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4) | Text extraction from Word/PDF and Spanish full-text search. |
 | [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Updates, code signing, optional OCR and embeddings. |
 

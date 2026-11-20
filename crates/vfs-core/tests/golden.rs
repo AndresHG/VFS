@@ -1,4 +1,4 @@
-//! Golden relevance set in Spanish (VFS-11): a fixed archive modelled on the end user's
+//! Golden relevance set in Spanish (VFS-11): a fixed archive modelled on the target user's
 //! (photos by event, household papers, the tax adviser's folders, recipes, music) plus noise,
 //! and a fixed list of queries, each with the file or folder that must appear among the
 //! first results. It guards every ranking change (sort, frecency, query syntax, schema

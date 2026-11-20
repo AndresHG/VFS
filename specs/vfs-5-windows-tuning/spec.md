@@ -1,4 +1,4 @@
-# VFS-5 — Windows tuning for the first install on the target PC
+# VFS-5 — Windows tuning for the first install on the reference machine
 
 - **Status**: approved (from the coordinating session's brief, 2026-11-20)
 - **Size**: L (platform-specific scheduling, Windows-only probes, connection pragmas)
@@ -9,7 +9,7 @@
 
 ## Problem
 
-The target PC is a slow Windows machine with one 8 TB spinning disk that holds the archive and
+The reference machine is a slow Windows machine with one 8 TB spinning disk that holds the archive and
 the index, a Synology client syncing the same folders all day, and Defender scanning. Today the
 indexer thread enters Windows background mode once for its whole life. Background mode issues
 very-low-priority I/O, which Windows only sends after about 50 ms of disk silence, so under
@@ -79,7 +79,7 @@ measurement named next to it exists.
 ## Acceptance scenarios
 
 Tests cite these ids (`VFS-5 AC-<m>`) in their doc comments. "Measured on the PC" names what the
-first visit checks; the plan's step numbers are in `target-pc-measurement-plan.md`.
+first field test checks; the plan's step numbers are in `target-pc-measurement-plan.md`.
 
 - AC-1 (R1) Given a root waiting for its first index (or a full re-walk), When the indexer lists
   its directories, Then the thread is in the walk profile for every listing and never enters

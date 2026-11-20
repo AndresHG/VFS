@@ -6,7 +6,7 @@
 
 ## Problem
 
-The target PC keeps both the 4–5 TB archive and the index on one slow, contended 8 TB
+The reference machine keeps both the 4–5 TB archive and the index on one slow, contended 8 TB
 spinning disk, with little memory for the OS file cache. A cold query there pays about one
 disk seek per database page it reads. On the 2 M-file synthetic index (schema version 2,
 889 MB), a single-word query reads about 5,000 pages from a cold file: tens of seconds on

@@ -10,7 +10,7 @@ Labels as in the study: **[doc]** primary source, **[3p]** third-party measureme
 **[est]** our estimate, **[code]** today's code (`origin/feat/vfs-1-freshness` @ `494603a`).
 No gain below is measured; every gain figure is **[est]** unless marked otherwise.
 
-Ranking: expected gain on the target PC divided by cost, with risk as a tie-breaker. R1–R5 are
+Ranking: expected gain on the reference machine divided by cost, with risk as a tie-breaker. R1–R5 are
 the five to do first.
 
 | # | Change | Gain | Cost | Risk | Measure (plan) | Admin | Issue |
@@ -90,7 +90,7 @@ churn **[est]**.
 **Code today.** `apps/desktop/src-tauri/src/lib.rs:101` uses `app_data_dir()`, which is Roaming
 on Windows **[code]**. The WebView2 profile is already in Local.
 
-**Cost.** S. No migration is needed on the target PC, which has never had VFS installed. Dev
+**Cost.** S. No migration is needed on the reference machine, which has never had VFS installed. Dev
 machines need the move.
 
 **Risk.** Low.
@@ -185,8 +185,8 @@ and a standard user cannot create it **[doc]**. The default size (~32 MB, **[3p]
 only hours of Synology churn. Every failure is detected (journal id, `FirstUsn`, error codes
 **[doc]**) and falls back, so the risk is wasted effort, not a wrong index.
 
-**Measure.** **Do not start before the visit.** Probe step 2 (N1: does the call work on her
-build, which handles open) and steps 2 + 10 (N2: journal size and bytes per hour, so hours of
+**Measure.** **Do not start before the field test.** Probe step 2 (N1: does the call work on the reference
+machine's build, which handles open) and steps 2 + 10 (N2: journal size and bytes per hour, so hours of
 history). Build it only if N1 is yes and N2 covers at least a typical gap between uses (a
 weekend) **[est]**.
 
@@ -343,7 +343,7 @@ these files:** reading one downloads it and shows the user a toast **[doc]** (§
 ## What stays unknowable until someone measures on the real machine
 
 1. Whether very-low I/O really starves the walk under Synology load: N4, decides R1.
-2. Whether the unprivileged USN read works on her Windows build, and how many hours the
+2. Whether the unprivileged USN read works on the reference machine's Windows build, and how many hours the
    journal holds under Synology churn: N1, N2, decide R5.
 3. The real cold-walk rate and file count, hence the first-index time: N3, N4, N13.
 4. Disk idle and queue figures in normal use, which set R3's thresholds: N10.

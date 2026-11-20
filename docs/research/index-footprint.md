@@ -186,7 +186,7 @@ the rename cost barely changes. This is the next structural step, not part of ve
 - Version 3, 16 KB pages, warm pass with the reader page cache at 16 MB instead of 64 MB:
   CPU p50 / p95 13.4 / 49.5 ms vs 10.8 / 48.1 ms (load 28–30), peak RSS of the warm-only
   process 38 MB vs 102 MB. On this machine the OS file cache holds the whole index, so a
-  smaller SQLite cache costs almost nothing; on the target PC the OS cache is small and
+  smaller SQLite cache costs almost nothing; on the reference machine the OS cache is small and
   shared with the NAS client, and SQLite's own cache may be the only warm cache there is.
   Not changed: measure on the PC.
 - **Pre-read at start**: after the migration's `VACUUM`, every table is one contiguous run in

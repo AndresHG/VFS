@@ -9,13 +9,13 @@
 
 ## Problem
 
-The end user keeps about 3,000 Firefox bookmarks: some in folder trees by topic, many
-unsorted. She thinks in topics, not in file names or sources: "lo de las recetas de mi
-madre" may be a PDF in her archive or a page she bookmarked years ago. Today she has to
+A typical target user keeps about 3,000 Firefox bookmarks: some in folder trees by topic, many
+unsorted. Users think in topics, not in file names or sources: "lo de las recetas de la
+abuela" may be a PDF in their archive or a page they bookmarked years ago. Today they have to
 search twice, in two programs that match differently (Firefox's bookmark search has no
 accent folding and no typo tolerance). The owner decided: Firefox bookmarks become an
 optional, off-by-default source, and the user chooses which sources a search covers
-(files only, bookmarks only, or both). Her other wishes (YouTube playlists, chat apps, the
+(files only, bookmarks only, or both). The user's other wishes (YouTube playlists, chat apps, the
 open internet, reorganising bookmarks, bibliographies) are out of scope.
 
 ## What we know (research, 2026-11-20)
@@ -352,7 +352,7 @@ Tests cite these ids (`VFS-6 AC-<m>`).
 | D5 | Ranking across sources | Shared tiers; file first on ties | session | 2026-11-20 |
 | D6 | Refresh triggers | Start, setting on, button, every 30 min if changed | session | 2026-11-20 |
 | D7 | Default source | Both ("Archivos y marcadores"), reset at each start | owner | 2026-11-20 |
-| D8 | Several profiles | All profiles Firefox lists, profile groups included; the profile name shows only when more than one profile has bookmarks ("she probably uses one, but maybe all is better") | owner | 2026-11-20 |
+| D8 | Several profiles | All profiles Firefox lists, profile groups included; the profile name shows only when more than one profile has bookmarks ("the user probably uses one, but maybe all is better") | owner | 2026-11-20 |
 | D9 | Action on a bookmark | "Abrir en Firefox" (first answer was the default browser; changed by the owner through the design session); `http`/`https` only | owner | 2026-11-20 |
 | D10 | Folder hierarchy | Essential: searchable, shown on every row, a filter, folders as results, Firefox's order kept | owner | 2026-11-20 |
 | D11 | Writing to sources | Never: VFS is consultative (R14) | owner | 2026-11-20 |

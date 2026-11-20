@@ -80,7 +80,7 @@ NTFS change journal as a **standard user** (issue 32), C: of the runner:
 - `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL`: **works** — 383,798 records covering 3.5 days read in
   0.83 s; **no file names** (`records_with_name=0`); `OpenFileById` resolved 200/200 parent
   references (0.25 ms each).
-- Caveat: Windows Server 2025, not Windows 10/11 client; repeat on the target PC. Recorded on
+- Caveat: Windows Server 2025, not Windows 10/11 client; repeat on the reference machine. Recorded on
   issue 32.
 
 Other probe numbers (runner SSD, not the target): 4 KiB random read p50 0.17 ms at normal and
