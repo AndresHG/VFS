@@ -40,9 +40,9 @@ Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/
   is standing authorization. Then merge it yourself (squash) once the critic has passed the
   head, CI is green on Windows and macOS, and the branch is rebased on `main`; the owner
   reviews product decisions, not PRs. Direct pushes to `main` stay the user's call.
-- `guard-git-danger.py` asks before pushes to `main` and PR merges (its prompt restates these conditions), and
-  denies force-pushes to `main`, `claude/*` pushes, bare stash, and `gh pr create` without a
-  critic verdict for HEAD.
+- `guard-git-danger.py` asks before pushes to `main` and PR merges, and denies force-pushes to
+  `main`, `claude/*` pushes, bare stash, `gh pr create` without a critic verdict for HEAD, and
+  `gh pr merge` with `--auto` or before both CI test jobs pass (`main` has no required checks).
 
 ## Plan before coding: spec first
 
