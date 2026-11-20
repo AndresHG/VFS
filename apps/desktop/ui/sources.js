@@ -38,6 +38,14 @@ export function bookmarkPathParts(hit, rootLabels) {
   return parts;
 }
 
+/** The site of an address, without user, `www.` or port: "https://www.cocina.es/flan" ->
+ *  "cocina.es"; "" for an address with no host (`file:`, `data:`). */
+export function site(url) {
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url || '');
+  if (!m) return '';
+  return m[1].replace(/^[^@]*@/, '').replace(/:\d+$/, '').replace(/^www\./i, '');
+}
+
 /** The separator between folder names in a bookmark path. No-break spaces: the row splits the
  *  path into a head and a tail for middle truncation, and a plain space at either edge would
  *  collapse. */

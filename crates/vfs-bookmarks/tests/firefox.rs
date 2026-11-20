@@ -299,6 +299,8 @@ fn ac3_damaged_database_falls_back_to_the_newest_backup() {
     bm.set_enabled(true).unwrap();
     let st = bm.refresh().unwrap();
     assert_eq!((st.state, st.count), (ReadState::FromBackup, 2));
+    // Nothing changed: the profile is skipped and still reads as from the backup.
+    assert_eq!(bm.refresh().unwrap().state, ReadState::FromBackup);
     std::fs::remove_dir_all(&backups).unwrap();
     std::fs::write(dir.join("places.sqlite"), b"still not a database").unwrap();
     let st = bm.refresh().unwrap();

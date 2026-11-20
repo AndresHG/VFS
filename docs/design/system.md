@@ -115,7 +115,7 @@ Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keep
 - **Bookmark rows** reuse the result row: a bookmark icon, the title as the name, and the
   bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
   same middle truncation, because the folder path matters as much as for files. The date slot
-  carries the date the bookmark was saved; size stays empty. The details line shows the whole
+  carries the date the bookmark was saved and the size slot its site (`cocina.es`). The details line shows the whole
   path and the address.
 - The bookmark row's one action is **"Abrir en Firefox"**: it opens the bookmarked page in
   Firefox, like "Mostrar en carpeta" for files, with the same Intro/double-click behaviour.

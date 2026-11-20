@@ -78,8 +78,8 @@ export const S = {
     [BookmarkRoot.MENU]: 'Menú de marcadores', [BookmarkRoot.TOOLBAR]: 'Barra de marcadores',
     [BookmarkRoot.UNFILED]: 'Otros marcadores', [BookmarkRoot.MOBILE]: 'Marcadores del móvil',
   },
-  bookmarkRowLabel: (title, kind, path, date) =>
-    [title, kind, `en ${path}`, date && `guardado el ${date}`].filter(Boolean).join(', '),
+  bookmarkRowLabel: (title, kind, path, site, date) =>
+    [title, kind, `en ${path}`, site, date && `guardado el ${date}`].filter(Boolean).join(', '),
   detailsBookmark: 'Dirección:',
   detailsBookmarkFolder: 'Guardado en:',
   rowLabel: (name, kind, dir, date, size, unavailable) =>

@@ -133,9 +133,10 @@ folder path is treated as a file's folder path:
 
 ### Sorting (owner decision D12)
 
-A sort choice applies to every source: "Relevancia" (the default: the shared tiers, or
-Firefox's order inside a bookmark folder with no words), "Más recientes" (a file's
-modification date, a bookmark's date saved) and "Por origen" (files first, then bookmarks,
+A sort choice applies to every source: "Lo más parecido primero" (the default: the shared
+tiers, or Firefox's order inside a bookmark folder with no words), "Lo más reciente primero"
+(a file's modification date, a bookmark's date saved) and "Archivos primero, luego
+marcadores" (files first, then bookmarks,
 each by relevance).
 
 ### Read only, always (owner decision D11)
@@ -184,7 +185,8 @@ the root joined by U+001F.
 | Folder (a folder on disk) | none shown |
 | Folder (a bookmark folder) | only what is inside it; no files |
 
-While "Marcadores" is the chosen source, the type, size and folder filters are disabled.
+While "Marcadores" is the chosen source, the size filter is disabled; the type and folder
+filters stay, because "Carpetas" and the "Carpeta" select also apply to bookmark folders.
 
 ### Source choice
 
@@ -300,9 +302,9 @@ Tests cite these ids (`VFS-6 AC-<m>`).
   folder with its own path ("recetas" finds "Recetas" and "Recétas viejas"); the folder
   filter on one of two same-named folders returns only what is inside it, no files; with
   no words it lists the contents in Firefox's order and nesting.
-- AC-14 (R13) Given files and bookmarks, When sorted "Más recientes", Then the hits come
-  newest first across both sources; "Por origen" lists every file before any bookmark;
-  "Relevancia" is the AC-6 order.
+- AC-14 (R13) Given files and bookmarks, When sorted "Lo más reciente primero", Then the hits
+  come newest first across both sources; "Archivos primero, luego marcadores" lists every
+  file before any bookmark; "Lo más parecido primero" is the AC-6 order.
 - AC-15 (R14) Given a profile folder and files made read-only, When bookmarks are read,
   Then the read succeeds and the folder is unchanged (names, sizes, times).
 

@@ -11,7 +11,7 @@ import { S } from '../ui/strings.js';
 import { BookmarkRoot, ReadState, SortOrder, Source } from '../ui/contract.js';
 import { SourceChoice } from '../ui/choices.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, sizeFilterApplies, sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
 } from '../ui/sources.js';
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
@@ -44,7 +44,17 @@ test('bookmark row path', () => {
   assert.deepEqual(bookmarkPathParts(hit, S.bookmarkRoots), ['Menú de marcadores', 'Recetas', 'Postres']);
   assert.match(PATH_SEPARATOR, /›/);
   assert.deepEqual(bookmarkPathParts({ ...hit, profile: 'Casa' }, S.bookmarkRoots).slice(0, 2), ['Casa', 'Menú de marcadores']);
-  assert.match(S.bookmarkRowLabel('Flan', S.bookmarkKind, 'Menú de marcadores', '1 mar 2020'), /guardado el 1 mar 2020/);
+  const label = S.bookmarkRowLabel('Flan', S.bookmarkKind, 'Menú de marcadores', 'cocina.es', '1 mar 2020');
+  assert.match(label, /cocina\.es/);
+  assert.match(label, /guardado el 1 mar 2020/);
+});
+
+/** VFS-6 AC-11: a bookmark row shows the site of its address. */
+test('site of a bookmark address', () => {
+  assert.equal(site('https://www.cocina.es/flan?x=1'), 'cocina.es');
+  assert.equal(site('http://user:pw@Ejemplo.es:8080/a'), 'Ejemplo.es');
+  assert.equal(site('HTTPS://WWW.banco.es'), 'banco.es');
+  for (const none of ['file:///C:/a.pdf', 'data:text/html,hola', '', null]) assert.equal(site(none), '', String(none));
 });
 
 /** VFS-6 AC-11: every choice, root, read state and sort order has Spanish copy; "Buscar en"

@@ -13,7 +13,7 @@ import {
   DateChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
 } from './choices.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, sizeFilterApplies, sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
 } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
@@ -509,12 +509,15 @@ function main() {
     pathEl.title = whole;
     const kindLabel = hit.isFolder ? S.bookmarkFolderKind : S.bookmarkKind;
     const dateText = F.date(hit.added);
+    // A bookmark has no size; its slot shows the site (VFS-6 AC-11).
+    const host = hit.isFolder ? '' : site(hit.url);
     kind.textContent = kindLabel;
     date.textContent = dateText;
-    size.textContent = '';
+    size.textContent = host;
+    size.title = host;
     if (hit.isFolder) setAction(action, FileKind.FOLDER, S.folderContentsButton, true);
     else setAction(action, OPEN_ICON, S.openButton, hit.openable);
-    row.setAttribute('aria-label', S.bookmarkRowLabel(hit.title, kindLabel, whole, dateText));
+    row.setAttribute('aria-label', S.bookmarkRowLabel(hit.title, kindLabel, whole, host, dateText));
   }
 
   const list = createVirtualList({ scroller: $('results'), sizer: $('sizer'), buildRow, fillRow });

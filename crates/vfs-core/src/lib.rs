@@ -28,13 +28,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use rusqlite::{Connection, InterruptHandle};
 
 use indexer::IndexerHandle;
+use search::SearchState;
 
 /// Lowers the calling thread's CPU and disk priority, as the indexer does (VFS-1 I7); for
 /// readers of other sources (VFS-6 bookmarks).
 pub fn enter_background_priority() {
     platform::enter_background_priority();
 }
-use search::SearchState;
 
 /// Receives indexer progress; implemented by the app (Tauri events) and the CLI.
 pub trait ProgressSink: Send + Sync + 'static {

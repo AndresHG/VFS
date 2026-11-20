@@ -17,6 +17,7 @@ mod types;
 pub use search::{filters_exclude_bookmarks, is_openable, MAX_BOOKMARK_HITS};
 pub use types::*;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -56,6 +57,8 @@ struct State {
     profiles: u32,
     multi_profile: bool,
     read_state: ReadState,
+    /// How the last read of each profile folder went (Ok, FromBackup or Failed).
+    outcomes: HashMap<String, ReadState>,
 }
 
 impl State {
@@ -101,6 +104,7 @@ impl Bookmarks {
             profiles: 0,
             multi_profile: false,
             read_state: ReadState::Never,
+            outcomes: HashMap::new(),
         };
         state.reload()?;
         if !state.entries.is_empty() {
@@ -127,6 +131,7 @@ impl Bookmarks {
             st.entries.clear();
             st.profiles = 0;
             st.multi_profile = false;
+            st.outcomes.clear();
             st.read_state = ReadState::Never;
         }
         drop(st);
@@ -156,17 +161,25 @@ impl Bookmarks {
             return Ok(self.status());
         }
         lock(&self.state).read_state = ReadState::Reading;
+        let result = self.read_changed();
+        let _ = std::fs::remove_dir_all(&self.work_dir);
+        // An error never leaves the status at "reading".
+        lock(&self.state).read_state = *result.as_ref().unwrap_or(&ReadState::Failed);
+        result.map(|_| self.status())
+    }
+
+    /// The reading part of [`Bookmarks::refresh`]; returns the overall state. A profile
+    /// skipped as unchanged keeps the outcome of its last read.
+    fn read_changed(&self) -> Result<ReadState> {
         let profiles = self.locator.profiles(&self.work_dir);
-        let (mut any_backup, mut any_failed) = (false, false);
         for p in &profiles {
             let dir = p.dir.to_string_lossy().into_owned();
             let sig = firefox::signature(&p.dir);
             if lock(&self.state).store.signature(&dir)?.as_deref() == Some(sig.as_str()) {
                 continue;
             }
-            match firefox::read_profile(&p.dir, &self.work_dir.join("places")) {
+            let outcome = match firefox::read_profile(&p.dir, &self.work_dir.join("places")) {
                 Ok((tree, origin)) => {
-                    any_backup |= origin == Origin::Backup;
                     let mut st = lock(&self.state);
                     if !st.store.enabled()? {
                         break;
@@ -179,34 +192,39 @@ impl Bookmarks {
                         &tree,
                         now(),
                     )?;
+                    if origin == Origin::Backup {
+                        ReadState::FromBackup
+                    } else {
+                        ReadState::Ok
+                    }
                 }
                 Err(e) => {
                     log::warn!("Firefox profile {}: {e}", p.dir.display());
-                    any_failed = true;
+                    ReadState::Failed
                 }
-            }
+            };
+            lock(&self.state).outcomes.insert(dir, outcome);
         }
-        let _ = std::fs::remove_dir_all(&self.work_dir);
+        let found: Vec<String> = profiles
+            .iter()
+            .map(|p| p.dir.to_string_lossy().into_owned())
+            .collect();
         let mut st = lock(&self.state);
         if st.store.enabled()? {
-            let found: Vec<String> = profiles
-                .iter()
-                .map(|p| p.dir.to_string_lossy().into_owned())
-                .collect();
             st.store.keep_only_profiles(&found)?;
             st.reload()?;
         }
-        st.read_state = if profiles.is_empty() {
+        st.outcomes.retain(|dir, _| found.contains(dir));
+        let has = |s: ReadState| st.outcomes.values().any(|o| *o == s);
+        Ok(if profiles.is_empty() {
             ReadState::NoFirefox
-        } else if any_failed {
+        } else if has(ReadState::Failed) {
             ReadState::Failed
-        } else if any_backup {
+        } else if has(ReadState::FromBackup) {
             ReadState::FromBackup
         } else {
             ReadState::Ok
-        };
-        drop(st);
-        Ok(self.status())
+        })
     }
 
     /// Ranked bookmark and folder hits for `query`, only inside the folder `inside` when
