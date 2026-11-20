@@ -123,7 +123,9 @@ class HeredocTest(unittest.TestCase):
     def test_commit_message_heredoc_in_substitution_is_ignored(self):
         decision, _ = self.decision(
             "git commit -m \"$(cat <<'EOF'\n"
-            "fix: don't run git stash pop or gh pr merge --auto\n"
+            "fix: the guard\n"
+            "gh pr merge 95 --auto\n"
+            "git stash pop\n"
             "EOF\n"
             ")\"")
         self.assertIsNone(decision)
