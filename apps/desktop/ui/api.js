@@ -18,6 +18,8 @@
 //   3. the URL carries `?fake`, which nothing in the app ever adds.
 // Dev use: serve `apps/desktop/` and open http://localhost:<port>/ui/?fake
 
+import { ErrorCode } from './contract.js';
+
 function tauriBackend(t) {
   const { invoke } = t.core;
   const { listen } = t.event;
@@ -46,7 +48,7 @@ function fakeAllowed() {
 }
 
 function missingBackend() {
-  const fail = () => Promise.reject({ code: 'backend_missing', message: 'no Tauri runtime' });
+  const fail = () => Promise.reject({ code: ErrorCode.BACKEND_MISSING, message: 'no Tauri runtime' });
   return {
     isFake: false,
     missing: true,

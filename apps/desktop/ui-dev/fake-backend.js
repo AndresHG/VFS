@@ -28,9 +28,15 @@ function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const rand = rng(20261120);
-const pick = (a) => a[Math.floor(rand() * a.length)];
-const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+// The seeded generator is created per backend and passed down, so no module state mutates.
+function makeRandom(seed) {
+  const rand = rng(seed);
+  return {
+    rand,
+    pick: (a) => a[Math.floor(rand() * a.length)],
+    int: (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1)),
+  };
+}
 
 const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\\/g, '/');
 
@@ -58,51 +64,51 @@ function makeRoots(scenario) {
   ];
 }
 
-function makeEntry(root) {
-  const y = int(1998, 2026);
-  const t = Math.min(NOW - int(0, 3) * DAY, Math.floor(Date.UTC(y, int(0, 11), int(1, 28)) / 1000) + int(0, DAY));
+function makeEntry(root, R) {
+  const y = R.int(1998, 2026);
+  const t = Math.min(NOW - R.int(0, 3) * DAY, Math.floor(Date.UTC(y, R.int(0, 11), R.int(1, 28)) / 1000) + R.int(0, DAY));
   if (root.id === 1) {
-    const sub = pick(['Banco', 'Casa', `Hacienda\\${y}`, 'Médico', 'Seguros', 'Recetas', 'Coche', `Facturas\\${y}\\${pick(months)}`, 'Varios']);
-    const base = pick(docs);
-    const name = `${base}${rand() < 0.5 ? ` ${pick(months)} ${y}` : ` ${y}`}.${pick(docExt)}`;
-    return { dir: `${root.path}\\${sub}`, name, kind: 'document', size: int(8_000, 4_000_000), modified: t };
+    const sub = R.pick(['Banco', 'Casa', `Hacienda\\${y}`, 'Médico', 'Seguros', 'Recetas', 'Coche', `Facturas\\${y}\\${R.pick(months)}`, 'Varios']);
+    const base = R.pick(docs);
+    const name = `${base}${R.rand() < 0.5 ? ` ${R.pick(months)} ${y}` : ` ${y}`}.${R.pick(docExt)}`;
+    return { dir: `${root.path}\\${sub}`, name, kind: 'document', size: R.int(8_000, 4_000_000), modified: t };
   }
-  const r = rand();
+  const r = R.rand();
   if (r < 0.62) {
-    const ev = pick(events);
-    const evName = ev.endsWith(' a') || ev.endsWith(' en') ? `${ev} ${pick(places)}` : ev;
-    const deep = rand() < 0.15
-      ? `\\Fotos escaneadas del álbum de la abuela Concepción\\Caja ${int(1, 9)} - Años sesenta y setenta\\${evName} con los primos de ${pick(places)}\\Sobre ${int(1, 40)} sin clasificar todavía\\Revisar con mamá antes de tirar nada de lo que hay aquí dentro, por favor`
+    const ev = R.pick(events);
+    const evName = ev.endsWith(' a') || ev.endsWith(' en') ? `${ev} ${R.pick(places)}` : ev;
+    const deep = R.rand() < 0.15
+      ? `\\Fotos escaneadas del álbum de la abuela Concepción\\Caja ${R.int(1, 9)} - Años sesenta y setenta\\${evName} con los primos de ${R.pick(places)}\\Sobre ${R.int(1, 40)} sin clasificar todavía\\Revisar con mamá antes de tirar nada de lo que hay aquí dentro, por favor`
       : `\\Fotos\\${y}\\${evName}`;
-    const ext = pick(['JPG', 'JPG', 'jpg', 'jpeg', 'png', 'HEIC']);
-    const name = rand() < 0.6 ? `IMG_${String(int(1, 9999)).padStart(4, '0')}.${ext}` : `${evName} ${int(1, 300)}.${ext}`;
-    return { dir: root.path + deep, name, kind: 'photo', size: int(400_000, 9_000_000), modified: t };
+    const ext = R.pick(['JPG', 'JPG', 'jpg', 'jpeg', 'png', 'HEIC']);
+    const name = R.rand() < 0.6 ? `IMG_${String(R.int(1, 9999)).padStart(4, '0')}.${ext}` : `${evName} ${R.int(1, 300)}.${ext}`;
+    return { dir: root.path + deep, name, kind: 'photo', size: R.int(400_000, 9_000_000), modified: t };
   }
   if (r < 0.75) {
-    const ev = pick(events);
-    return { dir: `${root.path}\\Vídeos\\${y}`, name: `${ev} ${pick(places)}.${pick(['mp4', 'MOV', 'avi'])}`, kind: 'video', size: int(20_000_000, 4_500_000_000), modified: t };
+    const ev = R.pick(events);
+    return { dir: `${root.path}\\Vídeos\\${y}`, name: `${ev} ${R.pick(places)}.${R.pick(['mp4', 'MOV', 'avi'])}`, kind: 'video', size: R.int(20_000_000, 4_500_000_000), modified: t };
   }
   if (r < 0.9) {
-    const singer = pick(singers);
-    return { dir: `${root.path}\\Música\\${singer}`, name: `${String(int(1, 14)).padStart(2, '0')} - ${pick(songs)}.mp3`, kind: 'audio', size: int(2_000_000, 12_000_000), modified: t };
+    const singer = R.pick(singers);
+    return { dir: `${root.path}\\Música\\${singer}`, name: `${String(R.int(1, 14)).padStart(2, '0')} - ${R.pick(songs)}.mp3`, kind: 'audio', size: R.int(2_000_000, 12_000_000), modified: t };
   }
   if (r < 0.97) {
-    return { dir: `${root.path}\\Documentos de ${pick(people)}`, name: `${pick(docs)} ${y}.${pick(docExt)}`, kind: 'document', size: int(8_000, 3_000_000), modified: t };
+    return { dir: `${root.path}\\Documentos de ${R.pick(people)}`, name: `${R.pick(docs)} ${y}.${R.pick(docExt)}`, kind: 'document', size: R.int(8_000, 3_000_000), modified: t };
   }
-  return { dir: `${root.path}\\Varios`, name: `${pick(['copia', 'backup', 'programa', 'datos'])}_${int(1, 999)}.${pick(['zip', 'exe', 'dat', 'iso'])}`, kind: 'other', size: int(1_000, 900_000_000), modified: t };
+  return { dir: `${root.path}\\Varios`, name: `${R.pick(['copia', 'backup', 'programa', 'datos'])}_${R.int(1, 999)}.${R.pick(['zip', 'exe', 'dat', 'iso'])}`, kind: 'other', size: R.int(1_000, 900_000_000), modified: t };
 }
 
-function buildCorpus(roots) {
+function buildCorpus(roots, R) {
   const files = [];
   const dirs = new Map(); // path -> entry
   const weights = roots.map((r) => r.weight);
   let seqPerRoot = new Map(roots.map((r) => [r.id, 0]));
   for (let i = 0; i < TOTAL_FILES; i++) {
-    let x = rand();
+    let x = R.rand();
     let root = roots[roots.length - 1];
     for (let k = 0; k < roots.length; k++) { if ((x -= weights[k]) < 0) { root = roots[k]; break; } }
-    const e = makeEntry(root);
-    if (rand() < 0.002) e.name = e.name.replace(/(\.[^.]+)$/, ' borrado$1');
+    const e = makeEntry(root, R);
+    if (R.rand() < 0.002) e.name = e.name.replace(/(\.[^.]+)$/, ' borrado$1');
     const seq = seqPerRoot.get(root.id);
     seqPerRoot.set(root.id, seq + 1);
     files.push({ id: i + 1, rootId: root.id, seq, isDir: false, matched: null, ...e, fName: fold(e.name), fDir: fold(e.dir) });
@@ -140,7 +146,8 @@ export function createFakeBackend(params) {
   const scenario = params.get('scenario') || '';
   const slow = params.has('slow');
   let roots = scenario === 'empty' ? [] : makeRoots(scenario);
-  const corpus = buildCorpus(makeRoots(''));
+  const R = makeRandom(20261120);
+  const corpus = buildCorpus(makeRoots(''), R);
   const all = [...corpus.files, ...corpus.dirs];
   const totalOf = (id) => corpus.counts.get(id) || 0;
 
@@ -276,7 +283,7 @@ export function createFakeBackend(params) {
     async search(q) {
       const text = q.text || '';
       const f = q.filters || {};
-      await sleep(slow ? int(400, 1200) : int(30, 220));
+      await sleep(slow ? R.int(400, 1200) : R.int(30, 220));
       if (fold(text).includes('fallo')) throw { code: 'db', message: 'database is locked' };
       if (fold(text).includes('tardar')) {
         await sleep(900);
@@ -292,7 +299,7 @@ export function createFakeBackend(params) {
       const hits = list.slice(offset, Math.min(total, offset + limit)).map(({ e, m }) => ({
         id: e.id, name: e.name, dir: e.dir, kind: e.kind, size: e.size, modified: e.modified, matched: m, isDir: e.isDir,
       }));
-      return { hits, total, truncated: capped, truncatedBy: capped ? 'cap' : null, elapsedMs: int(8, 90) };
+      return { hits, total, truncated: capped, truncatedBy: capped ? 'cap' : null, elapsedMs: R.int(8, 90) };
     },
 
     async reveal(id, isDir) {

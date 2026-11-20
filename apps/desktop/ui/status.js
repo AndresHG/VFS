@@ -2,6 +2,7 @@
 // every start included), or the time of the last completed check. Pure, so it is tested
 // outside the browser (`apps/desktop/ui-dev/status.test.mjs`).
 
+import { IndexerState, RootStatus } from './contract.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 
@@ -27,7 +28,7 @@ export function checkedAt(secs, now) {
 
 /** True while no root has finished its first scan. */
 export function firstScanRunning(roots) {
-  return roots.length > 0 && !roots.some((r) => r.lastFullScan != null || r.status === 'ready');
+  return roots.length > 0 && !roots.some((r) => r.lastFullScan != null || r.status === RootStatus.READY);
 }
 
 /**
@@ -37,12 +38,12 @@ export function firstScanRunning(roots) {
  */
 export function statusText(p, roots, now = Date.now() / 1000) {
   const files = F.count(p?.filesIndexed ?? roots.reduce((s, r) => s + r.files, 0));
-  if (p?.state === 'scanning') {
+  if (p?.state === IndexerState.SCANNING) {
     if (!firstScanRunning(roots)) return S.statusChecking(files);
     return S.statusScanning(files, F.count(p.roots.reduce((s, r) => s + r.dirsPending, 0)));
   }
-  if (p?.state === 'paused') return S.statusPaused(files);
-  const missing = roots.filter((r) => r.status === 'unavailable').length;
+  if (p?.state === IndexerState.PAUSED) return S.statusPaused(files);
+  const missing = roots.filter((r) => r.status === RootStatus.UNAVAILABLE).length;
   if (missing) return S.statusReadyUnavailable(files, missing);
   const checks = roots.map((r) => r.lastFullScan).filter((t) => t != null);
   if (!checks.length) return S.statusFiles(files);
