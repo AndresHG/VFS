@@ -278,7 +278,8 @@ fails the check, is replaced: a fresh index holding every root path still readab
 (with its `-wal` and `-shm`), and `index.db.new` takes its place. A kill between the last two
 steps is finished by the next open, so the root list survives a crash during recovery
 (VFS-3 AC-3). Once every root is ready with a finished full scan, the indexer deletes the
-`.bad` file and its companions (`discard_recovered_copy`). Any other open error (busy, locked, I/O) is returned, never recovered. Several
+`.bad` file and its companions (`discard_recovered_copy`). Any other open error (busy,
+locked, I/O) is returned, never recovered. Several
 processes (the app and the CLI) can share one index; each holds its own marker, and the
 migration takes the write lock before reading the schema version (VFS-3 AC-9).
 
