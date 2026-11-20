@@ -103,20 +103,28 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
   The ellipsis means "asks something more" (a picker or a confirm).
 - No exclamation marks, no "¡Ups!", no blame ("ha introducido mal…").
 
-## Room for sources (planned, not built)
+## Sources (VFS-6)
 
-Search will cover more than one source (files, and optionally Firefox bookmarks). The layout
-keeps room for it without changing shape:
-- **Where to search** is one more pill, first in the filter line ("Archivos", "Marcadores",
-  "Archivos y marcadores"), shown only when a second source is set up. It uses the same
-  checklist popover pattern as the type filter.
-- **Bookmark rows** reuse the result row: an icon slot, the title as the name, and the bookmark
-  folder path in the path line with the same middle truncation, because the folder path matters
-  as much as for files. Date and size slots carry what a bookmark has (date added) or stay empty.
+Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
+Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keeps its shape:
+- **Where to search** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") is the
+  first pill in the filter line, and **"Orden"** (relevance, newest, files first) the last;
+  both show only while bookmarks are included. They are native-select pills like date and
+  size rather than the type checklist: each is one choice out of three, and a select also
+  works where the Popover API is missing.
+- **Bookmark rows** reuse the result row: a bookmark icon, the title as the name, and the
+  bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
+  same middle truncation, because the folder path matters as much as for files. The date slot
+  carries the date the bookmark was saved and the size slot its site (`cocina.es`). The details line shows the whole
+  path and the address.
 - The bookmark row's one action is **"Abrir en Firefox"**: it opens the bookmarked page in
   Firefox, like "Mostrar en carpeta" for files, with the same Intro/double-click behaviour.
   Firefox cannot be told from outside to select a bookmark in its bookmark manager, so the
   folder path on the row is what tells where the bookmark is saved (owner's decision).
+- **Bookmark folders** are results with the folder icon; their action is **"Ver su
+  contenido"**, which makes the folder the "Carpeta" filter ("Dentro de: Recetas") and lists
+  what it holds in Firefox's order. The "Carpeta" select also offers the bookmark roots under
+  "Marcadores de Firefox".
 
 ## Directions for the main screen
 

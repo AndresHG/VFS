@@ -12,11 +12,14 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 ┌──────────────── Tauri 2 app (one process) ─────────────────┐
 │ apps/desktop/ui        static Spanish screen (JS, no build) │
 │        │  invoke(command) / listen(event)                   │
-│ apps/desktop/src-tauri commands.rs, reveal.rs, lib.rs       │
+│ apps/desktop/src-tauri commands.rs, reveal.rs, lib.rs,      │
+│        │               bookmarks.rs (VFS-6)                 │
+│ crates/vfs-bookmarks   Firefox reader, bookmarks.db, merge  │
 │        │                                                    │
 │ crates/vfs-core        Vfs facade (core/lib.rs)             │
 │   ├─ roots.rs          add / remove / list folders          │
 │   ├─ search.rs         candidates, verification, paging     │
+│   ├─ matching.rs       query parsing, typo rule, tiers      │
 │   │    ├─ fuzzy.rs     one-typo candidates and check        │
 │   │    └─ rank.rs      ordering                             │
 │   ├─ indexer/          thread "vfs-indexer"                 │
@@ -32,7 +35,8 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
               <local app data dir>/index.db
 ```
 
-`crates/vfs-cli` uses the same `Vfs` facade, with its own index file.
+`crates/vfs-cli` uses the same `Vfs` facade, with its own index file. Firefox bookmarks
+(VFS-6) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below.
 
 The app is one process. The core opens these SQLite connections to the same file
 (`core/lib.rs`, `core/db.rs`):
@@ -408,9 +412,16 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `get_progress` | — | `IndexProgress` |
 | `rescan` | `id \| null` | `null` (`unavailable` if the indexer is not running) |
 | `set_paused` | `paused` | `null` |
+| `search_sources` | `query: SearchQuery`, `options: { sources: Source[] (empty = all), bookmarkFolder, sort: SortOrder }` (optional) | `SourcesResponse` (VFS-6) |
+| `get_bookmarks_status` | — | `BookmarkStatus` |
+| `set_bookmarks_enabled` | `enabled` | `BookmarkStatus`; off deletes every stored bookmark |
+| `open_bookmark` | `id` | `null`; `not_found` for an unknown id, `unavailable` for a non-web address |
+
+`rescan` with `id: null` ("Buscar cambios ahora") also wakes the bookmark reader.
 
 Events: `index-progress` (payload `IndexProgress`) and `index-changed` (payload `null`), sent
-by `EventSink` in `apps/desktop/src-tauri/src/lib.rs`.
+by `EventSink` in `apps/desktop/src-tauri/src/lib.rs`; `bookmarks-changed` (payload
+`BookmarkStatus`) after every bookmark read, from `src-tauri/src/bookmarks.rs`.
 
 Key shapes:
 
@@ -446,12 +457,58 @@ second launch focuses the running window (single-instance plugin). The webview m
 core IPC (`capabilities/default.json`) under a strict content security policy
 (`tauri.conf.json`).
 
+## Bookmarks (VFS-6)
+
+`crates/vfs-bookmarks` adds Firefox bookmarks as a second source, off until the user turns
+on "Incluir marcadores de Firefox" in the folder panel. Spec:
+[`specs/vfs-6-bookmarks/spec.md`](../specs/vfs-6-bookmarks/spec.md).
+
+- **Finding profiles** (`firefox/mod.rs`): `profiles.ini` in `%APPDATA%\Mozilla\Firefox`, the
+  Microsoft Store build's redirected copy of it, or `~/Library/Application Support/Firefox`;
+  a profile with a `StoreID` adds the profiles of `Profile Groups/<StoreID>.sqlite`.
+- **Reading** (`firefox/snapshot.rs`, `places.rs`, `backup.rs`): Firefox's own files are never
+  opened with SQLite. `places.sqlite` and its WAL are copied into
+  `<data dir>/bookmarks.db.snapshot/`; the copy is kept only if both files had the same
+  size and modification time before and after copying and `quick_check` passes (3 attempts,
+  500 ms apart), and it is deleted after reading. The copy is read through a SQLite
+  authorizer that allows only `moz_bookmarks`, `moz_keywords` and `moz_places.id`/`url`
+  (`ALLOWED_COLUMNS`), so history cannot be read. If the database cannot be read, the newest
+  readable `bookmarkbackups/*.jsonlz4` is used. Tags (folders under the tags root) belong to
+  the address; `place:` and `javascript:` entries and identical rows are dropped.
+- **Storing** (`store.rs`): `bookmarks.db` (WAL, `secure_delete`): `settings`, `profiles` (one
+  row per profile folder with the size/time signature of its files) and `items`, the
+  bookmarks and folders (the four roots included) with their parent guid and Firefox
+  position, unique per profile and Firefox `guid`, so an item keeps its id across reads. A profile whose
+  signature is unchanged is not read again. Turning the setting off deletes every profile
+  and bookmark and vacuums the file.
+- **Refreshing**: thread `vfs-bookmarks` at background priority reads at start, when the
+  setting is turned on, on "Buscar cambios ahora", and every 30 minutes.
+- **Searching** (`search.rs`, `sources.rs`): every stored item is in memory with folded keys
+  (title; for a bookmark the address without scheme and `www.`, folder path, tags and
+  keyword; for a folder its whole path), its ancestors' ids and its tree key (profile, then
+  Firefox's position at every level), and is matched with `vfs_core::matching`, the file
+  rules: substrings, and one typo for terms of 6–64 characters when the exact matches are
+  fewer than 20. A folder also needs one term in its own name (VFS-1 D1). The title takes
+  the file name's place in the tiers. `search_sources` reads the file list from the core in
+  500-hit pages and merges both lists by (tier, folded name or title length, newer first),
+  files first on a tie; `sort: newest` sorts everything by date and `source` puts files
+  first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
+  their ancestors and no files; with no words they come in tree order, Firefox's own. Type
+  filters drop bookmarks but keep bookmark folders under "Carpetas"; size and file folder
+  filters drop both; a date filter applies to the date an item was saved.
+- **Opening**: `open_bookmark` passes an `http`/`https` address without spaces, quotes or
+  control characters to Firefox: `open -a Firefox <url>` on macOS, `ShellExecuteW` of
+  `firefox.exe` on Windows (App Paths or the Store build's alias), and the default browser
+  if Firefox cannot be started. Nothing else is opened.
+
 ## Not yet run
 
 Nothing under `cfg(windows)` has executed; it is only type-checked on the Mac by
 `cargo xwin clippy` for `x86_64-pc-windows-msvc` (the CI workflow has not run on GitHub
 yet): the `ReadDirectoryChangesW` loop, volume GUID lookup, drive type, background thread
-mode, long-path handling in the watcher and the Explorer reveal. The move of an index out
+mode, long-path handling in the watcher, the Explorer reveal, and for VFS-6 the copy of a
+`places.sqlite` that Firefox holds open on Windows, the Microsoft Store profile path and
+`ShellExecuteW` for "Abrir en Firefox". The move of an index out
 of the roaming folder has run only in unit tests, where both folders are temporary ones.
 The NSIS installer has never been built. Performance at 2 million
 files is checked only by `vfs bench` on a synthetic database on the development Mac (Apple

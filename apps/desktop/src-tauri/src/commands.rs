@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use tauri::ipc::Invoke;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 use vfs_core::api::{ApiError, RevealOutcome};
 use vfs_core::{IndexProgress, Root, SearchQuery, SearchResponse};
@@ -29,6 +29,10 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         get_progress,
         rescan,
         set_paused,
+        crate::bookmarks::search_sources,
+        crate::bookmarks::get_bookmarks_status,
+        crate::bookmarks::set_bookmarks_enabled,
+        crate::bookmarks::open_bookmark,
     ]
 }
 
@@ -94,8 +98,18 @@ pub fn get_progress(state: State<'_, AppState>) -> CmdResult<IndexProgress> {
     Ok(state.vfs.progress())
 }
 
+/// "Buscar cambios ahora" also reads changed Firefox profiles (VFS-6 R2).
 #[tauri::command(async)]
-pub fn rescan(state: State<'_, AppState>, id: Option<i64>) -> CmdResult<()> {
+pub fn rescan<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    id: Option<i64>,
+) -> CmdResult<()> {
+    if id.is_none() {
+        if let Some(b) = app.try_state::<crate::bookmarks::BookmarkState>() {
+            b.refresh_now();
+        }
+    }
     Ok(state.vfs.rescan(id)?)
 }
 

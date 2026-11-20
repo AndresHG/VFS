@@ -138,3 +138,90 @@ fn add_root_search_progress_end_to_end() {
 
     app.state::<AppState>().vfs.shutdown();
 }
+
+/// VFS-6 AC-8, AC-11, AC-12 over IPC: with the setting off `search_sources` returns files only
+/// and the status says so; once on and read, `["bookmarks"]` returns bookmark results with
+/// the contract's shape; `open_bookmark` refuses an unknown id and a non-web address.
+#[test]
+fn bookmark_commands_over_ipc() {
+    use rusqlite::Connection;
+    use std::sync::Arc;
+    use vfs_bookmarks::testing::{FakeFirefox, Places, MENU};
+    use vfs_bookmarks::Bookmarks;
+    use vfs_desktop_lib::bookmarks::BookmarkState;
+
+    let data = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    let index = data.path().join(INDEX_FILE);
+    let vfs = vfs_core::Vfs::open(&index).unwrap();
+    let root = data.path().join("datos");
+    write_file(&root.join("Recetas.pdf"));
+    vfs.add_root(&root).unwrap();
+    vfs.scan_to_completion(&std::sync::atomic::AtomicBool::new(false))
+        .unwrap();
+    app.manage(AppState { vfs });
+
+    let mut ff = FakeFirefox::new(&data.path().join("Firefox"));
+    let profile = ff.add_profile("default", "p.default");
+    {
+        let conn = Connection::open(profile.join("places.sqlite")).unwrap();
+        let p = Places { conn: &conn };
+        p.bookmark(MENU, Some("Recetas de la abuela"), "https://r.es/", 10);
+        p.bookmark(MENU, Some("Recetas locales"), "file:///r.pdf", 10);
+    }
+    let bm =
+        Arc::new(Bookmarks::open(&vfs_bookmarks::bookmarks_db_path(&index), ff.locator()).unwrap());
+    app.manage(BookmarkState::new(Arc::clone(&bm)));
+
+    let query = json!({ "text": "recetas", "filters": {}, "limit": 50, "offset": 0 });
+    let st = invoke(&webview, "get_bookmarks_status", json!({})).unwrap();
+    assert_eq!(
+        (st["enabled"].clone(), st["state"].clone()),
+        (json!(false), json!("never"))
+    );
+    let r = invoke(
+        &webview,
+        "search_sources",
+        json!({ "query": query, "options": { "sources": [] } }),
+    )
+    .unwrap();
+    let hits = r["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| h["source"] == json!("files")));
+
+    let st = invoke(
+        &webview,
+        "set_bookmarks_enabled",
+        json!({ "enabled": true }),
+    )
+    .unwrap();
+    assert_eq!(st["enabled"], json!(true));
+    bm.refresh().unwrap();
+    let r = invoke(
+        &webview,
+        "search_sources",
+        json!({ "query": query, "options": { "sources": ["bookmarks"], "sort": "relevance" } }),
+    )
+    .unwrap();
+    let hits = r["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|h| h["isFolder"] == json!(false)));
+    let web = hits.iter().find(|h| h["openable"] == json!(true)).unwrap();
+    assert_eq!(web["source"], json!("bookmarks"));
+    assert_eq!(web["root"], json!("menu"));
+    assert_eq!(web["url"], json!("https://r.es/"));
+    assert!(web["folder"].as_array().unwrap().is_empty());
+    let local = hits.iter().find(|h| h["openable"] == json!(false)).unwrap();
+    let err = invoke(&webview, "open_bookmark", json!({ "id": local["id"] })).unwrap_err();
+    assert_eq!(err["code"], json!(Error::Unavailable(String::new()).code()));
+    let err = invoke(&webview, "open_bookmark", json!({ "id": 987654 })).unwrap_err();
+    assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
+
+    let st = invoke(
+        &webview,
+        "set_bookmarks_enabled",
+        json!({ "enabled": false }),
+    )
+    .unwrap();
+    assert_eq!(st["count"], json!(0));
+}

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 vfs-core.workspace = true
+vfs-bookmarks.workspace = true
 # Only for `Transaction`/`Connection` around `vfs_core::db::ingest` in `gen-db`.
 rusqlite.workspace = true
 clap.workspace = true
@@ -26,3 +27,4 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+vfs-bookmarks = { workspace = true, features = ["test-support"] }

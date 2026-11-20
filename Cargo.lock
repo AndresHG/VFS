@@ -2303,6 +2303,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "lz4_flex"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f56455fff36934a9500d69062aec1c77037179b6f0669e4d5d6b72b84722d6a3"
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4669,6 +4675,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vfs-bookmarks"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "lz4_flex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vfs-bookmarks",
+ "vfs-core",
+]
+
+[[package]]
 name = "vfs-cli"
 version = "0.1.0"
 dependencies = [
@@ -4678,6 +4698,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "vfs-bookmarks",
  "vfs-core",
  "windows-sys 0.61.2",
 ]
@@ -4715,7 +4736,9 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-single-instance",
  "tempfile",
+ "vfs-bookmarks",
  "vfs-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

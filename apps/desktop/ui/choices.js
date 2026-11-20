@@ -32,3 +32,10 @@ export const TypeChecklist = Object.freeze({ POPOVER: 'popover', INLINE: 'inline
 export function typeChecklistMode(proto) {
   return Object.prototype.hasOwnProperty.call(proto, 'popover') ? TypeChecklist.POPOVER : TypeChecklist.INLINE;
 }
+
+/** The "Buscar en" choice (VFS-6), shown while Firefox bookmarks are included. */
+export const SourceChoice = Object.freeze({
+  BOTH: 'both',
+  FILES: 'files',
+  BOOKMARKS: 'bookmarks',
+});

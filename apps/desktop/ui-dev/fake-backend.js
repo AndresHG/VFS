@@ -13,11 +13,13 @@
 //   slow                 add 0.4–1.2 s of latency to every search
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
-// opened_parent. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
+// opened_parent. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
+// gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
 import {
-  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
+  BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus,
+  Source, TruncatedBy,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -44,6 +46,22 @@ function makeRandom(seed) {
     int: (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1)),
   };
 }
+
+/** A few bookmarks for the VFS-6 source (title, url, root, folder, days ago). */
+const BOOKMARKS = [
+  ['Recetas', '', BookmarkRoot.MENU, [], 800],
+  ['Receta de croquetas caseras', 'https://www.cocina-casera.es/croquetas', BookmarkRoot.MENU, ['Recetas', 'Entrantes'], 40],
+  ['Flan de huevo de la abuela', 'https://recetasdelaabuela.es/flan', BookmarkRoot.MENU, ['Recetas', 'Postres'], 400],
+  ['Banco - acceso clientes', 'https://www.banco.es/clientes', BookmarkRoot.TOOLBAR, [], 1200],
+  ['Cómo podar los rosales', 'https://jardineria.es/rosales-poda', BookmarkRoot.UNFILED, [], 15],
+  ['Ruta por Galicia en coche', 'https://viajes.es/galicia', BookmarkRoot.MENU, ['Viajes'], 700],
+  ['Documento guardado en el equipo', 'file:///C:/Users/Carmen/receta.pdf', BookmarkRoot.UNFILED, [], 90],
+].map(([title, url, root, folder, days], i) => ({
+  id: i + 1, isFolder: !url, title, url, root, folder, profile: null, added: NOW - days * DAY,
+  openable: url.startsWith('http'),
+  // Folder ids: 1 is the "Recetas" folder (the first entry), 1001 the menu, 1003 "Otros marcadores".
+  parent: folder[0] === 'Recetas' ? 1 : root === BookmarkRoot.UNFILED ? 1003 : 1001,
+}));
 
 const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\\/g, '/');
 
@@ -169,6 +187,8 @@ export function createFakeBackend(params) {
   let paused = false;
   const progressCbs = new Set();
   const changedCbs = new Set();
+  const bookmarkCbs = new Set();
+  const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   let lastChanged = 0;
   let picks = 0;
   let generation = 0;
@@ -318,6 +338,54 @@ export function createFakeBackend(params) {
       if (e.name.includes('borrado')) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${e.name}` };
       return (e.dir.length + e.name.length + 1 > 259) ? RevealOutcome.OPENED_PARENT : RevealOutcome.REVEALED;
     },
+
+    async searchSources(q, options = {}) {
+      const sources = options.sources || [];
+      const inside = options.bookmarkFolder ?? null;
+      const files = inside == null && (sources.length === 0 || sources.includes(Source.FILES));
+      const marks = bookmarks.enabled && (sources.length === 0 || sources.includes(Source.BOOKMARKS));
+      const f = q.filters || {};
+      const blocked = (f.kinds || []).length || f.sizeMin != null || f.sizeMax != null || f.folder;
+      const ts = fold(q.text || '').split(/\s+/).filter(Boolean);
+      const pool = BOOKMARKS.filter((b) => inside == null || b.parent === inside);
+      const found = marks && !blocked && (ts.length || inside != null)
+        ? pool.filter((b) => ts.every((t) => fold(`${b.title} ${b.url} ${b.folder.join(' ')}`).includes(t)))
+          .map(({ parent, ...b }) => ({ ...b, source: Source.BOOKMARKS, matched: MatchKind.NAME }))
+        : [];
+      const offset = q.offset || 0;
+      const limit = q.limit || 100;
+      if (!files) {
+        await sleep(30);
+        return { hits: found.slice(offset, offset + limit), total: found.length, truncated: false, truncatedBy: null, elapsedMs: 1 };
+      }
+      const r = await this.search({ ...q, offset: Math.max(0, offset - found.length) });
+      const fileHits = r.hits.map((h) => ({ ...h, source: Source.FILES }));
+      // Bookmarks first, then files: enough for looking at the screen.
+      const head = offset < found.length ? found.slice(offset) : [];
+      return { ...r, hits: [...head, ...fileHits].slice(0, limit), total: r.total + found.length };
+    },
+    async getBookmarksStatus() { await sleep(20); return { ...bookmarks }; },
+    async setBookmarksEnabled(on) {
+      bookmarks.enabled = on;
+      bookmarks.state = ReadState.NEVER;
+      bookmarks.count = 0;
+      if (on) {
+        setTimeout(() => {
+          Object.assign(bookmarks, {
+            state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000),
+            roots: [{ id: 1001, root: BookmarkRoot.MENU, profile: null }, { id: 1003, root: BookmarkRoot.UNFILED, profile: null }],
+          });
+          for (const cb of bookmarkCbs) cb({ ...bookmarks });
+        }, 1000);
+      }
+      return { ...bookmarks };
+    },
+    async openBookmark(id) {
+      const b = BOOKMARKS.find((x) => x.id === id);
+      if (!b) throw { code: ErrorCode.NOT_FOUND, message: `bookmark ${id}` };
+      if (!b.openable) throw { code: ErrorCode.UNAVAILABLE, message: 'not a web address' };
+    },
+    async onBookmarksChanged(cb) { bookmarkCbs.add(cb); return () => bookmarkCbs.delete(cb); },
 
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {

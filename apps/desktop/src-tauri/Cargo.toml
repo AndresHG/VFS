@@ -18,15 +18,20 @@ embed-resource = "3"
 tauri = { version = "2.12", features = [] }
 tauri-plugin-dialog = "2.8"
 vfs-core.workspace = true
+vfs-bookmarks.workspace = true
 serde_json.workspace = true
 log.workspace = true
 dunce.workspace = true
 tauri-plugin-log = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
+vfs-bookmarks = { workspace = true, features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 tempfile.workspace = true
 serde.workspace = true

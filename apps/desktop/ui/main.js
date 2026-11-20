@@ -6,12 +6,15 @@ import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
-  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
-  UiErrorCode,
+  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
+  Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
-  DateChoice, SearchState, SizeChoice, TypeChecklist, View, typeChecklistMode,
+  DateChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
 } from './choices.js';
+import {
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
+} from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 100;
@@ -35,6 +38,10 @@ const PICK_FOLDER = '__pick';
 const ON = 'is-on';
 /** Look of a message in the folder panel. */
 const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
+/** Icons of a bookmark row and of the row actions (VFS-6). */
+const BOOKMARK_ICON = 'bookmark';
+const OPEN_ICON = 'open';
+const REVEAL_ICON = 'reveal';
 
 // Everything that changes while the screen is open lives in this call's scope, owned by the
 // screen; the module itself holds only constants, never mutable state.
@@ -57,6 +64,10 @@ function main() {
     terms: [],
     searchState: SearchState.IDLE,
     unavailableDismissed: '',
+    source: SourceChoice.BOTH, // VFS-6 D7: both sources at every start
+    sort: SortOrder.RELEVANCE,
+    bookmarks: null, // BookmarkStatus, null until known
+    pickedBookmarkFolder: null, // {id, title} chosen with "Ver su contenido"
   };
 
   /* ---------------------------------------------------------------- static copy */
@@ -123,6 +134,28 @@ function main() {
   }
   fillSelect($('f-date'), S.dateOptions);
   fillSelect($('f-size'), S.sizeOptions);
+  fillSelect($('f-source'), S.sourceOptions);
+  fillSelect($('f-sort'), S.sortOptions);
+  $('f-source').value = state.source;
+  $('f-sort').value = state.sort;
+  $('f-source').addEventListener('change', (e) => { state.source = e.target.value; renderSources(); filtersChanged(); });
+  $('f-sort').addEventListener('change', (e) => { state.sort = e.target.value; filtersChanged(); });
+
+  function bookmarksOn() {
+    return !!state.bookmarks?.enabled;
+  }
+
+  /** "Buscar en" and "Orden" show only while bookmarks are included; the size filter does
+   *  not apply to bookmarks alone (VFS-6 R7). */
+  function renderSources() {
+    const on = bookmarksOn();
+    $('f-source-pill').hidden = !on;
+    $('f-sort-pill').hidden = !on;
+    $('f-source').value = state.source;
+    $('f-size').disabled = !sizeFilterApplies(state.source, on);
+    $('f-source-pill').classList.toggle(ON, on && state.source !== SourceChoice.BOTH);
+    $('f-sort-pill').classList.toggle(ON, on && state.sort !== SortOrder.RELEVANCE);
+  }
 
   function renderFolderSelect() {
     const sel = $('f-folder');
@@ -139,13 +172,32 @@ function main() {
       opts.push(o);
     }
     opts.push(new Option(S.folderPick, PICK_FOLDER));
+    // VFS-6 R12: bookmark roots, and a folder chosen with "Ver su contenido".
+    if (bookmarksOn()) {
+      const group = document.createElement('optgroup');
+      group.label = S.folderGroupBookmarks;
+      for (const r of state.bookmarks.roots || []) {
+        const label = bookmarkPathParts({ root: r.root, folder: [], profile: r.profile }, S.bookmarkRoots).join(PATH_SEPARATOR);
+        group.append(new Option(label, bookmarkFolderValue(r.id)));
+      }
+      const b = state.pickedBookmarkFolder;
+      if (b && !(state.bookmarks.roots || []).some((r) => r.id === b.id)) {
+        group.append(new Option(S.folderInside(b.title), bookmarkFolderValue(b.id)));
+      }
+      if (group.children.length) opts.push(group);
+    }
     sel.replaceChildren(...opts);
     if (state.folder && ![...sel.options].some((o) => o.value === state.folder)) state.folder = '';
     sel.value = state.folder;
   }
 
+  function sizeApplies() {
+    return sizeFilterApplies(state.source, bookmarksOn());
+  }
+
   function activeFilterCount() {
-    return state.kinds.size + (state.date !== DateChoice.ANY) + (state.size !== SizeChoice.ANY) + (state.folder !== '');
+    const size = sizeApplies() && state.size !== SizeChoice.ANY;
+    return state.kinds.size + (state.date !== DateChoice.ANY) + size + (state.folder !== '');
   }
 
   function renderClearButton() {
@@ -187,12 +239,23 @@ function main() {
 
   function filters() {
     const [modifiedFrom, modifiedTo] = dateRange();
-    const [sizeMin, sizeMax] = SIZE_RANGES[state.size];
+    const [sizeMin, sizeMax] = sizeApplies() ? SIZE_RANGES[state.size] : [null, null];
     return {
       kinds: [...state.kinds],
       modifiedFrom, modifiedTo, sizeMin, sizeMax,
-      folder: state.folder || null,
+      // A bookmark folder is not a path: it goes in the options instead (VFS-6 R12).
+      folder: bookmarkFolderOf(state.folder) == null ? state.folder || null : null,
     };
+  }
+
+  /** One page of the current query over the chosen sources (VFS-6). */
+  function fetchPage(offset) {
+    const query = { text: state.text.trim(), filters: filters(), limit: PAGE, offset };
+    return api.searchSources(query, {
+      sources: sourcesFor(state.source, bookmarksOn()),
+      bookmarkFolder: bookmarkFolderOf(state.folder),
+      sort: bookmarksOn() ? state.sort : SortOrder.RELEVANCE,
+    });
   }
 
   chips.addEventListener('change', (e) => {
@@ -279,7 +342,7 @@ function main() {
       loadingTimer = setTimeout(() => { if (seq === state.seq) { state.searchState = SearchState.LOADING; renderSummary(); } }, 350);
     }
     try {
-      const res = await api.search({ text: state.text.trim(), filters: filters(), limit: PAGE, offset: 0 });
+      const res = await fetchPage(0);
       if (seq !== state.seq) return; // a newer query is on its way: drop this stale answer
       clearTimeout(loadingTimer);
       state.searchState = SearchState.DONE;
@@ -287,7 +350,9 @@ function main() {
       let active = 0;
       if (quiet && state.active >= 0) {
         const prev = hitAt(state.active);
-        const same = prev ? res.hits.findIndex((h) => h.id === prev.id && h.isDir === prev.isDir) : -1;
+        const same = prev
+          ? res.hits.findIndex((h) => h.source === prev.source && h.id === prev.id && h.isDir === prev.isDir)
+          : -1;
         active = same >= 0 ? same : state.active;
       }
       setResults(res.total, res.truncatedBy, new Map([[0, res.hits]]), active);
@@ -324,7 +389,7 @@ function main() {
     const seq = state.seq;
     state.pagesPending.add(p);
     try {
-      const res = await api.search({ text: state.text.trim(), filters: filters(), limit: PAGE, offset: p * PAGE });
+      const res = await fetchPage(p * PAGE);
       if (seq !== state.seq) return;
       state.pages.set(p, res.hits);
       const idx = [];
@@ -359,7 +424,8 @@ function main() {
     reveal.type = 'button';
     reveal.tabIndex = -1; // keyboard and screen readers use Enter on the selected row instead
     reveal.setAttribute('aria-hidden', 'true');
-    reveal.append(icon('reveal'), el('span', 'reveal-text', S.revealButton), el('span', 'kbd', S.revealKey));
+    reveal.dataset.icon = REVEAL_ICON;
+    reveal.append(icon(REVEAL_ICON), el('span', 'reveal-text', S.revealButton), el('span', 'kbd', S.revealKey));
     row.append(ico, main, el('span', 'kind', 'Documento'), el('span', 'date', '12 sept 2026'), el('span', 'size', '999,9 MB'), reveal);
     return row;
   }
@@ -380,6 +446,8 @@ function main() {
       return;
     }
     row.classList.remove('loading');
+    if (hit.source === Source.BOOKMARKS) { fillBookmarkRow(row, hit); return; }
+    setAction(row.children[5], REVEAL_ICON, S.revealButton, true);
     const kindKey = hit.isDir ? FileKind.FOLDER : hit.kind;
     ico.dataset.kind = kindKey;
     ico.replaceChildren(icon(kindKey));
@@ -410,6 +478,48 @@ function main() {
     row.setAttribute('aria-label', S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable));
   }
 
+  /** The row's one action: "Mostrar en carpeta", "Abrir en Firefox" or "Ver su contenido". */
+  function setAction(btn, iconName, text, visible) {
+    btn.hidden = !visible;
+    if (btn.dataset.icon === iconName && btn.querySelector('.reveal-text')?.textContent === text) return;
+    btn.dataset.icon = iconName;
+    btn.replaceChildren(icon(iconName), el('span', 'reveal-text', text), el('span', 'kbd', S.revealKey));
+  }
+
+  /** A bookmark or bookmark-folder row (VFS-6): title, the folder path it is saved in with the
+   *  same middle truncation as a file's, its kind and the date it was saved. */
+  function fillBookmarkRow(row, hit) {
+    const [ico, main, kind, date, size, action] = row.children;
+    const iconName = hit.isFolder ? FileKind.FOLDER : BOOKMARK_ICON;
+    ico.dataset.kind = iconName;
+    ico.replaceChildren(icon(iconName));
+    const [nameEl, pathEl] = main.children;
+    const nameText = el('span', 'name-text');
+    F.appendHighlighted(nameText, hit.title, F.matchRanges(hit.title, state.terms));
+    nameEl.replaceChildren(nameText);
+    const parts = bookmarkPathParts(hit, S.bookmarkRoots);
+    const whole = parts.join(PATH_SEPARATOR);
+    const cut = whole.length - parts[parts.length - 1].length;
+    const ranges = F.matchRanges(whole, state.terms);
+    const head = el('span', 'p-head');
+    const tail = el('span', 'p-tail');
+    F.appendHighlighted(head, whole, ranges, 0, cut);
+    F.appendHighlighted(tail, whole, ranges, cut, whole.length);
+    pathEl.replaceChildren(head, tail);
+    pathEl.title = whole;
+    const kindLabel = hit.isFolder ? S.bookmarkFolderKind : S.bookmarkKind;
+    const dateText = F.date(hit.added);
+    // A bookmark has no size; its slot shows the site (VFS-6 AC-11).
+    const host = hit.isFolder ? '' : site(hit.url);
+    kind.textContent = kindLabel;
+    date.textContent = dateText;
+    size.textContent = host;
+    size.title = host;
+    if (hit.isFolder) setAction(action, FileKind.FOLDER, S.folderContentsButton, true);
+    else setAction(action, OPEN_ICON, S.openButton, hit.openable);
+    row.setAttribute('aria-label', S.bookmarkRowLabel(hit.title, kindLabel, whole, host, dateText));
+  }
+
   const list = createVirtualList({ scroller: $('results'), sizer: $('sizer'), buildRow, fillRow });
 
   /* ---------------------------------------------------------------- selection + keyboard */
@@ -438,7 +548,7 @@ function main() {
       case 'ArrowUp': e.preventDefault(); setActive(state.active - 1); break;
       case 'PageDown': e.preventDefault(); setActive(state.active + list.pageSize()); break;
       case 'PageUp': e.preventDefault(); setActive(state.active - list.pageSize()); break;
-      case 'Enter': e.preventDefault(); if (state.active >= 0) reveal(state.active); break;
+      case 'Enter': e.preventDefault(); if (state.active >= 0) act(state.active); break;
       case 'Escape':
         e.preventDefault();
         if (q.value) clearQuery();
@@ -465,12 +575,42 @@ function main() {
   });
   listEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.reveal');
-    if (btn) reveal(Number(btn.closest('.row').dataset.index));
+    if (btn) act(Number(btn.closest('.row').dataset.index));
   });
   listEl.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.row');
-    if (row && !e.target.closest('.reveal')) reveal(Number(row.dataset.index));
+    if (row && !e.target.closest('.reveal')) act(Number(row.dataset.index));
   });
+
+  /** The selected result's one action (Intro, double click or its button). */
+  function act(i) {
+    const hit = hitAt(i);
+    if (hit?.source !== Source.BOOKMARKS) reveal(i);
+    else if (hit.isFolder) showBookmarkFolder(hit);
+    else openBookmark(hit);
+  }
+
+  /** "Abrir en Firefox" (VFS-6 R10). */
+  async function openBookmark(hit) {
+    if (!hit.openable) return;
+    try {
+      await api.openBookmark(hit.id);
+    } catch (err) {
+      showError(errorText(err, S.errors.openBookmark));
+    }
+  }
+
+  /** "Ver su contenido": the folder becomes the "Carpeta" filter and its contents are listed
+   *  in Firefox's order (VFS-6 R12). */
+  function showBookmarkFolder(hit) {
+    state.pickedBookmarkFolder = { id: hit.id, title: hit.title };
+    state.folder = bookmarkFolderValue(hit.id);
+    renderFolderSelect();
+    q.value = '';
+    state.text = '';
+    $('q-clear').hidden = true;
+    filtersChanged();
+  }
 
   async function reveal(i) {
     const hit = hitAt(i);
@@ -596,6 +736,13 @@ function main() {
     const d = $('details');
     const hit = state.active >= 0 ? hitAt(state.active) : null;
     if (!hit) { d.replaceChildren(); return; }
+    if (hit.source === Source.BOOKMARKS) {
+      const where = bookmarkPathParts(hit, S.bookmarkRoots).join(PATH_SEPARATOR);
+      const parts = [el('strong', null, `${S.detailsBookmarkFolder} `), where];
+      if (!hit.isFolder) parts.push(' · ', el('strong', null, `${S.detailsBookmark} `), hit.url);
+      d.replaceChildren(...parts);
+      return;
+    }
     d.replaceChildren(el('strong', null, `${S.detailsLabel} `), F.joinPath(hit.dir, hit.name));
   }
 
@@ -829,6 +976,54 @@ function main() {
     } catch (err) { showError(errorText(err)); }
   });
 
+  /* ---------------------------------------------------------------- bookmarks setting (VFS-6) */
+
+  const bookmarksToggle = $('bookmarks-on');
+
+  function setBookmarks(status) {
+    state.bookmarks = status;
+    if (!bookmarksOn()) {
+      state.source = SourceChoice.BOTH;
+      state.sort = SortOrder.RELEVANCE;
+      $('f-sort').value = state.sort;
+      state.pickedBookmarkFolder = null;
+      if (bookmarkFolderOf(state.folder) != null) state.folder = '';
+    }
+    renderBookmarks();
+    renderSources();
+    renderFolderSelect();
+    renderClearButton();
+  }
+
+  function renderBookmarks() {
+    const st = state.bookmarks;
+    bookmarksToggle.checked = !!st?.enabled;
+    const parts = [];
+    if (st?.enabled) {
+      parts.push(S.bookmarksState[st.state] || '');
+      if (st.count && st.state !== ReadState.READING) parts.push(S.bookmarksCount(F.count(st.count), F.date(st.lastRead)));
+    }
+    $('bookmarks-status').textContent = parts.filter(Boolean).join(' ');
+  }
+
+  bookmarksToggle.addEventListener('change', async () => {
+    try {
+      const status = await api.setBookmarksEnabled(bookmarksToggle.checked);
+      // Turning it on starts a read in the background; say so until it reports.
+      if (status.enabled && status.state === ReadState.NEVER) status.state = ReadState.READING;
+      setBookmarks(status);
+      runSearch({ quiet: true });
+    } catch (err) {
+      bookmarksToggle.checked = bookmarksOn();
+      showError(errorText(err));
+    }
+  });
+
+  function onBookmarksChanged(status) {
+    setBookmarks(status);
+    if (hasQuery() && state.searchState === SearchState.DONE && list.atTop()) runSearch({ quiet: true });
+  }
+
   /* ---------------------------------------------------------------- live data */
 
   async function refreshRoots() {
@@ -877,6 +1072,8 @@ function main() {
     if (api.missing) { renderEmpty(); return; }
     await api.onProgress(onProgress);
     await api.onIndexChanged(onIndexChanged);
+    await api.onBookmarksChanged(onBookmarksChanged);
+    try { setBookmarks(await api.getBookmarksStatus()); } catch { /* files only */ }
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
