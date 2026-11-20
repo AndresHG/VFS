@@ -27,7 +27,10 @@ Verdicts:
   - `gh pr create` without a pr-critic `pass`/`waived` verdict for
     HEAD (scripts/pr_critic_verdict.py)                              -> "deny"
 
-Before matching, the command is: split on shell operators outside quotes,
+Before matching, the command is: stripped of heredoc bodies (data, unless
+the command outside bodies, or one of its substitutions, names a shell,
+`eval`, `source` or `.`, which makes them commands; `$(…)` in an unquoted-delimiter body is
+always analyzed), split on shell operators outside quotes,
 expanded through `$(…)`/backtick substitutions, stripped of wrappers
 (`bash -c`, `eval`, `command`, `env`, `timeout`, `xargs`, `sudo -u x`,
 absolute paths, shell keywords like `if`/`then`/`do`) and tracked through
@@ -439,17 +442,161 @@ def _cd_target(tokens, cwd):
     return target if os.path.isabs(target) else os.path.normpath(os.path.join(cwd or ".", target))
 
 
-def analyze(command, cwd, depth=0):
-    """Return a list of (decision, reason) for one command string."""
+def _heredoc_delimiters(line, quote):
+    """Scan one line -> ([(strip_tabs, word, quoted)], quote state at end of line).
+
+    Only `<<` outside quotes opens a heredoc; `<<<` is a here-string. A
+    heredoc opened inside a `$(…)`/backtick that closes on the same line
+    (`x=$(cat <<EOF)`) has an empty body in bash, so it is dropped and the
+    following lines stay commands.
+    """
+    delims, i, n = [], 0, len(line)
+    depth, backticks = 0, []  # nesting, and the depth each open backtick sits at
+
+    def close():
+        nonlocal depth, delims
+        depth -= 1
+        delims = [d for d in delims if d[3] <= depth]
+
+    while i < n:
+        c = line[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        elif c == "\\":
+            i += 2
+            continue
+        elif c == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break  # a comment: nothing after it opens a heredoc
+        elif line.startswith("((", i) or line.startswith("$((", i):
+            end = line.find("))", i)  # arithmetic: `1<<2` is a shift
+            i = n if end == -1 else end + 2
+            continue
+        elif line.startswith("$[", i):
+            end = line.find("]", i)  # deprecated arithmetic `$[1<<2]`
+            i = n if end == -1 else end + 1
+            continue
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            close()
+        elif c == "`":
+            if backticks and backticks[-1] == depth - 1:
+                backticks.pop()
+                close()
+            else:
+                backticks.append(depth)
+                depth += 1
+        elif line.startswith("<<<", i):
+            i += 3
+            continue
+        elif line.startswith("<<", i):
+            j = i + 2
+            strip_tabs = line.startswith("-", j)
+            j += strip_tabs
+            while j < n and line[j] in " \t":
+                j += 1
+            word, quoted = [], False
+            while j < n and line[j] not in " \t;|&<>()`":
+                if line[j] in ("'", '"'):
+                    quoted = True
+                    end = line.find(line[j], j + 1)
+                    end = n if end == -1 else end
+                    word.append(line[j + 1:end])
+                    j = end + 1
+                else:
+                    if line[j] == "\\":
+                        quoted = True
+                    else:
+                        word.append(line[j])
+                    j += 1
+            if word:
+                delims.append((strip_tabs, "".join(word), quoted, depth))
+            i = j
+            continue
+        i += 1
+    return [d[:3] for d in delims], quote
+
+
+def _feeds_shell(text):
+    """True when text names something that runs its input as commands (a shell,
+    `eval`, `source`, `.`). Any matching word anywhere counts — `bash <<X`,
+    `cat <<X |\\\nbash`, `{ cat <<X; } | sh` — which errs toward analyzing."""
+    words = re.split(r"[\s|;&()<>{}\\]+", text)  # `bash<<EOF` has no space
+    return any(os.path.basename(w.strip("'\"")) in SHELLS | {"eval", "source", "."}
+               for w in words)
+
+
+def _heredocs(command):
+    """Remove heredoc bodies -> (command, [(body, delimiter was quoted)])."""
+    if "<<" not in command:
+        return command, []
+    lines, kept, bodies, quote, i = command.split("\n"), [], [], None, 0
+    while i < len(lines):
+        line = lines[i]
+        kept.append(line)
+        delims, quote = _heredoc_delimiters(line, quote)
+        i += 1
+        # A trailing `\` continues the command line; bodies start after it.
+        while delims and not quote and line.endswith("\\") and i < len(lines):
+            line = lines[i]
+            kept.append(line)
+            more, quote = _heredoc_delimiters(line, quote)
+            delims += more
+            i += 1
+        for strip_tabs, word, quoted in delims:
+            body = []
+            while i < len(lines):
+                current = lines[i]
+                i += 1
+                if (current.lstrip("\t") if strip_tabs else current) == word:
+                    break
+                body.append(current)
+            bodies.append(("\n".join(body), quoted))
+    return "\n".join(kept), bodies
+
+
+def analyze(command, cwd, depth=0, runs=False):
+    """Return a list of (decision, reason) for one command string.
+
+    Heredoc bodies are data (a commit message, a Python script) unless the
+    command, outside its bodies, names a shell — at the top level or inside
+    one of its substitutions (or `runs`:
+    it sits in a substitution whose output a shell runs); then they are
+    analyzed as commands. An unquoted delimiter still expands `$(…)` and
+    backticks in its body, so those are analyzed either way.
+    """
     if depth > MAX_DEPTH or not isinstance(command, str):
         return []
     command = command.replace("\x00", "")
     if len(command) > MAX_COMMAND:
         return []
     verdicts, current_cwd = [], cwd
+    command, bodies = _heredocs(command)
+    outside = command
+    for inner in _substitutions(command):
+        for wrapped in ("$(" + inner + ")", "`" + inner + "`"):
+            if wrapped in outside:  # this occurrence only, not every copy of the text
+                outside = outside.replace(wrapped, "", 1)
+                break
+    # A shell inside a substitution (`out=$(bash <<EOF …)`) runs bodies too;
+    # each substitution is checked with its own heredoc bodies removed, so a
+    # commit message that mentions bash stays data.
+    runs = runs or _feeds_shell(outside) or any(
+        _feeds_shell(_heredocs(inner)[0]) for inner in _substitutions(command))
+    for body, quoted in bodies:
+        for executed in [body] if runs else [] if quoted else _substitutions(body):
+            verdicts += analyze(executed, cwd, depth + 1)
     for segment in _split_segments(command):
         for inner in _substitutions(segment):
-            verdicts += analyze(inner, current_cwd, depth + 1)
+            verdicts += analyze(inner, current_cwd, depth + 1, runs)
         try:
             tokens = shlex.split(segment)
         except ValueError:
