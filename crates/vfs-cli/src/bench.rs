@@ -14,26 +14,58 @@ pub const P95_LIMIT_MS: f64 = 150.0;
 pub const RSS_LIMIT_BYTES: u64 = 300 * 1024 * 1024;
 
 pub struct BenchQuery {
-    pub class: &'static str,
+    pub class: QueryClass,
     pub label: String,
     pub query: SearchQuery,
     /// Name of a planted file (`gen::CANARIES`) this query should find.
     pub canary: Option<&'static str>,
 }
 
-/// Classes in report order.
-pub const CLASSES: &[&str] = &[
-    "single",
-    "multi",
-    "path",
-    "accent",
-    "typo",
-    "short",
-    "filter_only",
-    "text_filter",
-    "broad",
-    "no_hit",
-];
+/// Query classes of AC-9, in report order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryClass {
+    Single,
+    Multi,
+    Path,
+    Accent,
+    Typo,
+    Short,
+    FilterOnly,
+    TextFilter,
+    Broad,
+    NoHit,
+}
+
+impl QueryClass {
+    pub const ALL: [QueryClass; 10] = [
+        QueryClass::Single,
+        QueryClass::Multi,
+        QueryClass::Path,
+        QueryClass::Accent,
+        QueryClass::Typo,
+        QueryClass::Short,
+        QueryClass::FilterOnly,
+        QueryClass::TextFilter,
+        QueryClass::Broad,
+        QueryClass::NoHit,
+    ];
+
+    /// Name in the report.
+    pub fn name(self) -> &'static str {
+        match self {
+            QueryClass::Single => "single",
+            QueryClass::Multi => "multi",
+            QueryClass::Path => "path",
+            QueryClass::Accent => "accent",
+            QueryClass::Typo => "typo",
+            QueryClass::Short => "short",
+            QueryClass::FilterOnly => "filter_only",
+            QueryClass::TextFilter => "text_filter",
+            QueryClass::Broad => "broad",
+            QueryClass::NoHit => "no_hit",
+        }
+    }
+}
 
 const NOTARIA: &str = "Notaría Pérez escritura 2019.pdf";
 const PENALARA: &str = "Contrato de alquiler Calle Peñalara 14.pdf";
@@ -89,19 +121,24 @@ pub fn query_set() -> Vec<BenchQuery> {
         "graduación",
         "whatsapp",
     ] {
-        add("single", t, none(), None);
+        add(QueryClass::Single, t, none(), None);
     }
-    add("multi", "factura iberdrola 2015", none(), None);
-    add("multi", "boda begoña", none(), Some(BODA));
+    add(QueryClass::Multi, "factura iberdrola 2015", none(), None);
+    add(QueryClass::Multi, "boda begoña", none(), Some(BODA));
     add(
-        "multi",
+        QueryClass::Multi,
         "contrato alquiler peñalara",
         none(),
         Some(PENALARA),
     );
-    add("multi", "declaración renta 2012", none(), None);
-    add("multi", "viaje cádiz 2008", none(), None);
-    add("multi", "notaría pérez 2019", none(), Some(NOTARIA));
+    add(QueryClass::Multi, "declaración renta 2012", none(), None);
+    add(QueryClass::Multi, "viaje cádiz 2008", none(), None);
+    add(
+        QueryClass::Multi,
+        "notaría pérez 2019",
+        none(),
+        Some(NOTARIA),
+    );
     for t in [
         "gestoria/ano",
         "expedientes anexos",
@@ -110,29 +147,29 @@ pub fn query_set() -> Vec<BenchQuery> {
         "dcim 100apple",
         "sin clasificar revisar",
     ] {
-        add("path", t, none(), None);
+        add(QueryClass::Path, t, none(), None);
     }
-    add("accent", "notaria", none(), Some(NOTARIA));
-    add("accent", "NOTARÍA", none(), Some(NOTARIA));
-    add("accent", "penalara", none(), Some(PENALARA));
-    add("accent", "inigo begona", none(), Some(BODA));
-    add("accent", "ibanez pericial", none(), Some(INFORME));
-    add("accent", "cadiz", none(), None);
-    add("typo", "notaira", none(), Some(NOTARIA));
-    add("typo", "escirtura", none(), Some(NOTARIA));
-    add("typo", "peñalra", none(), Some(PENALARA));
-    add("typo", "pericail", none(), Some(INFORME));
-    add("typo", "iberdorla", none(), None);
-    add("typo", "testamneto", none(), None);
+    add(QueryClass::Accent, "notaria", none(), Some(NOTARIA));
+    add(QueryClass::Accent, "NOTARÍA", none(), Some(NOTARIA));
+    add(QueryClass::Accent, "penalara", none(), Some(PENALARA));
+    add(QueryClass::Accent, "inigo begona", none(), Some(BODA));
+    add(QueryClass::Accent, "ibanez pericial", none(), Some(INFORME));
+    add(QueryClass::Accent, "cadiz", none(), None);
+    add(QueryClass::Typo, "notaira", none(), Some(NOTARIA));
+    add(QueryClass::Typo, "escirtura", none(), Some(NOTARIA));
+    add(QueryClass::Typo, "peñalra", none(), Some(PENALARA));
+    add(QueryClass::Typo, "pericail", none(), Some(INFORME));
+    add(QueryClass::Typo, "iberdorla", none(), None);
+    add(QueryClass::Typo, "testamneto", none(), None);
     for t in ["a", "ñ", "jp", "19", "wa", "de"] {
-        add("short", t, none(), None);
+        add(QueryClass::Short, t, none(), None);
     }
     let gestoria = format!("{ROOT_PATH}/Gestoría");
     let movil = format!("{ROOT_PATH}/Fotos del móvil");
-    add("filter_only", "", kinds(&[FileKind::Video]), None);
-    add("filter_only", "", kinds(&[FileKind::Folder]), None);
+    add(QueryClass::FilterOnly, "", kinds(&[FileKind::Video]), None);
+    add(QueryClass::FilterOnly, "", kinds(&[FileKind::Folder]), None);
     add(
-        "filter_only",
+        QueryClass::FilterOnly,
         "",
         SearchFilters {
             size_min: Some(4 << 30),
@@ -141,7 +178,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         None,
     );
     add(
-        "filter_only",
+        QueryClass::FilterOnly,
         "",
         SearchFilters {
             modified_from: Some(year(2010)),
@@ -151,7 +188,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         None,
     );
     add(
-        "filter_only",
+        QueryClass::FilterOnly,
         "",
         SearchFilters {
             kinds: vec![FileKind::Document],
@@ -161,7 +198,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         None,
     );
     add(
-        "filter_only",
+        QueryClass::FilterOnly,
         "",
         SearchFilters {
             size_max: Some(1024),
@@ -169,10 +206,20 @@ pub fn query_set() -> Vec<BenchQuery> {
         },
         None,
     );
-    add("text_filter", "factura", kinds(&[FileKind::Document]), None);
-    add("text_filter", "boda", kinds(&[FileKind::Video]), Some(BODA));
     add(
-        "text_filter",
+        QueryClass::TextFilter,
+        "factura",
+        kinds(&[FileKind::Document]),
+        None,
+    );
+    add(
+        QueryClass::TextFilter,
+        "boda",
+        kinds(&[FileKind::Video]),
+        Some(BODA),
+    );
+    add(
+        QueryClass::TextFilter,
         "img",
         SearchFilters {
             modified_from: Some(year(2019)),
@@ -182,7 +229,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         None,
     );
     add(
-        "text_filter",
+        QueryClass::TextFilter,
         "notaria",
         SearchFilters {
             size_min: Some(1024),
@@ -192,7 +239,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         Some(NOTARIA),
     );
     add(
-        "text_filter",
+        QueryClass::TextFilter,
         "img",
         SearchFilters {
             folder: Some(movil),
@@ -201,7 +248,7 @@ pub fn query_set() -> Vec<BenchQuery> {
         None,
     );
     add(
-        "text_filter",
+        QueryClass::TextFilter,
         "escritura",
         SearchFilters {
             folder: Some(gestoria),
@@ -209,12 +256,17 @@ pub fn query_set() -> Vec<BenchQuery> {
         },
         Some(NOTARIA),
     );
-    add("text_filter", "copia", kinds(&[FileKind::Folder]), None);
+    add(
+        QueryClass::TextFilter,
+        "copia",
+        kinds(&[FileKind::Folder]),
+        None,
+    );
     for t in ["img", "jpg", "201", "copia", "pdf", "foto"] {
-        add("broad", t, none(), None);
+        add(QueryClass::Broad, t, none(), None);
     }
     for t in ["zzqxj", "kwyjibo", "xilófono marciano", "qqqq"] {
-        add("no_hit", t, none(), None);
+        add(QueryClass::NoHit, t, none(), None);
     }
     out
 }
@@ -417,7 +469,7 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
             None => None,
         };
         reports.push(QueryReport {
-            class: q.class.to_string(),
+            class: q.class.name().to_string(),
             query: q.label.clone(),
             total: first.total,
             truncated_by: first.truncated_by,
@@ -441,9 +493,9 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
             deadline_truncated: idx.iter().map(|&i| deadline[i]).sum(),
         }
     };
-    let classes: Vec<ClassReport> = CLASSES
+    let classes: Vec<ClassReport> = QueryClass::ALL
         .iter()
-        .map(|c| class_report(c, &|i| queries[i].class == *c))
+        .map(|c| class_report(c.name(), &|i| queries[i].class == *c))
         .collect();
     let overall = class_report("overall", &|_| true);
     let peak = peak_rss_bytes();
@@ -552,24 +604,25 @@ mod tests {
     #[test]
     fn query_set_covers_classes() {
         let qs = query_set();
-        for class in CLASSES {
-            let n = qs.iter().filter(|q| q.class == *class).count();
-            assert!(n >= 4, "class {class} has {n} queries");
+        for class in QueryClass::ALL {
+            let n = qs.iter().filter(|q| q.class == class).count();
+            assert!(n >= 4, "class {} has {n} queries", class.name());
         }
-        assert!(qs.iter().all(|q| CLASSES.contains(&q.class)));
         let planted: Vec<&str> = crate::gen::CANARIES.iter().map(|c| c.1).collect();
         for q in &qs {
             if let Some(c) = q.canary {
                 assert!(planted.contains(&c), "{c} is not planted");
             }
         }
+        assert!(qs.iter().filter(|q| q.class == QueryClass::Short).all(|q| q
+            .query
+            .text
+            .chars()
+            .count()
+            <= 2));
         assert!(qs
             .iter()
-            .filter(|q| q.class == "short")
-            .all(|q| q.query.text.chars().count() <= 2));
-        assert!(qs
-            .iter()
-            .filter(|q| q.class == "filter_only")
+            .filter(|q| q.class == QueryClass::FilterOnly)
             .all(|q| q.query.text.is_empty()));
     }
 
