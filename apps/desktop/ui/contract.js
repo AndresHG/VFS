@@ -1,6 +1,6 @@
-// Closed sets of the command contract (VFS-1 spec, "Tauri commands and events"): the serde
-// values of `crates/vfs-core/src/types.rs`, `api.rs` and `error.rs`, named once for the UI
-// and the development fake backend. The Rust test `contract_js_matches_the_rust_enums`
+// Closed sets of the command contract (VFS-1 spec, "Tauri commands and events"; VFS-6): the
+// serde values of `crates/vfs-core/src/types.rs`, `api.rs`, `error.rs` and
+// `crates/vfs-bookmarks/src/types.rs`, named once for the UI and the development fake backend. The Rust test `contract_js_matches_the_rust_enums`
 // (apps/desktop/src-tauri/tests/contract.rs) fails when a set here and its Rust enum differ.
 
 export const FileKind = Object.freeze({
@@ -34,6 +34,27 @@ export const DriveKind = Object.freeze({
 });
 
 export const RevealOutcome = Object.freeze({ REVEALED: 'revealed', OPENED_PARENT: 'opened_parent' });
+
+/** What a search covers, and the `source` of each result (VFS-6). */
+export const Source = Object.freeze({ FILES: 'files', BOOKMARKS: 'bookmarks' });
+
+/** The Firefox folder a bookmark is under (VFS-6). */
+export const BookmarkRoot = Object.freeze({
+  MENU: 'menu',
+  TOOLBAR: 'toolbar',
+  UNFILED: 'unfiled',
+  MOBILE: 'mobile',
+});
+
+/** `BookmarkStatus.state`: how the last read of Firefox bookmarks went (VFS-6). */
+export const ReadState = Object.freeze({
+  NEVER: 'never',
+  READING: 'reading',
+  OK: 'ok',
+  FROM_BACKUP: 'from_backup',
+  NO_FIREFOX: 'no_firefox',
+  FAILED: 'failed',
+});
 
 /** `ApiError.code`: every code a command can reject with (`Error::code` in error.rs). */
 export const ErrorCode = Object.freeze({

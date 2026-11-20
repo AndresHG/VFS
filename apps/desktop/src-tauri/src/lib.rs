@@ -2,6 +2,7 @@
 //! the background indexer, and exposes the command and event contract of `vfs_core::api` to
 //! the static frontend in `apps/desktop/ui`.
 
+pub mod bookmarks;
 pub mod commands;
 pub mod reveal;
 
@@ -103,6 +104,7 @@ pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), S
     vfs.start_indexer(Arc::new(EventSink { app: app.clone() }))
         .map_err(|e| e.to_string())?;
     app.manage(AppState { vfs });
+    bookmarks::init(app, db_path);
     Ok(())
 }
 

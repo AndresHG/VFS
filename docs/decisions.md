@@ -191,6 +191,19 @@ profile folder can be synced or backed up, and a multi-GB file that changes cons
 not travel with it. On macOS both folders are the same. Rejected: the roaming folder, the
 first build's choice.
 
+## Bookmarks are read from a copy of Firefox's database
+
+Firefox bookmarks (VFS-6) are read from a copy of `places.sqlite` and its WAL made in the
+app's data folder, checked for consistency and deleted after reading; the daily
+`bookmarkbackups` file is the fallback. On macOS Firefox holds the database with an
+exclusive lock, so a normal read-only open fails; measured with Firefox 160, an
+`immutable=1` open saw 2 of 11 bookmarks because the rest were still in the WAL, while a
+copy of both files saw all 11. On Windows a read-only open would join Firefox's locking.
+The copy takes no lock and writes nothing in the profile. Rejected: opening in place
+(locks, missed or torn data) and backups only (up to a day old). Bookmarks live in their
+own `bookmarks.db`, searched in memory: 3,000 rows need no full-text index, and the file
+index schema stays untouched.
+
 ## Session marker instead of an integrity check at every start
 
 At open, the core creates and locks a marker file in `index.db.session/`; a clean shutdown

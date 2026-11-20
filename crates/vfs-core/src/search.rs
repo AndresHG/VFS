@@ -33,7 +33,8 @@ use rusqlite::{params_from_iter, Connection, ErrorCode, OptionalExtension, Row};
 use crate::db::join_rel;
 use crate::error::{Error, Result};
 use crate::fold::fold_key;
-use crate::fuzzy::{self, FUZZY_MAX_LEN, FUZZY_MIN_LEN};
+use crate::fuzzy;
+use crate::matching::FUZZY_TRIGGER;
 use crate::rank::{self, Candidate};
 use crate::types::{
     FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
@@ -46,17 +47,10 @@ const MAX_HITS: usize = 2000;
 /// the list is cut to `MAX_HITS`, so a better-ranked name match is never lost to rowid
 /// order while its tier has at most this many matches.
 const NAME_READ_CAP: usize = 4_000;
-const MAX_TERMS: usize = 8;
-/// Bytes of query text read; the rest is ignored (the search box allows no more).
-const MAX_QUERY_BYTES: usize = 1024;
-/// Characters kept of each term; a longer one is cut, which only widens what it matches.
-const MAX_TERM_CHARS: usize = 128;
 /// Directories read by a directory-driven stage.
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
 const SCAN_CAP_FUZZY: usize = 5_000;
-/// The fuzzy pass runs only when the exact pass found fewer hits.
-const FUZZY_TRIGGER: usize = 20;
 /// Bound on work that is not subject to the configured deadline (S3).
 const UNDER_CAP_BUDGET: Duration = Duration::from_secs(2);
 const MAX_LIMIT: u32 = 500;
@@ -129,27 +123,7 @@ fn search_snapshot(
     let start = Instant::now();
     let limit = query.limit.clamp(1, MAX_LIMIT) as usize;
     let offset = query.offset as usize;
-    // Bounded input: at most MAX_QUERY_BYTES of text and MAX_TERM_CHARS per term, so no
-    // query costs more than a typed one, whatever is pasted.
-    let mut text_end = query.text.len().min(MAX_QUERY_BYTES);
-    while !query.text.is_char_boundary(text_end) {
-        text_end -= 1;
-    }
-    let folded = fold_key(&query.text[..text_end].replace('\\', "/"));
-    let folded = folded
-        .split_whitespace()
-        .map(|t| t.chars().take(MAX_TERM_CHARS).collect::<String>())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut terms: Vec<String> = Vec::new();
-    for t in folded.split(' ').filter(|t| !t.is_empty()) {
-        if terms.len() == MAX_TERMS {
-            break;
-        }
-        if !terms.iter().any(|x| x == t) {
-            terms.push(t.to_string());
-        }
-    }
+    let crate::matching::ParsedQuery { folded, terms } = crate::matching::parse_query(&query.text);
     let f = &query.filters;
     let has_filter = !f.kinds.is_empty()
         || f.modified_from.is_some()
@@ -706,9 +680,9 @@ impl Ctx {
     }
 }
 
-/// Terms that tolerate a typo: from `FUZZY_MIN_LEN` up to `FUZZY_MAX_LEN` characters.
+/// Terms that tolerate a typo (`matching::tolerates_typo`).
 fn is_long_for_fuzzy(t: &str) -> bool {
-    (FUZZY_MIN_LEN..=FUZZY_MAX_LEN).contains(&t.chars().count())
+    crate::matching::tolerates_typo(t)
 }
 
 /// File verification: every term in the name or the directory path; with `fuzzy`, terms

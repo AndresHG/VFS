@@ -749,3 +749,13 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .filter-select::after { background: ButtonText; }
   .row mark { forced-color-adjust: none; background: Mark; color: MarkText; }
 }
+
+/* VFS-6: bookmarks as a source. Structural only; the visual redesign restyles these. */
+.chip input:disabled + span { opacity: 0.5; cursor: not-allowed; }
+.row .ico[data-kind="bookmark"] { color: var(--accent); }
+.bookmarks-setting { padding: 0.9rem 1.5rem 0; border-block-start: 1px solid var(--border); }
+.bookmarks-setting h3 { margin: 0 0 0.4rem; font-size: 1rem; }
+.bookmarks-setting .drawer-intro { padding: 0.4rem 0 0; }
+.toggle { display: inline-flex; align-items: center; gap: 0.5rem; min-block-size: 2.5rem; font-weight: 700; }
+.toggle input { inline-size: 1.25rem; block-size: 1.25rem; }
+.bookmarks-status { margin: 0.25rem 0 0.9rem; color: var(--muted); }

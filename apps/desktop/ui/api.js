@@ -9,6 +9,10 @@
 //   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
 //   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
+//   (VFS-6) search_sources(query, sources: Source[]) -> {hits: (SearchHit & {source: 'files'} |
+//     BookmarkHit & {source: 'bookmarks'})[], total, truncated, truncatedBy, elapsedMs}
+//   BookmarkHit    {id, title, url, root: BookmarkRoot, folder: string[], profile, added, matched, openable}
+//   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead}
 //
 // Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
 // bundled `ui/` folder (frontendDist), so it is not in the packaged app at all. On top of that
@@ -36,6 +40,11 @@ function tauriBackend(t) {
     getProgress: () => invoke('get_progress'),
     rescan: (id) => invoke('rescan', { id }),
     setPaused: (paused) => invoke('set_paused', { paused }),
+    searchSources: (query, sources) => invoke('search_sources', { query, sources }),
+    getBookmarksStatus: () => invoke('get_bookmarks_status'),
+    setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),
+    openBookmark: (id) => invoke('open_bookmark', { id }),
+    onBookmarksChanged: (cb) => listen('bookmarks-changed', (e) => cb(e.payload)),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -55,7 +64,9 @@ function missingBackend() {
     missing: true,
     listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
     reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
+    searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
+    onBookmarksChanged: async () => () => {},
   };
 }
 

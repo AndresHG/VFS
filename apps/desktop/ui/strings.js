@@ -1,8 +1,8 @@
 // Every user-visible string (VFS-1 R9). Spanish, impersonal/usted, plain words: never
 // "indexar", "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values.
 
-import { DateChoice, SizeChoice } from './choices.js';
-import { ErrorCode, FileKind } from './contract.js';
+import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
+import { BookmarkRoot, ErrorCode, FileKind, ReadState } from './contract.js';
 
 export const S = {
   searchLabel: 'Buscar por nombre de archivo o de carpeta',
@@ -45,6 +45,10 @@ export const S = {
     [SizeChoice.MEDIUM]: 'De 1 MB a 100 MB', [SizeChoice.LARGE]: 'De 100 MB a 1 GB',
     [SizeChoice.HUGE]: 'Más de 1 GB',
   },
+  fSource: 'Buscar en',
+  sourceOptions: {
+    [SourceChoice.ALL]: 'Todo', [SourceChoice.FILES]: 'Archivos', [SourceChoice.BOOKMARKS]: 'Marcadores',
+  },
   folderAll: 'Todas las carpetas',
   folderPick: 'Elegir otra carpeta…',
   folderInside: (name) => `Dentro de: ${name}`,
@@ -59,6 +63,15 @@ export const S = {
   revealButton: 'Mostrar en carpeta',
   revealKey: 'Intro',
   unavailableBadge: 'No disponible',
+  openButton: 'Abrir en el navegador',
+  bookmarkKind: 'Marcador',
+  bookmarkRoots: {
+    [BookmarkRoot.MENU]: 'Menú de marcadores', [BookmarkRoot.TOOLBAR]: 'Barra de marcadores',
+    [BookmarkRoot.UNFILED]: 'Otros marcadores', [BookmarkRoot.MOBILE]: 'Marcadores del móvil',
+  },
+  bookmarkRowLabel: (title, path, site, date) =>
+    [title, 'marcador', `en ${path}`, site, date && `guardado el ${date}`].filter(Boolean).join(', '),
+  detailsBookmark: 'Dirección:',
   rowLabel: (name, kind, dir, date, size, unavailable) =>
     [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible']
       .filter(Boolean).join(', '),
@@ -119,6 +132,18 @@ export const S = {
   rescanStarted: 'Se buscarán cambios en segundo plano. Puede seguir buscando mientras tanto.',
   rootAdded: (p) => `Se añadió «${p}». Se está revisando; puede buscar mientras tanto.`,
   remoteWarning: 'Esta carpeta está en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
+  bookmarksTitle: 'Marcadores de Firefox',
+  bookmarksToggle: 'Incluir marcadores de Firefox',
+  bookmarksIntro: 'Busca también entre los marcadores guardados en Firefox. Solo se leen los marcadores, nunca el historial ni las contraseñas, y nada sale de este equipo.',
+  bookmarksCount: (n, when) => `${n} marcadores · leídos ${when}`,
+  bookmarksState: {
+    [ReadState.NEVER]: 'Todavía no se han leído los marcadores.',
+    [ReadState.READING]: 'Leyendo los marcadores de Firefox…',
+    [ReadState.OK]: '',
+    [ReadState.FROM_BACKUP]: 'Firefox no dejó leer sus marcadores más recientes; se usa su última copia de seguridad.',
+    [ReadState.NO_FIREFOX]: 'No se han encontrado marcadores de Firefox en este equipo.',
+    [ReadState.FAILED]: 'No se pudieron leer los marcadores de Firefox. Se volverá a intentar más tarde.',
+  },
   removeTitle: '¿Quitar esta carpeta?',
   removeBody: 'Dejará de aparecer en las búsquedas. Sus archivos no se borran del disco.',
   cancel: 'Cancelar',
@@ -135,6 +160,10 @@ export const S = {
     reveal: {
       [ErrorCode.NOT_FOUND]: 'El archivo ya no está en esa ubicación.',
       [ErrorCode.UNAVAILABLE]: 'Esa carpeta no está disponible ahora. Compruebe que el disco está conectado.',
+    },
+    openBookmark: {
+      [ErrorCode.NOT_FOUND]: 'Ese marcador ya no existe en Firefox.',
+      [ErrorCode.UNAVAILABLE]: 'Este marcador no es una página web y no se puede abrir.',
     },
     addRoot: {
       [ErrorCode.NOT_FOUND]: 'No se encuentra esa carpeta.',

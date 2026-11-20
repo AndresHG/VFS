@@ -1,0 +1,23 @@
+[package]
+name = "vfs-bookmarks"
+description = "Browser bookmarks as a VFS search source (VFS-6): Firefox reader, store, search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+vfs-core.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+lz4_flex.workspace = true
+
+[features]
+# Fake Firefox profiles for tests of this crate and of its users (VFS-6).
+test-support = ["lz4_flex/safe-encode"]
+
+[dev-dependencies]
+vfs-bookmarks = { path = ".", features = ["test-support"] }
+tempfile.workspace = true

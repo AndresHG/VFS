@@ -31,7 +31,10 @@ pub(crate) fn rank(candidates: &mut [Candidate], folded_query: &str, terms: &[St
         let (tier, len) = if terms.is_empty() {
             (0, 0)
         } else {
-            (tier(c, trimmed, &whole, terms), c.name_key.chars().count())
+            (
+                tier(&c.name_key, c.hit.matched, trimmed, &whole, terms),
+                c.name_key.chars().count(),
+            )
         };
         (tier, len, Reverse(c.hit.modified), c.hit.id, c.hit.is_dir)
     });
@@ -40,9 +43,15 @@ pub(crate) fn rank(candidates: &mut [Candidate], folded_query: &str, terms: &[St
 /// 0 = whole query or stem, 1 = all terms in the name with the first as prefix, 2 = all
 /// terms in the name, 3 = some term only in the path, 4 = typo with the name starting
 /// within one edit of the first term, 5 = other typos.
-fn tier(c: &Candidate, trimmed: &str, whole: &str, terms: &[String]) -> u8 {
-    let name = c.name_key.as_str();
-    if c.hit.matched == MatchKind::Fuzzy {
+/// `name` is the folded name (or bookmark title, VFS-6) and `matched` why it matched.
+pub(crate) fn tier(
+    name: &str,
+    matched: MatchKind,
+    trimmed: &str,
+    whole: &str,
+    terms: &[String],
+) -> u8 {
+    if matched == MatchKind::Fuzzy {
         return if starts_within_one(name, &terms[0]) {
             4
         } else {

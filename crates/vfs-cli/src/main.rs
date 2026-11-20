@@ -3,6 +3,7 @@
 
 mod bench;
 mod gen;
+mod sources;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -18,7 +19,7 @@ use gen::{civil_from_unix, days_from_civil, AnyResult};
 #[command(
     name = "vfs",
     version,
-    about = "VFS file search: index, search, gen-db, bench"
+    about = "VFS file search: index, search, bookmarks, gen-db, bench"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -65,6 +66,19 @@ enum Cmd {
         /// Print the raw response as JSON.
         #[arg(long)]
         json: bool,
+        /// Which sources to search (VFS-6); bookmarks only once `vfs bookmarks on` was run.
+        #[arg(long, value_enum, default_value = "all")]
+        source: sources::SourceArg,
+    },
+    /// Firefox bookmarks as a search source (VFS-6), stored next to the index.
+    Bookmarks {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(value_enum)]
+        action: sources::BookmarksAction,
+        /// Folders holding Firefox's profiles.ini (default: this system's).
+        #[arg(long)]
+        firefox_root: Vec<PathBuf>,
     },
     /// Write a deterministic synthetic index of N files (AC-9 harness).
     GenDb {
@@ -241,6 +255,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             limit,
             offset,
             json,
+            source,
         } => {
             let filters = SearchFilters {
                 kinds: kind.into_iter().map(FileKind::from).collect(),
@@ -256,8 +271,17 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 limit,
                 offset,
             };
-            cmd_search(&Vfs::open(&db)?, &q, json)?;
+            if source == sources::SourceArg::Files {
+                cmd_search(&Vfs::open(&db)?, &q, json)?;
+            } else {
+                sources::cmd_search(&db, &q, source, json)?;
+            }
         }
+        Cmd::Bookmarks {
+            db,
+            action,
+            firefox_root,
+        } => sources::cmd_bookmarks(&db, action, firefox_root)?,
         Cmd::GenDb {
             files,
             out,
