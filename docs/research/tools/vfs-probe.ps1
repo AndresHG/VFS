@@ -6,9 +6,10 @@
 .DESCRIPTION
   Read-only towards the user's files: it lists directories, watches for changes and reads the
   NTFS change journal, but never opens, modifies or deletes a user file. It writes only under
-  -OutDir (default %LOCALAPPDATA%\VFS-probe) and, for the -Step semantics and disk tests, in a
-  scratch folder it creates and deletes itself (under -ScratchDir, default
-  <DataRoot>\VFS-probe-scratch).
+  -OutDir (default %LOCALAPPDATA%\VFS-probe) and, for the semantics, flush and seek steps, in a
+  new folder vfs-probe-<timestamp> that it creates under -ScratchParent (default: the root of
+  the -DataRoot drive) and deletes at the end. It refuses to run if that folder already exists,
+  and never deletes anything else.
 
   Run from a normal PowerShell window (no "Run as administrator"):
     powershell -NoProfile -ExecutionPolicy Bypass -File vfs-probe.ps1 -Step all -DataRoot D:\
@@ -32,7 +33,8 @@ param(
   [int] $MaxDirs = 400000,
   [int] $WalkMinutes = 30,
   [string] $OutDir = (Join-Path $env:LOCALAPPDATA 'VFS-probe'),
-  [string] $ScratchDir = ''
+  # Existing folder on the data disk under which a fresh scratch folder is created.
+  [string] $ScratchParent = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -40,7 +42,17 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $run = Join-Path $OutDir $stamp
 New-Item -ItemType Directory -Force -Path $run | Out-Null
 $log = Join-Path $run 'log.txt'
-if (-not $ScratchDir) { $ScratchDir = Join-Path ([IO.Path]::GetPathRoot($DataRoot)) 'VFS-probe-scratch' }
+if (-not $ScratchParent) { $ScratchParent = [IO.Path]::GetPathRoot($DataRoot) }
+$ScratchDir = Join-Path $ScratchParent "vfs-probe-$stamp"
+if (Test-Path -LiteralPath $ScratchDir) { throw "scratch folder $ScratchDir already exists; not touching it" }
+$scratchCreated = $false
+function New-Scratch {
+  if (-not $script:scratchCreated) {
+    New-Item -ItemType Directory -Path $ScratchDir | Out-Null
+    $script:scratchCreated = $true
+  }
+  return $ScratchDir
+}
 
 function Log([string] $msg) {
   $line = '{0:HH:mm:ss} {1}' -f (Get-Date), $msg
@@ -85,8 +97,10 @@ public static class VfsProbe
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct WIN32_FIND_DATAW
     {
+        // FILETIMEs as two DWORDs each: a C# long would be 8-aligned and shift every field.
         public uint dwFileAttributes;
-        public long ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+        public uint ftCreationLow, ftCreationHigh, ftLastAccessLow, ftLastAccessHigh;
+        public uint ftLastWriteLow, ftLastWriteHigh;
         public uint nFileSizeHigh, nFileSizeLow, dwReserved0, dwReserved1;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string cFileName;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string cAlternateFileName;
@@ -130,6 +144,7 @@ public static class VfsProbe
 
     static string Long(string p)
     {
+        if (p.Length == 2 && p[1] == ':') p += "\\"; // "D:" means the volume device; use "D:\\"
         if (p.StartsWith(@"\\?\")) return p;
         if (p.StartsWith(@"\\")) return @"\\?\UNC\" + p.Substring(2);
         return @"\\?\" + p;
@@ -217,7 +232,7 @@ public static class VfsProbe
     static bool ListFind(string dir, bool large, List<KeyValuePair<string, uint>> outNames)
     {
         WIN32_FIND_DATAW d;
-        IntPtr h = FindFirstFileExW(Long(dir) + "\\*", FindExInfoBasic, out d, FindExSearchNameMatch,
+        IntPtr h = FindFirstFileExW(Long(dir).TrimEnd('\\') + "\\*", FindExInfoBasic, out d, FindExSearchNameMatch,
             IntPtr.Zero, large ? FIND_FIRST_EX_LARGE_FETCH : 0);
         if (h == new IntPtr(-1)) return false;
         do
@@ -252,7 +267,7 @@ public static class VfsProbe
                     off += next;
                 }
             }
-            return true; // ends with ERROR_NO_MORE_FILES
+            return Marshal.GetLastWin32Error() == 18; // ERROR_NO_MORE_FILES
         }
     }
 
@@ -447,7 +462,7 @@ public static class VfsProbe
         if (h == new IntPtr(-1)) return -1;
         FindClose(h);
         listedSize = ((long)d.nFileSizeHigh << 32) | d.nFileSizeLow;
-        return d.ftLastWriteTime;
+        return ((long)d.ftLastWriteHigh << 32) | d.ftLastWriteLow;
     }
 
     public static List<string> Semantics(string scratch)
@@ -679,14 +694,14 @@ if ($all -or $Step -eq 'walk') {
 }
 
 if ($all -or $Step -eq 'semantics') {
-  Try-Step 'semantics' { Save 'semantics' ([VfsProbe]::Semantics($ScratchDir)) }
+  Try-Step 'semantics' { Save 'semantics' ([VfsProbe]::Semantics((New-Scratch))) }
 }
 
 if ($all -or $Step -eq 'flush') {
   Try-Step 'flush' {
     $f = [ordered]@{}
     $f.localappdata = [VfsProbe]::Flush((Join-Path $run 'scratch'), 40)
-    $f.data_disk = [VfsProbe]::Flush($ScratchDir, 40)
+    $f.data_disk = [VfsProbe]::Flush((New-Scratch), 40)
     Save 'flush' $f
   }
 }
@@ -695,7 +710,7 @@ if ($all -or $Step -eq 'seek') {
   Try-Step 'seek' {
     $free = (Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='{0}'" -f [IO.Path]::GetPathRoot($ScratchDir).TrimEnd('\'))).FreeSpace
     if ($free -lt 20GB) { Log "seek skipped: less than 20 GB free" }
-    else { Save 'seek' ([VfsProbe]::Seek($ScratchDir, 2048, 400)) }
+    else { Save 'seek' ([VfsProbe]::Seek((New-Scratch), 2048, 400)) }
   }
 }
 
@@ -709,6 +724,7 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
     $csv = Join-Path $run 'perf.csv'
     'time,disk,idle_pct,cur_queue,avg_queue,read_ms,write_ms,reads_s,writes_s,avail_mb,pages_s,events_vfs,events_names,overflows_vfs,overflows_names,top_io' | Set-Content $csv -Encoding UTF8
     $end = (Get-Date).AddMinutes($Minutes)
+    $prevRaw = @{}
     Log "sampling disk, memory and watcher events every 5 s for $Minutes min; use the PC normally"
     while ((Get-Date) -lt $end) {
       $t = Get-Date -Format 'HH:mm:ss'
@@ -717,11 +733,24 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
           Sort-Object IODataBytesPersec -Descending | Select-Object -First 3 | ForEach-Object { '{0}:{1}KB/s' -f $_.Name, [math]::Round($_.IODataBytesPersec / 1KB) }) -join ' '
       $ev1 = if ($vfs) { $vfs.Events } else { '' }; $ev2 = if ($names) { $names.Events } else { '' }
       $er1 = if ($vfs) { $vfs.Errors } else { '' }; $er2 = if ($names) { $names.Errors } else { '' }
+      # Latency from the raw class: the formatted AvgDisksecPerRead is an integer in seconds.
+      $raw = @{}
+      foreach ($r in (Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) { $raw[$r.Name] = $r }
       foreach ($d in (Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) {
+        $readMs = ''; $writeMs = ''
+        $r = $raw[$d.Name]; $p = $prevRaw[$d.Name]
+        if ($r -and $p) {
+          $f = [double]$r.Frequency_PerfTime
+          $nb = [double]$r.AvgDisksecPerRead_Base - $p.AvgDisksecPerRead_Base
+          if ($nb -gt 0) { $readMs = [math]::Round(1000 * ([double]$r.AvgDisksecPerRead - $p.AvgDisksecPerRead) / $f / $nb, 2) }
+          $nb = [double]$r.AvgDisksecPerWrite_Base - $p.AvgDisksecPerWrite_Base
+          if ($nb -gt 0) { $writeMs = [math]::Round(1000 * ([double]$r.AvgDisksecPerWrite - $p.AvgDisksecPerWrite) / $f / $nb, 2) }
+        }
         '{0},"{1}",{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13},{14},"{15}"' -f $t, $d.Name, $d.PercentIdleTime, $d.CurrentDiskQueueLength,
-        $d.AvgDiskQueueLength, ($d.AvgDisksecPerRead * 1000), ($d.AvgDisksecPerWrite * 1000), $d.DiskReadsPersec, $d.DiskWritesPersec,
+        $d.AvgDiskQueueLength, $readMs, $writeMs, $d.DiskReadsPersec, $d.DiskWritesPersec,
         $mem.AvailableMBytes, $mem.PagesPersec, $ev1, $ev2, $er1, $er2, $top | Add-Content $csv -Encoding UTF8
       }
+      $prevRaw = $raw
       Start-Sleep -Seconds 5
     }
     if ($vfs) {
@@ -735,5 +764,6 @@ if ($all -or $Step -eq 'usn') {
   Try-Step 'usn-rate' { Save 'usn-query-2' ([VfsProbe]::UsnQueryOnly($DataRoot)) }
 }
 
-if (Test-Path $ScratchDir) { Remove-Item -Recurse -Force $ScratchDir -ErrorAction SilentlyContinue }
+# Delete only the folder this run created.
+if ($scratchCreated) { Remove-Item -LiteralPath $ScratchDir -Recurse -Force -ErrorAction SilentlyContinue }
 Log "done. Results in $run"

@@ -130,7 +130,8 @@ the full walk as total dirs ÷ `dirs_per_sec`. The total comes from step 8.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:\ -Step semantics
 ```
 
-It works only inside `D:\VFS-probe-scratch` and deletes that folder afterwards. Expected (see
+It works only inside a new folder `D:\vfs-probe-<timestamp>` that it creates and deletes
+afterwards. It refuses to run if that folder already exists, and deletes nothing else. Expected (see
 `windows-io.md` §3.3): the directory mtime changes for create, rename and delete, and does not
 change for an append to a file or for a grandchild. Any other result changes the design of R9.
 The two "listed size" lines show N7.
@@ -160,8 +161,10 @@ Every 5 s it appends per-disk `% Idle Time`, queue length, read/write latency, a
 pages/s and the three processes with the most I/O to `perf.csv`. Two `ReadDirectoryChanges`
 watchers run on `D:\` meanwhile: one with VFS's current filter (names + size + last-write +
 creation), one with names only. `watch.json` reports the events and overflows of each. The
-counters are read through WMI classes (`Win32_PerfFormattedData_*`) because PDH counter paths
-are localised on a Spanish Windows (`\Disco físico(...)`).
+counters are read through WMI classes (`Win32_PerfFormattedData_*`, plus `Win32_PerfRawData_*`
+for read and write latency) because PDH counter paths are localised on a Spanish Windows
+(`\Disco físico(...)`). The per-process I/O query is itself not free on a slow PC: expect the
+probe to add some CPU load, and do not read small differences into it.
 
 ### 7. Synology configuration by hand (10 min) → N14
 
