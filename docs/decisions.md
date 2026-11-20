@@ -63,7 +63,7 @@ full re-walk of exactly that root and re-arms on the same handle; any other fail
 re-walk, closes the handle and reopens it every 2 s; the directory is opened with the
 long-path prefix. With `notify`, overflow and reopen handling on Windows would be whatever
 its backend does, which we had not audited. Rejected: `notify` on both systems. Caveat: this
-loop has never run.
+loop has run only on a GitHub Windows runner (VFS-8).
 
 ## Search deadline
 
@@ -182,8 +182,8 @@ the paths of the folder's subtree in one transaction (folder rows, folder search
 the files' path index rows) and keeps every file row (spec I9). A renamed top-level folder
 of a large archive would otherwise delete and re-insert all its files and walk them again.
 Anything not provably a rename inside one root falls back to re-listing both parents.
-Rejected: always treating a rename as delete plus insert. Caveat: the Windows watcher has
-never run.
+Rejected: always treating a rename as delete plus insert. Caveat: the Windows watcher has run
+only on a GitHub Windows runner (VFS-8), where a rename was followed in about 2 s.
 
 ## The index stays on this computer
 
@@ -229,7 +229,8 @@ Rejected: a code-signing certificate (published prices of about $219–400 a yea
 organisation-validated certificate, and Microsoft's cheaper signing service is not open to
 individual developers outside the US and Canada), tracked for later in Fase 4; and the
 offline WebView2 installer (about 150 MB per Microsoft's documentation), which only matters
-without internet. Caveat: the installer has never been built or installed.
+without internet. Caveat: the installer has been installed and uninstalled only on a GitHub
+Windows runner (VFS-8), where WebView2 was already present, so the bootstrapper never ran.
 
 ## GitHub Issues for tracking
 

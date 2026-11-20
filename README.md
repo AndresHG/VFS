@@ -205,12 +205,14 @@ build is refused, never overwritten.
   GTK stack, not built for Windows or macOS), and `zbus_names`, `zvariant`,
   `zvariant_derive` (unmaintained; the Linux D-Bus side of the single-instance plugin).
   None has a fix VFS can apply short of a Tauri update.
-- **Nothing has been run on Windows yet.** The Windows watcher, volume identity, background
-  priority, long-path reveal and the installer are compiled only on Windows and have never
-  executed; so are, for VFS-6, the copy of a `places.sqlite` that Firefox holds open on
-  Windows, the Microsoft Store profile folder and "Abrir en Firefox" (`ShellExecuteW`). The CI and release workflows have not run on GitHub yet.
-- No figure has been measured on Windows, on an HDD, or on the target PC (slow 8 TB HDD).
-  Milestone Fase 2 exists for that.
+- **Run on Windows only on a GitHub runner** (VFS-8, Windows Server 2025, SSD; results in
+  `docs/research/windows-e2e-results.md`): the NSIS installer installs and uninstalls per
+  user, the window opens, the watcher follows create, rename and delete, the catch-up at start
+  works, and "Mostrar en carpeta" opens the right folder but does not select the item
+  (issue 107). Never run on Windows: for VFS-6, the copy of a `places.sqlite` that Firefox
+  holds open, the Microsoft Store profile folder and "Abrir en Firefox" (`ShellExecuteW`).
+- Measured on Windows only on that runner (first scan, memory, latency); nothing on an HDD or
+  on the target PC (slow 8 TB HDD). Milestone Fase 2 exists for that.
 
 ## Phases
 
