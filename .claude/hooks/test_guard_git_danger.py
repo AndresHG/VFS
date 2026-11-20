@@ -144,6 +144,11 @@ class HeredocTest(unittest.TestCase):
         decision, _ = self.decision("bash <<'EOF'\ngit push --force origin main\nEOF")
         self.assertEqual(decision, "deny")
 
+    def test_shell_written_against_the_operator_is_analyzed(self):
+        for opener in ("bash<<EOF", "zsh<<'EOF'", "cat<<EOF|sh"):
+            decision, _ = self.decision(f"{opener}\ngit push --force origin main\nEOF")
+            self.assertEqual(decision, "deny", opener)
+
     def test_heredoc_piped_to_a_shell_is_analyzed(self):
         decision, _ = self.decision("cat <<EOF | sh\ngh pr merge 95 --auto\nEOF")
         self.assertEqual(decision, "deny")

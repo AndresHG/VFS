@@ -442,7 +442,7 @@ def _cd_target(tokens, cwd):
 
 
 def _heredoc_delimiters(line, quote):
-    """Scan one line -> ([(strip_tabs, word)], quote state at end of line).
+    """Scan one line -> ([(strip_tabs, word, quoted)], quote state at end of line).
 
     Only `<<` outside quotes opens a heredoc; `<<<` is a here-string.
     """
@@ -497,7 +497,7 @@ def _feeds_shell(text):
     """True when text runs what it is given as commands: `bash <<X`,
     `cat <<X | sh`, `source /dev/stdin <<X`, `eval "$(…)"`. Any matching word
     counts, which errs toward analyzing."""
-    words = re.split(r"[\s|;&()]+", text)
+    words = re.split(r"[\s|;&()<>]+", text)  # `bash<<EOF` has no space
     return any(os.path.basename(w.strip("'\"")) in SHELLS | {"eval", "source", "."}
                for w in words)
 
