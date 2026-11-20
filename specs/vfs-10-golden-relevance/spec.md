@@ -1,6 +1,6 @@
 # VFS-10 — Golden relevance tests in Spanish
 
-- **Status**: implemented (PR #101)
+- **Status**: approved
 - **Size**: M. Tests only, no behavior change, but it fixes the ranking contract that the next
   changes (sort P2/issue 66, frecency P5/issue 69, query syntax P8/issue 72, schema work)
   must keep.
