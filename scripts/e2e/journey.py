@@ -69,9 +69,27 @@ class App:
         self.proc = None
         self.wd = None
 
+    def start_driver(self):
+        """Starts `tauri-driver` (once) when its path is given. It must run in the same CI step
+        as the journey: the Windows runner ends a step's processes when the step ends."""
+        if getattr(self, "driver_proc", None) or not getattr(self.args, "tauri_driver", None):
+            return
+        log = open(os.path.join(self.args.out, "tauri-driver.log"), "ab")
+        cmd = [self.args.tauri_driver, "--port", "4444"]
+        if self.args.native_driver:
+            cmd += ["--native-driver", self.args.native_driver]
+        self.driver_proc = subprocess.Popen(cmd, stdout=log, stderr=log)
+
+    def stop_driver(self):
+        p = getattr(self, "driver_proc", None)
+        if p:
+            p.terminate()
+            self.driver_proc = None
+
     def start(self):
         t0 = now()
         if self.mode == "tauri-driver":
+            self.start_driver()
             self.wd = WebDriver(self.args.driver)
             self.wd.wait_ready(60)
             self.wd.start({"browserName": "wry",
@@ -702,6 +720,8 @@ def main(argv=None):
     ap.add_argument("--mode", choices=["tauri-driver", "embedded"], required=True)
     ap.add_argument("--app", required=True, help="path to the app binary")
     ap.add_argument("--driver", default="http://127.0.0.1:4444")
+    ap.add_argument("--tauri-driver", help="start this tauri-driver binary on :4444")
+    ap.add_argument("--native-driver", help="msedgedriver.exe for tauri-driver")
     ap.add_argument("--port", type=int, default=4445, help="embedded server port")
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--out", required=True)
@@ -715,6 +735,7 @@ def main(argv=None):
         return j.run()
     finally:
         j.app.stop()
+        j.app.stop_driver()
         j.save()
         shutil.copy(args.manifest, os.path.join(args.out, "manifest.json"))
 

@@ -42,7 +42,7 @@ not waste the visit.
 | N11 | Watcher events per minute and buffer overflows: VFS filter vs names-only filter | `watch.json` (6) | R6 (watcher overflows and filter) |
 | N12 | RAM: total, free with Firefox open, VFS + WebView2 working set open and minimised | `info.json` (1), step 9 | R7, R8 (page caches, WebView2); issue 19 |
 | N13 | First full index: duration, index size, disk use while it runs | step 8 | Issues 17, 33 |
-| N14 | Which Synology product and which folders it syncs or backs up; is `%APPDATA%` included? | step 7 (by hand) | R2 (index location); issue 36 |
+| N14 | Which Synology product and which folders it syncs or backs up; is `%LOCALAPPDATA%` included? | step 7 (by hand) | R2 (index location); issue 36 |
 | N15 | Defender state, other antivirus, WebView2 runtime version, long-path setting | `info.json` (1) | R8 (memory API needs runtime 114+); issue 21 |
 
 ## Step by step
@@ -172,8 +172,8 @@ From the photographs in step 0 and the client UI, answer:
 
 1. Product: Synology Drive Client (sync), Drive Client backup task, or Active Backup for
    Business agent? Which version?
-2. Is any sync or backup task rooted at `C:\Users\<user>` or `%APPDATA%`? If so,
-   `%APPDATA%\app.vfs.desktop\` (where the index lives today) would be uploaded.
+2. Is any sync or backup task rooted at `C:\Users\<user>` or `%LOCALAPPDATA%`? If so,
+   `%LOCALAPPDATA%\app.vfs.desktop\` (where the index lives) would be uploaded.
 3. Is On-demand sync on for any task on the data disk? The `placeholders` count in step 3 is
    the cross-check.
 4. Does the client show "Scanning" or "Indexing" after a reboot, and for how long? That tells
@@ -186,8 +186,7 @@ From the photographs in step 0 and the client UI, answer:
    `... -Step perf -Minutes 240`.
 3. Note the start time. VFS's status bar shows progress. Record when the first scan finishes,
    or how far it got when the visit ends: the scan resumes at the next start.
-4. Index size: `Get-ChildItem "$env:APPDATA\app.vfs.desktop" | Select Name, Length`. Use
-   `$env:LOCALAPPDATA` instead if R2 has landed.
+4. Index size: `Get-ChildItem "$env:LOCALAPPDATA\app.vfs.desktop" | Select Name, Length`.
 
 ### 9. VFS memory, open and minimised (10 min) → N12
 

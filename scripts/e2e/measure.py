@@ -44,6 +44,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--app", required=True)
     ap.add_argument("--driver", default="http://127.0.0.1:4444")
+    ap.add_argument("--tauri-driver", help="start this tauri-driver binary on :4444")
+    ap.add_argument("--native-driver", help="msedgedriver.exe for tauri-driver")
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--label", required=True)
     ap.add_argument("--out", required=True)
@@ -141,6 +143,7 @@ def main(argv=None):
     finally:
         save()
         app.stop()
+        app.stop_driver()
     print(json.dumps({k: res.get(k) for k in ("first_scan", "catch_up")}, default=str)[:2000])
     return 0
 

@@ -15,6 +15,7 @@ param(
   [ValidateSet('run', 'cycle')] [string] $Action = 'run',
   [string] $Exe = '',
   [string] $Cli = '',
+  [string] $TauriDriver = '',
   [string] $Out = '',
   [switch] $Busy,
   [int] $Files = 100000,
@@ -122,7 +123,8 @@ foreach ($label in @('quiet', 'busy')) {
   Cycle $busy
   $between = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Action cycle" + $(if ($busy) { ' -Busy' } else { '' })
   Log "measure $label"
-  & $py (Join-Path $here 'measure.py') --app $Exe --manifest 'V:\manifest.json' --label $label --out $Out --between $between
+  & $py (Join-Path $here 'measure.py') --app $Exe --manifest 'V:\manifest.json' --label $label --out $Out --between $between `
+    --tauri-driver $TauriDriver --native-driver $env:MSEDGEDRIVER
   if ($LASTEXITCODE) { $failed += "measure-$label" }
   Copy-Item -Recurse -Force 'V:\appdata\logs' (Join-Path $Out "app-logs-$label") -ErrorAction SilentlyContinue
   Get-ChildItem 'V:\appdata' -Filter 'index.db*' | Select-Object Name, Length |
