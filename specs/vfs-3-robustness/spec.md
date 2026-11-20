@@ -1,6 +1,6 @@
 # VFS-3 — Robustness harness: crashes, hostile trees, properties, concurrency, soak
 
-- **Status**: implemented (PR pending)
+- **Status**: implemented (PR #85)
 - **Size**: M
 - **Links**: VFS-1 (`specs/vfs-1-core-search/spec.md`, AC-4..AC-11)
 
