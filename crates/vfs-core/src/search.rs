@@ -31,8 +31,8 @@ use crate::fold::fold_key;
 use crate::fuzzy::{self, FUZZY_MIN_LEN};
 use crate::rank::{self, Candidate};
 use crate::types::{
-    FileKind, MatchKind, SearchConfig, SearchFilters, SearchHit, SearchQuery, SearchResponse,
-    TruncatedBy,
+    FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
+    SearchResponse, TruncatedBy,
 };
 
 /// Accepted hits per query; one more sets `truncated_by = cap`.
@@ -42,8 +42,12 @@ const MAX_TERMS: usize = 8;
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
 const SCAN_CAP_FUZZY: usize = 5_000;
-/// Count probe cap (S2); a generator term with more matches is "over cap" (S3).
+/// A generator term with more matches than this is "over cap" (S3): the configured deadline
+/// applies to it.
 const PROBE_CAP: i64 = 5_000;
+/// Count probes (S2) stop here. Counting FTS rowids is cheap, so the counts stay exact far
+/// beyond `PROBE_CAP` and still tell a common generator term from a very common one.
+const COUNT_CAP: i64 = 50_000;
 /// The fuzzy pass runs only when the exact pass found fewer hits.
 const FUZZY_TRIGGER: usize = 20;
 /// Bound on work that is not subject to the configured deadline (S3).
@@ -466,9 +470,11 @@ struct Group {
 }
 
 impl Group {
+    /// The unary `+` keeps SQLite from driving the query by the `(root_id, rel_path)`
+    /// index, which would read every directory of the root.
     fn roots_sql(&self) -> String {
         let ids: Vec<String> = self.root_ids.iter().map(i64::to_string).collect();
-        format!(" AND d.root_id IN ({})", ids.join(","))
+        format!(" AND +d.root_id IN ({})", ids.join(","))
     }
 }
 
@@ -651,6 +657,18 @@ fn verify_dir(terms: &[String], d: &DirRow, fuzzy: bool) -> Option<MatchKind> {
     })
 }
 
+/// `FROM` source of the directories whose path matches the next `?` (at most `cap`), as
+/// `d`. `CROSS JOIN` fixes the join order: the FTS match drives and each directory is read
+/// by rowid. Left to itself, SQLite estimates the subquery at `cap` rows and reads every
+/// directory of the root through the `(root_id, rel_path)` index instead (hundreds of
+/// milliseconds at 2 M files, VFS-1 AC-9).
+fn matching_dirs(cap: usize) -> String {
+    format!(
+        "(SELECT rowid AS id FROM dirs_fts WHERE dirs_fts MATCH ? LIMIT {cap}) m \
+         CROSS JOIN dirs d ON d.id = m.id"
+    )
+}
+
 /// FTS5 phrase for a folded term: quoted, inner quotes doubled.
 fn phrase(term: &str) -> String {
     format!("\"{}\"", term.replace('"', "\"\""))
@@ -663,9 +681,10 @@ fn run_query(
     f: &SearchFilters,
 ) -> Result<()> {
     let roots: Vec<RootRow> = {
-        let mut stmt = conn
-            .prepare_cached("SELECT id, path, path_key FROM roots WHERE status <> 4 ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, path, path_key FROM roots WHERE status <> ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([RootStatus::Removing.code()], |r| {
             Ok(RootRow {
                 id: r.get(0)?,
                 path: r.get(1)?,
@@ -723,11 +742,11 @@ fn with_params(first: Option<Value>, clause: &Clause) -> Vec<Value> {
         .collect()
 }
 
-/// Capped number of rows of `table` matching `phrase` (S2).
+/// Number of rows of `table` matching `phrase`, counted up to `COUNT_CAP` + 1 (S2).
 fn probe(conn: &mut Connection, run: &mut Run, table: &str, phrase: &str) -> Result<i64> {
     let sql = format!(
         "SELECT count(*) FROM (SELECT 1 FROM {table} WHERE {table} MATCH ? LIMIT {})",
-        PROBE_CAP + 1
+        COUNT_CAP + 1
     );
     let mut n = 0;
     let deadline = run.hard;
@@ -819,11 +838,10 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
             run.truncated.get_or_insert(TruncatedBy::Cap);
         }
     }
-    let matching_dirs =
-        format!("d.id IN (SELECT rowid FROM dirs_fts WHERE dirs_fts MATCH ? LIMIT {SCAN_CAP_DIR})");
+    let matching_dirs = matching_dirs(SCAN_CAP_DIR);
     if let Some(clause) = &ctx.dirs {
         let sql = format!(
-            "SELECT {DIR_COLS} FROM dirs d WHERE {matching_dirs}{roots}{}",
+            "SELECT {DIR_COLS} FROM {matching_dirs} WHERE 1{roots}{}",
             clause.sql
         );
         let params = with_params(Some(Value::Text(p.clone())), clause);
@@ -838,8 +856,8 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
     if let Some(clause) = &ctx.files {
         // The root directory's path is empty: its files are covered by G1.
         let sql = format!(
-            "SELECT {FILE_COLS} FROM dirs d JOIN files f ON f.dir_id = d.id \
-             WHERE {matching_dirs} AND d.rel_path <> ''{roots}{}",
+            "SELECT {FILE_COLS} FROM {matching_dirs} CROSS JOIN files f ON f.dir_id = d.id \
+             WHERE d.rel_path <> ''{roots}{}",
             clause.sql
         );
         let params = with_params(Some(Value::Text(p)), clause);
@@ -913,9 +931,7 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                 if budget == 0 || run.stopped {
                     return Ok(());
                 }
-                let matching_dirs = format!(
-                    "d.id IN (SELECT rowid FROM dirs_fts WHERE dirs_fts MATCH ? LIMIT {budget})"
-                );
+                let matching_dirs = matching_dirs(budget);
                 let queries = [
                     ctx.files.as_ref().map(|c| {
                         (
@@ -931,7 +947,7 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                     ctx.dirs.as_ref().map(|c| {
                         (
                             format!(
-                                "SELECT {DIR_COLS} FROM dirs d WHERE {matching_dirs}{roots}{}",
+                                "SELECT {DIR_COLS} FROM {matching_dirs} WHERE 1{roots}{}",
                                 c.sql
                             ),
                             c,
@@ -941,8 +957,8 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                     ctx.files.as_ref().map(|c| {
                         (
                             format!(
-                                "SELECT {FILE_COLS} FROM dirs d JOIN files f ON f.dir_id = d.id \
-                                 WHERE {matching_dirs} AND d.rel_path <> ''{roots}{} LIMIT {budget}",
+                                "SELECT {FILE_COLS} FROM {matching_dirs} CROSS JOIN files f \
+                                 ON f.dir_id = d.id WHERE d.rel_path <> ''{roots}{} LIMIT {budget}",
                                 c.sql
                             ),
                             c,
@@ -1054,6 +1070,57 @@ mod tests {
         let r = search(&mut conn, &mut state, &config, &q).unwrap();
         assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
         assert_eq!(r.total as usize, MAX_HITS);
+    }
+
+    /// VFS-1 AC-9: directory-driven generation reads only the directories the FTS match
+    /// returns, by rowid, never every directory of the root through the `(root_id,
+    /// rel_path)` index (what SQLite picked before, hundreds of ms at 2 M files).
+    #[test]
+    fn matching_dirs_is_driven_by_the_fts_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut w = db::open_rw(&path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        for i in 0..200 {
+            ingest::insert_dir(&tx, root, top, &format!("carpeta {i}"), 0).unwrap();
+        }
+        tx.commit().unwrap();
+        let conn = db::open_ro(&path).unwrap();
+        let group = Group {
+            terms: vec!["carpeta".into()],
+            root_ids: vec![root],
+        };
+        let roots = group.roots_sql();
+        let m = matching_dirs(SCAN_CAP_DIR);
+        for sql in [
+            format!("SELECT {DIR_COLS} FROM {m} WHERE 1{roots}"),
+            format!(
+                "SELECT {FILE_COLS} FROM {m} CROSS JOIN files f ON f.dir_id = d.id \
+                 WHERE d.rel_path <> ''{roots}"
+            ),
+        ] {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = stmt
+                .query_map(["\"carpeta\""], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert!(
+                plan.iter()
+                    .any(|l| l.contains("SEARCH d USING INTEGER PRIMARY KEY")),
+                "{plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|l| l.contains("sqlite_autoindex_dirs_1")),
+                "{plan:?}"
+            );
+        }
     }
 
     /// VFS-1 AC-10, decision D1: file hits need every term in the name or the directory

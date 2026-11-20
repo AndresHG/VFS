@@ -1,7 +1,6 @@
 //! `vfs bench`: the fixed AC-9 query set through `Vfs::search`, warm and with cold SQLite
 //! caches, with per-class latency percentiles, peak RSS, database size and a PASS/FAIL line.
 
-use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
 
@@ -333,29 +332,6 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
-/// Runs `search` once, turning a panic (a `todo!` in an unfinished core) into an error.
-fn try_search(vfs: &Vfs, q: &SearchQuery) -> AnyResult<vfs_core::SearchResponse> {
-    let hook = panic::take_hook();
-    panic::set_hook(Box::new(|_| {}));
-    let r = panic::catch_unwind(AssertUnwindSafe(|| vfs.search(q)));
-    panic::set_hook(hook);
-    match r {
-        Ok(res) => Ok(res?),
-        Err(p) => {
-            let msg = p
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| p.downcast_ref::<String>().cloned())
-                .unwrap_or_default();
-            Err(format!(
-                "Vfs::search panicked ({msg}); search is not implemented in this build, so the \
-                 benchmark cannot run"
-            )
-            .into())
-        }
-    }
-}
-
 pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
     if !db.is_file() {
         return Err(format!(
@@ -369,7 +345,7 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
     let vfs = Vfs::open(db)?;
     let open_ms = ms(t);
     let stats = vfs.stats()?;
-    try_search(&vfs, &queries[0].query)?;
+    vfs.search(&queries[0].query)?;
     drop(vfs);
 
     // Cold: a fresh `Vfs` (new connections, empty SQLite page caches) for each query.
@@ -381,21 +357,27 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
         cold.push(ms(t));
     }
 
-    // Warm: one `Vfs`; each query once to warm up, then `runs` measured runs.
+    // Warm: one `Vfs`; every query once to warm the page caches, then `runs` rounds over the
+    // whole set. Consecutive searches always differ, so no measured run is served by the
+    // search's cache of the last ranked list (kept for paging).
     let vfs = Vfs::open(db)?;
-    let mut reports = Vec::with_capacity(queries.len());
-    let mut warm: Vec<Vec<f64>> = Vec::with_capacity(queries.len());
-    let mut deadline = Vec::with_capacity(queries.len());
-    for (i, q) in queries.iter().enumerate() {
-        let first = vfs.search(&q.query)?;
-        let mut samples = Vec::with_capacity(runs as usize);
-        let mut cut = 0;
-        for _ in 0..runs {
+    let firsts = queries
+        .iter()
+        .map(|q| vfs.search(&q.query))
+        .collect::<vfs_core::Result<Vec<_>>>()?;
+    let mut warm: Vec<Vec<f64>> = vec![Vec::with_capacity(runs as usize); queries.len()];
+    let mut deadline = vec![0usize; queries.len()];
+    for _ in 0..runs {
+        for (i, q) in queries.iter().enumerate() {
             let t = Instant::now();
             let r = vfs.search(&q.query)?;
-            samples.push(ms(t));
-            cut += usize::from(r.truncated_by == Some(TruncatedBy::Deadline));
+            warm[i].push(ms(t));
+            deadline[i] += usize::from(r.truncated_by == Some(TruncatedBy::Deadline));
         }
+    }
+    let mut reports = Vec::with_capacity(queries.len());
+    for (i, (q, first)) in queries.iter().zip(&firsts).enumerate() {
+        let samples = &warm[i];
         let canary_rank = q.canary.and_then(|c| {
             first
                 .hits
@@ -408,13 +390,11 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
             query: q.label.clone(),
             total: first.total,
             truncated_by: first.truncated_by,
-            warm_p50_ms: Latency::of(&samples).p50_ms,
+            warm_p50_ms: Latency::of(samples).p50_ms,
             cold_ms: cold[i],
             canary: q.canary.map(str::to_string),
             canary_rank,
         });
-        warm.push(samples);
-        deadline.push(cut);
     }
 
     let class_report = |name: &str, pick: &dyn Fn(usize) -> bool| {
