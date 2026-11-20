@@ -4,12 +4,14 @@ import { api } from './api.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
-import { statusText, firstScanRunning as firstScanOf } from './status.js';
+import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
   UiErrorCode,
 } from './contract.js';
-import { DateChoice, SizeChoice } from './choices.js';
+import {
+  DateChoice, SearchState, SizeChoice, TypeChecklist, View, typeChecklistMode,
+} from './choices.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 100;
@@ -29,10 +31,8 @@ const SIZE_RANGES = {
 const DATE_DAYS = { [DateChoice.WEEK]: 7, [DateChoice.MONTH]: 30, [DateChoice.YEAR]: 365 };
 /** Folder-select value of the "Elegir otra carpeta…" entry. */
 const PICK_FOLDER = '__pick';
-/** Where the current search is (`state.searchState`). */
-const SearchState = Object.freeze({ IDLE: 'idle', LOADING: 'loading', DONE: 'done', ERROR: 'error' });
-/** Layout of the screen: the box alone in the middle, or the box above the results. */
-const View = Object.freeze({ START: 'start', LIST: 'list' });
+/** Class of a filter that narrows the list. */
+const ON = 'is-on';
 /** Look of a message in the folder panel. */
 const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
 
@@ -99,12 +99,15 @@ function main() {
   function renderTypeButton() {
     const names = KIND_CHIPS.filter((k) => state.kinds.has(k)).map((k) => S.kindsPlural[k]);
     $('f-type-text').textContent = S.typeButton(...names);
-    $('f-type').classList.toggle('is-on', names.length > 0);
+    $('f-type').classList.toggle(ON, names.length > 0);
   }
 
   // The checklist opens under its button. Placed from the button's box so it also works where
-  // CSS anchor positioning is missing (older WKWebView).
+  // CSS anchor positioning is missing (older WKWebView). Without the Popover API at all, the
+  // chips are shown inline instead.
   const typePop = $('f-type-pop');
+  $('filters').dataset.types = typeChecklistMode(HTMLElement.prototype);
+  if ($('filters').dataset.types === TypeChecklist.INLINE) $('f-type').hidden = true;
   typePop.addEventListener('beforetoggle', (e) => {
     if (e.newState !== 'open') return;
     const r = $('f-type').getBoundingClientRect();
@@ -112,7 +115,6 @@ function main() {
     typePop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - typePop.offsetWidth - 8))}px`;
   });
   typePop.addEventListener('toggle', (e) => {
-    $('f-type').setAttribute('aria-expanded', String(e.newState === 'open'));
     if (e.newState === 'open') chips.querySelector('input')?.focus();
   });
 
@@ -153,9 +155,9 @@ function main() {
     b.textContent = n ? S.clearFiltersN(n) : S.clearFilters;
     renderTypeButton();
     // A filter that narrows the list looks chosen.
-    $('f-date').parentElement.classList.toggle('is-on', state.date !== DateChoice.ANY);
-    $('f-size').parentElement.classList.toggle('is-on', state.size !== SizeChoice.ANY);
-    $('f-folder').parentElement.classList.toggle('is-on', state.folder !== '');
+    $('f-date').parentElement.classList.toggle(ON, state.date !== DateChoice.ANY);
+    $('f-size').parentElement.classList.toggle(ON, state.size !== SizeChoice.ANY);
+    $('f-folder').parentElement.classList.toggle(ON, state.folder !== '');
   }
 
   /** Local midnight of a yyyy-mm-dd value, in unix seconds. */
@@ -505,12 +507,10 @@ function main() {
     const parts = [];
     let actions = [];
     let mode;
-    let start = false; // no search made yet: the start view
     const filesIndexed = state.progress?.filesIndexed ?? state.roots.reduce((s, r) => s + r.files, 0);
 
     if (api.missing) {
       mode = 'missing';
-      start = true;
       parts.push(icon('warn'), el('h3', null, S.backendMissing));
     } else if (state.searchState === SearchState.ERROR) {
       const code = state.lastError?.code;
@@ -520,12 +520,10 @@ function main() {
       actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
     } else if (!state.roots.length && state.rootsLoaded) {
       mode = 'no-roots';
-      start = true;
       parts.push(icon(FileKind.FOLDER), el('h3', null, S.emptyNoRootsTitle), el('p', null, S.emptyNoRootsBody));
       actions = [button(S.addFolderEllipsis, 'btn btn-primary', () => addFolder())];
     } else if (state.searchState === SearchState.IDLE) {
-      start = true;
-      if (!state.rootsLoaded) { box.hidden = true; setView(true); return; }
+      if (!state.rootsLoaded) { box.hidden = true; setView(); return; }
       if (firstScanRunning()) {
         mode = 'first-scan';
         const bar = document.createElement('progress');
@@ -552,10 +550,10 @@ function main() {
       }
     } else {
       box.hidden = true;
-      setView(false);
+      setView();
       return;
     }
-    setView(start);
+    setView();
     // Same state as on screen: refresh the words only, so buttons under the pointer and the
     // progress animation are not rebuilt on every progress tick.
     if (!box.hidden && box.dataset.mode === mode) {
@@ -578,8 +576,13 @@ function main() {
   }
 
   /** Before any search the box sits in the middle of an empty page; results move it up. */
-  function setView(start) {
-    $('app').dataset.view = start ? View.START : View.LIST;
+  function setView() {
+    $('app').dataset.view = viewFor({
+      backendMissing: !!api.missing,
+      rootsLoaded: !!state.rootsLoaded,
+      rootCount: state.roots.length,
+      searchState: state.searchState,
+    });
   }
 
   function button(text, cls, onClick) {
@@ -667,16 +670,11 @@ function main() {
     if (!state.rootsLoaded) { text.textContent = S.statusConnecting; return; }
     if (!state.roots.length) { text.textContent = S.statusNoRoots; return; }
     text.textContent = statusText(p, state.roots);
-    if (p?.state === IndexerState.SCANNING) {
-      bar.hidden = false;
-      pause.hidden = false;
-      pause.textContent = S.pause;
-    } else if (p?.state === IndexerState.PAUSED) {
-      pause.hidden = false;
-      pause.textContent = S.resume;
-    } else if (p?.state === IndexerState.IDLE) {
-      $('rescan-now').hidden = false;
-    }
+    const actions = footerActions(p);
+    bar.hidden = p?.state !== IndexerState.SCANNING;
+    pause.hidden = !actions.pause;
+    pause.textContent = actions.paused ? S.resume : S.pause;
+    $('rescan-now').hidden = !actions.rescan;
     $('banner-scan').hidden = !(firstScanRunning() && hasQuery());
   }
 

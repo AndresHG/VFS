@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { statusText, checkedAt } from '../ui/status.js';
+import { statusText, checkedAt, viewFor, footerActions } from '../ui/status.js';
+import { SearchState, View, TypeChecklist, typeChecklistMode } from '../ui/choices.js';
 import { S } from '../ui/strings.js';
 import { IndexerState, RootStatus } from '../ui/contract.js';
 
@@ -55,4 +56,35 @@ test('plain wording', () => {
   for (const s of texts.filter((t) => typeof t === 'string')) {
     assert.doesNotMatch(s, /index|índice/i);
   }
+});
+
+const screen = (over) => ({ backendMissing: false, rootsLoaded: true, rootCount: 2, searchState: SearchState.IDLE, ...over });
+
+/** VFS-1 AC-12: before any search the box sits alone in the middle (also with no folders or no
+ *  backend); results, no hits and errors use the list layout. */
+test('viewFor picks the start or the list layout', () => {
+  assert.equal(viewFor(screen()), View.START);
+  assert.equal(viewFor(screen({ rootsLoaded: false, rootCount: 0 })), View.START);
+  assert.equal(viewFor(screen({ rootCount: 0 })), View.START);
+  assert.equal(viewFor(screen({ backendMissing: true, searchState: SearchState.ERROR })), View.START);
+  assert.equal(viewFor(screen({ searchState: SearchState.DONE })), View.LIST);
+  assert.equal(viewFor(screen({ searchState: SearchState.LOADING })), View.LIST);
+  assert.equal(viewFor(screen({ searchState: SearchState.ERROR })), View.LIST);
+  assert.equal(viewFor(screen({ rootCount: 0, searchState: SearchState.ERROR })), View.LIST);
+});
+
+/** VFS-1 U6: "Buscar cambios ahora" sits in the status line only when nothing is being
+ *  checked; "Pausar"/"Continuar" only while folders are being checked. */
+test('footerActions offers pause or a check, never both', () => {
+  assert.deepEqual(footerActions(progress(IndexerState.IDLE)), { pause: false, paused: false, rescan: true });
+  assert.deepEqual(footerActions(progress(IndexerState.SCANNING)), { pause: true, paused: false, rescan: false });
+  assert.deepEqual(footerActions(progress(IndexerState.PAUSED)), { pause: true, paused: true, rescan: false });
+  assert.deepEqual(footerActions(null), { pause: false, paused: false, rescan: false });
+});
+
+/** VFS-1 AC-11: where the Popover API is missing (macOS 11-12 WKWebView) the type filter
+ *  falls back to inline chips instead of a checklist that cannot open. */
+test('typeChecklistMode falls back to inline chips without the Popover API', () => {
+  assert.equal(typeChecklistMode({ popover: null }), TypeChecklist.POPOVER);
+  assert.equal(typeChecklistMode({}), TypeChecklist.INLINE);
 });

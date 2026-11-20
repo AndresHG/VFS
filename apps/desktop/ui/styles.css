@@ -356,6 +356,18 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .chip span svg { color: var(--ink-2); }
 .chip:has(input:checked) { font-weight: 700; }
 
+/* No Popover API (macOS 11–12): the chips sit inline in the filter line as pills. */
+.filters[data-types="inline"] .type-pop {
+  position: static;
+  display: contents;
+}
+.filters[data-types="inline"] .kinds legend {
+  position: absolute; clip-path: inset(50%); overflow: hidden; width: 1px; height: 1px; white-space: nowrap;
+}
+.filters[data-types="inline"] .chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.filters[data-types="inline"] .chip { border-radius: 999px; background: var(--sunk); font-size: var(--t-meta); }
+.filters[data-types="inline"] .chip:has(input:checked) { background: var(--accent-soft); }
+
 .range {
   flex-basis: 100%;
   display: flex;
@@ -593,7 +605,8 @@ input[type="date"] {
 .status-text { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); }
 .status-text p { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
 .summary { color: var(--ink); }
-.summary:not(:empty)::after { content: " · "; font-weight: 400; color: var(--ink-2); }
+/* One separator, only when both parts have words. */
+.summary:not(:empty) + #status-text:not(:empty)::before { content: " · "; }
 .bottom .btn { font-size: var(--t-meta); }
 #scan-progress { width: 3rem; flex: none; }
 
