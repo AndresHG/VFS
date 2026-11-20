@@ -745,7 +745,10 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
       # Latency from the raw class: the formatted AvgDisksecPerRead is an integer in seconds.
       $raw = @{}
       foreach ($r in (Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) { $raw[$r.Name] = $r }
-      foreach ($d in (Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) {
+      $disks = @(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')
+      # The runner rehearsal (VFS-5) got no rows here as a standard user: say so in the log.
+      if (-not $disks.Count -and -not $script:noDisksLogged) { Log 'perf: no PhysicalDisk counter instances visible to this user'; $script:noDisksLogged = $true }
+      foreach ($d in $disks) {
         $readMs = ''; $writeMs = ''
         $r = $raw[$d.Name]; $p = $prevRaw[$d.Name]
         if ($r -and $p) {

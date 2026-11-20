@@ -137,6 +137,43 @@ jobs:
           path: out/
           retention-days: 30
 
+  windows-webview-diag: # TEMPORARY (VFS-5 investigation of the blank window); removed before merge
+    needs: build-windows
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-windows-bin
+          path: ${{ runner.temp }}/bin
+      - run: python -m pip install --disable-pip-version-check $env:PY_PACKAGES.Split(' ')
+      - run: |
+          (New-Object -ComObject Shell.Application).MinimizeAll()
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\release\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/install | Select-Object -Last 1
+          $variants = [ordered]@{ plain = ''; log = '--enable-logging --v=1'; nogpu = '--disable-gpu --enable-logging --v=1'; nosandbox = '--no-sandbox --enable-logging --v=1' }
+          foreach ($k in $variants.Keys) {
+            Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'app.vfs.desktop') -ErrorAction SilentlyContinue
+            python scripts/e2e/webview_diag.py $exe out/diag $k $variants[$k]
+            Copy-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'app.vfs.desktop\EBWebView') "out/diag/EBWebView-$k" -ErrorAction SilentlyContinue
+          }
+          Get-ChildItem -Recurse out/diag -Filter '*.log' | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 300
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-diag-${{ matrix.os }}
+          path: out/
+          retention-days: 5
+
   windows-slow-disk:
     needs: build-windows
     if: github.event_name == 'push' || inputs.measurements || github.event.schedule == '30 3 * * 0'
@@ -168,7 +205,7 @@ jobs:
           retention-days: 30
 
   windows-probe:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e-all]')) || inputs.measurements || github.event.schedule == '30 3 * * 0'
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e-probe]')) || inputs.measurements || github.event.schedule == '30 3 * * 0'
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:

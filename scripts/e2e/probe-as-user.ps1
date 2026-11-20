@@ -58,9 +58,11 @@ $info = Get-ScheduledTaskInfo -TaskName 'vfs-probe'
 Write-Host ("standard-user probe finished in {0:N0} s, LastTaskResult 0x{1:X}" -f $t.Elapsed.TotalSeconds, $info.LastTaskResult)
 Copy-Item -Recurse -Force (Join-Path $userOut '*') (Join-Path $Out 'standard-user')
 
-# Same USN calls with the administrator's token, for comparison.
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $work 'vfs-probe.ps1') `
-  -DataRoot $DataRoot -Step usn -OutDir (Join-Path $Out 'administrator')
+# The USN calls and the counter sampling with the administrator's token, for comparison.
+foreach ($step in @('usn', 'perf')) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $work 'vfs-probe.ps1') `
+    -DataRoot $DataRoot -Step $step -Minutes 1 -OutDir (Join-Path $Out 'administrator')
+}
 
 Unregister-ScheduledTask -TaskName 'vfs-probe' -Confirm:$false
 net user $user /delete | Out-Null
