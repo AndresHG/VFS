@@ -373,10 +373,11 @@ pub mod ingest {
     ) -> Result<i64> {
         let path_key = fold_key(rel_path);
         let name_key = fold_key(name);
-        tx.execute(
+        tx.prepare_cached(
             "INSERT INTO dirs(root_id, parent_id, rel_path, path_key, name_key, mtime, scan_state) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
+        )?
+        .execute(params![
                 root_id,
                 parent_id,
                 rel_path,
@@ -384,13 +385,10 @@ pub mod ingest {
                 name_key,
                 mtime,
                 ScanState::PendingDeep as i64
-            ],
-        )?;
+            ])?;
         let id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)",
-            params![id, path_key, name_key],
-        )?;
+        tx.prepare_cached("INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)")?
+            .execute(params![id, path_key, name_key])?;
         Ok(id)
     }
 
@@ -409,19 +407,18 @@ pub mod ingest {
 
     /// Updates the stored modification time of a directory (shown on folder hits).
     pub fn set_dir_mtime(tx: &Transaction, dir_id: i64, mtime: i64) -> Result<()> {
-        tx.execute(
-            "UPDATE dirs SET mtime = ?2 WHERE id = ?1",
-            params![dir_id, mtime],
-        )?;
+        tx.prepare_cached("UPDATE dirs SET mtime = ?2 WHERE id = ?1")?
+            .execute(params![dir_id, mtime])?;
         Ok(())
     }
 
     /// Inserts a file and its `files_fts` row; computes `name_key` and `kind`.
     pub fn insert_file(tx: &Transaction, dir_id: i64, file: &NewFile) -> Result<i64> {
         let name_key = fold_key(file.name);
-        tx.execute(
+        tx.prepare_cached(
             "INSERT INTO files(dir_id, name, name_key, kind, size, mtime, flags) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
+        )?
+        .execute(params![
                 dir_id,
                 file.name,
                 name_key,
@@ -429,28 +426,25 @@ pub mod ingest {
                 file.size as i64,
                 file.mtime,
                 i64::from(file.lossy),
-            ],
-        )?;
+            ])?;
         let id = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO files_fts(rowid, name_key) VALUES (?1, ?2)",
-            params![id, name_key],
-        )?;
+        tx.prepare_cached("INSERT INTO files_fts(rowid, name_key) VALUES (?1, ?2)")?
+            .execute(params![id, name_key])?;
         Ok(id)
     }
 
     pub fn update_file(tx: &Transaction, file_id: i64, size: u64, mtime: i64) -> Result<()> {
-        tx.execute(
-            "UPDATE files SET size = ?2, mtime = ?3 WHERE id = ?1",
-            params![file_id, size as i64, mtime],
-        )?;
+        tx.prepare_cached("UPDATE files SET size = ?2, mtime = ?3 WHERE id = ?1")?
+            .execute(params![file_id, size as i64, mtime])?;
         Ok(())
     }
 
     /// Deletes a file and its `files_fts` row.
     pub fn delete_file(tx: &Transaction, file_id: i64) -> Result<()> {
-        tx.execute("DELETE FROM files_fts WHERE rowid = ?1", [file_id])?;
-        tx.execute("DELETE FROM files WHERE id = ?1", [file_id])?;
+        tx.prepare_cached("DELETE FROM files_fts WHERE rowid = ?1")?
+            .execute([file_id])?;
+        tx.prepare_cached("DELETE FROM files WHERE id = ?1")?
+            .execute([file_id])?;
         Ok(())
     }
 
@@ -496,10 +490,8 @@ pub mod ingest {
     }
 
     pub fn set_dir_state(tx: &Transaction, dir_id: i64, state: ScanState) -> Result<()> {
-        tx.execute(
-            "UPDATE dirs SET scan_state = ?2 WHERE id = ?1",
-            params![dir_id, state as i64],
-        )?;
+        tx.prepare_cached("UPDATE dirs SET scan_state = ?2 WHERE id = ?1")?
+            .execute(params![dir_id, state as i64])?;
         Ok(())
     }
 
