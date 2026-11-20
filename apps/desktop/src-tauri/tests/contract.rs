@@ -143,10 +143,10 @@ fn all_sources() -> Vec<Source> {
 
 fn all_sort_orders() -> Vec<SortOrder> {
     use SortOrder::*;
-    let all = vec![Relevance, Newest, Source];
+    let all = vec![Relevance, Newest, Oldest, Name, Size, Source];
     for s in &all {
         match s {
-            Relevance | Newest | Source => {}
+            Relevance | Newest | Oldest | Name | Size | Source => {}
         }
     }
     all

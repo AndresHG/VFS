@@ -379,6 +379,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 filters,
                 limit,
                 offset,
+                sort: Default::default(),
             };
             // Without a bookmark store (`vfs bookmarks on` never ran), plain file output.
             let files_only = source == sources::SourceArg::Files

@@ -312,6 +312,17 @@ export function createFakeBackend(params) {
     return out;
   }
 
+  /** VFS-12 orders, enough for looking at the screen (the core sorts before its cap). */
+  function sortFake(list, sort) {
+    const by = {
+      newest: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || b.e.modified - a.e.modified,
+      oldest: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || a.e.modified - b.e.modified,
+      name: (a, b) => (a.e.fName < b.e.fName ? -1 : a.e.fName > b.e.fName ? 1 : 0),
+      size: (a, b) => (b.e.size || 0) - (a.e.size || 0),
+    }[sort];
+    return by ? [...list].sort(by) : list;
+  }
+
   return {
     isFake: true,
     // VFS-22: `?locale=en-US` stands in for the OS locale.
@@ -354,8 +365,8 @@ export function createFakeBackend(params) {
         await sleep(900);
         return { hits: [], total: 0, truncated: true, truncatedBy: TruncatedBy.DEADLINE, elapsedMs: 1000 };
       }
-      const key = JSON.stringify([text, f, generation]);
-      if (!cache || cache.key !== key) cache = { key, list: groupCopies(rank(text, f)) };
+      const key = JSON.stringify([text, f, generation, q.sort]);
+      if (!cache || cache.key !== key) cache = { key, list: groupCopies(sortFake(rank(text, f), q.sort)) };
       const list = cache.list;
       const capped = list.length > 2000;
       const total = Math.min(list.length, 2000);
@@ -410,7 +421,7 @@ export function createFakeBackend(params) {
         await sleep(30);
         return { hits: found.slice(offset, offset + limit), total: found.length, truncated: false, truncatedBy: null, elapsedMs: 1 };
       }
-      const r = await this.search({ ...q, offset: Math.max(0, offset - found.length) });
+      const r = await this.search({ ...q, sort: options.sort, offset: Math.max(0, offset - found.length) });
       const fileHits = r.hits.map((h) => ({ ...h, source: Source.FILES }));
       // Bookmarks first, then files: enough for looking at the screen.
       const head = offset < found.length ? found.slice(offset) : [];

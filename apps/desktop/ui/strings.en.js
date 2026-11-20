@@ -53,9 +53,11 @@ export const en = {
     [SourceChoice.BOOKMARKS]: 'Bookmarks',
   },
   fSort: 'Order',
+  // Option order is display order (VFS-12).
   sortOptions: {
     [SortOrder.RELEVANCE]: 'Best match first', [SortOrder.NEWEST]: 'Most recent first',
-    [SortOrder.SOURCE]: 'Files first, then bookmarks',
+    [SortOrder.OLDEST]: 'Oldest first', [SortOrder.NAME]: 'By name (A-Z)',
+    [SortOrder.SIZE]: 'Largest first', [SortOrder.SOURCE]: 'Files first, then bookmarks',
   },
   folderGroupBookmarks: 'Firefox bookmarks',
   folderAll: 'All folders',
@@ -65,6 +67,7 @@ export const en = {
   resultsTitle: 'Results',
   results: (n, one) => (one ? '1 result' : `${n} results`),
   resultsCapped: (n) => `More than ${n} results. Type a little more to narrow them down.`,
+  resultsApproximate: (n) => `More than ${n} results: too many to sort them all. Type a little more to narrow them down.`,
   resultsPartial: (n) => `${n} results. The search did not quite finish; some may be missing.`,
   searching: 'Searching…',
   fuzzyNote: 'No exact matches; showing similar results.',

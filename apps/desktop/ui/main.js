@@ -15,7 +15,8 @@ import {
   DateChoice, LanguageChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
 } from './choices.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sortChoices, sortFor,
+  sourcesFor,
 } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
@@ -96,6 +97,7 @@ function main(L) {
     seq: 0,
     total: 0,
     truncatedBy: null,
+    approximateOrder: false, // VFS-12: the order covers only the matches read
     pages: new Map(),
     pagesPending: new Set(),
     active: -1,
@@ -173,26 +175,29 @@ function main(L) {
   fillSelect($('f-date'), S.dateOptions);
   fillSelect($('f-size'), S.sizeOptions);
   fillSelect($('f-source'), S.sourceOptions);
-  fillSelect($('f-sort'), S.sortOptions);
   $('f-source').value = state.source;
-  $('f-sort').value = state.sort;
   $('f-source').addEventListener('change', (e) => { state.source = e.target.value; renderSources(); filtersChanged(); });
   $('f-sort').addEventListener('change', (e) => { state.sort = e.target.value; filtersChanged(); });
+  // The "Orden" options before the bookmark setting is known (VFS-12).
+  renderSources();
 
   function bookmarksOn() {
     return !!state.bookmarks?.enabled;
   }
 
-  /** "Buscar en" and "Orden" show only while bookmarks are included; the size filter does
-   *  not apply to bookmarks alone (VFS-6 R7). */
+  /** "Buscar en" shows only while bookmarks are included, and "Orden" offers "by source" only
+   *  then (VFS-12); the size filter does not apply to bookmarks alone (VFS-6 R7). */
   function renderSources() {
     const on = bookmarksOn();
     $('f-source-pill').hidden = !on;
-    $('f-sort-pill').hidden = !on;
+    state.sort = sortFor(state.sort, on);
+    const sorts = $('f-sort');
+    sorts.replaceChildren(...sortChoices(on).map((o) => new Option(S.sortOptions[o], o)));
+    sorts.value = state.sort;
     $('f-source').value = state.source;
     $('f-size').disabled = !sizeFilterApplies(state.source, on);
     $('f-source-pill').classList.toggle(ON, on && state.source !== SourceChoice.BOTH);
-    $('f-sort-pill').classList.toggle(ON, on && state.sort !== SortOrder.RELEVANCE);
+    $('f-sort-pill').classList.toggle(ON, state.sort !== SortOrder.RELEVANCE);
   }
 
   function renderFolderSelect() {
@@ -292,7 +297,7 @@ function main(L) {
     return api.searchSources(query, {
       sources: sourcesFor(state.source, bookmarksOn()),
       bookmarkFolder: bookmarkFolderOf(state.folder),
-      sort: bookmarksOn() ? state.sort : SortOrder.RELEVANCE,
+      sort: sortFor(state.sort, bookmarksOn()),
     });
   }
 
@@ -393,7 +398,7 @@ function main(L) {
           : -1;
         active = same >= 0 ? same : state.active;
       }
-      setResults(res.total, res.truncatedBy, new Map([[0, res.hits]]), active);
+      setResults(res.total, res.truncatedBy, new Map([[0, res.hits]]), active, res.approximateOrder);
     } catch (err) {
       if (seq !== state.seq) return;
       clearTimeout(loadingTimer);
@@ -403,9 +408,10 @@ function main(L) {
     }
   }
 
-  function setResults(total, truncatedBy, pages, active = 0) {
+  function setResults(total, truncatedBy, pages, active = 0, approximateOrder = false) {
     state.total = total;
     state.truncatedBy = truncatedBy;
+    state.approximateOrder = approximateOrder;
     state.pages = pages;
     state.pagesPending = new Set();
     state.active = total ? Math.min(Math.max(active, 0), total - 1) : -1;
@@ -775,7 +781,8 @@ function main(L) {
     if (state.searchState === SearchState.LOADING) { s.textContent = S.searching; return; }
     if (state.searchState !== SearchState.DONE || !state.total) { s.textContent = ''; return; }
     const n = N.count(state.total);
-    if (state.truncatedBy === TruncatedBy.CAP) s.textContent = S.resultsCapped(n);
+    if (state.approximateOrder) s.textContent = S.resultsApproximate(n);
+    else if (state.truncatedBy === TruncatedBy.CAP) s.textContent = S.resultsCapped(n);
     else if (state.truncatedBy === TruncatedBy.DEADLINE) s.textContent = S.resultsPartial(n);
     else s.textContent = S.results(n, state.total === 1);
     fuzzy.hidden = hitAt(0)?.matched !== MatchKind.FUZZY;
@@ -1154,8 +1161,6 @@ function main(L) {
     state.bookmarks = status;
     if (!bookmarksOn()) {
       state.source = SourceChoice.BOTH;
-      state.sort = SortOrder.RELEVANCE;
-      $('f-sort').value = state.sort;
       state.pickedBookmarkFolder = null;
       if (bookmarkFolderOf(state.folder) != null) state.folder = '';
     }

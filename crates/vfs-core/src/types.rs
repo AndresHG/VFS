@@ -64,6 +64,24 @@ fn default_limit() -> u32 {
     100
 }
 
+/// Order of a search's results (VFS-12). Every order other than `Relevance` applies to all
+/// matches read, before the list is cut to the hit cap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    /// The ranking tiers (VFS-1 AC-10); a filter-only query lists newest first.
+    #[default]
+    Relevance,
+    /// Newest modification first; an unknown date (0) last.
+    Newest,
+    /// Oldest modification first; an unknown date (0) last.
+    Oldest,
+    /// Folded name, A to Z.
+    Name,
+    /// Largest first; folders (size 0) last.
+    Size,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchQuery {
@@ -75,6 +93,9 @@ pub struct SearchQuery {
     pub limit: u32,
     #[serde(default)]
     pub offset: u32,
+    /// Default `Relevance` (VFS-12).
+    #[serde(default)]
+    pub sort: SortOrder,
 }
 
 /// Why a hit matched. Document content search (VFS-1 AC-15) adds its own variant.
@@ -191,6 +212,9 @@ pub struct SearchResponse {
     /// `null`, `"cap"` or `"deadline"`.
     pub truncated_by: Option<TruncatedBy>,
     pub elapsed_ms: u32,
+    /// The order (anything but relevance, or a filter-only query's newest first) covers only
+    /// the matches read before a cap or the deadline cut the search (VFS-12 AC-3).
+    pub approximate_order: bool,
 }
 
 /// Default wall-clock budget of a search; filtered scans and the split-term typo pass stop
@@ -376,6 +400,7 @@ mod tests {
             truncated: true,
             truncated_by: Some(TruncatedBy::Deadline),
             elapsed_ms: 2,
+            approximate_order: false,
         };
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
@@ -383,7 +408,8 @@ mod tests {
                 "hits": [{ "id": 7, "name": "Notaría.pdf", "dir": "/a/b", "kind": "document",
                            "size": 3, "modified": 4, "matched": "fuzzy", "isDir": false,
                            "copies": [{ "id": 9, "dir": "/c", "modified": 5 }] }],
-                "total": 1, "truncated": true, "truncatedBy": "deadline", "elapsedMs": 2
+                "total": 1, "truncated": true, "truncatedBy": "deadline", "elapsedMs": 2,
+                "approximateOrder": false
             })
         );
     }

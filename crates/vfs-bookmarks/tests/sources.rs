@@ -87,6 +87,7 @@ fn q(text: &str) -> SearchQuery {
         filters: SearchFilters::default(),
         limit: 100,
         offset: 0,
+        sort: Default::default(),
     }
 }
 
@@ -372,4 +373,62 @@ fn ac14_sort_orders() {
     let default = search_sources(&w.vfs, Some(&w.bm), &q("receta"), &only(&[])).unwrap();
     assert_eq!(names(&relevance.hits), names(&default.hits));
     assert_eq!(newest.total, relevance.total);
+}
+
+/// VFS-12 AC-5: with bookmarks, oldest first merges both sources by date (bookmark dates
+/// saved), name sorts by file name and bookmark title, size puts every file before the
+/// bookmarks, and each order pages like the others.
+#[test]
+fn vfs12_ac5_date_name_and_size_orders_with_bookmarks() {
+    let w = world();
+    let opts = |sort| SourceOptions {
+        sort,
+        ..Default::default()
+    };
+    let date = |h: &SourceHit| match h {
+        SourceHit::Files(f) => f.modified,
+        SourceHit::Bookmarks(b) => b.added,
+    };
+    let oldest =
+        search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(SortOrder::Oldest)).unwrap();
+    let dated: Vec<i64> = oldest.hits.iter().map(date).filter(|d| *d != 0).collect();
+    assert!(dated.windows(2).all(|d| d[0] <= d[1]), "{dated:?}");
+    let first_undated = oldest.hits.iter().position(|h| date(h) == 0);
+    if let Some(i) = first_undated {
+        assert!(
+            oldest.hits[i..].iter().all(|h| date(h) == 0),
+            "unknown dates last"
+        );
+    }
+
+    let by_name =
+        search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(SortOrder::Name)).unwrap();
+    let keys: Vec<String> = by_name
+        .hits
+        .iter()
+        .map(|h| match h {
+            SourceHit::Files(f) => vfs_core::fold_key(&f.name),
+            SourceHit::Bookmarks(b) => vfs_core::fold_key(&b.title),
+        })
+        .collect();
+    assert!(keys.windows(2).all(|k| k[0] <= k[1]), "{keys:?}");
+    assert!(by_name.hits.iter().any(|h| h.source() == Source::Files));
+    assert!(by_name.hits.iter().any(|h| h.source() == Source::Bookmarks));
+
+    let by_size =
+        search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(SortOrder::Size)).unwrap();
+    let kinds: Vec<Source> = by_size.hits.iter().map(SourceHit::source).collect();
+    let first_mark = kinds.iter().position(|s| *s == Source::Bookmarks).unwrap();
+    assert!(first_mark > 0);
+    assert!(kinds[first_mark..].iter().all(|s| *s == Source::Bookmarks));
+
+    for sort in [SortOrder::Oldest, SortOrder::Name, SortOrder::Size] {
+        let all = search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(sort)).unwrap();
+        let mut page = q("receta");
+        page.limit = 5;
+        page.offset = 5;
+        let second = search_sources(&w.vfs, Some(&w.bm), &page, &opts(sort)).unwrap();
+        assert_eq!(names(&second.hits), names(&all.hits[5..10]), "{sort:?}");
+        assert_eq!(all.total, oldest.total);
+    }
 }
