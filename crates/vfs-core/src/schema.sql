@@ -49,7 +49,7 @@ CREATE TABLE files(
   size          INTEGER NOT NULL,
   mtime         INTEGER NOT NULL,     -- unix seconds
   flags         INTEGER NOT NULL DEFAULT 0,  -- bit 0: name was not valid Unicode (stored lossily)
-  content_state INTEGER NOT NULL DEFAULT 0,  -- phase 2 (content::ContentState); always 0 in v1
+  content_state INTEGER NOT NULL DEFAULT 0,  -- content search (content::ContentState); always 0 in v1
   UNIQUE(dir_id, name)
 );
 

@@ -77,7 +77,7 @@ pub struct SearchQuery {
     pub offset: u32,
 }
 
-/// Why a hit matched. Phase-2 content search (VFS-1 AC-15) adds its own variant.
+/// Why a hit matched. Document content search (VFS-1 AC-15) adds its own variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchKind {

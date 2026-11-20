@@ -9,7 +9,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::error::{Error, Result};
 
-/// `PRAGMA user_version` written by this build. Later versions (such as phase-2 content
+/// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
 pub const SCHEMA_VERSION: u32 = 2;
 

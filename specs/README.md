@@ -2,10 +2,13 @@
 
 A spec says what a significant change must do, agreed before we build it. It
 lives next to the code so the PR shows it, Claude reads it without any tool,
-and tests can cite its acceptance criteria. VFS has no ticket system: the
-spec folder and the PR body are the durable record. (Calligence kept specs in
-the gitignored OMC state folder, which is deleted with its worktree, and lost
-specs that committed code still referenced.)
+and tests can cite its acceptance criteria. Work items are GitHub Issues in
+`AndresHG/VFS`, grouped in one milestone per phase (Fase 0 Cimientos, Fase 1
+Búsqueda por nombre y ruta, Fase 2 Validación en el PC real, Fase 3 Contenido
+de documentos, Fase 4 Pulido y distribución); an issue tracks the work, while
+the spec folder and the PR body are the durable record of what a change must
+do. (Calligence kept specs in a gitignored state folder, which is deleted with
+its worktree, and lost specs that committed code still referenced.)
 
 ## When a spec lives here
 

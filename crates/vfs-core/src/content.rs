@@ -1,4 +1,4 @@
-//! Phase-2 extension point for document content search (VFS-1 AC-15). No implementation
+//! Extension point for document content search (VFS-1 AC-15; milestone Fase 3). No implementation
 //! and no caller in v1.
 
 use std::path::Path;
@@ -22,7 +22,7 @@ pub struct ExtractedText {
     pub body: String,
 }
 
-/// Extracts the text of a document; implemented in phase 2 by an isolated worker.
+/// Extracts the text of a document; to be implemented by an isolated worker (Fase 3).
 pub trait ContentExtractor: Send + Sync {
     fn supports(&self, extension: &str) -> bool;
     fn extract(&self, path: &Path) -> Result<ExtractedText>;

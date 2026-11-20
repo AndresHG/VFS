@@ -51,8 +51,9 @@ Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/
   - **M** (one subsystem, one PR): short `specs/vfs-<n>-<slug>/spec.md`.
   - **L** (index schema, platform-specific path, installer, multi-PR): full spec from
     `.claude/skills/spec/template.md`. When unsure, pick the larger size.
-- No ticket system: ids are `VFS-<n>`, the next free number in `specs/`. The spec and the PR
-  body are the durable record. See `specs/README.md`.
+- Work is tracked in GitHub Issues, one milestone per phase (Fase 0–4), in `AndresHG/VFS`.
+  Spec ids are `VFS-<n>`, the next free number in `specs/`; the spec and the PR body are the
+  durable record of what a change must do. See `specs/README.md`.
 - Then list the affected components, the tests needed (new + existing) and the approach. Only
   then write code.
 
