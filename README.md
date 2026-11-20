@@ -1,4 +1,16 @@
-# VFS
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/vfs-logo-dark.svg">
+    <img src="docs/brand/vfs-logo.svg" alt="VFS logo: a folder holding a small graph" height="72">
+  </picture>
+</p>
+
+<p align="center">
+  <b>Find any file in a huge personal archive, by name or folder, as you type.</b><br>
+  Offline desktop app for Windows and macOS · designed for 5 million files · Spanish interface
+</p>
+
+# VFS: offline file search for huge personal archives
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS, fully offline, with a Spanish interface.
@@ -74,7 +86,7 @@ in [`docs/vision.md`](docs/vision.md).
 | `apps/desktop/ui` | The Spanish screen: static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
 | `specs/` | Specs with acceptance criteria (`VFS-<n>`); tests cite them. |
-| `docs/` | [Vision](docs/vision.md), [architecture](docs/architecture.md), [decisions](docs/decisions.md), [content-search design](docs/content-search-design.md). |
+| `docs/` | [Vision](docs/vision.md), [brand assets](docs/brand/README.md), [architecture](docs/architecture.md), [decisions](docs/decisions.md), [content-search design](docs/content-search-design.md). |
 
 ## Build, test and run
 
@@ -238,6 +250,48 @@ Work is tracked as GitHub issues grouped in milestones:
 | [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the reference machine; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
 | [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4) | Text extraction from Word/PDF and Spanish full-text search. |
 | [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Updates, code signing, optional OCR and embeddings. |
+
+## FAQ
+
+**What is VFS?**
+An offline desktop app for Windows 10+ and macOS that finds any file in a very large
+personal archive by its name or by the names of the folders it sits in. Results appear as you
+type, and "Mostrar en carpeta" opens Explorer or Finder with the file selected.
+
+**How many files can it handle?**
+It is designed for 5 million files (a 4–5 TB archive) and tuned to stay light on a slow
+Windows PC with a spinning disk.
+
+**Does it search inside documents?**
+Not yet. VFS finds files by name, folder, type, date and size. Searching inside Word and PDF
+files is planned for phase 3 ([design](docs/content-search-design.md)).
+
+**Does it send my data anywhere?**
+No. VFS works fully offline: no account, no cloud service, no LLM. It reads only names, sizes
+and dates, and never opens, moves or changes your files. Future AI features (answers over
+your archive, a knowledge graph) would be opt-in, through a model API you configure
+yourself; see [`docs/vision.md`](docs/vision.md).
+
+**Does it need administrator rights?**
+No. It installs per user and does not read the NTFS master file table or install a service,
+so it works the same way on Windows and macOS.
+
+**Does it find files with typos or without accents?**
+Yes. Case and accents are ignored ("notaria" finds "Notaría"), and one typo is tolerated in
+longer words when the exact search finds few results.
+
+**Can it search Firefox bookmarks?**
+Yes, optionally. Turn on "Incluir marcadores de Firefox" in the "Carpetas" panel; bookmarks
+are found by title, address, folder, tags and keyword, and Firefox is only ever read.
+
+**Can it index a NAS or external disk?**
+No, only internal disks. The app warns when a chosen folder is on a network or removable
+drive.
+
+**Where is it heading?**
+Toward a local personal knowledge base over files, bookmarks, chats and notes: find, ask
+questions with answers that cite the original files, and browse an automatically built graph
+of connections. See [`docs/vision.md`](docs/vision.md).
 
 ## Contributing
 
