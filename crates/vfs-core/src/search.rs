@@ -13,7 +13,9 @@
 //! first term, names holding every term (one `files_fts` intersection each, read up to
 //! `NAME_READ_CAP` and ranked before the cut to `MAX_HITS`), then path matches (one
 //! intersection in `file_paths_fts`, the folded relative path and name of every file), then
-//! typos (near spellings in the name, then split-term candidates). Filters are SQL
+//! typos (near spellings in the name, then split-term candidates). A query with no hit
+//! after the path tier skips the typo tiers when one probe of the path index proves that no
+//! row holds every term exactly or within one edit (S8). Filters are SQL
 //! predicates of every stage, so a filtered query never spends the cap on rows the filter
 //! drops. Terms shorter than 3 characters cannot use the trigram index (S5): they are
 //! verified in Rust, and when only short terms remain the group is a filtered scan. The
@@ -768,6 +770,20 @@ fn run_query(
             exact_group(conn, run, &ctx, g)?;
         }
     }
+    // S8: with nothing found yet, both typo tiers would run to exhaustion; one probe of the
+    // path index proves first whether any file or folder could match at all.
+    if !terms.is_empty() && !run.stopped && run.hits.is_empty() {
+        let mut possible = false;
+        for g in &groups {
+            if may_match(conn, g)? {
+                possible = true;
+                break;
+            }
+        }
+        if !possible {
+            return Ok(());
+        }
+    }
     if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
         for prefix in [true, false] {
             for g in &groups {
@@ -781,6 +797,45 @@ fn run_query(
         fuzzy_pass(conn, run, &ctx, &groups)?;
     }
     Ok(())
+}
+
+/// False only when no file or folder can be a hit of the group in any tier (S8). A hit holds
+/// in its name or path, for every term of 3 or more characters, the term itself or, within
+/// one edit, one alternative of `fuzzy::candidate_parts` (each contains the term too). One
+/// probe of those alternatives, ORed per term and ANDed across terms, in `file_paths_fts`
+/// (as trigrams) and in `dirs_fts`, ignoring filters and roots, so a row found proves
+/// nothing and none found proves there is no hit.
+fn may_match(conn: &Connection, g: &Group) -> Result<bool> {
+    let mut paths = Vec::new();
+    let mut dirs = Vec::new();
+    for t in g.terms.iter().filter(|t| t.chars().count() >= 3) {
+        let alts = if is_long_for_fuzzy(t) {
+            fuzzy::candidate_parts(t)
+        } else {
+            vec![vec![t.clone()]]
+        };
+        let any = |each: &dyn Fn(&Vec<String>) -> String| {
+            let alts: Vec<String> = alts.iter().map(|a| format!("({})", each(a))).collect();
+            format!("({})", alts.join(" OR "))
+        };
+        paths.push(any(&|a| all_trigrams(a)));
+        dirs.push(any(&|a| {
+            a.iter()
+                .map(|p| phrase(p))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        }));
+    }
+    if paths.is_empty() {
+        return Ok(true);
+    }
+    for (table, expr) in [("file_paths_fts", paths), ("dirs_fts", dirs)] {
+        let sql = format!("SELECT 1 FROM {table} WHERE {table} MATCH ?1 LIMIT 1");
+        if conn.prepare_cached(&sql)?.exists([expr.join(" AND ")])? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Files and folders whose own name holds every term of 3 or more characters, as one FTS
@@ -955,15 +1010,20 @@ fn with_params(first: Option<Value>, clause: &Clause) -> Vec<Value> {
         .collect()
 }
 
-/// FTS5 expression for `file_paths_fts` (detail=none, so no phrases): every trigram of
-/// every term, ANDed. A superset of the files whose folded path and name contain every
-/// term; candidates are verified.
+/// FTS5 expression for `file_paths_fts` (detail=none, so no phrases): for every term, the
+/// trigrams that cover it without overlap plus its last one, ANDed. A superset of the files
+/// whose folded path and name contain every term; candidates are verified. The overlapping
+/// trigrams would add few constraints and read a doclist each: on the 2 M-file index the
+/// covering set halves the time of an intersection for a few percent more candidates.
 fn all_trigrams<S: AsRef<str>>(terms: &[S]) -> String {
     let mut grams: Vec<String> = Vec::new();
     for t in terms {
         let c: Vec<char> = t.as_ref().chars().collect();
-        for w in c.windows(3) {
-            let g = phrase(&w.iter().collect::<String>());
+        let Some(last) = c.len().checked_sub(3) else {
+            continue;
+        };
+        for i in (0..=last).step_by(3).chain([last]) {
+            let g = phrase(&c[i..i + 3].iter().collect::<String>());
             if !grams.contains(&g) {
                 grams.push(g);
             }
@@ -1251,6 +1311,82 @@ mod tests {
         let r = search(&mut conn, &mut state, &config, &q).unwrap();
         assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
         assert_eq!(r.total as usize, MAX_HITS);
+    }
+
+    /// VFS-1 AC-9, AC-10 (S8): the no-hit probe says "impossible" only when no file or
+    /// folder holds every term exactly or within one edit, in its name or its path.
+    #[test]
+    fn no_hit_probe_never_rules_out_a_possible_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut w = db::open_rw(&path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sub = ingest::insert_dir(&tx, root, top, "Notaría Pérez", 0).unwrap();
+        let file = ingest::NewFile {
+            name: "escritura 2019.pdf",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        ingest::insert_file(&tx, sub, &file).unwrap();
+        ingest::insert_dir(&tx, root, top, "Viaje Cádiz", 0).unwrap();
+        tx.commit().unwrap();
+        drop(w);
+
+        let conn = db::open_ro(&path).unwrap();
+        let possible = |q: &str| {
+            let g = Group {
+                terms: q.split(' ').map(str::to_string).collect(),
+                root_ids: vec![root],
+            };
+            may_match(&conn, &g).unwrap()
+        };
+        // Exact, split between folder and name, typos, folder only, short terms only.
+        for q in [
+            "escritura",
+            "notaria escritura",
+            "escirtura perez",
+            "notaira 2019",
+            "viaje cadiz",
+            "viaje cadizz",
+            "es 20",
+        ] {
+            assert!(possible(q), "{q}");
+        }
+        // Terms under 6 characters (`cadzi`) get no typo tolerance.
+        for q in [
+            "xilofono marciano",
+            "escritura cadiz",
+            "zzqxj",
+            "notaria marciano",
+            "cadzi",
+        ] {
+            assert!(!possible(q), "{q}");
+        }
+    }
+
+    /// VFS-1 AC-9: the path-index expression covers every character of every term, so a row
+    /// holding all the terms always matches it.
+    #[test]
+    fn covering_trigrams_cover_every_character() {
+        for t in ["abc", "abcd", "notaria", "gestoria/ano", "ñandúes"] {
+            let expr = all_trigrams(&[t]);
+            let chars: Vec<char> = t.chars().collect();
+            let mut covered = vec![false; chars.len()];
+            for g in expr.split(" AND ") {
+                let g: Vec<char> = g.trim_matches('"').chars().collect();
+                let at = chars.windows(3).position(|w| w == g.as_slice()).unwrap();
+                covered[at..at + 3].iter_mut().for_each(|c| *c = true);
+            }
+            assert!(covered.iter().all(|&c| c), "{t}: {expr}");
+        }
+        assert!(all_trigrams(&["ab"]).is_empty());
     }
 
     /// VFS-1 AC-9: directory-driven generation reads only the directories the FTS match

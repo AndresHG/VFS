@@ -194,6 +194,10 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   newest first; the folder filter is a directory range in SQL.
 - S7. The last ranked list is cached by (query, filters, index version), so pages are
   consistent.
+- S8. A query with no hit after the path tier first probes `file_paths_fts` and `dirs_fts`
+  once for rows holding, for every term, the term or one of its one-edit alternatives (S4);
+  when none exists the typo tiers are skipped. The path-index intersection uses the
+  trigrams that cover each term without overlap, not all of them.
 - I1. A watcher event never downgrades a directory pending a deep re-list.
 - I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
   requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its

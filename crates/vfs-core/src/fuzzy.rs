@@ -7,36 +7,53 @@ pub(crate) const FUZZY_MIN_LEN: usize = 6;
 const MIN_PART: usize = 3;
 
 /// FTS5 `MATCH` expressions whose union contains every string within one insertion,
-/// deletion, substitution or transposition of the folded `term`: for each edit position i,
-/// `"t[..i]" AND "t[i+1..]"` (plus `t[i+2..]` for transpositions), parts shorter than 3
-/// characters dropped. Empty when `term` is shorter than [`FUZZY_MIN_LEN`].
+/// deletion, substitution or transposition of the folded `term`: [`candidate_parts`], each
+/// alternative as `"a" AND "b"`. Empty when `term` is shorter than [`FUZZY_MIN_LEN`].
 pub(crate) fn candidate_queries(term: &str) -> Vec<String> {
+    candidate_parts(term)
+        .iter()
+        .map(|parts| {
+            parts
+                .iter()
+                .map(|p| phrase(&p.chars().collect::<Vec<_>>()))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        })
+        .collect()
+}
+
+/// Alternatives of substrings, at least one of which a string within one edit of the
+/// folded `term` contains in full: for each edit position i, `t[..i]` and `t[i+1..]` (plus
+/// `t[i+2..]` for transpositions), parts shorter than 3 characters dropped. Empty when
+/// `term` is shorter than [`FUZZY_MIN_LEN`].
+pub(crate) fn candidate_parts(term: &str) -> Vec<Vec<String>> {
     let t: Vec<char> = term.chars().collect();
     let n = t.len();
     if n < FUZZY_MIN_LEN {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    let mut push = |q: String| {
-        if !out.contains(&q) {
-            out.push(q);
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut push = |parts: Vec<String>| {
+        if !out.contains(&parts) {
+            out.push(parts);
         }
     };
     // Substitution or deletion of t[i], or insertion before t[i] (the haystack then holds
     // t[i..], which contains t[i+1..]). One part is always >= 3 chars since n - 1 >= 5.
     for i in 0..n {
-        push(join_parts(&[&t[..i], &t[i + 1..]]).expect("one part has >= 3 chars"));
+        push(long_parts(&[&t[..i], &t[i + 1..]]));
     }
     // Transposition of t[i] and t[i+1].
     for i in 0..n - 1 {
-        let q = join_parts(&[&t[..i], &t[i + 2..]]).unwrap_or_else(|| {
+        let mut parts = long_parts(&[&t[..i], &t[i + 2..]]);
+        if parts.is_empty() {
             // Both sides under 3 chars (a 6-char term swapped in the middle): the haystack
             // contains the transposed term itself, so match that exactly.
             let mut swapped = t.clone();
             swapped.swap(i, i + 1);
-            phrase(&swapped)
-        });
-        push(q);
+            parts.push(swapped.into_iter().collect());
+        }
+        push(parts);
     }
     out
 }
@@ -77,14 +94,13 @@ pub(crate) fn starts_within_one(name: &str, term: &str) -> bool {
     contains_within_one(&window, term)
 }
 
-/// `"a" AND "b"` over the parts of at least [`MIN_PART`] chars; `None` when none is left.
-fn join_parts(parts: &[&[char]]) -> Option<String> {
-    let kept: Vec<String> = parts
+/// The parts of at least [`MIN_PART`] chars.
+fn long_parts(parts: &[&[char]]) -> Vec<String> {
+    parts
         .iter()
         .filter(|p| p.len() >= MIN_PART)
-        .map(|p| phrase(p))
-        .collect();
-    (!kept.is_empty()).then(|| kept.join(" AND "))
+        .map(|p| p.iter().collect())
+        .collect()
 }
 
 /// An FTS5 phrase string: the text in double quotes with `"` doubled.
