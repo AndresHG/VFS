@@ -27,7 +27,9 @@ Verdicts:
   - `gh pr create` without a pr-critic `pass`/`waived` verdict for
     HEAD (scripts/pr_critic_verdict.py)                              -> "deny"
 
-Before matching, the command is: split on shell operators outside quotes,
+Before matching, the command is: stripped of heredoc bodies (data, unless
+the opening line feeds the body to a shell, which is then analyzed as
+commands), split on shell operators outside quotes,
 expanded through `$(…)`/backtick substitutions, stripped of wrappers
 (`bash -c`, `eval`, `command`, `env`, `timeout`, `xargs`, `sudo -u x`,
 absolute paths, shell keywords like `if`/`then`/`do`) and tracked through
@@ -439,6 +441,88 @@ def _cd_target(tokens, cwd):
     return target if os.path.isabs(target) else os.path.normpath(os.path.join(cwd or ".", target))
 
 
+def _heredoc_delimiters(line, quote):
+    """Scan one line -> ([(strip_tabs, word)], quote state at end of line).
+
+    Only `<<` outside quotes opens a heredoc; `<<<` is a here-string.
+    """
+    delims, i, n = [], 0, len(line)
+    while i < n:
+        c = line[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+        elif c == "\\":
+            i += 2
+            continue
+        elif line.startswith("<<<", i):
+            i += 3
+            continue
+        elif line.startswith("<<", i):
+            j = i + 2
+            strip_tabs = line.startswith("-", j)
+            j += strip_tabs
+            while j < n and line[j] in " \t":
+                j += 1
+            word = []
+            while j < n and line[j] not in " \t;|&<>()":
+                if line[j] in ("'", '"'):
+                    end = line.find(line[j], j + 1)
+                    end = n if end == -1 else end
+                    word.append(line[j + 1:end])
+                    j = end + 1
+                else:
+                    if line[j] != "\\":
+                        word.append(line[j])
+                    j += 1
+            if word:
+                delims.append((strip_tabs, "".join(word)))
+            i = j
+            continue
+        i += 1
+    return delims, quote
+
+
+def _feeds_shell(line):
+    """True when a heredoc's opening line runs its body (`bash <<X`, `cat <<X | sh`)."""
+    words = re.split(r"[\s|;&()]+", line)
+    return any(os.path.basename(w.strip("'\"")) in SHELLS | {"eval"} for w in words)
+
+
+def _heredocs(command):
+    """Remove heredoc bodies -> (command, bodies a shell executes).
+
+    A body is data (a commit message, a Python script) unless the opening line
+    feeds it to a shell, in which case it is analyzed as commands.
+    """
+    if "<<" not in command:
+        return command, []
+    lines, kept, shell_bodies, quote, i = command.split("\n"), [], [], None, 0
+    while i < len(lines):
+        line = lines[i]
+        kept.append(line)
+        delims, quote = _heredoc_delimiters(line, quote)
+        i += 1
+        for strip_tabs, word in delims:
+            body = []
+            while i < len(lines):
+                current = lines[i]
+                i += 1
+                if (current.lstrip("\t") if strip_tabs else current) == word:
+                    break
+                body.append(current)
+            if _feeds_shell(line):
+                shell_bodies.append("\n".join(body))
+    return "\n".join(kept), shell_bodies
+
+
 def analyze(command, cwd, depth=0):
     """Return a list of (decision, reason) for one command string."""
     if depth > MAX_DEPTH or not isinstance(command, str):
@@ -447,6 +531,9 @@ def analyze(command, cwd, depth=0):
     if len(command) > MAX_COMMAND:
         return []
     verdicts, current_cwd = [], cwd
+    command, shell_bodies = _heredocs(command)
+    for body in shell_bodies:
+        verdicts += analyze(body, cwd, depth + 1)
     for segment in _split_segments(command):
         for inner in _substitutions(segment):
             verdicts += analyze(inner, current_cwd, depth + 1)

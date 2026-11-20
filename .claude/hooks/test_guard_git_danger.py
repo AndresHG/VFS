@@ -1,4 +1,5 @@
-"""Tests for guard-git-danger.py's merge gate: no PR merges before CI is green.
+"""Tests for guard-git-danger.py: the merge gate (no PR merges before CI is green)
+and heredoc handling (bodies are data unless a shell runs them).
 
 Run: python3 -m unittest discover -s .claude/hooks -p "test_*.py"
 `gh pr checks` is stubbed, so the tests need neither gh nor the network.
@@ -98,6 +99,56 @@ class MergeGateTest(unittest.TestCase):
         cmd = run.call_args.args[0]
         self.assertEqual(cmd[3], "95")
         self.assertEqual(cmd[-2:], ["--repo", "AndresHG/VFS"])
+
+
+class HeredocTest(unittest.TestCase):
+    def decision(self, command):
+        with mock.patch.object(guard.subprocess, "run",
+                               return_value=checks("pending", "pending", 8)) as run:
+            verdicts = guard.analyze(command, "")
+        decision = ("deny" if any(d == "deny" for d, _ in verdicts)
+                    else "ask" if verdicts else None)
+        return decision, run
+
+    def test_data_heredoc_mentioning_git_commands_is_ignored(self):
+        decision, run = self.decision(
+            "python3 - <<'EOF'\n"
+            "msg = 'gh pr merge 95 --auto'\n"
+            "git push --force origin main\n"
+            "git stash\n"
+            "EOF")
+        self.assertIsNone(decision)
+        run.assert_not_called()
+
+    def test_commit_message_heredoc_in_substitution_is_ignored(self):
+        decision, _ = self.decision(
+            "git commit -m \"$(cat <<'EOF'\n"
+            "fix: don't run git stash pop or gh pr merge --auto\n"
+            "EOF\n"
+            ")\"")
+        self.assertIsNone(decision)
+
+    def test_commands_after_the_terminator_are_still_checked(self):
+        decision, _ = self.decision("cat > notes.txt <<EOF\nhello\nEOF\ngit stash")
+        self.assertEqual(decision, "deny")
+
+    def test_dash_heredoc_ends_at_tab_indented_terminator(self):
+        decision, _ = self.decision("cat <<-EOF\n\tgit stash\n\tEOF\ngit stash pop")
+        self.assertEqual(decision, "deny")
+        decision, _ = self.decision("cat <<-EOF\n\tgit stash\n\tEOF\necho done")
+        self.assertIsNone(decision)
+
+    def test_heredoc_fed_to_a_shell_is_analyzed(self):
+        decision, _ = self.decision("bash <<'EOF'\ngit push --force origin main\nEOF")
+        self.assertEqual(decision, "deny")
+
+    def test_heredoc_piped_to_a_shell_is_analyzed(self):
+        decision, _ = self.decision("cat <<EOF | sh\ngh pr merge 95 --auto\nEOF")
+        self.assertEqual(decision, "deny")
+
+    def test_quoted_double_angle_is_not_a_heredoc(self):
+        decision, _ = self.decision('echo "<<EOF"\ngit stash')
+        self.assertEqual(decision, "deny")
 
 
 if __name__ == "__main__":
