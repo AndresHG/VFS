@@ -1,0 +1,37 @@
+name: stress
+
+# Full-size robustness runs (VFS-3): hundreds of kill iterations, hostile trees at full size,
+# heavier property tests and a 30-minute soak. Too slow for every PR.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  VFS_STRESS: "1"
+  VFS_SOAK_SECS: "1800"
+
+jobs:
+  stress:
+    name: stress (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+      - name: Hostile trees and properties
+        run: cargo test --release -p vfs-core --test hostile --test props
+      - name: Crash, concurrency and soak
+        run: cargo test --release -p vfs-cli --test crash --test concurrency --test soak -- --test-threads=2

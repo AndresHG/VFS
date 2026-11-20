@@ -28,12 +28,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Add folders to the index and scan them to completion in the foreground.
+    /// Add folders to the index (unless already indexed) and scan pending folders to
+    /// completion in the foreground.
     Index {
         #[arg(long)]
         db: PathBuf,
         #[arg(required = true)]
         roots: Vec<PathBuf>,
+    },
+    /// Run the background indexer and watcher, as the app does, printing each progress
+    /// snapshot as one JSON line. Folders given are added unless already indexed. Stops
+    /// cleanly when stdin closes, or with `--until-idle` once every root is up to date.
+    Run {
+        #[arg(long)]
+        db: PathBuf,
+        roots: Vec<PathBuf>,
+        /// Exit once the indexer is idle with every root ready and nothing pending.
+        #[arg(long)]
+        until_idle: bool,
     },
     /// Search the index by name and path, with optional filters.
     Search {
@@ -194,8 +206,12 @@ fn cmd_index(db: &Path, roots: &[PathBuf]) -> AnyResult<()> {
     let vfs = Vfs::open(db)?;
     for r in roots {
         let abs = std::path::absolute(r)?;
-        let root = vfs.add_root(&abs)?;
-        println!("added root {} ({})", root.id, root.path);
+        match vfs.add_root(&abs) {
+            Ok(root) => println!("added root {} ({})", root.id, root.path),
+            // Already indexed: an interrupted run resumes its pending folders.
+            Err(vfs_core::Error::OverlappingRoot(why)) if why.starts_with("same ") => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     let t = Instant::now();
     let summary = vfs.scan_to_completion(&AtomicBool::new(false))?;
@@ -207,6 +223,79 @@ fn cmd_index(db: &Path, roots: &[PathBuf]) -> AnyResult<()> {
         summary.files_added as f64 / secs.max(1e-9),
         summary.dirs_listed as f64 / secs.max(1e-9)
     );
+    Ok(())
+}
+
+/// Writes the core's warnings and errors to stderr, so `vfs run` shows what the indexer
+/// logs (an unreadable folder, a failed transaction).
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= log::Level::Warn
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            eprintln!("vfs: {}: {}", r.level(), r.args());
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// Prints progress snapshots as JSON lines and signals when the index is up to date.
+struct LineSink {
+    until_idle: bool,
+    done: std::sync::mpsc::Sender<()>,
+}
+
+impl vfs_core::ProgressSink for LineSink {
+    fn on_progress(&self, p: &vfs_core::IndexProgress) {
+        use std::io::Write;
+        if let Ok(line) = serde_json::to_string(p) {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+        if self.until_idle && is_up_to_date(p) {
+            let _ = self.done.send(());
+        }
+    }
+}
+
+/// Idle, with at least one root, every root ready and no directory pending.
+fn is_up_to_date(p: &vfs_core::IndexProgress) -> bool {
+    p.state == vfs_core::IndexerState::Idle
+        && !p.roots.is_empty()
+        && p.roots
+            .iter()
+            .all(|r| r.status == vfs_core::RootStatus::Ready && r.dirs_pending == 0)
+}
+
+fn cmd_run(db: &Path, roots: &[PathBuf], until_idle: bool) -> AnyResult<()> {
+    if log::set_logger(&StderrLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
+    let vfs = Vfs::open(db)?;
+    for r in roots {
+        match vfs.add_root(&std::path::absolute(r)?) {
+            Ok(_) => {}
+            Err(vfs_core::Error::OverlappingRoot(why)) if why.starts_with("same ") => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    vfs.start_indexer(std::sync::Arc::new(LineSink {
+        until_idle,
+        done: done_tx.clone(),
+    }))?;
+    if !until_idle {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            let _ = done_tx.send(());
+        });
+    }
+    let _ = done_rx.recv();
+    vfs.shutdown();
     Ok(())
 }
 
@@ -246,6 +335,11 @@ fn cmd_search(vfs: &Vfs, query: &SearchQuery, json: bool) -> AnyResult<()> {
 fn run(cli: Cli) -> AnyResult<ExitCode> {
     match cli.cmd {
         Cmd::Index { db, roots } => cmd_index(&db, &roots)?,
+        Cmd::Run {
+            db,
+            roots,
+            until_idle,
+        } => cmd_run(&db, &roots, until_idle)?,
         Cmd::Search {
             db,
             query,

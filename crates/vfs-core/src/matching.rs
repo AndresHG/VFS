@@ -25,13 +25,14 @@ pub struct ParsedQuery {
 }
 
 /// Bounded input: at most `MAX_QUERY_BYTES` of text and `MAX_TERM_CHARS` per term, so no
-/// query costs more than a typed one, whatever is pasted. `\` reads as `/`.
+/// query costs more than a typed one, whatever is pasted. `\` reads as `/`, NUL as a space.
 pub fn parse_query(text: &str) -> ParsedQuery {
     let mut text_end = text.len().min(MAX_QUERY_BYTES);
     while !text.is_char_boundary(text_end) {
         text_end -= 1;
     }
-    let folded = fold_key(&text[..text_end].replace('\\', "/"));
+    // NUL cannot occur in a file name and would end an FTS5 expression early: whitespace.
+    let folded = fold_key(&text[..text_end].replace('\\', "/").replace('\0', " "));
     let folded = folded
         .split_whitespace()
         .map(|t| t.chars().take(MAX_TERM_CHARS).collect::<String>())
