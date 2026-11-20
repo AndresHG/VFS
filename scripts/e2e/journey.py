@@ -75,7 +75,8 @@ class App:
         self.proc = subprocess.Popen([self.args.app], env=env, stdout=log, stderr=log)
         self.wd = WebDriver(f"http://127.0.0.1:{self.args.port}")
         self.wd.wait_ready(90)
-        self.wd.start({})
+        # The server answers before the webview exists; WebView2's first start can be slow.
+        wait_for(lambda: self.try_session(), 180, 1.0, "the webview window")
         self.wd.set_script_timeout(120_000)
         # The page is ready when main.js has rendered the status line.
         wait_for(lambda: self.wd.js(
@@ -83,6 +84,15 @@ class App:
             " && document.querySelector('#open-folders').textContent.length > 0"),
             60, what="UI ready")
         return now() - t0
+
+    def try_session(self):
+        try:
+            self.wd.start({})
+            return True
+        except WebDriverError as e:
+            if "no such window" in str(e):
+                return False
+            raise
 
     def pids(self):
         """The app process and its descendants (WebView2 on Windows)."""
