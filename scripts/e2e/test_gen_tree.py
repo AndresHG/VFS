@@ -103,6 +103,38 @@ class ScanDoneTest(unittest.TestCase):
         self.assertFalse(scan_done({"state": STATE_IDLE, "roots": []}))
 
 
+class ExplorerMatchTest(unittest.TestCase):
+    TARGET = "C:\\e2e\\Archivo\\Escrituras\\Notaría Valdepeñas escritura 2019.pdf"
+
+    def test_selected_item_is_compared_by_full_path(self):
+        """VFS-8 AC-3: the reveal passes when Explorer selects the target, whatever its
+        display name (extension hidden) and its path's case or Unicode form."""
+        from journey import EXPECT_SELECT, explorer_match
+        nfd = unicodedata.normalize("NFD", self.TARGET.upper())
+        w = {"folder": "c:\\e2e\\archivo\\escrituras", "selected": [nfd]}
+        self.assertIs(explorer_match([w], self.TARGET, EXPECT_SELECT), w)
+
+    def test_display_name_or_other_item_does_not_match(self):
+        """VFS-8 AC-3: a window whose selection is another item, or only a display name,
+        does not count as the target selected."""
+        from journey import EXPECT_SELECT, explorer_match
+        folder = "C:\\e2e\\Archivo\\Escrituras"
+        for sel in (["Notaría Valdepeñas escritura 2019"],
+                    [folder + "\\Notaría Valdepeñas escritura 2019.txt"], []):
+            self.assertIsNone(explorer_match([{"folder": folder, "selected": sel}],
+                                             self.TARGET, EXPECT_SELECT))
+
+    def test_parent_expectation_needs_a_strict_ancestor(self):
+        """VFS-8 AC-3: for a path over 260 characters, an Explorer window on an ancestor of
+        the target's folder passes; one on the folder itself or elsewhere does not."""
+        from journey import EXPECT_PARENT, explorer_match
+        self.assertIsNotNone(explorer_match([{"folder": "C:\\e2e\\Archivo"}],
+                                            self.TARGET, EXPECT_PARENT))
+        self.assertIsNone(explorer_match([{"folder": "C:\\e2e\\Archivo\\Escrituras"},
+                                          {"folder": "D:\\otro"}],
+                                         self.TARGET, EXPECT_PARENT))
+
+
 class WebDriverTest(unittest.TestCase):
     def test_element_reference_by_prefix(self):
         """VFS-8 AC-5: element references are read by the W3C key prefix, so the embedded

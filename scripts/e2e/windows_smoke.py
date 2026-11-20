@@ -6,7 +6,9 @@ which WebDriver cannot drive (spec decision 1).
    profile); for each, record time to window and time until the page is painted (the window
    stays blank white until then), screenshot the desktop and the window, record the window
    size against the screen and the memory of the app and its WebView2 processes, close the
-   window and check that the process exits.
+   window and check that the process exits. The main window stays hidden until its page has
+   loaded, with a native splash meanwhile (issue 108): each launch also records when the
+   splash first shows and when it goes, and screenshots it.
 2. Diagnostic for decision 1: launch it again with the variable Edge WebDriver relies on
    (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=...) and record whether the
    DevTools endpoint answers.
@@ -26,6 +28,50 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from journey import App, now  # noqa: E402
 
 TITLE = "VFS — Buscador de archivos"
+# Window class of the native splash (`SPLASH_CLASS`, apps/desktop/src-tauri/src/splash.rs).
+SPLASH_CLASS = "VfsSplash"
+
+
+def watch_splash(t0, out, run, timeout):
+    """Polls for the splash window from launch (`t0`) until it has shown and gone, or the
+    main window is visible without it, or `timeout`. Screenshots the desktop and the splash
+    the first time it is seen. Times are seconds since launch."""
+    import ctypes
+    from ctypes import wintypes
+    from PIL import ImageGrab
+    user32 = ctypes.windll.user32
+    user32.FindWindowW.restype = wintypes.HWND
+
+    def visible(cls, title):
+        h = user32.FindWindowW(cls, title)
+        return h if h and user32.IsWindowVisible(h) else None
+
+    r = {"splash_seen": False, "time_to_splash_s": None, "splash_gone_s": None,
+         "time_to_main_visible_s": None}
+    while now() - t0 < timeout:
+        h = visible(SPLASH_CLASS, None)
+        main = visible(None, TITLE)
+        t = round(now() - t0, 2)
+        if main and r["time_to_main_visible_s"] is None:
+            r["time_to_main_visible_s"] = t
+        if h and not r["splash_seen"]:
+            r["splash_seen"], r["time_to_splash_s"] = True, t
+            try:
+                ImageGrab.grab().save(os.path.join(out, f"release-{run}-splash-desktop.png"))
+                rect = wintypes.RECT()
+                user32.GetWindowRect(h, ctypes.byref(rect))
+                box = (rect.left, rect.top, rect.right, rect.bottom)
+                r["splash_rect"] = list(box)
+                ImageGrab.grab(bbox=box, all_screens=True).save(
+                    os.path.join(out, f"release-{run}-splash.png"))
+            except Exception as e:
+                r["splash_screenshot_error"] = f"{type(e).__name__}: {e}"
+        if r["splash_seen"] and not h and r["splash_gone_s"] is None:
+            r["splash_gone_s"] = t
+        if main and (r["splash_gone_s"] is not None or not r["splash_seen"]):
+            break
+        time.sleep(0.05)
+    return r
 
 
 def find_window(timeout):
@@ -81,10 +127,13 @@ def main(argv=None):
         for run in ("first", "second"):
             t0 = now()
             p = launch(args.app)
-            w, secs = find_window(60)
+            splash = watch_splash(t0, args.out, run, 60)
+            w, _ = find_window(60)
+            secs = now() - t0
             paint = wait_painted(w, 120)
             r = {"time_to_window_s": round(secs, 2),
-                 "time_to_paint_s": None if paint is None else round(now() - t0, 2)}
+                 "time_to_paint_s": None if paint is None else round(now() - t0, 2),
+                 "splash": splash}
             time.sleep(3)  # let the first status arrive
             w.set_focus()
             time.sleep(1)

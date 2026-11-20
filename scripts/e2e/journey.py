@@ -16,6 +16,7 @@ steps create, rename and delete their own files.
 
 import argparse
 import json
+import ntpath
 import os
 import platform
 import shutil
@@ -655,7 +656,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $out = @()
 foreach ($w in (New-Object -ComObject Shell.Application).Windows()) {
   if ($w.FullName -notlike '*explorer.exe') { continue }
-  $sel = @(); foreach ($i in $w.Document.SelectedItems()) { $sel += $i.Name }
+  $sel = @(); foreach ($i in $w.Document.SelectedItems()) { $sel += $i.Path }
   $out += [pscustomobject]@{ folder = $w.Document.Folder.Self.Path; selected = $sel }
 }
 ConvertTo-Json -InputObject @($out) -Compress -Depth 4
@@ -679,11 +680,32 @@ def close_file_manager_windows():
         powershell(PS_CLOSE_EXPLORER)
 
 
+def win_path_key(p):
+    """A Windows path in the form two spellings of the same path share: NFC, normalised
+    separators, case-folded."""
+    return ntpath.normcase(ntpath.normpath(nfc(p))) if p else ""
+
+
+def explorer_match(windows, target_path, expect):
+    """The first `PS_EXPLORER` window that shows the target: on its folder with the target
+    selected (`expect=select`), or on one of its ancestors (`expect=parent`). Selected items
+    are compared by full path, never by display name, which drops the extension when
+    Explorer hides extensions (Windows' default)."""
+    path = win_path_key(target_path)
+    folder = ntpath.dirname(path)
+    for w in windows:
+        wf = win_path_key(w.get("folder"))
+        sel = [win_path_key(s) for s in (w.get("selected") or [])]
+        if expect == EXPECT_SELECT and wf == folder and path in sel:
+            return w
+        if expect == EXPECT_PARENT and wf and folder.startswith(wf) and wf != folder:
+            return w
+    return None
+
+
 def check_file_manager(target, expect, timeout):
-    """Windows: an Explorer window on the target's folder with the target selected
-    (`expect=select`), or on one of its ancestors (`expect=parent`). macOS: Finder's front
-    window, when AppleScript may ask Finder."""
-    folder = os.path.normcase(os.path.dirname(target["path"]))
+    """Windows: an Explorer window that shows the target (`explorer_match`). macOS: Finder's
+    front window, when AppleScript may ask Finder."""
     name = nfc(target["name"])
     if IS_WIN:
         windows = []
@@ -692,14 +714,7 @@ def check_file_manager(target, expect, timeout):
             nonlocal windows
             raw = powershell(PS_EXPLORER)
             windows = json.loads(raw) if raw else []
-            for w in windows:
-                wf = os.path.normcase(w.get("folder") or "")
-                sel = [nfc(s) for s in (w.get("selected") or [])]
-                if expect == EXPECT_SELECT and wf == folder and name in sel:
-                    return w
-                if expect == EXPECT_PARENT and wf and folder.startswith(wf) and wf != folder:
-                    return w
-            return None
+            return explorer_match(windows, target["path"], expect)
         try:
             w, secs = wait_for(look, timeout, 0.5, "Explorer window")
             return {"ok": True, "explorer": w, "explorer_after_s": round(secs, 2)}
