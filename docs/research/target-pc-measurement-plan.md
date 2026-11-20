@@ -71,8 +71,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:
 ```
 
 `-ExecutionPolicy Bypass` applies to this one process only and needs no admin. The script
-prints the output folder (`%LOCALAPPDATA%\VFS-probe\<timestamp>`). Every later step writes
-there too.
+prints its output folder. Every run creates its own `%LOCALAPPDATA%\VFS-probe\<timestamp>`
+folder; step 11 collects them all.
 
 ### 2. USN journal without admin (1–5 min) → N1, N2
 
@@ -205,10 +205,11 @@ carry `app.vfs.desktop` in their `--user-data-dir`.
 ### 10. Journal growth rate (end of the visit, 1 min) → N2
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:\ -Step usn
+powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:\ -Step usn-query
 ```
 
-Compare `next_usn` and `taken_utc` with step 2's `usn-query-1.json`. (next_usn₂ − next_usn₁)
+It only queries the journal (no reads). Compare `next_usn` and `taken_utc` in its
+`usn-query-2.json` with step 2's `usn-query-1.json` (in step 2's folder). (next_usn₂ − next_usn₁)
 ÷ hours = bytes of journal per hour. `maximum_size` ÷ that rate = hours of history the
 journal holds under real churn. That is N2: if it is below the longest time the app stays
 closed (a weekend, a holiday), USN catch-up alone is not enough and the re-walk remains the

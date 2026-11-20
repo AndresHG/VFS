@@ -24,8 +24,8 @@
 param(
   # Folder whose disk holds the archive (a root the user will add to VFS), e.g. D:\ or D:\Fotos.
   [Parameter(Mandatory = $true)] [string] $DataRoot,
-  # Which step to run: info, walk, usn, semantics, flush, seek, watch, perf, all.
-  [ValidateSet('info', 'walk', 'usn', 'semantics', 'flush', 'seek', 'watch', 'perf', 'all')]
+  # Which step to run: info, walk, usn, usn-query, semantics, flush, seek, watch, perf, all.
+  [ValidateSet('info', 'walk', 'usn', 'usn-query', 'semantics', 'flush', 'seek', 'watch', 'perf', 'all')]
   [string] $Step = 'all',
   # Minutes for the watch and perf sampling steps.
   [int] $Minutes = 15,
@@ -302,13 +302,14 @@ public static class VfsProbe
     {
         var r = new Dictionary<string, object>();
         // READ_USN_JOURNAL_DATA_V1: StartUsn, ReasonMask, ReturnOnlyOnClose, Timeout,
-        // BytesToWaitFor, UsnJournalID, MinMajorVersion=2, MaxMajorVersion=3 (48 bytes).
+        // BytesToWaitFor, UsnJournalID, MinMajorVersion=2, MaxMajorVersion=2 (48 bytes).
+        // V2 only: its 64-bit file ids are what OpenFileById's FileIdType takes below.
         var inBuf = new byte[48];
         BitConverter.GetBytes(startUsn).CopyTo(inBuf, 0);
         BitConverter.GetBytes(0xFFFFFFFFu).CopyTo(inBuf, 8);
         BitConverter.GetBytes(journalId).CopyTo(inBuf, 32);
         BitConverter.GetBytes((ushort)2).CopyTo(inBuf, 40);
-        BitConverter.GetBytes((ushort)3).CopyTo(inBuf, 42);
+        BitConverter.GetBytes((ushort)2).CopyTo(inBuf, 42);
         var o = new byte[64 * 1024];
         long records = 0, named = 0, firstTs = 0, lastTs = 0;
         int resolved = 0, resolveFailed = 0, resolveTried = 0; double resolveMs = 0;
@@ -760,8 +761,9 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
   }
 }
 
-if ($all -or $Step -eq 'usn') {
-  Try-Step 'usn-rate' { Save 'usn-query-2' ([VfsProbe]::UsnQueryOnly($DataRoot)) }
+if ($all -or $Step -eq 'usn-query') {
+  # End-of-visit query only (no reads): compare with usn-query-1.json for bytes per hour.
+  Try-Step 'usn-query' { Save 'usn-query-2' ([VfsProbe]::UsnQueryOnly($DataRoot)) }
 }
 
 # Delete only the folder this run created.
