@@ -46,6 +46,9 @@ enum Cmd {
         /// Exit once the indexer is idle with every root ready and nothing pending.
         #[arg(long)]
         until_idle: bool,
+        /// Start the catch-up walk at once, even within ten minutes of booting.
+        #[arg(long)]
+        no_boot_grace: bool,
     },
     /// Search the index by name and path, with optional filters.
     Search {
@@ -271,7 +274,7 @@ fn is_up_to_date(p: &vfs_core::IndexProgress) -> bool {
             .all(|r| r.status == vfs_core::RootStatus::Ready && r.dirs_pending == 0)
 }
 
-fn cmd_run(db: &Path, roots: &[PathBuf], until_idle: bool) -> AnyResult<()> {
+fn cmd_run(db: &Path, roots: &[PathBuf], until_idle: bool, no_boot_grace: bool) -> AnyResult<()> {
     if log::set_logger(&StderrLog).is_ok() {
         log::set_max_level(log::LevelFilter::Warn);
     }
@@ -284,10 +287,17 @@ fn cmd_run(db: &Path, roots: &[PathBuf], until_idle: bool) -> AnyResult<()> {
         }
     }
     let (done_tx, done_rx) = std::sync::mpsc::channel();
-    vfs.start_indexer(std::sync::Arc::new(LineSink {
-        until_idle,
-        done: done_tx.clone(),
-    }))?;
+    let mut options = vfs_core::IndexerOptions::default();
+    if no_boot_grace {
+        options.boot_grace = std::time::Duration::ZERO;
+    }
+    vfs.start_indexer_with(
+        std::sync::Arc::new(LineSink {
+            until_idle,
+            done: done_tx.clone(),
+        }),
+        options,
+    )?;
     if !until_idle {
         std::thread::spawn(move || {
             let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
@@ -339,7 +349,8 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             db,
             roots,
             until_idle,
-        } => cmd_run(&db, &roots, until_idle)?,
+            no_boot_grace,
+        } => cmd_run(&db, &roots, until_idle, no_boot_grace)?,
         Cmd::Search {
             db,
             query,

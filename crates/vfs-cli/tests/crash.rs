@@ -71,13 +71,15 @@ impl Cmd {
     }
 }
 
+/// Arguments of `cmd` on the index `db` and the folder `tree`. `run` starts its catch-up at
+/// once: a freshly booted CI runner is within the boot grace (VFS-5).
 fn args<'a>(cmd: Cmd, db: &'a Path, tree: &'a Path) -> Vec<&'a OsStr> {
-    vec![
-        OsStr::new(cmd.arg()),
-        OsStr::new("--db"),
-        db.as_os_str(),
-        tree.as_os_str(),
-    ]
+    let mut v = vec![OsStr::new(cmd.arg())];
+    if let Cmd::Run = cmd {
+        v.push(OsStr::new("--no-boot-grace"));
+    }
+    v.extend([OsStr::new("--db"), db.as_os_str(), tree.as_os_str()]);
+    v
 }
 
 /// The full recovery contract after any interruption: the index opens (recovering if it
@@ -96,6 +98,32 @@ fn check_and_converge(s: &Setup, context: &str) {
     run_until_idle(&s.db, &[&s.tree], CONVERGE);
     check_structure(&s.db, 500, &format!("{context}, after convergence"));
     assert_nothing_pending(&s.db, context);
+    assert_matches_disk(&raw_conn(&s.db), &root, &s.tree, context);
+}
+
+/// The contract after damage SQLite cannot detect: the index opens and passes SQLite's own
+/// check, a search for every query of the generators answers without error, and one more
+/// run brings the folders and files to exactly the disk with nothing pending.
+fn converge_searchable(s: &Setup, context: &str) {
+    let verdict: String = raw_conn(&s.db)
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(verdict, "ok", "{context}: integrity_check");
+    run_until_idle(&s.db, &[&s.tree], CONVERGE);
+    let vfs = vfs_core::Vfs::open(&s.db).unwrap();
+    for text in ["factura", "notaria", "cadiz 1", "fcatura", "x"] {
+        let q = vfs_core::SearchQuery {
+            text: text.to_string(),
+            filters: Default::default(),
+            limit: 50,
+            offset: 0,
+        };
+        vfs.search(&q)
+            .unwrap_or_else(|e| panic!("{context}: search {text:?}: {e}"));
+    }
+    drop(vfs);
+    assert_nothing_pending(&s.db, context);
+    let root = stored_root(&s.tree);
     assert_matches_disk(&raw_conn(&s.db), &root, &s.tree, context);
 }
 
@@ -351,7 +379,9 @@ fn kill_during_migration() {
 }
 
 /// One random torn write or corruption of the database, its WAL or the session marker.
-fn tear(db: &Path, rng: &mut Rng) -> String {
+/// Returns its description and whether it overwrote database bytes with junk: SQLite keeps
+/// no checksum on database pages, so such junk can pass every check undetected (#103).
+fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
     let mut wal = db.as_os_str().to_owned();
     wal.push("-wal");
     let mut session = db.as_os_str().to_owned();
@@ -390,7 +420,11 @@ fn tear(db: &Path, rng: &mut Rng) -> String {
             "zeroed page"
         }
     };
-    format!("{what} {} at {offset} of {len}", target.display())
+    let undetectable = what == "overwritten" && target == db;
+    (
+        format!("{what} {} at {offset} of {len}", target.display()),
+        undetectable,
+    )
 }
 
 /// VFS-3 AC-5, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
@@ -413,7 +447,7 @@ fn torn_writes_are_recovered() {
         let child = spawn(&args(Cmd::Run, &s.db, &s.tree));
         std::thread::sleep(full / 2 + delay(&mut rng, full));
         kill(child);
-        let what = tear(&s.db, &mut rng);
+        let (what, undetectable) = tear(&s.db, &mut rng);
         let context = format!("torn write {i}: {what}");
         let vfs = vfs_core::Vfs::open(&s.db).unwrap_or_else(|e| panic!("{context}: open: {e}"));
         let roots = vfs.list_roots().unwrap();
@@ -423,6 +457,12 @@ fn torn_writes_are_recovered() {
             // to salvage. The user adds the folder again; the index must accept it.
             index(&s.db, &[&s.tree]);
         }
-        check_and_converge(&s, &context);
+        if undetectable {
+            // Junk SQLite cannot detect may leave stale FTS entries (#103): search stays
+            // correct and the folders converge, but the FTS agreement is not promised.
+            converge_searchable(&s, &context);
+        } else {
+            check_and_converge(&s, &context);
+        }
     }
 }

@@ -396,7 +396,8 @@ impl Default for Check {
     }
 }
 
-/// True when a search for `name` returns the file or folder `id`.
+/// True when a search for `name` returns the file or folder `id`, or lists the file as a
+/// copy of another hit.
 pub fn found_by_name(vfs: &Vfs, name: &str, id: i64, is_dir: bool) -> bool {
     let mut offset = 0u32;
     loop {
@@ -408,7 +409,11 @@ pub fn found_by_name(vfs: &Vfs, name: &str, id: i64, is_dir: bool) -> bool {
                 offset,
             })
             .unwrap();
-        if r.hits.iter().any(|h| h.id == id && h.is_dir == is_dir) {
+        // A file may be listed as a copy of another hit with the same name and size
+        // (VFS-19): it is found there too.
+        if r.hits.iter().any(|h| {
+            h.is_dir == is_dir && (h.id == id || (!is_dir && h.copies.iter().any(|c| c.id == id)))
+        }) {
             return true;
         }
         offset += 500;

@@ -624,7 +624,12 @@ fn startup_catch_up_runs_after_an_interrupted_walk() {
         expected: expected.iter().map(|s| s.to_string()).collect(),
         first: Mutex::new(Some(tx)),
     };
-    fx.vfs.start_indexer(Arc::new(probe)).unwrap();
+    let no_grace = IndexerOptions {
+        boot_grace: Duration::ZERO,
+    };
+    fx.vfs
+        .start_indexer_with(Arc::new(probe), no_grace)
+        .unwrap();
     let complete = rx
         .recv_timeout(Duration::from_secs(30))
         .expect("never up to date");
