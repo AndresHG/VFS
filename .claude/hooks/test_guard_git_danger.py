@@ -206,6 +206,13 @@ class HeredocTest(unittest.TestCase):
             decision, _ = self.decision(command)
             self.assertEqual(decision, "deny", command)
 
+    def test_heredoc_in_a_substitution_closed_on_its_line_has_no_body(self):
+        for command in ("x=$(cat <<EOF)\ngit stash pop",
+                        "echo $(cat <<EOF)\ngit stash pop\nEOF",
+                        "echo `cat <<EOF`\necho hi\nEOF\ngit stash pop"):
+            decision, _ = self.decision(command)
+            self.assertEqual(decision, "deny", command)
+
     def test_repeated_substitution_text_does_not_hide_the_shell(self):
         decision, _ = self.decision(": $(bash); cat <<EOF | bash $(bash)\ngit stash pop\nEOF")
         self.assertEqual(decision, "deny")

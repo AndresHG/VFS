@@ -445,9 +445,19 @@ def _cd_target(tokens, cwd):
 def _heredoc_delimiters(line, quote):
     """Scan one line -> ([(strip_tabs, word, quoted)], quote state at end of line).
 
-    Only `<<` outside quotes opens a heredoc; `<<<` is a here-string.
+    Only `<<` outside quotes opens a heredoc; `<<<` is a here-string. A
+    heredoc opened inside a `$(…)`/backtick that closes on the same line
+    (`x=$(cat <<EOF)`) has an empty body in bash, so it is dropped and the
+    following lines stay commands.
     """
     delims, i, n = [], 0, len(line)
+    depth, backticks = 0, []  # nesting, and the depth each open backtick sits at
+
+    def close():
+        nonlocal depth, delims
+        depth -= 1
+        delims = [d for d in delims if d[3] <= depth]
+
     while i < n:
         c = line[i]
         if quote:
@@ -473,6 +483,17 @@ def _heredoc_delimiters(line, quote):
             end = line.find("]", i)  # deprecated arithmetic `$[1<<2]`
             i = n if end == -1 else end + 1
             continue
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            close()
+        elif c == "`":
+            if backticks and backticks[-1] == depth - 1:
+                backticks.pop()
+                close()
+            else:
+                backticks.append(depth)
+                depth += 1
         elif line.startswith("<<<", i):
             i += 3
             continue
@@ -483,7 +504,7 @@ def _heredoc_delimiters(line, quote):
             while j < n and line[j] in " \t":
                 j += 1
             word, quoted = [], False
-            while j < n and line[j] not in " \t;|&<>()":
+            while j < n and line[j] not in " \t;|&<>()`":
                 if line[j] in ("'", '"'):
                     quoted = True
                     end = line.find(line[j], j + 1)
@@ -497,11 +518,11 @@ def _heredoc_delimiters(line, quote):
                         word.append(line[j])
                     j += 1
             if word:
-                delims.append((strip_tabs, "".join(word), quoted))
+                delims.append((strip_tabs, "".join(word), quoted, depth))
             i = j
             continue
         i += 1
-    return delims, quote
+    return [d[:3] for d in delims], quote
 
 
 def _feeds_shell(text):
