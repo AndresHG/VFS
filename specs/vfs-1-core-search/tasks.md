@@ -14,14 +14,15 @@ through the lead. Paths are relative to the repository root; `core/` means
 | T3b | Change detection and platform code: watcher (FSEvents through `notify` on macOS, `ReadDirectoryChangesW` on Windows), volume identity, background priority | `core/src/indexer/watch.rs`, `core/src/platform.rs`, `core/tests/watch.rs` | T1 | AC-7, AC-8 |
 | T4+T5 | App shell and CI: Tauri crate, configuration, icons, capabilities, commands of `spec.md` "Tauri commands and events", "mostrar en carpeta" with fallback to the parent folder, CI and release workflows | `apps/desktop/package.json`, `apps/desktop/package-lock.json`, `apps/desktop/src-tauri/**`, `.github/workflows/{ci,release}.yml`; the desktop member line in the root `Cargo.toml` | T1 | AC-3, AC-4, AC-5, AC-13, AC-14 |
 | T6 | UI: one Spanish screen with search box, results as the user types, visible filters (type including folder, date, size, folder), progress, folder panel | `apps/desktop/ui/**` | the command contract only | AC-4, AC-5, AC-11, AC-12, AC-13 |
-| T7 | CLI and performance harness: `vfs index`, `search`, `gen-db`, `gen-tree`, `bench`, `stats`; synthetic 2 M-file database; latency and memory report | `crates/vfs-cli/**`, `docs/perf.md` | T1; T2 for `bench`, T3 for `index` | AC-9 |
+| T7 | CLI and performance harness: `vfs index`, `search`, `gen-db`, `bench` (`gen-tree` and `stats` cut, see below); synthetic 2 M-file database; latency and memory report printed by `bench` | `crates/vfs-cli/**` | T1; T2 for `bench`, T3 for `index` | AC-9 |
 | T8 | Docs: architecture, phase-2 content search design, README | `docs/architecture.md`, `docs/content-search-design.md`, `README.md` | T1 | AC-15 |
 | T9 | Integration and acceptance: app indexes and searches a real folder on the Mac, app memory with the 2 M index recorded, CI green on Windows and macOS, Windows installer downloaded | no source files; fixes go back to the owning task | T2–T8 | AC-1, AC-9, AC-14, all |
 
 ## Rules every task follows
 
 - Tests cite the AC they prove (`/// VFS-1 AC-n: ...`).
-- A stub body is `todo!("<task id>")` until its owner implements it.
+- A stub body is `todo!("<task id>")` until its owner implements it; none may remain at
+  integration (T9).
 - If time runs out, cut in this order: the 5 M-file bench and large `gen-tree` runs, the
   Windows volume GUID lookup, `stats`, keyboard navigation, the custom date interval,
   ranking tiers, the macOS release artifact. Never cut: the Windows installer, the live

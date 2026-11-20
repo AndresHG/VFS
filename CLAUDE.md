@@ -22,7 +22,8 @@ Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/
 - Build: `cargo build --workspace`; CLI: `cargo run -p vfs-cli --`.
 - Test all: `cargo test --workspace`; one crate: `cargo test -p vfs-core`.
 - Lint: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`.
-- The desktop app and frontend commands are added here when `apps/desktop` lands.
+- Desktop app: in `apps/desktop/src-tauri`, `npx --yes @tauri-apps/cli@2.12.6 dev` (or
+  `build --bundles app`). The UI is static files in `apps/desktop/ui`; no npm build.
 
 ## Git
 

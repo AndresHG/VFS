@@ -176,10 +176,10 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   shutdown) is renamed to `index.db.bad` and rebuilt from its roots.
 - S1. For each root, query terms already contained in the root's own path are ignored,
   unless none would remain.
-- S2. Generation is driven by the rarest terms (at most 3), counted in both FTS tables:
-  folders whose row has all of them, and per split of them between file name and directory
-  path, the files matching both sides, driven by the smaller side. Every candidate is
-  verified against all terms.
+- S2. The generator term is the one with the fewest matches in both FTS tables (counted
+  exactly up to 50,000): candidates are the files whose name contains it and the folders
+  whose path contains it, with their files, read by rowid from the FTS match. Every
+  candidate is verified against all terms.
 - S3. The deadline applies to scans and to generators over the probe cap (5000 rows); a
   generator under it runs to completion, bounded at about 2 s.
 - S4. Typo tolerance: for each edit position, FTS candidates from the two parts of the term
