@@ -39,10 +39,13 @@ Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/
 - **Changed code ends in a PR, unasked**: commit, run the `pr-critic`, push, open the PR. This
   is standing authorization. Then merge it yourself (squash) once the critic has passed the
   head, CI is green on Windows and macOS, and the branch is rebased on `main`; the owner
-  reviews product decisions, not PRs. Direct pushes to `main` stay the user's call.
+  reviews product decisions, not PRs.
+- GitHub ruleset "main protegida" (no bypass, owner included) rejects direct pushes,
+  force-pushes and deletion of `main`, and merges only by squash once both `test (…)` CI
+  jobs pass on a branch up to date with `main`.
 - `guard-git-danger.py` asks before pushes to `main` and PR merges, and denies force-pushes to
   `main`, `claude/*` pushes, bare stash, `gh pr create` without a critic verdict for HEAD, and
-  `gh pr merge` with `--auto` or before both CI test jobs pass (`main` has no required checks).
+  `gh pr merge` with `--auto` or before both CI test jobs pass.
 
 ## Plan before coding: spec first
 
