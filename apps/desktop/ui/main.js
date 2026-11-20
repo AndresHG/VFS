@@ -31,6 +31,8 @@ const DATE_DAYS = { [DateChoice.WEEK]: 7, [DateChoice.MONTH]: 30, [DateChoice.YE
 const PICK_FOLDER = '__pick';
 /** Where the current search is (`state.searchState`). */
 const SearchState = Object.freeze({ IDLE: 'idle', LOADING: 'loading', DONE: 'done', ERROR: 'error' });
+/** Layout of the screen: the box alone in the middle, or the box above the results. */
+const View = Object.freeze({ START: 'start', LIST: 'list' });
 /** Look of a message in the folder panel. */
 const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
 
@@ -94,6 +96,26 @@ function main() {
     chips.append(label);
   }
 
+  function renderTypeButton() {
+    const names = KIND_CHIPS.filter((k) => state.kinds.has(k)).map((k) => S.kindsPlural[k]);
+    $('f-type-text').textContent = S.typeButton(...names);
+    $('f-type').classList.toggle('is-on', names.length > 0);
+  }
+
+  // The checklist opens under its button. Placed from the button's box so it also works where
+  // CSS anchor positioning is missing (older WKWebView).
+  const typePop = $('f-type-pop');
+  typePop.addEventListener('beforetoggle', (e) => {
+    if (e.newState !== 'open') return;
+    const r = $('f-type').getBoundingClientRect();
+    typePop.style.top = `${r.bottom + 6}px`;
+    typePop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - typePop.offsetWidth - 8))}px`;
+  });
+  typePop.addEventListener('toggle', (e) => {
+    $('f-type').setAttribute('aria-expanded', String(e.newState === 'open'));
+    if (e.newState === 'open') chips.querySelector('input')?.focus();
+  });
+
   function fillSelect(select, options) {
     select.replaceChildren(...Object.entries(options).map(([v, t]) => new Option(t, v)));
   }
@@ -129,6 +151,11 @@ function main() {
     const b = $('f-clear');
     b.hidden = n === 0; // nothing to clear
     b.textContent = n ? S.clearFiltersN(n) : S.clearFilters;
+    renderTypeButton();
+    // A filter that narrows the list looks chosen.
+    $('f-date').parentElement.classList.toggle('is-on', state.date !== DateChoice.ANY);
+    $('f-size').parentElement.classList.toggle('is-on', state.size !== SizeChoice.ANY);
+    $('f-folder').parentElement.classList.toggle('is-on', state.folder !== '');
   }
 
   /** Local midnight of a yyyy-mm-dd value, in unix seconds. */
@@ -330,7 +357,7 @@ function main() {
     reveal.type = 'button';
     reveal.tabIndex = -1; // keyboard and screen readers use Enter on the selected row instead
     reveal.setAttribute('aria-hidden', 'true');
-    reveal.append(icon('reveal'), el('span', 'reveal-text', S.revealButton));
+    reveal.append(icon('reveal'), el('span', 'reveal-text', S.revealButton), el('span', 'kbd', S.revealKey));
     row.append(ico, main, el('span', 'kind', 'Documento'), el('span', 'date', '12 sept 2026'), el('span', 'size', '999,9 MB'), reveal);
     return row;
   }
@@ -478,10 +505,12 @@ function main() {
     const parts = [];
     let actions = [];
     let mode;
+    let start = false; // no search made yet: the start view
     const filesIndexed = state.progress?.filesIndexed ?? state.roots.reduce((s, r) => s + r.files, 0);
 
     if (api.missing) {
       mode = 'missing';
+      start = true;
       parts.push(icon('warn'), el('h3', null, S.backendMissing));
     } else if (state.searchState === SearchState.ERROR) {
       const code = state.lastError?.code;
@@ -491,10 +520,12 @@ function main() {
       actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
     } else if (!state.roots.length && state.rootsLoaded) {
       mode = 'no-roots';
+      start = true;
       parts.push(icon(FileKind.FOLDER), el('h3', null, S.emptyNoRootsTitle), el('p', null, S.emptyNoRootsBody));
       actions = [button(S.addFolderEllipsis, 'btn btn-primary', () => addFolder())];
     } else if (state.searchState === SearchState.IDLE) {
-      if (!state.rootsLoaded) { box.hidden = true; return; }
+      start = true;
+      if (!state.rootsLoaded) { box.hidden = true; setView(true); return; }
       if (firstScanRunning()) {
         mode = 'first-scan';
         const bar = document.createElement('progress');
@@ -521,8 +552,10 @@ function main() {
       }
     } else {
       box.hidden = true;
+      setView(false);
       return;
     }
+    setView(start);
     // Same state as on screen: refresh the words only, so buttons under the pointer and the
     // progress animation are not rebuilt on every progress tick.
     if (!box.hidden && box.dataset.mode === mode) {
@@ -542,6 +575,11 @@ function main() {
     }
     box.replaceChildren(...parts);
     box.hidden = false;
+  }
+
+  /** Before any search the box sits in the middle of an empty page; results move it up. */
+  function setView(start) {
+    $('app').dataset.view = start ? View.START : View.LIST;
   }
 
   function button(text, cls, onClick) {
@@ -624,6 +662,7 @@ function main() {
     $('open-folders').textContent = S.foldersButton(state.roots.length);
     bar.hidden = true;
     pause.hidden = true;
+    $('rescan-now').hidden = true;
     if (api.missing) { text.textContent = ''; return; }
     if (!state.rootsLoaded) { text.textContent = S.statusConnecting; return; }
     if (!state.roots.length) { text.textContent = S.statusNoRoots; return; }
@@ -635,6 +674,8 @@ function main() {
     } else if (p?.state === IndexerState.PAUSED) {
       pause.hidden = false;
       pause.textContent = S.resume;
+    } else if (p?.state === IndexerState.IDLE) {
+      $('rescan-now').hidden = false;
     }
     $('banner-scan').hidden = !(firstScanRunning() && hasQuery());
   }
@@ -731,6 +772,7 @@ function main() {
     } catch (err) { showError(errorText(err)); }
   }
   $('rescan-all').addEventListener('click', () => rescanRoot(null));
+  $('rescan-now').addEventListener('click', () => rescanRoot(null));
   $('add-folder').addEventListener('click', () => addFolder());
 
   /** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows. */
