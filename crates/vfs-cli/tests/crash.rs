@@ -439,9 +439,12 @@ fn torn_writes_are_recovered() {
     let s = setup(5, scaled(1_500, 20_000));
     let full = measure(&s, Cmd::Index);
     let mut rng = Rng::new(0x7EA2);
+    // Stale FTS entries left by undetectable damage are never cleaned up (#103): after such
+    // a tear the next iteration starts from a fresh index, so each check judges one tear.
+    let mut tainted = false;
     for i in 0..iterations {
         // A complete index, then an interrupted re-index, so a WAL and a marker remain.
-        if !s.db.exists() || rng.chance(20) {
+        if !s.db.exists() || tainted || rng.chance(20) {
             remove_index(&s.db);
             index(&s.db, &[&s.tree]);
         }
@@ -461,7 +464,8 @@ fn torn_writes_are_recovered() {
             // to salvage. The user adds the folder again; the index must accept it.
             index(&s.db, &[&s.tree]);
         }
-        if undetectable && !recovered {
+        tainted = undetectable && !recovered;
+        if tainted {
             // Damage SQLite cannot detect may leave stale FTS entries (#103): search stays
             // correct and the folders converge, but the FTS agreement is not promised.
             converge_searchable(&s, &context);

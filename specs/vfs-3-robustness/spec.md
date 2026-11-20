@@ -77,4 +77,5 @@ on Windows and macOS, in release.
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
 | D1 | Slow variants | Same tests, sized by `VFS_STRESS`, never `#[ignore]` | lead | 2026-11-20 |
-| D2 | Recovery trigger | Only SQLite corrupt / not-a-database errors and a failed quick check | lead | 2026-11-20 |
+| D2 | Recovery trigger | Only SQLite corrupt / not-a-database errors and a failed quick check; supersedes VFS-1 C5's "cannot be opened" | lead | 2026-11-20 |
+| D3 | Start-up catch-up | Never deferred, not even behind an interrupted walk, and idle is not reported while it is owed; supersedes VFS-1 I10's rule for start-up requests (#95) | lead | 2026-11-20 |
