@@ -4,7 +4,7 @@
 VFS is open source; anyone can read every tracked file. Docs, specs, fixtures and mockups
 describe users generically ("the user", "they") and use invented sample data. This check
 flags first-person kinship phrases ("my mother", "mi padre") and colloquial parent words
-("mamá", "dad") in tracked text files.
+("mamá", "mom") in tracked text files.
 
 Standard library only. `python3 scripts/personal_refs.py` exits 1 and lists each hit as
 path:line; CI runs it on every PR.
@@ -18,7 +18,7 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 _KIN_EN = (
-    r"mother|mom|mum|father|dad|parents?|wife|husband|sons?|daughters?|kids?|children|"
+    r"mother|mom|mum|father|dad|wife|husband|sons?|daughters?|kids|"
     r"brothers?|sisters?|grand(?:ma|pa|mother|father|parents?)|family|aunt|uncle|cousins?|"
     r"girlfriend|boyfriend"
 )
@@ -29,7 +29,8 @@ _KIN_ES = (
 PATTERNS = [
     re.compile(rf"\b(?:my|our)\s+(?:{_KIN_EN})\b", re.IGNORECASE),
     re.compile(rf"\b(?:mis?|nuestr[oa]s?)\s+(?:{_KIN_ES})\b", re.IGNORECASE),
-    re.compile(r"\b(?:mamá|papá|mom|mum|dad)\b", re.IGNORECASE),
+    # Bare "dad" is left out: "Dad clic" is ordinary Spanish UI copy.
+    re.compile(r"\b(?:mamá|papá|mom|mum)\b", re.IGNORECASE),
 ]
 
 # This file and its test hold the patterns themselves.

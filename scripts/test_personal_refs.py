@@ -16,12 +16,12 @@ _SPEC.loader.exec_module(refs)
 class FindHitsTest(unittest.TestCase):
     def test_flags_first_person_kinship_in_english_and_spanish(self):
         for text in (
-            "Built for my mother's old laptop.",
+            "Photos from my sister's wedding.",
             "Our kids keep photos here.",
             "Lo usa mi padre a diario.",
             "Fotos de mis abuelos",
             "Revisar con mamá",
-            "Ask Dad first",
+            "Ask Mom first",
         ):
             with self.subTest(text=text):
                 self.assertEqual(len(refs.find_hits(text)), 1)
@@ -33,6 +33,8 @@ class FindHitsTest(unittest.TestCase):
             "parent folder, child process, sibling crate",
             "Damage, mummy, momentum, dadaist",
             "Los resultados son mis favoritos",
+            "Dad clic en Aceptar",
+            "my parent process walks our children nodes",
         ):
             with self.subTest(text=text):
                 self.assertEqual(refs.find_hits(text), [])
