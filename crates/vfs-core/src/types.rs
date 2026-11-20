@@ -1,6 +1,8 @@
 //! Serde contract types shared by the core, the CLI and the Tauri app (VFS-1).
 //! Structs serialize camelCase and enums snake_case; ids are `i64`, times unix seconds.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -11,10 +13,12 @@ pub enum FileKind {
     Photo,
     Video,
     Audio,
+    /// A directory hit (VFS-1 decision D1: folders are results). Never stored in `files.kind`.
+    Folder,
 }
 
 impl FileKind {
-    /// Value stored in `files.kind`.
+    /// Value stored in `files.kind` (`Folder` = 5 is never stored).
     pub fn code(self) -> i64 {
         match self {
             FileKind::Other => 0,
@@ -22,6 +26,7 @@ impl FileKind {
             FileKind::Photo => 2,
             FileKind::Video => 3,
             FileKind::Audio => 4,
+            FileKind::Folder => 5,
         }
     }
 
@@ -32,6 +37,7 @@ impl FileKind {
             2 => FileKind::Photo,
             3 => FileKind::Video,
             4 => FileKind::Audio,
+            5 => FileKind::Folder,
             _ => FileKind::Other,
         }
     }
@@ -40,7 +46,7 @@ impl FileKind {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SearchFilters {
-    /// Empty = every kind.
+    /// Empty = every kind, folders included. `Folder` selects directory hits.
     pub kinds: Vec<FileKind>,
     /// Inclusive.
     pub modified_from: Option<i64>,
@@ -83,15 +89,30 @@ pub enum MatchKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
+    /// `files.id`, or `dirs.id` when `is_dir` (the two id spaces overlap).
     pub id: i64,
-    /// Original file name.
+    /// Original file or folder name.
     pub name: String,
-    /// Absolute directory path, native separators.
+    /// Absolute path of the containing directory, native separators.
     pub dir: String,
+    /// `Folder` when `is_dir`.
     pub kind: FileKind,
+    /// 0 for folders.
     pub size: u64,
     pub modified: i64,
     pub matched: MatchKind,
+    /// The hit is a folder (VFS-1 decision D1).
+    pub is_dir: bool,
+}
+
+/// What cut a search short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncatedBy {
+    /// A row or hit cap was reached.
+    Cap,
+    /// The wall-clock deadline expired.
+    Deadline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,9 +122,26 @@ pub struct SearchResponse {
     pub hits: Vec<SearchHit>,
     /// Length of the ranked list, <= 2000.
     pub total: u32,
-    /// A cap or the deadline cut the search short.
+    /// A cap or the deadline cut the search short (`truncated_by.is_some()`).
     pub truncated: bool,
+    /// `null`, `"cap"` or `"deadline"`.
+    pub truncated_by: Option<TruncatedBy>,
     pub elapsed_ms: u32,
+}
+
+/// Search tuning; not part of the UI contract.
+#[derive(Debug, Clone)]
+pub struct SearchConfig {
+    /// Wall-clock budget for scans and over-cap generators (default 1000 ms).
+    pub deadline: Duration,
+}
+
+impl Default for SearchConfig {
+    fn default() -> SearchConfig {
+        SearchConfig {
+            deadline: Duration::from_millis(1000),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +261,10 @@ mod tests {
         assert_eq!(q.filters.size_max, None);
         assert!(q.filters.folder.is_none());
 
+        let folders: SearchFilters =
+            serde_json::from_value(json!({ "kinds": ["folder"] })).unwrap();
+        assert_eq!(folders.kinds, vec![FileKind::Folder]);
+
         let bare: SearchQuery = serde_json::from_value(json!({ "text": "" })).unwrap();
         assert!(bare.filters.kinds.is_empty());
     }
@@ -239,17 +281,19 @@ mod tests {
                 size: 3,
                 modified: 4,
                 matched: MatchKind::Fuzzy,
+                is_dir: false,
             }],
             total: 1,
-            truncated: false,
+            truncated: true,
+            truncated_by: Some(TruncatedBy::Deadline),
             elapsed_ms: 2,
         };
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
             json!({
                 "hits": [{ "id": 7, "name": "Notaría.pdf", "dir": "/a/b", "kind": "document",
-                           "size": 3, "modified": 4, "matched": "fuzzy" }],
-                "total": 1, "truncated": false, "elapsedMs": 2
+                           "size": 3, "modified": 4, "matched": "fuzzy", "isDir": false }],
+                "total": 1, "truncated": true, "truncatedBy": "deadline", "elapsedMs": 2
             })
         );
     }
@@ -310,6 +354,7 @@ mod tests {
             FileKind::Photo,
             FileKind::Video,
             FileKind::Audio,
+            FileKind::Folder,
         ] {
             assert_eq!(FileKind::from_code(k.code()), k);
         }

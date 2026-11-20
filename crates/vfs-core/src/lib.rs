@@ -6,9 +6,13 @@ pub mod content;
 pub mod db;
 mod error;
 mod fold;
+mod fuzzy;
 mod indexer;
 mod kind;
 mod platform;
+mod rank;
+mod roots;
+mod search;
 mod types;
 
 pub use error::{Error, Result};
@@ -20,9 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, InterruptHandle};
 
 use indexer::IndexerHandle;
+use search::SearchState;
 
 /// Receives indexer progress; implemented by the app (Tauri events) and the CLI.
 pub trait ProgressSink: Send + Sync + 'static {
@@ -38,8 +43,12 @@ pub struct Vfs {
 
 struct Inner {
     db_path: PathBuf,
-    /// Reader connection used by search and queries.
+    config: SearchConfig,
+    /// Reader for roots, stats and paths.
     reader: Mutex<Connection>,
+    /// Dedicated search reader, interrupted by each new query.
+    searcher: Mutex<(Connection, SearchState)>,
+    search_interrupt: InterruptHandle,
     indexer: Mutex<Option<IndexerHandle>>,
 }
 
@@ -48,39 +57,70 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Vfs {
-    /// Opens or creates the index at `db_path` and applies migrations. Starts no thread.
+    /// Opens or creates the index at `db_path` with the default [`SearchConfig`]. Starts no
+    /// thread.
     pub fn open(db_path: &Path) -> Result<Vfs> {
-        drop(db::open_rw(db_path)?);
+        Vfs::open_with(db_path, SearchConfig::default())
+    }
+
+    /// Opens or creates the index and applies migrations; an unreadable index is moved to
+    /// `index.db.bad` and rebuilt from its roots (`db::open_or_recover`). Starts no thread.
+    pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {
+        drop(db::open_or_recover(db_path)?);
         let reader = db::open_ro(db_path)?;
+        let search_conn = db::open_ro(db_path)?;
+        let search_interrupt = search_conn.get_interrupt_handle();
         Ok(Vfs {
             inner: Arc::new(Inner {
                 db_path: db_path.to_path_buf(),
+                config,
                 reader: Mutex::new(reader),
+                searcher: Mutex::new((search_conn, SearchState::default())),
+                search_interrupt,
                 indexer: Mutex::new(None),
             }),
         })
     }
 
+    fn notify_roots_changed(&self) {
+        if let Some(h) = lock(&self.inner.indexer).as_ref() {
+            h.roots_changed();
+        }
+    }
+
     pub fn list_roots(&self) -> Result<Vec<Root>> {
-        todo!("T2: roots.rs")
+        roots::list_roots(&lock(&self.inner.reader))
     }
 
     /// `path` must be an existing directory that neither contains nor is inside another root.
-    pub fn add_root(&self, _path: &Path) -> Result<Root> {
-        todo!("T2: roots.rs (writes through a short-lived db::open_rw, then notifies the indexer)")
+    pub fn add_root(&self, path: &Path) -> Result<Root> {
+        let root = roots::add_root(&mut db::open_rw(&self.inner.db_path)?, path)?;
+        self.notify_roots_changed();
+        Ok(root)
     }
 
-    pub fn remove_root(&self, _root_id: i64) -> Result<()> {
-        todo!("T2: roots.rs (sets status removing, then notifies the indexer)")
+    pub fn remove_root(&self, root_id: i64) -> Result<()> {
+        roots::remove_root(&mut db::open_rw(&self.inner.db_path)?, root_id)?;
+        self.notify_roots_changed();
+        Ok(())
     }
 
-    pub fn search(&self, _query: &SearchQuery) -> Result<SearchResponse> {
-        todo!("T2: search.rs")
+    /// Runs a query; a query still running on another thread is interrupted first.
+    pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
+        self.inner.search_interrupt.interrupt();
+        let mut guard = lock(&self.inner.searcher);
+        let (conn, state) = &mut *guard;
+        search::search(conn, state, &self.inner.config, query)
     }
 
     /// Absolute path of an indexed file, built from the original names.
-    pub fn file_path(&self, _file_id: i64) -> Result<PathBuf> {
-        todo!("T2: search.rs")
+    pub fn file_path(&self, file_id: i64) -> Result<PathBuf> {
+        db::file_abs_path(&lock(&self.inner.reader), file_id)
+    }
+
+    /// Absolute path of an indexed folder (a hit with `is_dir`).
+    pub fn dir_path(&self, dir_id: i64) -> Result<PathBuf> {
+        db::dir_abs_path(&lock(&self.inner.reader), dir_id)
     }
 
     pub fn stats(&self) -> Result<IndexStats> {
@@ -184,6 +224,56 @@ mod tests {
         assert!(stats.db_bytes > 0);
         assert_eq!(vfs.progress().state, IndexerState::Idle);
         vfs.shutdown();
+    }
+
+    /// VFS-1 AC-6: opening over a garbage file recovers to a fresh index and keeps the bad
+    /// file as `index.db.bad`.
+    #[test]
+    fn open_recovers_garbage_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        std::fs::write(&path, b"this is not a sqlite database, just garbage bytes").unwrap();
+        let vfs = Vfs::open(&path).unwrap();
+        assert_eq!(vfs.stats().unwrap().schema_version, db::SCHEMA_VERSION);
+        assert!(dir.path().join("index.db.bad").exists());
+    }
+
+    /// VFS-1 AC-13: paths of files and folders are rebuilt from the original names.
+    #[test]
+    fn file_and_dir_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let vfs = Vfs::open(&path).unwrap();
+        let mut conn = db::open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = db::ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sub = db::ingest::insert_dir(&tx, root, top, "Año 2019", 0).unwrap();
+        let file = db::ingest::insert_file(
+            &tx,
+            sub,
+            &db::ingest::NewFile {
+                name: "Notaría.pdf",
+                size: 1,
+                mtime: 1,
+                lossy: false,
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            vfs.dir_path(sub).unwrap(),
+            Path::new("/datos").join("Año 2019")
+        );
+        assert_eq!(
+            vfs.file_path(file).unwrap(),
+            Path::new("/datos").join("Año 2019").join("Notaría.pdf")
+        );
+        assert!(matches!(vfs.file_path(sub + 100), Err(Error::NotFound(_))));
     }
 
     /// VFS-1 AC-5: the facade is shareable across threads (Tauri state, indexer callbacks).

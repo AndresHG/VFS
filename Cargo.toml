@@ -19,7 +19,7 @@ notify = "8.2"
 dunce = "1"
 log = "0.4"
 libc = "0.2"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_ProcessStatus"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_ProcessStatus", "Win32_System_IO", "Win32_Security"] }
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
 
