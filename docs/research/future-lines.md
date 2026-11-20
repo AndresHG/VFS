@@ -270,7 +270,7 @@ averaging 8 chunks of ~300 tokens, so 2.4 M chunks. Older 4-core CPU, maybe no A
   platform.claude.com/docs/en/about-claude/pricing]** comes to **≈ $0.0002 per query**, so
   $0.21 per 1,000 queries **[estimate]**. Claude Sonnet 5.5 at $2 / $10 comes to ≈ $0.004 per
   query. OpenAI gpt-6-luna at $0.10 / $0.50 **[published, developers.openai.com/api/docs/pricing]**
-  costs the same as Haiku 5.5. Anthropic notes newer models' tokenizer yields ~30% more tokens,
+  costs the same as Haiku 5.5. Anthropic notes newer models' tokenizer yields ~30% more tokens **[published]**,
   which is still a fraction of a cent.
 - **E, RAG:** 20 chunks × 500 tokens = 10k input + 1k output. Haiku 5.5 ≈ $0.0015 and Sonnet 5.5
   ≈ $0.03 per question **[estimate]**.
@@ -373,7 +373,7 @@ Neither photo set has a useful file name. Both requests combine three things: a 
 
 **Offline reverse geocoding**
 
-- **Data.** GeoNames `cities500.zip` (**13.9 MB** zip, **41.8 MB** text, **237,329** places [measured, downloaded 2026-11-20]) or `cities1000` (11 MB); both CC BY 4.0 ([dump index](https://download.geonames.org/export/dump/)). Places in `cities500` have more than 500 inhabitants or are administrative seats down to PPLA4. A k-d tree over ECEF coordinates gives the nearest place, as the [reverse_geocoder](https://github.com/thampiman/reverse-geocoder) project does (that project is LGPL, so reimplement it; the method is small).
+- **Data.** GeoNames `cities500.zip` (**13.9 MB** zip, **41.8 MB** text, **237,329** places [measured, downloaded 2026-11-20]) or `cities1000` (11 MB **[published]**); both CC BY 4.0 ([dump index](https://download.geonames.org/export/dump/)). Places in `cities500` have more than 500 inhabitants or are administrative seats down to PPLA4. A k-d tree over ECEF coordinates gives the nearest place, as the [reverse_geocoder](https://github.com/thampiman/reverse-geocoder) project does (that project is LGPL, so reimplement it; the method is small).
 - **Ansó resolves [measured].** `cities500` contains *Ansó* (PPLA3, 42.7579 N, −0.8295 W). The Spain file `ES.txt` (3.2 MB zip) also contains the valley as a feature: *Valle de Ansó* (T.VAL, 42.7625, −0.8304).
 - **Precision limit [measured].** Neighbouring seats are close: Fago is 5.0 km from Ansó and Echo 6.8 km. A photo taken up the valley toward Zuriza can resolve to the wrong village. A nearest-place name is good for display ("Ansó, Huesca") but weak as a filter. The better filter is **«cerca de aquí»**: a radius (e.g. 300 m to 2 km) around a point she picks, by choosing one known photo («más fotos tomadas aquí») or a place name.
 - **Her examples:**
@@ -396,7 +396,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 | SigLIP 2 ViT-B/16 (multilingual WebLI) | Apache-2.0 ([HF](https://huggingface.co/google/siglip2-base-patch16-224)) | Spanish recall **83.61 %** [published, Immich] | ≈35 GFLOPs (ViT-B/16 class) **[estimate]** | Best quality per cost; ~4× the compute of B/32. |
 | nllb-clip-base-siglip | (not verified) | 80.91 % [published, Immich] | Image 8.8 GFLOPs; text 414 M params | Heavy text side. |
 | M-CLIP XLM-R-Large + ViT-B/32 | Not stated on the card | Spanish COCO R@10 89.1 [published] ([HF](https://huggingface.co/M-CLIP/XLM-Roberta-Large-Vit-B-32)) | Image 8.8 GFLOPs | Licence unclear, so avoid. |
-| MobileCLIP / MobileCLIP2 S0–S2 (Apple) | Code MIT; **weights under Apple ML Research Model Terms** ([repo](https://github.com/apple/ml-mobileclip)) | English only | S0: 11.4 M image params, 1.5 ms on the repo's (unnamed) device **[published]**; IN-1k 67.8–77.2 % | Fastest. Weight licence is likely research-only, so unsuitable unless verified. |
+| MobileCLIP / MobileCLIP2 S0–S2 (Apple) | Code MIT; **weights under Apple ML Research Model Terms** ([repo](https://github.com/apple/ml-mobileclip)) | English only | S0: 11.4 M image params, 1.5 ms on the repo's (unnamed) device **[published]**; IN-1k 67.8–77.2 % **[published]** | Fastest. Weight licence is likely research-only, so unsuitable unless verified. |
 | Jina CLIP v2 | **CC BY-NC 4.0** | 89 languages | 0.9 B params, 512 px ([HF](https://huggingface.co/jinaai/jina-clip-v2)) | Too heavy for the target PC. |
 
 - **Spanish recall** is from Immich's multilingual benchmark on a Ryzen 7800X3D ([Immich searching](https://docs.immich.app/features/searching)). Immich lists ~3 GB of RAM **[published]** for the B-size multilingual models in that table. On an 8 GB PC that is a real cost.
@@ -999,7 +999,7 @@ fecha en que lo guardé", then a group or filter by source ("Mis archivos · Mar
 YouTube · Telegram · WhatsApp"). Each result shows its date with the source in plain
 words on hover ("Fecha de la foto (cámara)", "Añadido a marcadores"). Example 6 is "Fotos" +
 "fosa séptica" + sort ascending by taken date, but the photos have no names (example 4 problem),
-so finding them needs image content or folder context (another line). This line only orders
+so finding them by what they show needs image content, which is out of scope ([line 2](#line-2)); by folder, they are found with name search. This line only orders
 them.
 
 ### 3. What it needs from the user
@@ -1044,8 +1044,7 @@ is based on `main` at commit `3af9d6e` (phase 1 and the «Papel» search screen;
 modified-date range, but no sort field. `rank.rs` orders hits by relevance tiers, then name
 length, then newest `modified`, then id; a filter-only query is newest first. The search ranks
 at most 2,000 hits (`MAX_HITS` in `search.rs`) and returns a page `[offset, offset + limit)`.
-Each `SearchHit` already carries `modified` (unix seconds). Folders have `mtime = 0` until their
-parent is listed. The UI shows the date per row, with «modificado el …» in the row's accessible label (`apps/desktop/ui/strings.js`) and has
+Each `SearchHit` already carries `modified` (unix seconds). A root folder has `mtime = 0` until it is first listed; other folders get their real mtime when inserted. The UI shows the date per row, with «modificado el …» in the row's accessible label (`apps/desktop/ui/strings.js`) and has
 a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not merged yet.
 
 **Change.**
@@ -1054,7 +1053,7 @@ a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not 
    `Relevance` through serde, so existing callers and stored queries keep working.
 2. Core: `NewestFirst` / `OldestFirst` reorder the **whole ranked list** (≤ 2,000 hits) by the
    hit's collected date before the page is cut, so paging is stable. Ties keep relevance
-   order. A date of 0 (unknown, such as an unlisted folder) sorts **last in both directions**.
+   order. A date of 0 (unknown, such as a root folder not yet listed) sorts **last in both directions**.
    The sort also applies to hits served from the search cache (`search.rs`), before paging.
    No new SQL, index or schema change: the dates are already on the hits.
 3. When the search was truncated (`truncated_by` set), the result line says that the order
@@ -1251,8 +1250,8 @@ private videos instead of loading pages.
 - D3 tokens **[estimate]**: 3,000 bookmarks × ~80 input tokens + 60 batches × ~500 tokens of
   instructions ≈ 0.27 M input; ~15 output tokens per bookmark ≈ 0.045 M output.
   - Claude Haiku 5.5 ($0.10 / $0.50 per MTok **[published]**): ≈ $0.05; Batch API (−50 %): ≈ $0.03.
-  - Claude Haiku 4.5 ($1 / $5): ≈ $0.50; batch ≈ $0.25.
-  - gpt-5.4-mini ($0.75 / $4.50 **[published]**): ≈ $0.41; gpt-5-nano ($0.05 / $0.40): ≈ $0.03.
+  - Claude Haiku 4.5 ($1 / $5 **[published]**): ≈ $0.50; batch ≈ $0.25.
+  - gpt-5.4-mini ($0.75 / $4.50 **[published]**): ≈ $0.41; gpt-5-nano ($0.05 / $0.40 **[published]**): ≈ $0.03.
   - With fetched descriptions (~+100 tokens each) input roughly doubles: still under $1.
   - Optional scheme-proposal pass (60k tokens in, 2k out): < $0.01 on Haiku 5.5.
 - D2 on the target PC **[estimate]**: a ~120 M-parameter multilingual encoder on an older 4-core
@@ -1356,7 +1355,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
   use a page-1 render.
 - **Google Books API** (`q=isbn:<isbn>`): requires an API key; `imageLinks.thumbnail` gives
   covers **[published, developers.google.com/books/docs/v1/using]**. Default quota commonly cited
-  as 1,000/day (not on an official page we could find; a 2026 report shows 20 M) — verify in the
+  as 1,000/day **[published, secondary only]** (not on an official page we could find; a 2026 report shows 20 M **[published, secondary]**) — verify in the
   Cloud console. Terms forbid charging users a fee for the app **[published, Books API terms]**.
   Best coverage of Spanish trade books.
 - **Base de datos de libros editados en España** (Ministerio de Cultura, Agencia del ISBN): a
@@ -1367,7 +1366,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
 - **datos.bne.es** (Biblioteca Nacional): linked open data under CC0 with a SPARQL endpoint
   **[published, bne.es linked-data page]**; ISBN querying not documented (needs a test). Good
   for older Spanish books; no covers.
-- **ISBNdb**: paid (secondary sources: plans ~$15–300/month; official page returned 403).
+- **ISBNdb**: paid (secondary sources: plans ~$15–300/month **[published, secondary]**; official page returned 403).
   Not needed at her scale.
 
 **Step 3 — output (three options, not exclusive):**
