@@ -30,7 +30,7 @@ requests are about themes, not file names:
 The owner decided that, apart from Firefox bookmarks (issue
 [#63](https://github.com/AndresHG/VFS/issues/63), spec VFS-6, being built), none of this is
 built now. In phase 3 the owner had ruled out the *content* of images, audio and video
-([decisions](https://github.com/AndresHG/VFS/blob/feat/vfs-1-release/docs/decisions.md),
+([decisions](../decisions.md),
 "Scope: names and paths first"). Examples 4 and 6 show that finding unnamed photos matters
 to her, so [line 2](#line-2) records what finding them would cost. The owner has kept the
 decision: image content stays out of scope, and photos are found by name and folder as today.
@@ -54,7 +54,7 @@ Line 2 is kept as a future line with its findings, not as a proposal to reopen i
   done soon. Its section and issue carry implementation-ready acceptance criteria.
 
 Context assumed throughout, from [windows-io.md](windows-io.md) and the
-[content search design](https://github.com/AndresHG/VFS/blob/feat/vfs-1-release/docs/content-search-design.md):
+[content search design](../content-search-design.md):
 a slow Windows 10/11 PC with one busy 8 TB spinning disk shared with a Synology sync client,
 little free memory, an unknown CPU (we budget for an older 4-core x86 with 8 GB of RAM,
 possibly without AVX2), fully offline by default, no administrator rights, Spanish UI.
@@ -476,7 +476,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 
 ### 7. Smallest useful first step
 
-A **metadata-only photo index**, with no model:
+Only if the owner ever revisits the decision: a **metadata-only photo index**, with no model:
 - one capped EXIF read per JPEG/HEIC in the worker;
 - columns for capture date (with its source), GPS, camera and orientation;
 - the GeoNames `cities500` place name;
@@ -718,10 +718,10 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 ### 5. Cost
 
 - Assumptions **[estimate]**: 30 exported chats, 150,000 messages total, 20,000 media files (~40 GB), 3,000 links, 200 shared contacts.
-  - Parsing JSON/TXT at ~50 MB/min of text on an old 4-core CPU: the text part (~50 MB) parses in about 1 min.
+  - **[estimate]** Parsing JSON/TXT at ~50 MB/min of text on an old 4-core CPU: the text part (~50 MB) parses in about 1 min.
   - Media files are not opened, only linked by path, so no extra HDD reads beyond Phase 1's walk.
   - Index growth: messages ~300 B each searchable → ~45 MB if all message text is indexed. Indexing only items (attachments, links, contacts) plus captions → ~10 MB.
-- oEmbed for YouTube links: about 1,000 GETs once, roughly 17 min at 1/s.
+- oEmbed for YouTube links: about 1,000 GETs once, roughly 17 min at 1/s **[estimate]**.
 - Disk: exports duplicate phone media (+40 GB on the 8 TB HDD). Acceptable, but the importer could dedupe against already-synced WhatsApp Images by name + size.
 - API fees: €0.
 
@@ -739,7 +739,7 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 
 ### 8. Recommendation
 
-**Do later** (after VFS-6 lands and Phase 3 is stable), **exports only**. Do not build the Telegram API, and never build WhatsApp database decryption. The value is real: chronological photos with sender context match her fosa séptica example. But the per-chat manual export, especially WhatsApp's chat-by-chat flow with its silent 10,000-message media cap, limits coverage. Her synced WhatsApp Images folder already gives a cheaper partial answer through plain file search. Start with Telegram only if she actually uses Telegram Desktop or is willing to.
+**Do later** (after VFS-6 lands and Phase 3 is stable), **exports only**. Do not build the Telegram API, and never build WhatsApp database decryption. The value is real: chronological photos with sender context match her fosa séptica example. But the per-chat manual export, especially WhatsApp's chat-by-chat flow with its reported 10,000-message media cap (third-party sources only, see section 2), limits coverage. If her WhatsApp Images folder is synced to the PC, it already gives a cheaper partial answer through plain file search. Start with Telegram only if she actually uses Telegram Desktop or is willing to.
 
 ### 9. Open product questions for the owner
 
@@ -874,26 +874,21 @@ needs #38/#40). The unified "one command, several sources" result list is shared
 
 ### 7. Smallest useful first step
 
-Option A: a "Buscar también en internet" button under the result list that opens her default
-browser with the query. It ships independently, has no privacy cost, and shows whether she
-actually uses web search from VFS. In parallel, add the normalised-URL column to VFS-6 so
-matching is ready when an API arrives.
+None: decided, will not do. The research found that the cheapest form would have been a
+«Buscar también en internet» button opening her browser; the owner judged that any LLM or
+agent already covers this better. The URL normalisation in section 2 is still useful to
+deduplicate bookmarks and saved links within VFS.
 
 ### 8. Recommendation
 
-**Do A next (S-sized); do B later** with Brave as the default provider (free at her volume,
-independent index, documented 90-day retention, clean ToS), behind the phase-5 consent pattern.
-Prefer B over C for plain web results: it is cheaper, gives deterministic results, and needs no
-LLM. C belongs to #40 if natural-language search is built. Do not use SerpAPI, Google CSE or
-Bing.
+**Decided (owner, 2026-11-20): will not do.** Any LLM or agent already searches the web better
+than VFS could. Kept for reference: had it been built, Brave Search would have been the
+provider (free at her volume, documented 90-day retention), and SerpAPI, Google Custom Search
+and Bing were to be avoided.
 
 ### 9. Open product questions
 
-1. **Is "marking what she already has" worth sending her health queries to a third party, or is
-   the browser button enough?** (This decides A only vs A+B.)
-2. Who pays and owns the key (owner's card), and is a monthly spend cap needed?
-3. Should web results appear in the same list (interleaved) or in a separate "En internet" block?
-   We recommend a separate block.
+None now: the owner has decided.
 
 ### 10. Sources
 
@@ -1023,14 +1018,14 @@ source lines. The target-PC measurement plan for Synology timestamp behaviour.
 
 **Decided (owner, 2026-11-20): reasonable; the line most likely to be done soon.** The first
 step below is written to be specified (`/spec`, size M) and built without more research. It
-is based on phase 1 as merged into `main` (commit `cfab8c0`).
+is based on `main` at commit `3af9d6e` (phase 1 and the «Papel» search screen).
 
 **What exists today.** `SearchQuery` (`crates/vfs-core/src/types.rs`) has filters, including a
 modified-date range, but no sort field. `rank.rs` orders hits by relevance tiers, then name
 length, then newest `modified`, then id; a filter-only query is newest first. The search ranks
 at most 2,000 hits (`MAX_HITS` in `search.rs`) and returns a page `[offset, offset + limit)`.
 Each `SearchHit` already carries `modified` (unix seconds). Folders have `mtime = 0` until their
-parent is listed. The UI shows «modificado el …» per row (`apps/desktop/ui/strings.js`) and has
+parent is listed. The UI shows the date per row, with «modificado el …» in the row's accessible label (`apps/desktop/ui/strings.js`) and has
 a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not merged yet.
 
 **Change.**
@@ -1040,6 +1035,7 @@ a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not 
 2. Core: `NewestFirst` / `OldestFirst` reorder the **whole ranked list** (≤ 2,000 hits) by the
    hit's collected date before the page is cut, so paging is stable. Ties keep relevance
    order. A date of 0 (unknown, such as an unlisted folder) sorts **last in both directions**.
+   The sort also applies to hits served from the search cache (`search.rs`), before paging.
    No new SQL, index or schema change: the dates are already on the hits.
 3. When the search was truncated (`truncated_by` set), the result line says that the order
    covers the first 2,000 matches, so «Más antiguos» is not mistaken for the oldest file on
@@ -1165,21 +1161,21 @@ The approaches split into two parts: **deciding** the new folder for each bookma
   "database is locked" **[published, SQLite forum, Mozilla bugs 627936/1285041]**. Writing
   behind Firefox's back would also bypass Sync's change tracking. VFS-6 already reads a copy
   only; keep that.
-- **HTML import (Library → Import and Backup → Import Bookmarks from HTML)** **adds**; it never
+- **Excluded by the invariant (writes to Firefox).** **HTML import (Library → Import and Backup → Import Bookmarks from HTML)** **adds**; it never
   replaces or de-duplicates. Imported items go under the Bookmarks Menu (often an "Imported"
   folder) **[published, Mozilla support; Bugzilla 1353217: import "creates new bookmarks
   blindly… never de-dupes"]**. For a reorganisation this means the old copies remain, she
   would have to delete them by hand, and Sync spreads the duplicates to other devices. HTML
   import is good for **adding** a new "Marcadores reorganizados" tree alongside the old one,
   not for moving.
-- **Restore from JSON (Library → Import and Backup → Restore → Choose File)** **replaces all**
+- **Excluded by the invariant (writes to Firefox).** **Restore from JSON (Library → Import and Backup → Restore → Choose File)** **replaces all**
   bookmarks **[published, Mozilla support "Restore bookmarks from backup", which recommends HTML
   import to merge instead]**. VFS could write a complete reorganised tree in Firefox's JSON
   backup format. This is the only no-extension way to get a true *move*, but it is
   all-or-nothing: an error drops bookmarks, and it interacts with Sync (Firefox 57 stopped HTML
   imports from forcing a Sync reset; restore behaviour under Sync must be tested). It needs
   Firefox closed or a careful user flow.
-- **WebExtension using `browser.bookmarks.move()`** (requires the `bookmarks` permission).
+- **Excluded by the invariant (writes to Firefox).** **WebExtension using `browser.bookmarks.move()`** (requires the `bookmarks` permission).
   Moves are real, incremental, Sync-aware and keep GUIDs, tags and keywords. VFS writes a move
   plan file and the extension applies it. Cost: release Firefox requires Mozilla signing; an
   **unlisted (self-distributed)** add-on gets automated validation (up to 24 h) and may be
@@ -1249,28 +1245,23 @@ workspace).
 
 ### 7. Smallest useful first step
 
-A read-only **"Ordenar marcadores" report** inside VFS using D1 only: duplicates by normalised
-URL, counts per domain and per folder, and an opt-in dead-link check with Wayback links. Output
-is a preview plus an exported HTML file of the proposed tree, which she *can* import as a new
-folder. No write path. This is useful on its own (duplicates and dead links are the usual mess)
-and tests whether she actually wants to move things.
+None: decided, will not do for now. Under the consultative invariant, the only parts that
+could return are read-only search features over VFS-6 bookmarks, shown inside VFS and never
+applied to Firefox: duplicates by normalised URL, counts per domain and per folder, and an
+opt-in dead-link report with Wayback links.
 
 ### 8. Recommendation
 
-**Do later**, after VFS-6 ships. Start with the read-only report (D1 + dead links). For deciding
-moves, prefer **D3 with Haiku-class batch pricing** (< $0.10 for the whole collection) once phase
-5 exists, since it understands "su criterio" in Spanish; D2 only if #41 lands a model anyway. For
-applying, prefer the **signed unlisted WebExtension** if she wants real moves, and offer the
-HTML "new folder" import as the no-install fallback. **Do not** generate a JSON restore for her to
-apply alone: too destructive for a non-technical user with Sync on.
+**Decided (owner, 2026-11-20): will not do for now.** VFS is purely consultative and never
+writes to a source. Every way of applying a new structure (HTML import, JSON restore, a
+WebExtension calling `bookmarks.move()`) writes to Firefox and is excluded. The classification
+research (D1–D3 and its costs) is kept in case the owner wants an organised *view* inside VFS
+later, which would not touch Firefox.
 
 ### 9. Open product questions
 
-1. **Does she want Firefox itself reorganised (needs an extension, or an all-or-nothing restore),
-   or is an organised view inside VFS enough?**
-2. Is it acceptable to send her bookmark titles and URLs to Anthropic/OpenAI for classification?
-3. Does she use Firefox Sync on other devices (phone)? This changes the risk of any apply step.
-4. Should dead bookmarks be deleted, moved to a "Rotos" folder, or replaced with their Wayback link?
+None now: the owner has decided. If the read-only view is ever considered: is it acceptable to
+send bookmark titles and URLs to an AI provider for classification?
 
 ### 10. Sources
 
@@ -1393,7 +1384,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
 
 ### 5. Cost
 
-- API fees: $0 (Open Library, Crossref, datos.bne.es free; Google Books free within quota).
+- API fees: $0 **[published: Open Library, Crossref and datos.bne.es charge nothing; Google Books is free within quota; see section 4]**.
 - Time **[estimate]**: 300 books at Open Library's 1 req/s ≈ 5 min metadata; covers capped at
   100/5 min → 15 min for 300 by ISBN, or ~5 min via cover IDs. Run in the background with
   progress; the list is usable before covers arrive.
