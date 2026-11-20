@@ -590,6 +590,76 @@ fn ac9_text_truncation_by_cap() {
     assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
 }
 
+/// VFS-7 AC-4: a folder whose path matches holds more files than the cap: the query is cut
+/// at 2,000 hits with `truncatedBy = cap`, its path hits read in file-id order (`files_dir`, no name
+/// index); a folder under the cap returns every file.
+#[test]
+fn vfs7_capped_path_hits_are_read_by_file_id() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let big = w.dir(root, top, "WhatsApp Images", 1);
+    let small = w.dir(root, top, "Notaría", 1);
+    let tx = w.conn.transaction().unwrap();
+    let mut big_ids = Vec::new();
+    // Names inserted in reverse order, so file-id order differs from name order.
+    for i in (0..2_001).rev() {
+        let name = format!("img {i:05}.jpg");
+        let f = ingest::NewFile {
+            name: &name,
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        big_ids.push(ingest::insert_file(&tx, big, &f).unwrap());
+    }
+    let mut small_ids = Vec::new();
+    for name in ["escritura.pdf", "poder.pdf", "acta.pdf"] {
+        let f = ingest::NewFile {
+            name,
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        small_ids.push(ingest::insert_file(&tx, small, &f).unwrap());
+    }
+    tx.commit().unwrap();
+    drop(w);
+
+    let r = fx.search("whatsapp", SearchFilters::default());
+    assert_eq!(r.total, 2000);
+    assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
+    let mut all = Vec::new();
+    for offset in (0..2000).step_by(500) {
+        let page = fx
+            .vfs
+            .search(&SearchQuery {
+                text: "whatsapp".into(),
+                filters: SearchFilters::default(),
+                limit: 500,
+                offset,
+            })
+            .unwrap();
+        for h in page.hits.iter().filter(|h| !h.is_dir) {
+            assert_eq!(h.matched, MatchKind::Path);
+            all.push(h.id);
+        }
+    }
+    // The folder itself is the one name hit; its files fill the rest of the cap.
+    assert_eq!(all.len(), 1999);
+    all.sort();
+    big_ids.sort();
+    assert_eq!(all, big_ids[..1999].to_vec(), "the lowest file ids");
+    let mut expected = files(&small_ids);
+    expected.push((true, small));
+    expected.sort();
+    assert_eq!(
+        ids(&fx.text("notaria")),
+        expected,
+        "the folder and all its files"
+    );
+}
+
 /// VFS-1 AC-10: one typo is tolerated ("notaira" finds "Notaría").
 #[test]
 fn ac10_one_typo() {
