@@ -4607,6 +4607,7 @@ dependencies = [
  "clap",
  "libc",
  "log",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
