@@ -1,0 +1,37 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+
+# Tauri (generated capability schemas; src-tauri/target is covered above)
+src-tauri/gen/schemas/
+
+# macOS
+.DS_Store
+._*
+
+# Python (harness hooks and scripts)
+__pycache__/
+
+# Local env
+.env
+.env*.local
+
+# Editors
+.idea/
+.vscode/
+
+# AI coding state: OMC runtime state is per-machine and deleted with its
+# worktree, so committed files never reference it (specs/README.md).
+.omc/
+# Claude Code local artifacts: per-machine config, personal agents, worktrees.
+.claude/agents/*
+!.claude/agents/pr-critic.md
+.claude/launch.json
+.claude/settings.local.json
+.claude/worktrees/
