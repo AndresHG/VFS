@@ -134,6 +134,12 @@ fn kill_during_first_scan_then_resume() {
         if !s.db.exists() {
             continue; // killed before the index was created
         }
+        drop(vfs_core::Vfs::open(&s.db).unwrap()); // creates the schema if the kill beat it
+        if root_paths(&s.db).is_empty() {
+            // Killed after the index was created but before the folder's row committed: the
+            // folder was never added. The user adds it again.
+            index(&s.db, &[&s.tree]);
+        }
         check_and_converge(&s, &format!("first scan, iteration {i} ({cmd:?})"));
     }
 }

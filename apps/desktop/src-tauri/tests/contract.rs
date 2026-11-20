@@ -165,7 +165,10 @@ fn all_error_codes() -> Vec<String> {
     let all = vec![
         Error::NotFound(String::new()),
         Error::NotADirectory(String::new()),
-        Error::OverlappingRoot(String::new()),
+        Error::OverlappingRoot {
+            relation: vfs_core::OverlapRelation::Same,
+            existing: String::new(),
+        },
         Error::Unavailable(String::new()),
         Error::SchemaTooNew,
         Error::Db(rusqlite::Error::InvalidQuery),
@@ -175,7 +178,7 @@ fn all_error_codes() -> Vec<String> {
         match e {
             Error::NotFound(_)
             | Error::NotADirectory(_)
-            | Error::OverlappingRoot(_)
+            | Error::OverlappingRoot { .. }
             | Error::Unavailable(_)
             | Error::SchemaTooNew
             | Error::Db(_)
