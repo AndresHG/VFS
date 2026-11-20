@@ -365,9 +365,9 @@ fn resume_after_stop_mid_scan() {
     assert_eq!(fx.status(), RootStatus::Ready);
 }
 
-/// VFS-1 AC-7, VFS-4 AC-4: a full re-walk requested from the running indexer reflects files
-/// added, deleted, renamed, moved and changed in size, and folders renamed, moved and
-/// deleted.
+/// VFS-1 AC-7, VFS-4 AC-4, VFS-7 AC-3: a full re-walk requested from the running indexer
+/// reflects files added, deleted, renamed, moved and changed in size, and folders renamed,
+/// moved and deleted.
 #[test]
 fn rewalk_detects_changes() {
     let fx = Fixture::new();
@@ -418,6 +418,13 @@ fn rewalk_detects_changes() {
     assert!(fx.find_files("renombrar").is_empty());
     assert!(fx.find_files("borrar").is_empty());
     assert_eq!(fx.find_files("profundo"), vec!["profundo.txt"]);
+    // VFS-7 AC-3: without a uniqueness constraint, re-walks still store a name once per folder.
+    assert_eq!(
+        fx.count(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM files GROUP BY dir_id, name HAVING COUNT(*) > 1)"
+        ),
+        0
+    );
     assert_eq!(fx.files_fts_rows(), 6);
     assert_eq!(fx.count("SELECT files_count FROM roots"), 6);
     assert_eq!(fx.status(), RootStatus::Ready);
