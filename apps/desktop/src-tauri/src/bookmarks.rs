@@ -129,14 +129,10 @@ pub fn open_in_firefox(url: &str) -> std::io::Result<()> {
     platform_open(arg).inspect_err(|e| log::warn!("open in Firefox: {e}"))
 }
 
-/// The address as one command-line argument: an `http`/`https` address with no space,
-/// quote or control character (Firefox stores addresses already percent-encoded), so it
-/// starts with the scheme, cannot be read as an option, and needs no quoting.
+/// The address as one command-line argument, when [`vfs_bookmarks::is_openable`] accepts it:
+/// it starts with the scheme, cannot be read as an option, and needs no quoting.
 pub fn firefox_arg(url: &str) -> Option<&str> {
-    let plain = !url
-        .chars()
-        .any(|c| c.is_whitespace() || c.is_control() || c == '"');
-    (plain && vfs_bookmarks::is_openable(url) && url.starts_with(['h', 'H'])).then_some(url)
+    vfs_bookmarks::is_openable(url).then_some(url)
 }
 
 #[cfg(target_os = "macos")]

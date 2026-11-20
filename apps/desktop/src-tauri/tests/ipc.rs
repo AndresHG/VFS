@@ -182,14 +182,12 @@ fn bookmark_commands_over_ipc() {
     let r = invoke(
         &webview,
         "search_sources",
-        json!({ "query": query, "sources": [] }),
+        json!({ "query": query, "options": { "sources": [] } }),
     )
     .unwrap();
-    assert!(r["hits"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|h| h["source"] == json!("files")));
+    let hits = r["hits"].as_array().unwrap();
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| h["source"] == json!("files")));
 
     let st = invoke(
         &webview,

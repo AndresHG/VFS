@@ -308,6 +308,14 @@ fn ac12_only_web_addresses_are_opened() {
     ));
     assert!(matches!(w.bm.url_to_open(999_999), Err(Error::NotFound(_))));
     assert!(vfs_bookmarks::is_openable("HTTPS://x.es") && !vfs_bookmarks::is_openable("ftp://x"));
+    for odd in [
+        "https://a.es/ b",
+        "https://a.es/\"x",
+        "https://a.es/\tb",
+        " https://a.es",
+    ] {
+        assert!(!vfs_bookmarks::is_openable(odd), "{odd:?}");
+    }
 }
 
 /// VFS-6 AC-7 (R7, R11): the type "Carpetas" keeps bookmark folders and drops bookmarks.

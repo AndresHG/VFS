@@ -41,10 +41,15 @@ pub(crate) struct Entry {
     tree_key: Vec<i64>,
 }
 
-/// Only web addresses are opened in Firefox (VFS-6 R10).
+/// Only plain web addresses are opened in Firefox (VFS-6 R10): `http`/`https`, with no
+/// space, quote or control character (Firefox stores addresses already percent-encoded), so
+/// the address is one command-line argument that starts with the scheme.
 pub fn is_openable(url: &str) -> bool {
-    let lower = url.trim_start().to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://")
+    let lower = url.to_ascii_lowercase();
+    let plain = !url
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '"');
+    plain && (lower.starts_with("https://") || lower.starts_with("http://"))
 }
 
 /// The address as matched: no scheme, no leading `www.`, folded.

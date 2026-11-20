@@ -275,7 +275,10 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 limit,
                 offset,
             };
-            if source == sources::SourceArg::Files && sort == sources::SortArg::Relevance {
+            // Without a bookmark store (`vfs bookmarks on` never ran), plain file output.
+            let files_only = source == sources::SourceArg::Files
+                || !vfs_bookmarks::bookmarks_db_path(&db).exists();
+            if files_only && sort == sources::SortArg::Relevance {
                 cmd_search(&Vfs::open(&db)?, &q, json)?;
             } else {
                 sources::cmd_search(&db, &q, source, sort, json)?;
