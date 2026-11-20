@@ -328,12 +328,14 @@ def _check_gh(args, cwd=""):
         return _pr_critic_gate(cwd)
     if sub == "pr" and action == "merge":
         return [("ask", "Merging a PR changes main, which every release is built "
-                        "from. Merge only on an explicit user request, with --squash.")]
+                        "from. Merge with --squash only once the pr-critic has passed "
+                        "HEAD, CI is green on Windows and macOS, and the branch is "
+                        "rebased on main (CLAUDE.md, Git).")]
     if sub == "api":
         joined = " ".join(rest)
         if re.search(r"pulls/\d+/merge\b", joined) or "mergePullRequest" in joined:
             return [("ask", "This GitHub API call merges a PR — the same change as "
-                            "`gh pr merge`. Confirm it was requested.")]
+                            "`gh pr merge`, under the same conditions (CLAUDE.md, Git).")]
     if sub == "secret" and action in ("set", "delete", "remove"):
         return [("ask", "GitHub secrets feed the CI and release workflows. Changing "
                         "one changes what every build runs with. Confirm it was requested.")]
