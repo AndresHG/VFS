@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use crate::error::Result;
 
-#[allow(dead_code)] // T3a consumes these events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WatchEvent {
     /// Something changed at this absolute path; its parent (and itself, if a known directory)
@@ -25,7 +24,6 @@ pub(crate) struct RootWatcher {
     backend: imp::Backend,
 }
 
-#[allow(dead_code)] // T3a owns the watcher's lifetime.
 impl RootWatcher {
     /// Creates a watcher that reports through `sink` and drops events under `ignore` (the
     /// app's data directory).
@@ -458,6 +456,9 @@ mod imp {
         }
     }
 }
+
+#[cfg(test)]
+mod live_tests;
 
 #[cfg(test)]
 mod tests {

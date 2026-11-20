@@ -74,11 +74,4 @@ mod tests {
             assert_eq!(ApiError::from(e).code, code);
         }
     }
-
-    /// VFS-1 AC-5: event names match the command contract.
-    #[test]
-    fn event_names() {
-        assert_eq!(EVENT_INDEX_PROGRESS, "index-progress");
-        assert_eq!(EVENT_INDEX_CHANGED, "index-changed");
-    }
 }

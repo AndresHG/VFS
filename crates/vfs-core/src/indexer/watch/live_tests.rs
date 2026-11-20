@@ -1,16 +1,5 @@
-//! Live watcher tests on a real temp directory (VFS-1 AC-7). The watcher is crate-private,
-//! so its source is compiled into this test crate with `#[path]`, together with the two
-//! modules it uses. Every wait polls for up to 30 s; the tests run on Windows CI too.
-
-#[allow(dead_code)]
-#[path = "../src/error.rs"]
-mod error;
-#[allow(dead_code)]
-#[path = "../src/platform.rs"]
-mod platform;
-#[allow(dead_code)]
-#[path = "../src/indexer/watch.rs"]
-mod watch;
+//! Live watcher tests on a real temp directory (VFS-1 AC-7). Every wait polls for up to
+//! 30 s; the tests run on Windows CI too.
 
 use std::collections::HashSet;
 use std::fs;
@@ -18,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use watch::{RootWatcher, WatchEvent, WatchSink};
+use super::{RootWatcher, WatchEvent, WatchSink};
 
 const ROOT_ID: i64 = 7;
 const TIMEOUT: Duration = Duration::from_secs(30);

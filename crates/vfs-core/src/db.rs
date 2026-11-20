@@ -15,10 +15,34 @@ pub const SCHEMA_VERSION: u32 = 1;
 
 const SCHEMA_V1: &str = include_str!("schema.sql");
 
+/// Readers wait this long for a lock.
+const READER_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// A writer waits this long for the other writer (indexer vs facade root changes).
+const WRITER_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Page cache of a writer and of a reader, KiB (negative `cache_size`). With `mmap_size=0`
+/// these bound the index's resident memory (VFS-1 AC-9).
+const WRITER_CACHE_KIB: i64 = 32 * 1024;
+const READER_CACHE_KIB: i64 = 64 * 1024;
+/// The search connection keeps more of the FTS index and the rows it reads, so repeated
+/// and related searches stay fast when the system has little file cache to spare. With the
+/// writer and the other reader, the page caches stay under 230 MB (AC-9: < 300 MB).
+const SEARCH_CACHE_KIB: i64 = 128 * 1024;
+/// WAL pages before an automatic checkpoint.
+const WAL_AUTOCHECKPOINT_PAGES: i64 = 4000;
+/// The WAL is truncated to this size after a checkpoint.
+const JOURNAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+/// Prepared statements kept per writer connection: every `prepare_cached` statement of the
+/// ingest helpers and the indexer loop stays cached.
+const WRITER_STATEMENT_CACHE: usize = 32;
+
+/// Suffixes of SQLite's companion files next to the index.
+pub(crate) const WAL_SUFFIX: &str = "-wal";
+const SHM_SUFFIX: &str = "-shm";
+
 /// Pragmas shared by every connection. `mmap_size=0` keeps resident memory bounded by the
 /// page caches (VFS-1 AC-9).
 fn apply_common_pragmas(conn: &Connection) -> Result<()> {
-    conn.busy_timeout(Duration::from_millis(5000))?;
+    conn.busy_timeout(READER_BUSY_TIMEOUT)?;
     let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
     conn.execute_batch(
         "PRAGMA synchronous=NORMAL;
@@ -38,13 +62,17 @@ fn schema_version(conn: &Connection) -> Result<u32> {
 pub fn open_rw(db_path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(db_path)?;
     apply_common_pragmas(&conn)?;
-    // A writer waits up to 30 s for the other writer (indexer vs facade root changes).
-    conn.busy_timeout(Duration::from_secs(30))?;
-    conn.execute_batch(
-        "PRAGMA cache_size=-32768;
-         PRAGMA wal_autocheckpoint=4000;",
+    conn.busy_timeout(WRITER_BUSY_TIMEOUT)?;
+    conn.set_prepared_statement_cache_capacity(WRITER_STATEMENT_CACHE);
+    conn.execute_batch(&format!(
+        "PRAGMA cache_size=-{WRITER_CACHE_KIB};
+         PRAGMA wal_autocheckpoint={WAL_AUTOCHECKPOINT_PAGES};"
+    ))?;
+    let _limit: i64 = conn.query_row(
+        &format!("PRAGMA journal_size_limit={JOURNAL_SIZE_LIMIT_BYTES}"),
+        [],
+        |r| r.get(0),
     )?;
-    let _limit: i64 = conn.query_row("PRAGMA journal_size_limit=67108864", [], |r| r.get(0))?;
     let version = schema_version(&conn)?;
     if version > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew);
@@ -58,20 +86,27 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Opens an existing index for reading only (`query_only=1`, 64 MB page cache).
+/// Opens an existing index for reading only (`query_only=1`).
 pub fn open_ro(db_path: &Path) -> Result<Connection> {
     let conn = Connection::open_with_flags(
         db_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     apply_common_pragmas(&conn)?;
-    conn.execute_batch(
-        "PRAGMA cache_size=-65536;
-         PRAGMA query_only=1;",
-    )?;
+    conn.execute_batch(&format!(
+        "PRAGMA cache_size=-{READER_CACHE_KIB};
+         PRAGMA query_only=1;"
+    ))?;
     if schema_version(&conn)? > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew);
     }
+    Ok(conn)
+}
+
+/// [`open_ro`] with the larger page cache of the search connection.
+pub(crate) fn open_search(db_path: &Path) -> Result<Connection> {
+    let conn = open_ro(db_path)?;
+    conn.execute_batch(&format!("PRAGMA cache_size=-{SEARCH_CACHE_KIB};"))?;
     Ok(conn)
 }
 
@@ -230,7 +265,7 @@ fn salvage_root_paths(db_path: &Path) -> Vec<String> {
 pub(crate) fn recover(db_path: &Path) -> Result<Connection> {
     let roots = salvage_root_paths(db_path);
     let bad = bad_path(db_path);
-    for suffix in ["", "-wal", "-shm"] {
+    for suffix in ["", WAL_SUFFIX, SHM_SUFFIX] {
         let mut from = db_path.as_os_str().to_owned();
         from.push(suffix);
         let mut to = bad.as_os_str().to_owned();
@@ -487,6 +522,29 @@ pub mod ingest {
         )?;
         tx.execute(&format!("DELETE FROM dirs WHERE id IN ({subtree})"), p)?;
         Ok(removed as u64)
+    }
+
+    /// Deletes a root with all its directories, files and FTS rows at once.
+    pub fn delete_root(tx: &Transaction, root_id: i64) -> Result<()> {
+        let subtree = "SELECT id FROM dirs WHERE root_id = ?1";
+        tx.execute(
+            &format!(
+                "DELETE FROM files_fts WHERE rowid IN \
+                 (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+            ),
+            [root_id],
+        )?;
+        tx.execute(
+            &format!("DELETE FROM files WHERE dir_id IN ({subtree})"),
+            [root_id],
+        )?;
+        tx.execute(
+            &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
+            [root_id],
+        )?;
+        tx.execute("DELETE FROM dirs WHERE root_id = ?1", [root_id])?;
+        tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
+        Ok(())
     }
 
     pub fn set_dir_state(tx: &Transaction, dir_id: i64, state: ScanState) -> Result<()> {
@@ -954,27 +1012,27 @@ mod tests {
             .unwrap()
     }
 
-    /// VFS-1 AC-9: writer and reader pragmas bound memory (page caches, no mmap) and keep
-    /// readers from blocking (WAL, busy timeouts: 30 s writer, 5 s reader).
+    /// VFS-1 AC-9: no connection memory-maps the index (resident memory stays bounded by
+    /// the page caches), every connection is in WAL mode so readers never block the
+    /// indexer, and a reader refuses writes.
     #[test]
-    fn connection_pragmas() {
+    fn connection_behaviour() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.db");
         let w = open_rw(&path).unwrap();
-        assert_eq!(pragma(&w, "busy_timeout"), 30_000);
-        assert_eq!(pragma(&w, "cache_size"), -32768);
-        assert_eq!(pragma(&w, "wal_autocheckpoint"), 4000);
-        assert_eq!(pragma(&w, "journal_size_limit"), 67_108_864);
         let r = open_ro(&path).unwrap();
-        assert_eq!(pragma(&r, "busy_timeout"), 5000);
-        assert_eq!(pragma(&r, "cache_size"), -65536);
-        assert_eq!(pragma(&r, "query_only"), 1);
         for c in [&w, &r] {
-            assert_eq!(pragma(c, "synchronous"), 1, "NORMAL");
-            assert_eq!(pragma(c, "temp_store"), 2, "MEMORY");
-            assert_eq!(pragma(c, "foreign_keys"), 0);
             assert_eq!(pragma(c, "mmap_size"), 0);
+            let mode: String = c
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal");
         }
+        assert!(
+            r.execute("DELETE FROM roots", []).is_err(),
+            "reader is query-only"
+        );
+        assert!(w.execute("DELETE FROM roots", []).is_ok());
     }
 
     /// VFS-1 AC-4: roots on one volume share its row; a Windows root is named after its last

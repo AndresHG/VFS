@@ -1,16 +1,21 @@
-//! Indexer walk, apply and resume over real temporary directory trees (VFS-1 AC-5..AC-8).
-//! Rows are checked through a read connection with FTS queries, as search reads them.
+//! Indexer walk, apply and resume over real temporary directory trees (VFS-1 AC-4..AC-11).
+//! Rows are checked through a read connection, and the end-to-end test searches the indexed
+//! tree through `Vfs::search`.
 
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use rusqlite::Connection;
+use vfs_core::db::ingest::ScanState;
 use vfs_core::db::{self, ingest};
-use vfs_core::{fold_key, IndexProgress, IndexerState, ProgressSink, Vfs};
+use vfs_core::{
+    fold_key, FileKind, IndexProgress, IndexerState, MatchKind, ProgressSink, RootStatus,
+    SearchFilters, SearchQuery, SearchResponse, Vfs,
+};
 
 struct Fixture {
     _db_dir: tempfile::TempDir,
@@ -84,6 +89,47 @@ impl Fixture {
 
     fn count(&self, sql: &str) -> i64 {
         self.reader().query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    /// Directories still waiting to be listed.
+    fn pending_dirs(&self) -> i64 {
+        self.reader()
+            .query_row(
+                "SELECT COUNT(*) FROM dirs WHERE scan_state <> ?1",
+                [ScanState::Clean as i64],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Status of the only root.
+    fn status(&self) -> RootStatus {
+        let code: i64 = self
+            .reader()
+            .query_row("SELECT status FROM roots", [], |r| r.get(0))
+            .unwrap();
+        RootStatus::from_code(code)
+    }
+
+    fn set_dir_state(&self, rel_path: &str, state: ScanState) {
+        db::open_rw(&self.db_path)
+            .unwrap()
+            .execute(
+                "UPDATE dirs SET scan_state = ?2 WHERE rel_path = ?1",
+                rusqlite::params![rel_path, state as i64],
+            )
+            .unwrap();
+    }
+
+    fn search(&self, text: &str, filters: SearchFilters) -> SearchResponse {
+        self.vfs
+            .search(&SearchQuery {
+                text: text.into(),
+                filters,
+                limit: 500,
+                offset: 0,
+            })
+            .unwrap()
     }
 }
 
@@ -196,10 +242,7 @@ fn full_scan_indexes_tree() {
         0,
         "directories carry their mtime"
     );
-    assert_eq!(
-        fx.count("SELECT COUNT(*) FROM dirs WHERE scan_state <> 0"),
-        0
-    );
+    assert_eq!(fx.pending_dirs(), 0);
     let (status, files, dirs, last): (i64, i64, i64, Option<i64>) = fx
         .reader()
         .query_row(
@@ -208,7 +251,10 @@ fn full_scan_indexes_tree() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
-    assert_eq!((status, files, dirs), (2, 4, 5));
+    assert_eq!(
+        (RootStatus::from_code(status), files, dirs),
+        (RootStatus::Ready, 4, 5)
+    );
     assert!(last.is_some());
 
     // A second scan with nothing pending does nothing.
@@ -271,11 +317,7 @@ fn resume_after_stop_mid_scan() {
     // Committed rows are visible to a reader before the scan finishes.
     assert_eq!(fx.find_files("raiz").len(), 4);
     assert_eq!(fx.count("SELECT COUNT(*) FROM files"), 4);
-    assert_eq!(
-        fx.count("SELECT status FROM roots"),
-        1,
-        "root is still scanning"
-    );
+    assert_eq!(fx.status(), RootStatus::Scanning, "root is still scanning");
 
     // A new process: open the index again and finish.
     let vfs = Vfs::open(&fx.db_path).unwrap();
@@ -293,7 +335,7 @@ fn resume_after_stop_mid_scan() {
         total_files as i64
     );
     assert_eq!(fx.find_files("archivo 3-2-4").len(), 1);
-    assert_eq!(fx.count("SELECT status FROM roots"), 2);
+    assert_eq!(fx.status(), RootStatus::Ready);
 }
 
 /// VFS-1 AC-7: a full re-walk requested from the running indexer reflects files added,
@@ -331,8 +373,7 @@ fn rewalk_detects_changes() {
         "B/queda.txt",
     ];
     wait_until("re-walk", || {
-        fx.all_files() == expected
-            && fx.count("SELECT COUNT(*) FROM dirs WHERE scan_state <> 0") == 0
+        fx.all_files() == expected && fx.pending_dirs() == 0
     });
     wait_until("idle", || fx.vfs.progress().state == IndexerState::Idle);
     fx.vfs.shutdown();
@@ -351,7 +392,7 @@ fn rewalk_detects_changes() {
     assert_eq!(fx.find_files("profundo"), vec!["profundo.txt"]);
     assert_eq!(fx.count("SELECT COUNT(*) FROM files_fts"), 6);
     assert_eq!(fx.count("SELECT files_count FROM roots"), 6);
-    assert_eq!(fx.count("SELECT status FROM roots"), 2);
+    assert_eq!(fx.status(), RootStatus::Ready);
 }
 
 /// VFS-1 AC-7: a watcher hint re-lists only the directory that changed (pending shallow),
@@ -380,14 +421,11 @@ fn mark_dirty_relists_one_directory() {
     );
 
     // A pending deep directory stays deep.
-    let conn = db::open_rw(&fx.db_path).unwrap();
-    conn.execute("UPDATE dirs SET scan_state = 1 WHERE rel_path = 'A'", [])
-        .unwrap();
-    drop(conn);
+    fx.set_dir_state("A", ScanState::PendingDeep);
     fx.vfs.mark_dirty(&[fx.root().join("A/uno.txt")]).unwrap();
     assert_eq!(
         fx.count("SELECT scan_state FROM dirs WHERE rel_path = 'A'"),
-        1
+        ScanState::PendingDeep as i64
     );
     assert_eq!(fx.scan().dirs_listed, 4, "deep re-list of A and below");
 }
@@ -459,11 +497,8 @@ fn unreadable_directory_does_not_abort_scan() {
         );
         assert!(fx.all_dirs().contains(&"Cerrada".to_string()));
     }
-    assert_eq!(fx.count("SELECT status FROM roots"), 2);
-    assert_eq!(
-        fx.count("SELECT COUNT(*) FROM dirs WHERE scan_state <> 0"),
-        0
-    );
+    assert_eq!(fx.status(), RootStatus::Ready);
+    assert_eq!(fx.pending_dirs(), 0);
 }
 
 /// VFS-1 AC-5: reads through a separate read connection succeed while a scan is writing,
@@ -503,9 +538,7 @@ fn removing_root_is_finished() {
     let fx = Fixture::new();
     fx.file("A/uno.txt", 1);
     fx.scan();
-    let conn = db::open_rw(&fx.db_path).unwrap();
-    conn.execute("UPDATE roots SET status = 4", []).unwrap();
-    drop(conn);
+    fx.vfs.remove_root(fx.root_id).unwrap();
     fx.scan();
     for table in ["roots", "dirs", "files", "files_fts", "dirs_fts"] {
         assert_eq!(
@@ -525,10 +558,155 @@ fn unreachable_root_keeps_rows() {
     let conn = db::open_rw(&fx.db_path).unwrap();
     conn.execute("UPDATE roots SET path = path || '-desconectada'", [])
         .unwrap();
-    conn.execute("UPDATE dirs SET scan_state = 1 WHERE rel_path = ''", [])
-        .unwrap();
     drop(conn);
+    fx.set_dir_state("", ScanState::PendingDeep);
     fx.scan();
-    assert_eq!(fx.count("SELECT status FROM roots"), 3);
+    assert_eq!(fx.status(), RootStatus::Unavailable);
     assert_eq!(fx.count("SELECT COUNT(*) FROM files"), 1);
+}
+
+/// Sets a file's modification time to `secs` after the epoch.
+fn set_mtime(path: &std::path::Path, secs: u64) {
+    let f = fs::File::options().write(true).open(path).unwrap();
+    f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+        .unwrap();
+}
+
+/// Names of the hits, sorted.
+fn names(r: &SearchResponse) -> Vec<String> {
+    let mut v: Vec<String> = r.hits.iter().map(|h| h.name.clone()).collect();
+    v.sort();
+    v
+}
+
+/// VFS-1 AC-4, AC-8, AC-10, AC-11, decision D1: core end to end. A real tree on disk (files
+/// and empty folders) is indexed by the indexer and then found through `Vfs::search` by name,
+/// by a middle path segment, without accents, with one typo, and with each filter.
+#[test]
+fn indexed_tree_is_searchable_end_to_end() {
+    let fx = Fixture::new();
+    let escritura = fx.file("Gestoría/Año 2019/Banco/Notaría Pérez escritura.pdf", 2_000);
+    let extracto = fx.file("Gestoría/Año 2019/Banco/extracto enero.pdf", 50_000);
+    let playa = fx.file("Fotos/Viaje Cádiz/playa.jpg", 300_000);
+    let video = fx.file("Fotos/Viaje Cádiz/playa.mp4", 9_000_000);
+    let cancion = fx.file("Música/canción favorita.mp3", 4_000);
+    fs::create_dir_all(fx.root().join("Facturas vacías")).unwrap();
+    fs::create_dir_all(fx.root().join("Fotos/Vacía")).unwrap();
+    let (old, new) = (1_500_000_000, 1_700_000_000);
+    for p in [&escritura, &extracto, &cancion] {
+        set_mtime(p, old);
+    }
+    for p in [&playa, &video] {
+        set_mtime(p, new);
+    }
+    assert_eq!(fx.scan().files_added, 5);
+    let none = SearchFilters::default;
+
+    // By name, ignoring case and accents, and with one typo.
+    for q in ["notaria", "NOTARÍA perez", "notaira"] {
+        let r = fx.search(q, none());
+        assert_eq!(
+            names(&r),
+            vec!["Notaría Pérez escritura.pdf"],
+            "query {q:?}"
+        );
+        assert!(!r.hits[0].is_dir);
+        assert_eq!(r.hits[0].kind, FileKind::Document);
+        assert_eq!(r.hits[0].size, 2_000);
+        assert_eq!(r.hits[0].modified, old as i64);
+    }
+    assert_eq!(
+        fx.search("notaira", none()).hits[0].matched,
+        MatchKind::Fuzzy
+    );
+    assert_eq!(
+        fx.search("cancion", none()).hits[0].name,
+        "canción favorita.mp3"
+    );
+
+    // A middle path segment finds what is below it and the folder itself.
+    let r = fx.search("2019", none());
+    assert_eq!(
+        names(&r),
+        vec![
+            "Año 2019",
+            "Notaría Pérez escritura.pdf",
+            "extracto enero.pdf"
+        ]
+    );
+    let hit = r
+        .hits
+        .iter()
+        .find(|h| h.name == "extracto enero.pdf")
+        .unwrap();
+    assert_eq!(hit.matched, MatchKind::Path);
+    assert_eq!(fx.vfs.file_path(hit.id).unwrap(), extracto);
+    let r = fx.search("cadiz playa", none());
+    assert_eq!(names(&r), vec!["playa.jpg", "playa.mp4"]);
+
+    // Empty folders are results, marked as folders, with their own path.
+    let r = fx.search("facturas vacias", none());
+    assert_eq!(names(&r), vec!["Facturas vacías"]);
+    assert!(r.hits[0].is_dir);
+    assert_eq!(r.hits[0].kind, FileKind::Folder);
+    assert_eq!(
+        fx.vfs.dir_path(r.hits[0].id).unwrap(),
+        fx.root().join("Facturas vacías")
+    );
+
+    // Each filter on its own, with and without text.
+    let kinds = |k: FileKind| SearchFilters {
+        kinds: vec![k],
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&fx.search("playa", kinds(FileKind::Photo))),
+        vec!["playa.jpg"]
+    );
+    assert_eq!(
+        names(&fx.search("playa", kinds(FileKind::Video))),
+        vec!["playa.mp4"]
+    );
+    assert_eq!(
+        names(&fx.search("", kinds(FileKind::Audio))),
+        vec!["canción favorita.mp3"]
+    );
+    assert_eq!(
+        names(&fx.search("vacia", kinds(FileKind::Folder))),
+        vec!["Facturas vacías", "Vacía"]
+    );
+    let recent = SearchFilters {
+        modified_from: Some(1_600_000_000),
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&fx.search("playa", recent)),
+        vec!["playa.jpg", "playa.mp4"]
+    );
+    let older = SearchFilters {
+        modified_to: Some(1_600_000_000),
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&fx.search("pdf", older)),
+        vec!["Notaría Pérez escritura.pdf", "extracto enero.pdf"]
+    );
+    let mid_size = SearchFilters {
+        size_min: Some(10_000),
+        size_max: Some(1_000_000),
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&fx.search("", mid_size)),
+        vec!["extracto enero.pdf", "playa.jpg"]
+    );
+    let in_fotos = SearchFilters {
+        folder: Some(fx.root().join("Fotos").to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&fx.search("", in_fotos.clone())),
+        vec!["Vacía", "Viaje Cádiz", "playa.jpg", "playa.mp4"]
+    );
+    assert_eq!(names(&fx.search("jpg", in_fotos)), vec!["playa.jpg"]);
 }

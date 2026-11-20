@@ -5,7 +5,6 @@ use std::cmp::Reverse;
 use crate::types::{MatchKind, SearchHit};
 
 /// A verified hit plus what ranking needs. Built by `search.rs` (T2a).
-#[allow(dead_code)] // T2a builds candidates; T2b ranks them.
 pub(crate) struct Candidate {
     pub hit: SearchHit,
     /// `fold_key` of the file or folder name.
@@ -18,9 +17,8 @@ pub(crate) struct Candidate {
 /// query text and `terms` its folded terms.
 ///
 /// Folders (VFS-1 D1) rank by the same rules on their own name; on a full tie a file sorts
-/// before a folder (their id spaces overlap). With no terms (a filter-only query, addendum
+/// before a folder (their id spaces overlap). With no terms (a filter-only query, VFS-1
 /// S6) the order is newest first, then lower id.
-#[allow(dead_code)]
 pub(crate) fn rank(candidates: &mut [Candidate], folded_query: &str, terms: &[String]) {
     let whole = terms.join(" ");
     let trimmed = folded_query.trim();

@@ -72,7 +72,7 @@ impl Vfs {
         let (conn, _recovered, session) = db::open_session(db_path)?;
         drop(conn);
         let reader = db::open_ro(db_path)?;
-        let search_conn = db::open_ro(db_path)?;
+        let search_conn = db::open_search(db_path)?;
         let search_interrupt = search_conn.get_interrupt_handle();
         Ok(Vfs {
             inner: Arc::new(Inner {
@@ -138,7 +138,7 @@ impl Vfs {
         let roots = count("SELECT COUNT(*) FROM roots")? as u32;
         let schema_version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let mut wal = self.inner.db_path.clone().into_os_string();
-        wal.push("-wal");
+        wal.push(db::WAL_SUFFIX);
         let db_bytes = [self.inner.db_path.as_os_str(), wal.as_os_str()]
             .iter()
             .filter_map(|p| std::fs::metadata(p).ok())

@@ -13,7 +13,6 @@ mod walk;
 mod watch;
 
 use std::collections::{HashMap, HashSet};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -23,12 +22,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
+use crate::db::ingest::ScanState;
 use crate::db::{self, ingest};
 use crate::error::Result;
 use crate::types::{IndexProgress, IndexerState, RootProgress, RootStatus, ScanSummary};
 use crate::{platform, ProgressSink};
 
-/// Commit after this many changed rows (VFS-1 plan addendum I5)...
+/// Commit after this many changed rows (VFS-1 I5)...
 const BATCH_ROWS: u64 = 20_000;
 /// ...or when the transaction is this old.
 const BATCH_AGE: Duration = Duration::from_secs(5);
@@ -43,6 +43,13 @@ const STARTUP_REWALK_SECS: i64 = 24 * 3600;
 const PERIODIC_REWALK_SECS: i64 = 7 * 24 * 3600;
 const PERIODIC_CHECK: Duration = Duration::from_secs(3600);
 const IDLE_WAIT: Duration = Duration::from_secs(60);
+
+/// SQL condition of a directory waiting to be listed. The value of `ScanState::Clean` is
+/// spelled into the SQL text, not bound, so SQLite can prove the query matches the partial
+/// index `dirs_pending` (`schema.sql`); `INDEXED BY` refuses to prepare otherwise.
+fn pending_condition() -> String {
+    format!("scan_state <> {}", ScanState::Clean as i64)
+}
 
 fn now_secs() -> i64 {
     SystemTime::now()
@@ -128,8 +135,8 @@ fn run(
     let skip = data_dir(conn);
     let roots: Vec<ActiveRoot> = {
         let mut stmt =
-            conn.prepare("SELECT id, path, status FROM roots WHERE status <> 4 ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
+            conn.prepare("SELECT id, path, status FROM roots WHERE status <> ?1 ORDER BY id")?;
+        let rows = stmt.query_map([RootStatus::Removing.code()], |r| {
             Ok(ActiveRoot {
                 id: r.get(0)?,
                 path: r.get(1)?,
@@ -189,10 +196,11 @@ fn scan_root(
             return Ok(RootOutcome::Yielded);
         }
         let next: Option<(i64, String, i64)> = tx
-            .prepare_cached(
+            .prepare_cached(&format!(
                 "SELECT id, rel_path, scan_state FROM dirs INDEXED BY dirs_pending \
-                 WHERE root_id = ?1 AND scan_state <> 0 ORDER BY id DESC LIMIT 1",
-            )?
+                 WHERE root_id = ?1 AND {} ORDER BY id DESC LIMIT 1",
+                pending_condition()
+            ))?
             .query_row([root.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .optional()?;
         let Some((dir_id, rel_path, state)) = next else {
@@ -277,11 +285,11 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
     let tx = begin(conn)?;
     refresh_counts(&tx, Some(root.id))?;
     if root.status == RootStatus::Ready {
-        tx.execute("UPDATE roots SET status = 2 WHERE id = ?1", [root.id])?;
+        set_root_status(&tx, root.id, RootStatus::Ready)?;
     } else {
         tx.execute(
-            "UPDATE roots SET status = 2, last_full_scan_at = ?2 WHERE id = ?1",
-            params![root.id, now_secs()],
+            "UPDATE roots SET status = ?2, last_full_scan_at = ?3 WHERE id = ?1",
+            params![root.id, RootStatus::Ready.code(), now_secs()],
         )?;
         tx.execute(
             "INSERT INTO files_fts(files_fts, rank) VALUES('merge', 500)",
@@ -305,8 +313,8 @@ fn refresh_counts(conn: &Connection, root_id: Option<i64>) -> Result<()> {
            files_count = (SELECT COUNT(*) FROM files WHERE dir_id IN \
                             (SELECT id FROM dirs WHERE dirs.root_id = roots.id)), \
            dirs_count = (SELECT COUNT(*) FROM dirs WHERE dirs.root_id = roots.id) \
-         WHERE (?1 IS NULL AND status <> 2) OR id = ?1",
-        [root_id],
+         WHERE (?1 IS NULL AND status <> ?2) OR id = ?1",
+        params![root_id, RootStatus::Ready.code()],
     )?;
     Ok(())
 }
@@ -321,24 +329,25 @@ fn set_root_status(conn: &Connection, root_id: i64, status: RootStatus) -> Resul
 
 /// Queues a full re-walk: the root directory becomes pending deep and the root scanning.
 fn queue_rewalk(conn: &Connection, root_id: Option<i64>) -> Result<()> {
+    let removing = RootStatus::Removing.code();
     conn.execute(
-        "UPDATE dirs SET scan_state = 1 WHERE rel_path = '' AND root_id IN \
-         (SELECT id FROM roots WHERE status <> 4 AND (?1 IS NULL OR id = ?1))",
-        [root_id],
+        "UPDATE dirs SET scan_state = ?2 WHERE rel_path = '' AND root_id IN \
+         (SELECT id FROM roots WHERE status <> ?3 AND (?1 IS NULL OR id = ?1))",
+        params![root_id, ScanState::PendingDeep as i64, removing],
     )?;
     conn.execute(
-        "UPDATE roots SET status = 1 WHERE status <> 4 AND (?1 IS NULL OR id = ?1)",
-        [root_id],
+        "UPDATE roots SET status = ?2 WHERE status <> ?3 AND (?1 IS NULL OR id = ?1)",
+        params![root_id, RootStatus::Scanning.code(), removing],
     )?;
     Ok(())
 }
 
 /// Deletes the rows of roots in `removing` in batches, then the root rows (VFS-1 plan
-/// addendum I6). Returns false when `stop()` interrupted it.
+/// I6). Returns false when `stop()` interrupted it.
 fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
     let ids: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT id FROM roots WHERE status = 4")?;
-        let rows = stmt.query_map([], |r| r.get(0))?;
+        let mut stmt = conn.prepare("SELECT id FROM roots WHERE status = ?1")?;
+        let rows = stmt.query_map([RootStatus::Removing.code()], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     for root_id in ids {
@@ -388,10 +397,10 @@ fn build_progress(conn: &Connection, pass: &Pass, state: IndexerState) -> Result
     let mut total = 0u64;
     for (id, path, status, files_count) in rows {
         let pending: i64 = conn
-            .prepare_cached(
-                "SELECT COUNT(*) FROM dirs INDEXED BY dirs_pending \
-                 WHERE root_id = ?1 AND scan_state <> 0",
-            )?
+            .prepare_cached(&format!(
+                "SELECT COUNT(*) FROM dirs INDEXED BY dirs_pending WHERE root_id = ?1 AND {}",
+                pending_condition()
+            ))?
             .query_row([id], |r| r.get(0))?;
         let tally = pass.tally.get(&id);
         let files = (files_count + tally.map_or(0, |t| t.files_delta)).max(0) as u64;
@@ -712,8 +721,13 @@ impl Worker {
         };
         let roots: rusqlite::Result<Vec<(i64, String)>> = self
             .conn
-            .prepare("SELECT id, path FROM roots WHERE status <> 4")
-            .and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect());
+            .prepare("SELECT id, path FROM roots WHERE status <> ?1")
+            .and_then(|mut s| {
+                s.query_map([RootStatus::Removing.code()], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
+                .collect()
+            });
         let roots = match roots {
             Ok(r) => r,
             Err(e) => return log::warn!("watch roots: {e}"),
@@ -736,20 +750,15 @@ impl Worker {
     }
 }
 
-/// Starts the watcher. A failing watcher (or one not available on this platform yet) never
-/// stops indexing: periodic and on-demand re-walks still catch changes (VFS-1 AC-7).
+/// Starts the watcher. A failing watcher never stops indexing: periodic and on-demand re-walks still catch changes (VFS-1 AC-7).
 fn start_watcher(tx: Sender<Cmd>, ignore: PathBuf) -> Option<watch::RootWatcher> {
     let sink: watch::WatchSink = Arc::new(move |event| {
         let _ = tx.send(Cmd::Watch(event));
     });
-    match catch_unwind(AssertUnwindSafe(|| watch::RootWatcher::start(sink, ignore))) {
-        Ok(Ok(w)) => Some(w),
-        Ok(Err(e)) => {
+    match watch::RootWatcher::start(sink, ignore) {
+        Ok(w) => Some(w),
+        Err(e) => {
             log::warn!("file watcher unavailable: {e}");
-            None
-        }
-        Err(_) => {
-            log::warn!("file watcher unavailable");
             None
         }
     }
@@ -759,10 +768,13 @@ fn start_watcher(tx: Sender<Cmd>, ignore: PathBuf) -> Option<watch::RootWatcher>
 fn queue_stale(conn: &Connection, age_secs: i64) -> Result<()> {
     let ids: Vec<i64> = {
         let mut stmt = conn.prepare(
-            "SELECT id FROM roots WHERE status = 2 \
+            "SELECT id FROM roots WHERE status = ?2 \
              AND (last_full_scan_at IS NULL OR last_full_scan_at < ?1)",
         )?;
-        let rows = stmt.query_map([now_secs() - age_secs], |r| r.get(0))?;
+        let rows = stmt.query_map(
+            params![now_secs() - age_secs, RootStatus::Ready.code()],
+            |r| r.get(0),
+        )?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     for id in ids {
@@ -790,24 +802,25 @@ pub(crate) fn scan_to_completion(
 }
 
 /// Marks the directories containing `paths` pending shallow, never downgrading a pending
-/// deep directory (`... WHERE id = ? AND scan_state = 0`).
+/// deep directory (only a clean directory becomes pending shallow).
 ///
 /// A path that is itself an indexed directory is marked too. A parent that is not indexed
 /// yet marks its nearest indexed ancestor. Paths outside every root are ignored.
 pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()> {
     let roots: Vec<(i64, PathBuf)> = {
-        let mut stmt = conn.prepare("SELECT id, path FROM roots WHERE status <> 4")?;
-        let rows = stmt.query_map([], |r| {
+        let mut stmt = conn.prepare("SELECT id, path FROM roots WHERE status <> ?1")?;
+        let rows = stmt.query_map([RootStatus::Removing.code()], |r| {
             Ok((r.get(0)?, PathBuf::from(r.get::<_, String>(1)?)))
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
+    let (shallow, clean) = (ScanState::PendingShallow as i64, ScanState::Clean as i64);
     let tx = conn.transaction()?;
     {
         let mut find =
             tx.prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?;
         let mut mark =
-            tx.prepare_cached("UPDATE dirs SET scan_state = 2 WHERE id = ?1 AND scan_state = 0")?;
+            tx.prepare_cached("UPDATE dirs SET scan_state = ?2 WHERE id = ?1 AND scan_state = ?3")?;
         for path in paths {
             let Some((root_id, rel)) = roots
                 .iter()
@@ -823,7 +836,7 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
                 .query_row(params![root_id, comps.join("/")], |r| r.get::<_, i64>(0))
                 .optional()?
             {
-                mark.execute([id])?;
+                mark.execute(params![id, shallow, clean])?;
             }
             let mut n = comps.len().saturating_sub(1);
             loop {
@@ -832,7 +845,7 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
                     .query_row(params![root_id, ancestor], |r| r.get::<_, i64>(0))
                     .optional()?
                 {
-                    mark.execute([id])?;
+                    mark.execute(params![id, shallow, clean])?;
                     break;
                 }
                 if n == 0 {

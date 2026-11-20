@@ -1012,9 +1012,15 @@ pub fn gen_db(out: &Path, files: u64, seed: u64, progress: bool) -> AnyResult<Ge
         .unwrap_or(Duration::ZERO)
         .as_secs() as i64;
     g.tx().execute(
-        "UPDATE roots SET status = 2, files_count = ?2, dirs_count = ?3, last_full_scan_at = ?4 \
+        "UPDATE roots SET status = ?5, files_count = ?2, dirs_count = ?3, last_full_scan_at = ?4 \
          WHERE id = ?1",
-        (root_id, files as i64, n_dirs as i64, now),
+        (
+            root_id,
+            files as i64,
+            n_dirs as i64,
+            now,
+            vfs_core::RootStatus::Ready.code(),
+        ),
     )?;
     g.tx.take().expect("transaction open").commit()?;
     let _: (i64, i64, i64) = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
