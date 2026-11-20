@@ -110,8 +110,9 @@ about 15:33 until the job's 120-minute limit). So there is no catch-up time unde
 foreground CLI scan for comparison, and no `vfs bench` on the 2,000,000-file index, quiet or
 busy. `slow-disk.ps1`'s busy remount needs fixing before the weekly run gives those numbers.
 
-The app's search round trip stays in milliseconds while scanning. The 16 s first search during
-the scan in the journey (defect 4) comes from the UI path, not from the engine.
+Here the search round trip stayed in milliseconds while scanning. So the 16 s first search
+during the scan in the journey (defect 4; a different run, tree on D:) is not explained by the
+engine alone; its cause is open in issue 109.
 
 What the emulation can and cannot say: no tool on a hosted runner rate-limits I/O or adds seek
 latency without a custom driver (Hyper-V QoS needs a VM, Storage QoS a cluster, job-object I/O
