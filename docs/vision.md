@@ -58,7 +58,8 @@ direction around them. Each line becomes a spec when it starts.
 Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6):
 
 - Other browsers' bookmarks (Chrome, Edge, Safari).
-- Chat exports: WhatsApp and Telegram (messages, shared links, contacts, and shared photos
+- Chat exports, official exports only (never the Telegram API or WhatsApp database
+  decryption): WhatsApp and Telegram (messages, shared links, contacts, and shared photos
   found by name and metadata only, under the no-photo-content rule).
 - Notes and lists: Google Keep and similar note or list apps, from their exports.
 - Private YouTube playlists and other saved-link services.
@@ -69,8 +70,8 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 - Text inside documents (Word, PDF): milestone Fase 3, designed in
   [`docs/content-search-design.md`](content-search-design.md).
 - Semantic search with small local embeddings, so a query finds a concept even when the
-  words differ.
-- Sort and filter by date and by source across everything.
+  words differ, once issue 41 has measured them on the target PC.
+- Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
 ### Ask your archive (RAG)
@@ -105,8 +106,9 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 ## Open questions
 
 - Obsidian: interoperate (Markdown vault in or out) or provide our own graph view? Both?
-- Which local model sizes are realistic for RAG on the target PC, and is a cloud model ever
-  acceptable as an opt-in?
+- Which local model sizes are realistic for RAG on the target PC. (Optional cloud model
+  access is already defined in the roadmap: off by default, the owner's own key, a consent
+  preview; issue 38.)
 - Where user-added notes live, and in what format, so they stay portable (plain Markdown?).
-- How each chat source can be read without the app writing to it or needing its cloud
-  account (official exports vs. local databases).
+- Chats: which apps and phones hold what the user wants (they are read only from official
+  exports; see the roadmap).
