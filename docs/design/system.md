@@ -125,7 +125,7 @@ Three static mockups use the same tokens and sample data. Open them by serving
 
 (The phase 1 UI today shows 2 rows at 900×600 and none at 150 %.)
 
-**Chosen: A · Papel** (the owner's pick; screenshots of the built screen in [`papel/`](papel/)). It is the direction that answers the owner's brief — simple,
+**Chosen: A · Papel** (the owner's pick; the built screen in every audited state, named as in [`audit/`](audit/) for before/after comparison, is in [`papel/`](papel/)). It is the direction that answers the owner's brief — simple,
 clean, calm, in the spirit of claude.ai — and it fixes the audit's top findings at once: the
 results get the screen, one action instead of a column of buttons, no boxes in boxes, warm
 colour, a quiet idle page that says what to do. It keeps every filter visible on one line (R9)
