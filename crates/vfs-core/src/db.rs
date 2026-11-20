@@ -311,11 +311,13 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
 
 /// [`open_rw`] with integrity handling, for a caller that ends its session itself.
 /// `PRAGMA quick_check` reads the whole index, so it runs only when an earlier session did
-/// not end cleanly. If the index cannot be opened or fails the check, it is moved to
-/// `<db_path>.bad` (replacing an older one), a fresh index is created, and every root path
-/// that could still be read from the bad file is re-added pending deep, so the next scan
-/// rebuilds it (VFS-1 AC-6). `SchemaTooNew` is returned as is: a newer build's index is
-/// never discarded.
+/// not end cleanly. Only damage recovers the index ([`is_damage`]: SQLite's corrupt or
+/// not-a-database, or a failed check): [`recover`] builds a replacement holding every root
+/// path still readable (pending deep, so the next scan rebuilds it, VFS-1 AC-6) at
+/// `<db_path>.new`, moves the damaged index to `<db_path>.bad` and swaps the new one in; a
+/// recovery killed between those steps is finished here first. Any other error (busy,
+/// locked, I/O, and `SchemaTooNew`: a newer build's index) is returned and nothing is moved
+/// (VFS-3 AC-3, AC-9).
 pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
     let (session, unclean) = begin_session(db_path)?;
     if !db_path.exists() && fresh_path(db_path).exists() && bad_path(db_path).exists() {
