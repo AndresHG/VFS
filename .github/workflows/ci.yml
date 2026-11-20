@@ -1,3 +1,6 @@
+# VFS-1 AC-3: lint and tests on Windows and macOS for every push to main and every PR.
+# Actions are pinned by commit SHA (tag in the comment); the toolchain comes from
+# rust-toolchain.toml.
 name: ci
 
 on:
@@ -27,14 +30,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The CLAUDE.md growth check compares against origin/main.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - name: Rust toolchain (pinned in rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Only main writes the cache, so PR runs don't evict each other.
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -45,6 +47,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
       - name: UI tests
-        run: node --test apps/desktop/ui-dev/status.test.mjs
+        run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs
