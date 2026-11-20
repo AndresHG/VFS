@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 vfs-core.workspace = true
+# Only for `Transaction`/`Connection` around `vfs_core::db::ingest` in `gen-db`.
+rusqlite.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
