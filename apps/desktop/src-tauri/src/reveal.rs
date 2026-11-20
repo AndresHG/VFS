@@ -1,5 +1,8 @@
 //! "Mostrar en carpeta" (VFS-1 AC-13): asks the OS file manager to show an item selected.
-//! macOS: `open -R <path>`. Windows: `explorer.exe /select,"<path>"`. Explorer cannot select
+//! macOS: `open -R <path>`. Windows: the Shell's `SHOpenFolderAndSelectItems`, which selects
+//! the item and reuses an Explorer window already showing its folder, repeated into the new
+//! Explorer window when it had to open one; `explorer.exe /select,"<path>"` only when that
+//! call fails (issue 107). Explorer cannot select
 //! items through a `\\?\` path or a path over `MAX_PATH`, so those open the nearest usable
 //! ancestor folder instead and report [`RevealOutcome::OpenedParent`]. On macOS a failed
 //! `open -R` reveals the nearest existing ancestor with `open -R` too. Nothing is opened
@@ -85,22 +88,149 @@ pub fn open_args(action: &Action) -> Vec<OsString> {
 /// Shows `path` (which exists) selected in Finder/Explorer.
 #[cfg(windows)]
 pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
-    use std::os::windows::process::CommandExt;
-    // Explorer parses its own command line: `/select,` must be followed by the quoted path in
-    // the same argument, so it is passed raw. Windows paths cannot contain `"`.
-    let (arg, outcome) = match plan_windows(path, |p| p.exists()) {
-        Some(a @ Action::Select(_)) => (explorer_arg(&a), RevealOutcome::Revealed),
-        Some(a @ Action::OpenDir(_)) => (explorer_arg(&a), RevealOutcome::OpenedParent),
-        None => {
-            return Err(io::Error::other(format!(
-                "no folder of {} can be shown in Explorer",
-                path.display()
-            )))
+    match plan_windows(path, |p| p.exists()) {
+        Some(Action::Select(p)) => {
+            if let Err(e) = shell_select(&p) {
+                log::warn!("SHOpenFolderAndSelectItems failed, using explorer /select: {e}");
+                spawn_explorer(&Action::Select(p))?;
+            }
+            Ok(RevealOutcome::Revealed)
         }
+        Some(dir @ Action::OpenDir(_)) => {
+            spawn_explorer(&dir)?;
+            Ok(RevealOutcome::OpenedParent)
+        }
+        None => Err(io::Error::other(format!(
+            "no folder of {} can be shown in Explorer",
+            path.display()
+        ))),
+    }
+}
+
+/// `explorer.exe` with [`explorer_arg`]. Explorer parses its own command line: `/select,`
+/// must be followed by the quoted path in the same argument, so it is passed raw. Windows
+/// paths cannot contain `"`. Its exit code is meaningless (1 on success); only a failed
+/// spawn is an error.
+#[cfg(windows)]
+fn spawn_explorer(action: &Action) -> io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    Command::new("explorer.exe")
+        .raw_arg(explorer_arg(action))
+        .spawn()
+        .map(drop)
+}
+
+/// How long to wait for the Explorer window that a reveal opens.
+#[cfg(windows)]
+const NEW_WINDOW_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Delays, after a new Explorer window appeared, of the repeated select calls.
+#[cfg(windows)]
+const RESELECT_AFTER: [std::time::Duration; 2] = [
+    std::time::Duration::from_millis(300),
+    std::time::Duration::from_millis(1200),
+];
+
+/// Opens `path`'s folder in Explorer with `path` selected, through
+/// `SHOpenFolderAndSelectItems` with the item's own absolute ID list and no child list (the
+/// documented form for one item). Measured on the Windows CI runner (issue 107): when the
+/// call has to create a new Explorer window, the folder opens with nothing selected, with
+/// this and every other form of the call and with `explorer /select,`; into a window that
+/// already shows the folder the same call selects at once. So when a new Explorer window
+/// appears within [`NEW_WINDOW_WAIT`], the call is repeated into it ([`RESELECT_AFTER`]).
+/// The Shell needs COM, so all of it runs on a thread of its own with a single-threaded
+/// apartment; the command returns after the first call and never waits for the window.
+#[cfg(windows)]
+fn shell_select(path: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
     };
-    // Explorer's exit code is meaningless (1 on success); only a failed spawn is an error.
-    Command::new("explorer.exe").raw_arg(arg).spawn()?;
-    Ok(outcome)
+    use windows_sys::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let (first_tx, first_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // SAFETY: plain Win32 calls; `wide` is NUL-terminated and outlives the calls, the ID
+        // list is freed once, and COM is uninitialised only when it was initialised here.
+        unsafe {
+            let hr = CoInitializeEx(
+                std::ptr::null(),
+                (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+            );
+            let pidl = ILCreateFromPathW(wide.as_ptr());
+            if pidl.is_null() {
+                let _ = first_tx.send(Err(io::Error::other(
+                    "ILCreateFromPathW returned no ID list",
+                )));
+            } else {
+                let before = explorer_windows();
+                let first = SHOpenFolderAndSelectItems(pidl, 0, std::ptr::null(), 0);
+                let ok = first >= 0;
+                let _ = first_tx.send(if ok {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(format!("HRESULT {first:#010x}")))
+                });
+                if ok && wait_for_new_window(&before) {
+                    for delay in RESELECT_AFTER {
+                        std::thread::sleep(delay);
+                        let hr = SHOpenFolderAndSelectItems(pidl, 0, std::ptr::null(), 0);
+                        if hr < 0 {
+                            log::warn!("repeated SHOpenFolderAndSelectItems: {hr:#010x}");
+                        }
+                    }
+                }
+                ILFree(pidl);
+            }
+            if hr >= 0 {
+                CoUninitialize();
+            }
+        }
+    });
+    first_rx
+        .recv()
+        .unwrap_or_else(|_| Err(io::Error::other("reveal thread ended early")))
+}
+
+/// Whether an Explorer window that is not in `before` appears within [`NEW_WINDOW_WAIT`].
+#[cfg(windows)]
+fn wait_for_new_window(before: &[isize]) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < NEW_WINDOW_WAIT {
+        if explorer_windows().iter().any(|w| !before.contains(w)) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
+}
+
+/// Window class of File Explorer's folder windows.
+#[cfg(windows)]
+const EXPLORER_WINDOW_CLASS: &str = "CabinetWClass";
+
+/// Handles of the open File Explorer folder windows.
+#[cfg(windows)]
+fn explorer_windows() -> Vec<isize> {
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetClassNameW};
+
+    unsafe extern "system" fn collect(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let mut class = [0u16; 64];
+        // SAFETY: `class` is a live buffer of the length passed; `lp` is the `Vec` below,
+        // borrowed for the duration of `EnumWindows`.
+        let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if String::from_utf16_lossy(&class[..n.max(0) as usize]) == EXPLORER_WINDOW_CLASS {
+            unsafe { (*(lp as *mut Vec<isize>)).push(hwnd as isize) };
+        }
+        1
+    }
+    let mut found: Vec<isize> = Vec::new();
+    // SAFETY: the callback only runs during this call, while `found` is alive.
+    unsafe { EnumWindows(Some(collect), &mut found as *mut Vec<isize> as LPARAM) };
+    found
 }
 
 /// Shows `path` (which exists) selected in Finder/Explorer.

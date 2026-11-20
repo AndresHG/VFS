@@ -5,12 +5,17 @@
 pub mod bookmarks;
 pub mod commands;
 pub mod reveal;
+pub mod splash;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent};
+use tauri::webview::PageLoadEvent;
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, Runtime, Window,
+    WindowEvent,
+};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub use vfs_core::api::{ApiError, RevealOutcome, EVENT_INDEX_CHANGED, EVENT_INDEX_PROGRESS};
@@ -20,6 +25,9 @@ pub use vfs_core::{
 };
 
 use vfs_core::{ProgressSink, SearchConfig, Vfs};
+
+/// Label of the main window in `tauri.conf.json`.
+pub const MAIN_WINDOW: &str = "main";
 
 /// File name of the index inside the local app data directory.
 pub const INDEX_FILE: &str = "index.db";
@@ -196,11 +204,119 @@ fn apply_webview_power<R: Runtime>(webview: &tauri::WebviewWindow<R>, action: We
 #[cfg(not(windows))]
 fn apply_webview_power<R: Runtime>(_webview: &tauri::WebviewWindow<R>, _action: WebviewPower) {}
 
+/// Size, minimum size and position (physical pixels) that make a window fit its monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowFit {
+    pub inner: (u32, u32),
+    pub min_inner: (u32, u32),
+    pub position: (i32, i32),
+}
+
+/// How the main window must change so that its outer frame (title bar and borders included,
+/// `frame` = outer minus inner size) fits the monitor's work area `(x, y, width, height)`,
+/// which excludes the taskbar (issue 106). `None` when it already fits. Otherwise each side is
+/// shrunk to what the work area leaves, the minimum size never exceeds the new size, and the
+/// window is centred in the work area.
+pub fn fit_window(
+    inner: (u32, u32),
+    min_inner: (u32, u32),
+    frame: (u32, u32),
+    work: (i32, i32, u32, u32),
+) -> Option<WindowFit> {
+    let (x, y, width, height) = work;
+    if inner.0 + frame.0 <= width && inner.1 + frame.1 <= height {
+        return None;
+    }
+    let inner = (
+        inner.0.min(width.saturating_sub(frame.0)),
+        inner.1.min(height.saturating_sub(frame.1)),
+    );
+    let offset = |area: u32, outer: u32| (area.saturating_sub(outer) / 2) as i32;
+    Some(WindowFit {
+        inner,
+        min_inner: (min_inner.0.min(inner.0), min_inner.1.min(inner.1)),
+        position: (
+            x + offset(width, inner.0 + frame.0),
+            y + offset(height, inner.1 + frame.1),
+        ),
+    })
+}
+
+/// Shrinks and centres the main window when it is larger than its monitor's work area.
+fn fit_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return Ok(());
+    };
+    let Some(monitor) = window.current_monitor()?.or(window.primary_monitor()?) else {
+        return Ok(());
+    };
+    let scale = monitor.scale_factor();
+    let min_inner = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN_WINDOW)
+        .map(|w| {
+            let px = |v: Option<f64>| (v.unwrap_or(0.0) * scale).round() as u32;
+            (px(w.min_width), px(w.min_height))
+        })
+        .unwrap_or_default();
+    let (inner, outer) = (window.inner_size()?, window.outer_size()?);
+    let area = monitor.work_area();
+    let fit = fit_window(
+        (inner.width, inner.height),
+        min_inner,
+        (
+            outer.width.saturating_sub(inner.width),
+            outer.height.saturating_sub(inner.height),
+        ),
+        (
+            area.position.x,
+            area.position.y,
+            area.size.width,
+            area.size.height,
+        ),
+    );
+    if let Some(fit) = fit {
+        window.set_min_size(Some(PhysicalSize::new(fit.min_inner.0, fit.min_inner.1)))?;
+        window.set_size(PhysicalSize::new(fit.inner.0, fit.inner.1))?;
+        window.set_position(PhysicalPosition::new(fit.position.0, fit.position.1))?;
+    }
+    Ok(())
+}
+
+/// Longest wait for the first page before the main window is shown anyway (issue 108), so a
+/// web view that never reports a load cannot leave the app invisible behind the splash.
+const SHOW_WINDOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Managed once startup has failed: the main window stays hidden behind the error dialog.
+struct StartupFailed;
+
+/// Shows the main window (hidden at start, see `tauri.conf.json`) and removes the splash.
+fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if app.try_state::<StartupFailed>().is_some() {
+        return;
+    }
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        if let Err(e) = w.show() {
+            log::warn!("show main window: {e}");
+        }
+    }
+    if let Some(splash) = app.try_state::<splash::Splash>() {
+        splash.close();
+    }
+}
+
 /// Shows a native error and quits: a startup failure must never die silently.
 fn fail_startup<R: Runtime>(app: &AppHandle<R>, detail: &str) {
     log::error!("startup failed: {detail}");
-    if let Some(w) = app.get_webview_window("main") {
+    app.manage(StartupFailed);
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
         let _ = w.hide();
+    }
+    if let Some(splash) = app.try_state::<splash::Splash>() {
+        splash.close();
     }
     let handle = app.clone();
     app.dialog()
@@ -216,12 +332,13 @@ fn fail_startup<R: Runtime>(app: &AppHandle<R>, detail: &str) {
 
 /// App entry point, called from `main.rs`.
 pub fn run() {
-    let builder = tauri::Builder::default();
+    // First, so it appears while WebView2 starts (issue 108).
+    let builder = tauri::Builder::default().manage(splash::Splash::show());
 
     // Must be the first plugin: a second launch focuses the running window and exits.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        if let Some(w) = app.get_webview_window("main") {
+        if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
             let _ = w.unminimize();
             let _ = w.show();
             let _ = w.set_focus();
@@ -236,9 +353,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(commands::handler())
         .on_window_event(on_window_event)
+        .on_page_load(|webview, payload| {
+            if webview.label() == MAIN_WINDOW && payload.event() == PageLoadEvent::Finished {
+                show_main_window(webview.app_handle());
+            }
+        })
         .setup(|app| {
             app.manage(WebviewSuspended::default());
             let handle = app.handle().clone();
+            if let Err(e) = fit_main_window(&handle) {
+                log::warn!("fit main window: {e}");
+            }
+            let deadline = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(SHOW_WINDOW_DEADLINE);
+                show_main_window(&deadline);
+            });
             // The index lives in the local (never roaming) app data directory: a multi-GB
             // file must not be synced to a NAS or backed up with the user's profile.
             let started = app
@@ -284,6 +414,34 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue 106: the 1100×720 window on a 1024×768 screen whose taskbar leaves 1024×728 is
+    /// shrunk so the frame fits above the taskbar, centred, with the minimum size kept.
+    #[test]
+    fn window_fits_a_small_screen_above_the_taskbar() {
+        let fit = fit_window((1100, 720), (720, 480), (16, 39), (0, 0, 1024, 728)).unwrap();
+        assert_eq!(fit.inner, (1008, 689));
+        assert_eq!(fit.min_inner, (720, 480));
+        assert_eq!(fit.position, (0, 0));
+        assert!(fit.inner.1 + 39 <= 728 && fit.inner.0 + 16 <= 1024);
+    }
+
+    /// Issue 106: at 150 % scale the minimum size itself is larger than the work area, so it
+    /// shrinks with the window; a window that fits is left alone; offsets follow the work
+    /// area's origin (a taskbar on the left or top, a second monitor).
+    #[test]
+    fn window_fit_edge_cases() {
+        let fit = fit_window((1650, 1080), (1080, 720), (24, 58), (0, 0, 1024, 728)).unwrap();
+        assert_eq!(fit.inner, (1000, 670));
+        assert_eq!(fit.min_inner, (1000, 670));
+        assert_eq!(
+            fit_window((1100, 720), (720, 480), (16, 39), (0, 0, 1920, 1040)),
+            None
+        );
+        let fit = fit_window((1100, 900), (720, 480), (16, 39), (1920, 40, 1600, 860)).unwrap();
+        assert_eq!(fit.inner, (1100, 821));
+        assert_eq!(fit.position, (1920 + (1600 - 1116) / 2, 40));
+    }
 
     /// VFS-5 AC-12: minimising asks for one suspend and restoring for one resume, on Windows
     /// only; repeated resizes in the same state ask for nothing.
