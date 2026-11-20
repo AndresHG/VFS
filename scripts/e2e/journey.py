@@ -314,7 +314,8 @@ class Journey:
         return found
 
     def engine_ms(self, query, filters=None):
-        r = self.wd.invoke("search", {"query": {"text": query, "filters": filters or NO_FILTERS, "limit": 200, "offset": 0}})
+        r = self.wd.invoke("search", {"query": {"text": query, "filters": filters or NO_FILTERS,
+                                                "limit": 200, "offset": 0}})
         return r["elapsedMs"], r["total"]
 
     def set_select(self, css, value):
