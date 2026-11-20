@@ -128,14 +128,24 @@ fn guid(conn: &Connection) -> String {
     format!("vfstest{n:05}")
 }
 
+/// The next position in `parent`, as Firefox numbers children 0, 1, 2…
+fn next_position(conn: &Connection, parent: i64) -> i64 {
+    conn.query_row(
+        "SELECT count(*) FROM moz_bookmarks WHERE parent = ?1",
+        [parent],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
 impl Places<'_> {
     pub fn folder(&self, parent: i64, title: &str) -> i64 {
         let g = guid(self.conn);
         self.conn
             .execute(
                 "INSERT INTO moz_bookmarks(type, parent, position, title, dateAdded, lastModified, guid) \
-                 VALUES(2, ?1, 0, ?2, 0, 0, ?3)",
-                params![parent, title, g],
+                 VALUES(2, ?1, ?2, ?3, 0, 0, ?4)",
+                params![parent, next_position(self.conn, parent), title, g],
             )
             .unwrap();
         self.conn.last_insert_rowid()
@@ -175,8 +185,8 @@ impl Places<'_> {
         self.conn
             .execute(
                 "INSERT INTO moz_bookmarks(type, fk, parent, position, title, dateAdded, lastModified, guid) \
-                 VALUES(1, ?1, ?2, 0, ?3, ?4, ?4, ?5)",
-                params![place, parent, title, prtime(added_secs), g],
+                 VALUES(1, ?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+                params![place, parent, next_position(self.conn, parent), title, prtime(added_secs), g],
             )
             .unwrap();
         self.conn.last_insert_rowid()

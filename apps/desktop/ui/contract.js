@@ -56,6 +56,9 @@ export const ReadState = Object.freeze({
   FAILED: 'failed',
 });
 
+/** Order of a search over several sources (VFS-6). */
+export const SortOrder = Object.freeze({ RELEVANCE: 'relevance', NEWEST: 'newest', SOURCE: 'source' });
+
 /** `ApiError.code`: every code a command can reject with (`Error::code` in error.rs). */
 export const ErrorCode = Object.freeze({
   NOT_FOUND: 'not_found',

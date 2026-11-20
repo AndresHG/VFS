@@ -73,7 +73,8 @@ fn ac1_reads_a_profile_with_every_kind_of_entry() {
     p.keyword("https://banco.es/", "bco");
     drop(conn);
 
-    let (list, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let (tree, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let list = tree.bookmarks;
     assert_eq!(origin, Origin::Database);
 
     let flan = &by_title(&list, "Flan de huevo")[0];
@@ -207,7 +208,8 @@ fn ac2_reads_while_another_process_holds_a_write_lock() {
     // Taken once the holder is ready; the reader must leave it exactly as it is.
     let before = listing(&dir);
 
-    let (list, _) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let (tree, _) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let list = tree.bookmarks;
     let titles: Vec<&str> = list.iter().map(|b| b.title.as_str()).collect();
     assert!(titles.contains(&"En el WAL"), "{titles:?}");
     assert!(!titles.contains(&"Sin confirmar"), "{titles:?}");
@@ -276,7 +278,8 @@ fn ac3_damaged_database_falls_back_to_the_newest_backup() {
     )
     .unwrap();
 
-    let (list, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let (tree, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let list = tree.bookmarks;
     assert_eq!(origin, Origin::Backup);
     let nueva = &by_title(&list, "Nueva")[0];
     assert_eq!(nueva.folder, vec!["Recetas"]);
@@ -287,7 +290,8 @@ fn ac3_damaged_database_falls_back_to_the_newest_backup() {
     assert_eq!(list.len(), 2);
 
     std::fs::remove_file(dir.join("places.sqlite")).unwrap();
-    let (list, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let (tree, origin) = firefox::read_profile(&dir, &work(tmp.path())).unwrap();
+    let list = tree.bookmarks;
     assert_eq!((origin, list.len()), (Origin::Backup, 2));
 
     // Through the store: read once, then make everything unreadable.
@@ -375,7 +379,7 @@ fn ac5_only_bookmark_tables_can_be_read() {
     assert_eq!(url, "https://uno.es/");
     drop(conn);
     // The whole reader runs under that authorizer, so succeeding means it read nothing else.
-    assert_eq!(firefox::read_places(&db).unwrap().len(), 1);
+    assert_eq!(firefox::read_places(&db).unwrap().bookmarks.len(), 1);
 }
 
 /// VFS-6 AC-9: a refresh with `places.sqlite` and its WAL unchanged since the last read makes

@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use rusqlite::Connection;
 use vfs_bookmarks::sources::search_sources;
 use vfs_bookmarks::testing::{FakeFirefox, Places, MENU, UNFILED};
-use vfs_bookmarks::{Bookmarks, ReadState, Source, SourceHit};
+use vfs_bookmarks::{Bookmarks, ReadState, SortOrder, Source, SourceHit, SourceOptions};
 use vfs_core::{Error, FileKind, MatchKind, SearchFilters, SearchQuery, Vfs};
 
 struct World {
@@ -54,6 +54,7 @@ fn world() -> World {
             "file:///C:/recetas.pdf",
             10,
         );
+        p.bookmark(UNFILED, Some("Dato incrustado"), "data:text/html,hola", 10);
         for i in 0..30 {
             p.bookmark(
                 UNFILED,
@@ -73,6 +74,13 @@ fn world() -> World {
     World { _tmp: tmp, vfs, bm }
 }
 
+fn only(sources: &[Source]) -> SourceOptions {
+    SourceOptions {
+        sources: sources.to_vec(),
+        ..Default::default()
+    }
+}
+
 fn q(text: &str) -> SearchQuery {
     SearchQuery {
         text: text.into(),
@@ -86,6 +94,7 @@ fn names(hits: &[SourceHit]) -> Vec<String> {
     hits.iter()
         .map(|h| match h {
             SourceHit::Files(f) => format!("F:{}", f.name),
+            SourceHit::Bookmarks(b) if b.is_folder => format!("BF:{}", b.title),
             SourceHit::Bookmarks(b) => format!("B:{}", b.title),
         })
         .collect()
@@ -97,9 +106,14 @@ fn names(hits: &[SourceHit]) -> Vec<String> {
 #[test]
 fn ac6_both_sources_merge_by_shared_tiers() {
     let w = world();
-    let all = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &[]).unwrap();
+    let all = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &only(&[])).unwrap();
     let n = names(&all.hits);
-    assert_eq!(&n[..2], ["B:Recetas", "F:recetas.txt"], "{n:?}");
+    // Tier 0 (the whole query) for all three; shorter name first, a file on a tie.
+    assert_eq!(
+        &n[..3],
+        ["B:Recetas", "BF:Recetas", "F:recetas.txt"],
+        "{n:?}"
+    );
     assert!(n.contains(&"F:Recetas de cocina.pdf".to_string()));
     assert!(
         n.contains(&"B:Flan".to_string()),
@@ -107,21 +121,37 @@ fn ac6_both_sources_merge_by_shared_tiers() {
     );
     assert_eq!(all.total as usize, all.hits.len());
 
-    let files = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &[Source::Files]).unwrap();
+    let files =
+        search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &only(&[Source::Files])).unwrap();
     assert!(files.hits.iter().all(|h| h.source() == Source::Files));
     assert_eq!(files.hits.len(), 2);
-    let marks = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &[Source::Bookmarks]).unwrap();
+    let marks = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("recetas"),
+        &only(&[Source::Bookmarks]),
+    )
+    .unwrap();
     assert!(marks.hits.iter().all(|h| h.source() == Source::Bookmarks));
 
     for text in ["RECETAS", "récetas"] {
-        let r = search_sources(&w.vfs, Some(&w.bm), &q(text), &[Source::Bookmarks]).unwrap();
+        let r = search_sources(&w.vfs, Some(&w.bm), &q(text), &only(&[Source::Bookmarks])).unwrap();
         assert_eq!(names(&r.hits)[0], "B:Recetas", "{text}");
     }
+    // The spec's example: one transposition in a 7-letter word.
+    let swapped = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("recteas"),
+        &only(&[Source::Bookmarks]),
+    )
+    .unwrap();
+    assert!(names(&swapped.hits).contains(&"B:Recetas".to_string()));
     let typo = search_sources(
         &w.vfs,
         Some(&w.bm),
         &q("bancoo onlin"),
-        &[Source::Bookmarks],
+        &only(&[Source::Bookmarks]),
     )
     .unwrap();
     assert_eq!(names(&typo.hits), ["B:Banco online"]);
@@ -129,8 +159,13 @@ fn ac6_both_sources_merge_by_shared_tiers() {
         SourceHit::Bookmarks(b) => assert_eq!(b.matched, MatchKind::Fuzzy),
         other => panic!("{other:?}"),
     }
-    let by_site =
-        search_sources(&w.vfs, Some(&w.bm), &q("cocina.es"), &[Source::Bookmarks]).unwrap();
+    let by_site = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("cocina.es"),
+        &only(&[Source::Bookmarks]),
+    )
+    .unwrap();
     assert_eq!(names(&by_site.hits), ["B:Flan"]);
 }
 
@@ -141,13 +176,13 @@ fn ac6_paging_the_merged_list_returns_each_hit_once() {
     let w = world();
     let mut whole = q("receta");
     whole.limit = 500;
-    let whole = search_sources(&w.vfs, Some(&w.bm), &whole, &[]).unwrap();
+    let whole = search_sources(&w.vfs, Some(&w.bm), &whole, &only(&[])).unwrap();
     assert!(whole.hits.len() > 30);
     let mut paged = Vec::new();
     let mut page = q("receta");
     page.limit = 7;
     loop {
-        let r = search_sources(&w.vfs, Some(&w.bm), &page, &[]).unwrap();
+        let r = search_sources(&w.vfs, Some(&w.bm), &page, &only(&[])).unwrap();
         if r.hits.is_empty() {
             break;
         }
@@ -180,7 +215,7 @@ fn ac7_filters_on_bookmarks() {
     ] {
         let mut query = q("recetas");
         query.filters = filters.clone();
-        let r = search_sources(&w.vfs, Some(&w.bm), &query, &[]).unwrap();
+        let r = search_sources(&w.vfs, Some(&w.bm), &query, &only(&[])).unwrap();
         assert!(
             r.hits.iter().all(|h| h.source() == Source::Files),
             "{filters:?}"
@@ -189,10 +224,10 @@ fn ac7_filters_on_bookmarks() {
     let mut query = q("");
     query.filters.modified_from = Some(1_600_000_000);
     query.filters.modified_to = Some(1_680_000_000);
-    let r = search_sources(&w.vfs, Some(&w.bm), &query, &[Source::Bookmarks]).unwrap();
+    let r = search_sources(&w.vfs, Some(&w.bm), &query, &only(&[Source::Bookmarks])).unwrap();
     assert_eq!(names(&r.hits), ["B:Flan"]);
     query.filters.modified_to = None;
-    let r = search_sources(&w.vfs, Some(&w.bm), &query, &[Source::Bookmarks]).unwrap();
+    let r = search_sources(&w.vfs, Some(&w.bm), &query, &only(&[Source::Bookmarks])).unwrap();
     assert_eq!(names(&r.hits), ["B:Recetas", "B:Flan"]);
 }
 
@@ -205,9 +240,15 @@ fn ac8_setting_off_searches_files_and_deletes_bookmarks() {
     let st = w.bm.set_enabled(false).unwrap();
     assert_eq!((st.enabled, st.count), (false, 0));
     assert_eq!(w.bm.stored_count().unwrap(), 0);
-    let r = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &[]).unwrap();
+    let r = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &only(&[])).unwrap();
     assert!(r.hits.iter().all(|h| h.source() == Source::Files));
-    let r = search_sources(&w.vfs, Some(&w.bm), &q("recetas"), &[Source::Bookmarks]).unwrap();
+    let r = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("recetas"),
+        &only(&[Source::Bookmarks]),
+    )
+    .unwrap();
     assert!(r.hits.is_empty());
     let st = w.bm.refresh().unwrap();
     assert_eq!(
@@ -227,7 +268,7 @@ fn ac12_only_web_addresses_are_opened() {
         &w.vfs,
         Some(&w.bm),
         &q("banco online"),
-        &[Source::Bookmarks],
+        &only(&[Source::Bookmarks]),
     )
     .unwrap();
     let SourceHit::Bookmarks(banco) = &r.hits[0] else {
@@ -239,7 +280,7 @@ fn ac12_only_web_addresses_are_opened() {
         &w.vfs,
         Some(&w.bm),
         &q("documento local"),
-        &[Source::Bookmarks],
+        &only(&[Source::Bookmarks]),
     )
     .unwrap();
     let SourceHit::Bookmarks(local) = &r.hits[0] else {
@@ -250,6 +291,77 @@ fn ac12_only_web_addresses_are_opened() {
         w.bm.url_to_open(local.id),
         Err(Error::Unavailable(_))
     ));
+    let r = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("dato incrustado"),
+        &only(&[Source::Bookmarks]),
+    )
+    .unwrap();
+    let SourceHit::Bookmarks(data) = &r.hits[0] else {
+        panic!("{:?}", r.hits)
+    };
+    assert!(!data.openable);
+    assert!(matches!(
+        w.bm.url_to_open(data.id),
+        Err(Error::Unavailable(_))
+    ));
     assert!(matches!(w.bm.url_to_open(999_999), Err(Error::NotFound(_))));
     assert!(vfs_bookmarks::is_openable("HTTPS://x.es") && !vfs_bookmarks::is_openable("ftp://x"));
+}
+
+/// VFS-6 AC-7 (R7, R11): the type "Carpetas" keeps bookmark folders and drops bookmarks.
+#[test]
+fn ac7_folder_type_keeps_bookmark_folders() {
+    let w = world();
+    let mut query = q("recetas");
+    query.filters.kinds = vec![FileKind::Folder];
+    let r = search_sources(&w.vfs, Some(&w.bm), &query, &only(&[Source::Bookmarks])).unwrap();
+    assert_eq!(names(&r.hits), ["BF:Recetas"]);
+}
+
+/// VFS-6 AC-14 (R13): newest first across both sources; by source, every file before any
+/// bookmark; relevance is the AC-6 order.
+#[test]
+fn ac14_sort_orders() {
+    let w = world();
+    let opts = |sort| SourceOptions {
+        sort,
+        ..Default::default()
+    };
+    let date = |h: &SourceHit| match h {
+        SourceHit::Files(f) => f.modified,
+        SourceHit::Bookmarks(b) => b.added,
+    };
+    let newest =
+        search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(SortOrder::Newest)).unwrap();
+    let dates: Vec<i64> = newest.hits.iter().map(date).collect();
+    assert!(dates.windows(2).all(|d| d[0] >= d[1]), "{dates:?}");
+    assert!(newest.hits.iter().any(|h| h.source() == Source::Files));
+    assert!(newest.hits.iter().any(|h| h.source() == Source::Bookmarks));
+    // Newest first pages like the others: page 2 continues page 1.
+    let mut page = q("receta");
+    page.limit = 5;
+    page.offset = 5;
+    let second = search_sources(&w.vfs, Some(&w.bm), &page, &opts(SortOrder::Newest)).unwrap();
+    assert_eq!(names(&second.hits), names(&newest.hits[5..10]));
+
+    let by_source =
+        search_sources(&w.vfs, Some(&w.bm), &q("receta"), &opts(SortOrder::Source)).unwrap();
+    let kinds: Vec<Source> = by_source.hits.iter().map(SourceHit::source).collect();
+    let first_mark = kinds.iter().position(|s| *s == Source::Bookmarks).unwrap();
+    assert!(first_mark > 0);
+    assert!(kinds[..first_mark].iter().all(|s| *s == Source::Files));
+    assert!(kinds[first_mark..].iter().all(|s| *s == Source::Bookmarks));
+
+    let relevance = search_sources(
+        &w.vfs,
+        Some(&w.bm),
+        &q("receta"),
+        &opts(SortOrder::Relevance),
+    )
+    .unwrap();
+    let default = search_sources(&w.vfs, Some(&w.bm), &q("receta"), &only(&[])).unwrap();
+    assert_eq!(names(&relevance.hits), names(&default.hits));
+    assert_eq!(newest.total, relevance.total);
 }

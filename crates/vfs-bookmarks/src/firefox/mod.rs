@@ -12,7 +12,7 @@ pub use backup::read_backup;
 pub use places::{open_guarded, read_places, ALLOWED_COLUMNS};
 pub use snapshot::{copy_consistent, signature};
 
-use crate::types::Bookmark;
+use crate::types::Tree;
 
 /// One Firefox profile folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +182,7 @@ pub enum Origin {
 
 /// Reads one profile: a consistent copy of `places.sqlite` and its WAL (R3), or else the
 /// newest readable bookmark backup (R4).
-pub fn read_profile(dir: &Path, work_dir: &Path) -> vfs_core::Result<(Vec<Bookmark>, Origin)> {
+pub fn read_profile(dir: &Path, work_dir: &Path) -> vfs_core::Result<(Tree, Origin)> {
     let db = dir.join("places.sqlite");
     let live = if db.is_file() {
         copy_consistent(&db, work_dir).and_then(|copy| read_places(&copy.path))

@@ -93,17 +93,57 @@ soon as it has been read.
   - `firefox.rs`: find profile roots and profiles (`profiles.ini`, profile groups), copy
     and read `places.sqlite`, read `jsonlz4` backups. Returns plain `Bookmark` values.
   - `store.rs`: the app's own `bookmarks.db` (in the same local data directory as
-    `index.db`): settings, the bookmarks read, and per-profile read stamps. Loaded into
-    memory on open (3,000 rows ≈ 1 MB).
+    `index.db`): settings, the bookmarks and folders read (one `items` table, one id
+    space, ids stable per Firefox guid), and per-profile read stamps. Loaded into memory on
+    open (3,000 rows ≈ 1 MB).
   - `search.rs`: matching and ranking of bookmarks in memory.
   - `sources.rs`: the `Source` closed set and the merge of file and bookmark results.
 - **`vfs-core`** gains one small public module, `matching`, so both sources share one
   definition of the query and typo rules: the query parsing now inline in `search::search`
   moves there unchanged, plus `contains_within_one`, the typo-length rule and the ranking
   tier. Nothing else in the core changes; `index.db`'s schema does not change.
-- **Tauri**: new commands `search_sources`, `open_bookmark`, `get_bookmarks_status`,
-  `set_bookmarks_enabled`; `rescan` also refreshes bookmarks.
-- **UI**: a "Buscar en" choice in the filters bar and a bookmark row, behind the setting.
+- **Tauri**: new commands `search_sources(query, options: {sources, bookmarkFolder, sort})`,
+  `open_bookmark`, `get_bookmarks_status`, `set_bookmarks_enabled`; `rescan` also refreshes
+  bookmarks.
+- **UI**: a "Buscar en" pill, first in the filter line, bookmark and bookmark-folder rows,
+  bookmark roots in the "Carpeta" filter and a sort choice, behind the setting
+  (`docs/design/system.md` "Room for sources").
+
+### The folder tree (owner decision D10)
+
+The user keeps an elaborate tree of nested bookmark folders by topic, so a bookmark's
+folder path is treated as a file's folder path:
+
+- Every folder is read and stored with its path, Firefox's position and its parent, the four
+  roots included; bookmarks keep their position too. Sorting by the positions along the
+  path gives Firefox's exact order and nesting.
+- The folder path is searchable by any segment with the same folding and typo rules.
+- Bookmark folders are results, matched as file folders are (VFS-1 D1): every term in the
+  folder's path and name, at least one in its own name. A folder row's action is "Ver su
+  contenido", which sets the folder filter to it.
+- The "Carpeta" filter offers the roots that hold something, by their Spanish names
+  ("Menú de marcadores", "Barra de marcadores", "Otros marcadores", "Marcadores del móvil",
+  led by the profile name when several profiles have bookmarks), and "Dentro de: <name>"
+  once a folder result's action chose it. A bookmark folder filter keeps only what is inside
+  that folder at any depth and leaves files out, as a file folder filter leaves bookmarks
+  out. With no words it lists the folder's contents in Firefox's order, which is how the
+  many unsorted bookmarks ("Otros marcadores") are browsed.
+- Rows show the folder path with the same middle truncation as files; the whole path is in
+  the details line and the tooltip.
+
+### Sorting (owner decision D12)
+
+A sort choice applies to every source: "Relevancia" (the default: the shared tiers, or
+Firefox's order inside a bookmark folder with no words), "Más recientes" (a file's
+modification date, a bookmark's date saved) and "Por origen" (files first, then bookmarks,
+each by relevance).
+
+### Read only, always (owner decision D11)
+
+VFS is consultative. It never writes to, modifies, reorganises or deletes anything in a
+source: not Firefox's database or backups, not the bookmarks, not files. Firefox's files are
+opened for reading only, never with SQLite, and a read works with the profile folder and its
+files made read-only.
 
 ### Storage: own tables, no full-text index
 
@@ -137,19 +177,21 @@ the root joined by U+001F.
 
 | Filter | Bookmarks |
 |---|---|
-| Type (any type chosen) | none shown: a bookmark is not a document, photo, video, audio or folder |
+| Type | bookmarks are never shown under a type; bookmark folders are shown when "Carpetas" is one of the chosen types |
 | Date | applies to the date the bookmark was saved (`dateAdded`) |
 | Size | none shown |
-| Folder | none shown: the folders are those on disk |
+| Folder (a folder on disk) | none shown |
+| Folder (a bookmark folder) | only what is inside it; no files |
 
 While "Marcadores" is the chosen source, the type, size and folder filters are disabled.
 
 ### Source choice
 
-- Setting "Incluir marcadores de Firefox", off by default, in the "Carpetas" panel, with one line saying what it reads and that nothing
-  leaves the computer.
-- While it is on, a "Buscar en" control with three choices: "Todo" (default), "Archivos",
-  "Marcadores". While it is off, the control is not shown and searches cover files only.
+- Setting "Incluir marcadores de Firefox", off by default, in the "Carpetas" panel, with
+  one line saying what it reads and that nothing leaves the computer.
+- While it is on, a "Buscar en" pill with three choices: "Archivos y marcadores" (default),
+  "Archivos", "Marcadores". While it is off, the pill is not shown and searches cover files
+  only.
 - Turning it on reads bookmarks at once; turning it off deletes every stored bookmark.
 
 ### Staying current
@@ -191,10 +233,18 @@ start if a crash left it.
   filter SHALL apply to the date a bookmark was saved.
 - R8. WHEN the setting is turned off, THE app SHALL delete every stored bookmark.
 - R9. THE CLI SHALL search files, bookmarks or both with `--source files|bookmarks|all`.
-- R10. WHEN the user acts on a bookmark result ("Abrir en el navegador", or Intro on the
-  selected row), THE app SHALL ask the system to open its address in the default browser,
-  only for `http` and `https` addresses; other bookmarks SHALL have no action. The app
-  SHALL never open a file.
+- R10. WHEN the user acts on a bookmark result ("Abrir en Firefox", Intro or a double
+  click on the selected row), THE app SHALL open its address in Firefox (in the default
+  browser if Firefox cannot be started), only for `http` and `https` addresses with no
+  space, quote or control character; other bookmarks SHALL have no action. The app SHALL
+  never open a file.
+- R11. WHEN a search covers bookmarks, THE app SHALL return bookmark folders whose path and
+  name hold every term and whose name holds at least one, as it returns file folders.
+- R12. WHILE a bookmark folder is the folder filter, THE app SHALL return only bookmarks and
+  folders inside it at any depth and no files; with no words, in Firefox's order.
+- R13. WHEN a sort order is chosen, THE app SHALL order the merged list by it.
+- R14. THE app SHALL never write to, modify, reorganise or delete anything in Firefox's
+  profile or in any other source.
 
 ## Acceptance scenarios
 
@@ -221,12 +271,13 @@ Tests cite these ids (`VFS-6 AC-<m>`).
 - AC-5 (R5) Given a `places.sqlite` with history rows, When bookmarks are read, Then the
   only tables and columns the reader's statements touch are the allowed ones, and a
   statement touching `moz_historyvisits` or `moz_places.title` fails.
-- AC-6 (R6) Given bookmarks and files, When searching "recetas" with "Todo", Then both
+- AC-6 (R6) Given bookmarks and files, When searching "recetas" with both sources, Then both
   appear, ranked by the shared tiers; "receta" without accent or "recteas" (one typo, 6+
   letters) finds "Recetas"; "Archivos" returns only files; "Marcadores" only bookmarks;
   paging the merged list returns each hit once.
-- AC-7 (R7) Given a type, size or folder filter, Then no bookmark is returned; Given a date
-  filter, Then only bookmarks saved in that range.
+- AC-7 (R7) Given a type, size or file folder filter, Then no bookmark is returned, except
+  bookmark folders under the type "Carpetas"; Given a date filter, Then only bookmarks
+  saved in that range.
 - AC-8 (R1, R8) Given the setting off, Then the app reads no Firefox file and `search_sources`
   returns files only; When the setting is turned off after a read, Then `bookmarks.db` holds
   no bookmark.
@@ -242,12 +293,25 @@ Tests cite these ids (`VFS-6 AC-<m>`).
   unknown id, Then nothing is opened and the command rejects (`not_found` for an unknown id,
   `unavailable` otherwise).
 
+- AC-13 (R11, R12, D10) Given a profile with a 12-level tree of over 300 folders, folders
+  with the same name in different branches and folders with accents, When it is read, Then
+  every folder is stored with its path; a query for a folder name returns each matching
+  folder with its own path ("recetas" finds "Recetas" and "Recétas viejas"); the folder
+  filter on one of two same-named folders returns only what is inside it, no files; with
+  no words it lists the contents in Firefox's order and nesting.
+- AC-14 (R13) Given files and bookmarks, When sorted "Más recientes", Then the hits come
+  newest first across both sources; "Por origen" lists every file before any bookmark;
+  "Relevancia" is the AC-6 order.
+- AC-15 (R14) Given a profile folder and files made read-only, When bookmarks are read,
+  Then the read succeeds and the folder is unchanged (names, sizes, times).
+
 ## Non-goals
 
 - Other browsers (Chrome, Edge, Safari): the `browser` column and reader layout leave room;
   no code now.
 - History, open tabs, reading lists, Pocket, synced tabs, favicons.
-- Editing, moving, deduplicating or reorganising bookmarks; anything written to Firefox.
+- Editing, moving, deduplicating or reorganising bookmarks, or anything else written to
+  Firefox or to any source (owner: explicitly not wanted; R14 makes it an invariant).
 - Searching the content of bookmarked pages; anything that uses the network.
 - Firefox forks (LibreWolf, Waterfox) and Firefox ESR/Nightly profile folders other than
   those in the same `profiles.ini`.
@@ -284,9 +348,12 @@ Tests cite these ids (`VFS-6 AC-<m>`).
 | D4 | Filters on bookmarks | Table "Filters" | session | 2026-11-20 |
 | D5 | Ranking across sources | Shared tiers; file first on ties | session | 2026-11-20 |
 | D6 | Refresh triggers | Start, setting on, button, every 30 min if changed | session | 2026-11-20 |
-| D7 | Default source | "Todo", reset at each start | owner | 2026-11-20 |
+| D7 | Default source | Both ("Archivos y marcadores"), reset at each start | owner | 2026-11-20 |
 | D8 | Several profiles | All profiles Firefox lists, profile groups included; the profile name shows only when more than one profile has bookmarks ("she probably uses one, but maybe all is better") | owner | 2026-11-20 |
-| D9 | Action on a bookmark | "Abrir en el navegador": the default browser, `http`/`https` only | owner | 2026-11-20 |
+| D9 | Action on a bookmark | "Abrir en Firefox" (first answer was the default browser; changed by the owner through the design session); `http`/`https` only | owner | 2026-11-20 |
+| D10 | Folder hierarchy | Essential: searchable, shown on every row, a filter, folders as results, Firefox's order kept | owner | 2026-11-20 |
+| D11 | Writing to sources | Never: VFS is consultative (R14) | owner | 2026-11-20 |
+| D12 | Sort options | Relevance (default), newest, by source | owner ("reasonable") | 2026-11-20 |
 
 ## Open questions
 

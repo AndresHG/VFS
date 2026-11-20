@@ -70,6 +70,10 @@ impl BookmarkRoot {
 pub struct Bookmark {
     /// The browser's own stable id of the bookmark (Firefox `guid`).
     pub guid: String,
+    /// The `guid` of the folder it is in (a root's own guid at the top).
+    pub parent_guid: String,
+    /// Its place among the folder's children, as Firefox orders them.
+    pub position: i64,
     pub root: BookmarkRoot,
     /// Folder names below the root, outermost first.
     pub folder: Vec<String>,
@@ -81,6 +85,62 @@ pub struct Bookmark {
     /// When it was saved.
     pub added: i64,
     pub modified: i64,
+}
+
+/// One bookmark folder, or one of the four roots (`parent_guid` `None`, empty title).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Folder {
+    pub guid: String,
+    pub parent_guid: Option<String>,
+    pub root: BookmarkRoot,
+    /// Folder names from the root down to its parent, outermost first.
+    pub path: Vec<String>,
+    pub title: String,
+    pub position: i64,
+    pub added: i64,
+}
+
+/// Everything read from one profile.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Tree {
+    pub folders: Vec<Folder>,
+    pub bookmarks: Vec<Bookmark>,
+}
+
+/// Order of a search over several sources (VFS-6 "Sorting").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortOrder {
+    /// The shared ranking tiers (VFS-1 AC-10); inside a bookmark folder with no words, the
+    /// folder's own order.
+    #[default]
+    Relevance,
+    /// Newest first: a file's modification date, a bookmark's date saved.
+    Newest,
+    /// Files first, then bookmarks, each by relevance.
+    Source,
+}
+
+/// What a search over several sources covers and how it is ordered.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SourceOptions {
+    /// Empty = every source.
+    pub sources: Vec<Source>,
+    /// Only inside this bookmark folder (`BookmarkHit.id` of a folder or `BookmarkPlace.id`);
+    /// files are then left out, as bookmarks are under a file folder filter.
+    pub bookmark_folder: Option<i64>,
+    pub sort: SortOrder,
+}
+
+/// A root folder of a profile, offered as a "Carpeta" filter choice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkPlace {
+    pub id: i64,
+    pub root: BookmarkRoot,
+    /// Only when more than one profile has bookmarks.
+    pub profile: Option<String>,
 }
 
 /// Where the last read of a profile came from, or why there is none.
@@ -113,15 +173,20 @@ pub struct BookmarkStatus {
     pub profiles: u32,
     /// When bookmarks were last read successfully.
     pub last_read: Option<i64>,
+    /// The roots that hold something, in Firefox's order.
+    pub roots: Vec<BookmarkPlace>,
 }
 
-/// A bookmark search result.
+/// A bookmark or bookmark folder search result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkHit {
-    /// Stable while the bookmark exists (`bookmarks.id`).
+    /// Stable while the bookmark or folder exists. Bookmarks and folders are one id space.
     pub id: i64,
+    /// A folder result (VFS-6 R11): its action shows what it contains.
+    pub is_folder: bool,
     pub title: String,
+    /// Empty for a folder.
     pub url: String,
     pub root: BookmarkRoot,
     pub folder: Vec<String>,
@@ -129,7 +194,7 @@ pub struct BookmarkHit {
     pub profile: Option<String>,
     pub added: i64,
     pub matched: MatchKind,
-    /// The address can be opened in the browser (`http` or `https`, VFS-6 R10).
+    /// The address can be opened in Firefox (`http` or `https`, VFS-6 R10).
     pub openable: bool,
 }
 

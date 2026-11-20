@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use vfs_bookmarks::{BookmarkRoot, ReadState, Source, SourceHit};
+use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
 use vfs_core::api::RevealOutcome;
 use vfs_core::{DriveKind, Error, FileKind, IndexerState, MatchKind, RootStatus, TruncatedBy};
 
@@ -128,6 +128,17 @@ fn all_sources() -> Vec<Source> {
     all
 }
 
+fn all_sort_orders() -> Vec<SortOrder> {
+    use SortOrder::*;
+    let all = vec![Relevance, Newest, Source];
+    for s in &all {
+        match s {
+            Relevance | Newest | Source => {}
+        }
+    }
+    all
+}
+
 fn all_bookmark_roots() -> Vec<BookmarkRoot> {
     use BookmarkRoot::*;
     let all = vec![Menu, Toolbar, Unfiled, Mobile];
@@ -192,6 +203,7 @@ fn contract_js_matches_the_rust_enums() {
         ("Source", serde_names(&all_sources())),
         ("BookmarkRoot", serde_names(&all_bookmark_roots())),
         ("ReadState", serde_names(&all_read_states())),
+        ("SortOrder", serde_names(&all_sort_orders())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -229,6 +241,7 @@ fn source_hit_tags_are_the_source_values() {
     });
     let mark = SourceHit::Bookmarks(vfs_bookmarks::BookmarkHit {
         id: 2,
+        is_folder: false,
         title: "t".into(),
         url: "https://x.es/".into(),
         root: BookmarkRoot::Menu,

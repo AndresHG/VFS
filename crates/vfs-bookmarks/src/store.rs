@@ -1,13 +1,14 @@
-//! `bookmarks.db`: the setting and the bookmarks read, in the app's local data directory
-//! next to `index.db` (VFS-6 D3). It holds nothing that cannot be read again, so a file
-//! that cannot be opened is deleted and created anew.
+//! `bookmarks.db`: the setting and what was read, in the app's local data directory next to
+//! `index.db` (VFS-6 D3). It holds nothing that cannot be read again, so a file that cannot
+//! be opened is deleted and created anew.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use vfs_core::Result;
 
-use crate::types::{Bookmark, BookmarkRoot, Browser};
+use crate::types::{BookmarkRoot, Browser, Tree};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -19,10 +20,13 @@ CREATE TABLE IF NOT EXISTS profiles(
   signature TEXT,
   read_at INTEGER
 );
-CREATE TABLE IF NOT EXISTS bookmarks(
+CREATE TABLE IF NOT EXISTS items(
   id INTEGER PRIMARY KEY,
   profile_id INTEGER NOT NULL,
   guid TEXT NOT NULL,
+  is_folder INTEGER NOT NULL,
+  parent_guid TEXT,
+  position INTEGER NOT NULL,
   root INTEGER NOT NULL,
   folder TEXT NOT NULL,
   title TEXT NOT NULL,
@@ -37,13 +41,20 @@ PRAGMA user_version = 1;
 ";
 
 /// Joins folder names and tags in one column; never part of a name Firefox shows.
-pub(crate) const SEP: char = '\u{1f}';
+const SEP: char = '\u{1f}';
 const KEY_ENABLED: &str = "enabled";
+const ON: &str = "1";
+const OFF: &str = "0";
 
-/// A stored bookmark with what the search needs.
+/// A stored bookmark or folder.
 pub(crate) struct Row {
     pub id: i64,
+    pub profile_id: i64,
     pub profile: String,
+    pub guid: String,
+    pub is_folder: bool,
+    pub parent_guid: Option<String>,
+    pub position: i64,
     pub root: BookmarkRoot,
     pub folder: Vec<String>,
     pub title: String,
@@ -108,19 +119,19 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()?;
-        Ok(v.as_deref() == Some("1"))
+        Ok(v.as_deref() == Some(ON))
     }
 
-    /// Turning it off deletes every stored profile and bookmark (R8).
+    /// Turning it off deletes every stored profile, bookmark and folder (R8).
     pub fn set_enabled(&mut self, on: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![KEY_ENABLED, if on { "1" } else { "0" }],
+            params![KEY_ENABLED, if on { ON } else { OFF }],
         )?;
         if !on {
-            tx.execute("DELETE FROM bookmarks", [])?;
+            tx.execute("DELETE FROM items", [])?;
             tx.execute("DELETE FROM profiles", [])?;
         }
         tx.commit()?;
@@ -143,16 +154,16 @@ impl Store {
             .flatten())
     }
 
-    /// Replaces one profile's bookmarks in one transaction. Rows keep their id while the
-    /// browser's guid stays the same, so a result on screen still names the same bookmark
-    /// after a refresh.
+    /// Replaces one profile's bookmarks and folders in one transaction. A row keeps its id
+    /// while Firefox's guid stays the same, so a result on screen, or a folder chosen as a
+    /// filter, still names the same item after a refresh.
     pub fn replace_profile(
         &mut self,
         browser: Browser,
         dir: &str,
         name: &str,
         signature: &str,
-        list: &[Bookmark],
+        tree: &Tree,
         now: i64,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
@@ -168,17 +179,39 @@ impl Store {
             })?;
         {
             let mut up = tx.prepare(
-                "INSERT INTO bookmarks(profile_id, guid, root, folder, title, url, tags, keyword, added, modified) \
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
-                 ON CONFLICT(profile_id, guid) DO UPDATE SET root = excluded.root, \
-                 folder = excluded.folder, title = excluded.title, url = excluded.url, \
-                 tags = excluded.tags, keyword = excluded.keyword, added = excluded.added, \
-                 modified = excluded.modified",
+                "INSERT INTO items(profile_id, guid, is_folder, parent_guid, position, root, folder, \
+                 title, url, tags, keyword, added, modified) \
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+                 ON CONFLICT(profile_id, guid) DO UPDATE SET is_folder = excluded.is_folder, \
+                 parent_guid = excluded.parent_guid, position = excluded.position, \
+                 root = excluded.root, folder = excluded.folder, title = excluded.title, \
+                 url = excluded.url, tags = excluded.tags, keyword = excluded.keyword, \
+                 added = excluded.added, modified = excluded.modified",
             )?;
-            for b in list {
+            for f in &tree.folders {
+                up.execute(params![
+                    profile_id,
+                    f.guid,
+                    true,
+                    f.parent_guid,
+                    f.position,
+                    f.root.code(),
+                    join(&f.path),
+                    f.title,
+                    "",
+                    "",
+                    None::<String>,
+                    f.added,
+                    f.added
+                ])?;
+            }
+            for b in &tree.bookmarks {
                 up.execute(params![
                     profile_id,
                     b.guid,
+                    false,
+                    b.parent_guid,
+                    b.position,
                     b.root.code(),
                     join(&b.folder),
                     b.title,
@@ -189,9 +222,13 @@ impl Store {
                     b.modified
                 ])?;
             }
-            let seen: std::collections::HashSet<&str> =
-                list.iter().map(|b| b.guid.as_str()).collect();
-            let mut stmt = tx.prepare("SELECT id, guid FROM bookmarks WHERE profile_id = ?1")?;
+            let seen: HashSet<&str> = tree
+                .folders
+                .iter()
+                .map(|f| f.guid.as_str())
+                .chain(tree.bookmarks.iter().map(|b| b.guid.as_str()))
+                .collect();
+            let mut stmt = tx.prepare("SELECT id, guid FROM items WHERE profile_id = ?1")?;
             let gone: Vec<i64> = stmt
                 .query_map([profile_id], |r| {
                     Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
@@ -200,7 +237,7 @@ impl Store {
                 .filter(|(_, g)| !seen.contains(g.as_str()))
                 .map(|(id, _)| id)
                 .collect();
-            let mut del = tx.prepare("DELETE FROM bookmarks WHERE id = ?1")?;
+            let mut del = tx.prepare("DELETE FROM items WHERE id = ?1")?;
             for id in gone {
                 del.execute([id])?;
             }
@@ -209,7 +246,7 @@ impl Store {
         Ok(())
     }
 
-    /// Forgets profiles that are no longer found, with their bookmarks.
+    /// Forgets profiles that are no longer found, with what was read from them.
     pub fn keep_only_profiles(&mut self, dirs: &[String]) -> Result<()> {
         let tx = self.conn.transaction()?;
         let stored: Vec<(i64, String)> = {
@@ -221,7 +258,7 @@ impl Store {
         };
         for (id, dir) in stored {
             if !dirs.contains(&dir) {
-                tx.execute("DELETE FROM bookmarks WHERE profile_id = ?1", [id])?;
+                tx.execute("DELETE FROM items WHERE profile_id = ?1", [id])?;
                 tx.execute("DELETE FROM profiles WHERE id = ?1", [id])?;
             }
         }
@@ -238,31 +275,37 @@ impl Store {
 
     pub fn load(&self) -> Result<Vec<Row>> {
         let mut stmt = self.conn.prepare(
-            "SELECT b.id, p.name, b.root, b.folder, b.title, b.url, b.tags, b.keyword, b.added \
-             FROM bookmarks b JOIN profiles p ON p.id = b.profile_id ORDER BY b.id",
+            "SELECT i.id, i.profile_id, p.name, i.guid, i.is_folder, i.parent_guid, i.position, \
+             i.root, i.folder, i.title, i.url, i.tags, i.keyword, i.added \
+             FROM items i JOIN profiles p ON p.id = i.profile_id ORDER BY i.id",
         )?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(Row {
                     id: r.get(0)?,
-                    profile: r.get(1)?,
-                    root: BookmarkRoot::from_code(r.get(2)?),
-                    folder: split(&r.get::<_, String>(3)?),
-                    title: r.get(4)?,
-                    url: r.get(5)?,
-                    tags: split(&r.get::<_, String>(6)?),
-                    keyword: r.get(7)?,
-                    added: r.get(8)?,
+                    profile_id: r.get(1)?,
+                    profile: r.get(2)?,
+                    guid: r.get(3)?,
+                    is_folder: r.get(4)?,
+                    parent_guid: r.get(5)?,
+                    position: r.get(6)?,
+                    root: BookmarkRoot::from_code(r.get(7)?),
+                    folder: split(&r.get::<_, String>(8)?),
+                    title: r.get(9)?,
+                    url: r.get(10)?,
+                    tags: split(&r.get::<_, String>(11)?),
+                    keyword: r.get(12)?,
+                    added: r.get(13)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<Row>>>()?;
         Ok(rows)
     }
 
-    /// Number of bookmarks in the store (tests and status).
+    /// Number of stored bookmarks and folders.
     pub fn count(&self) -> Result<u32> {
         Ok(self
             .conn
-            .query_row("SELECT count(*) FROM bookmarks", [], |r| r.get(0))?)
+            .query_row("SELECT count(*) FROM items", [], |r| r.get(0))?)
     }
 }

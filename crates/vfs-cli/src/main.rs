@@ -69,6 +69,9 @@ enum Cmd {
         /// Which sources to search (VFS-6); bookmarks only once `vfs bookmarks on` was run.
         #[arg(long, value_enum, default_value = "all")]
         source: sources::SourceArg,
+        /// Order of the results (VFS-6).
+        #[arg(long, value_enum, default_value = "relevance")]
+        sort: sources::SortArg,
     },
     /// Firefox bookmarks as a search source (VFS-6), stored next to the index.
     Bookmarks {
@@ -256,6 +259,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             offset,
             json,
             source,
+            sort,
         } => {
             let filters = SearchFilters {
                 kinds: kind.into_iter().map(FileKind::from).collect(),
@@ -271,10 +275,10 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 limit,
                 offset,
             };
-            if source == sources::SourceArg::Files {
+            if source == sources::SourceArg::Files && sort == sources::SortArg::Relevance {
                 cmd_search(&Vfs::open(&db)?, &q, json)?;
             } else {
-                sources::cmd_search(&db, &q, source, json)?;
+                sources::cmd_search(&db, &q, source, sort, json)?;
             }
         }
         Cmd::Bookmarks {

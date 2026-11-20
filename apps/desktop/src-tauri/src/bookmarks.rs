@@ -1,7 +1,7 @@
 //! The bookmark source in the app (VFS-6): managed state, the refresh thread, and the
 //! commands `search_sources`, `get_bookmarks_status`, `set_bookmarks_enabled` and
-//! `open_bookmark`. Opening a bookmark hands a web address to the system's default
-//! browser; no file is ever opened (R10).
+//! `open_bookmark`. Opening a bookmark hands a web address to Firefox; no file is ever
+//! opened (R10).
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use vfs_bookmarks::firefox::Locator;
 use vfs_bookmarks::sources::search_sources as run_search;
-use vfs_bookmarks::{bookmarks_db_path, BookmarkStatus, Bookmarks, Source, SourcesResponse};
+use vfs_bookmarks::{bookmarks_db_path, BookmarkStatus, Bookmarks, SourceOptions, SourcesResponse};
 use vfs_core::api::ApiError;
 use vfs_core::SearchQuery;
 
@@ -73,17 +73,23 @@ fn missing() -> ApiError {
     vfs_core::Error::Unavailable("bookmarks unavailable".into()).into()
 }
 
-/// A search over `sources` (empty = every source); bookmarks only while the setting is on.
+/// A search over the chosen sources, optionally inside one bookmark folder and in another
+/// order; bookmarks only while the setting is on.
 #[tauri::command(async)]
 pub fn search_sources<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     query: SearchQuery,
-    sources: Vec<Source>,
+    options: Option<SourceOptions>,
 ) -> Result<SourcesResponse, ApiError> {
     let marks = app.try_state::<BookmarkState>();
     let bookmarks = marks.as_ref().map(|s| s.bookmarks.as_ref());
-    Ok(run_search(&state.vfs, bookmarks, &query, &sources)?)
+    Ok(run_search(
+        &state.vfs,
+        bookmarks,
+        &query,
+        &options.unwrap_or_default(),
+    )?)
 }
 
 #[tauri::command(async)]
@@ -107,34 +113,44 @@ pub fn set_bookmarks_enabled<R: Runtime>(
     Ok(status)
 }
 
-/// "Abrir en el navegador" (R10): the bookmark's `http`/`https` address in the default
-/// browser.
+/// "Abrir en Firefox" (R10): the bookmark's `http`/`https` address in Firefox.
 #[tauri::command(async)]
 pub fn open_bookmark<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), ApiError> {
     let state = app.try_state::<BookmarkState>().ok_or_else(missing)?;
     let url = state.bookmarks.url_to_open(id)?;
-    open_in_browser(&url).map_err(|e| vfs_core::Error::Io(e).into())
+    open_in_firefox(&url).map_err(|e| vfs_core::Error::Io(e).into())
 }
 
-/// Asks the system to open a web address with the default browser. Callers pass only
-/// addresses that [`vfs_bookmarks::is_openable`] accepts, so the argument starts with
-/// `http://` or `https://` and cannot be read as an option.
-pub fn open_in_browser(url: &str) -> std::io::Result<()> {
-    if !vfs_bookmarks::is_openable(url) {
-        return Err(std::io::Error::other("not a web address"));
-    }
-    platform_open(url)
+/// Opens a web address in Firefox; if Firefox cannot be started (moved or uninstalled
+/// since its bookmarks were read), in the default browser instead. Only addresses that
+/// [`firefox_arg`] accepts are passed on.
+pub fn open_in_firefox(url: &str) -> std::io::Result<()> {
+    let arg = firefox_arg(url).ok_or_else(|| std::io::Error::other("not a web address"))?;
+    platform_open(arg).inspect_err(|e| log::warn!("open in Firefox: {e}"))
+}
+
+/// The address as one command-line argument: an `http`/`https` address with no space,
+/// quote or control character (Firefox stores addresses already percent-encoded), so it
+/// starts with the scheme, cannot be read as an option, and needs no quoting.
+pub fn firefox_arg(url: &str) -> Option<&str> {
+    let plain = !url
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '"');
+    (plain && vfs_bookmarks::is_openable(url) && url.starts_with(['h', 'H'])).then_some(url)
 }
 
 #[cfg(target_os = "macos")]
 fn platform_open(url: &str) -> std::io::Result<()> {
-    let status = std::process::Command::new("/usr/bin/open")
-        .arg(url)
-        .status()?;
-    if status.success() {
+    let run = |args: &[&str]| -> std::io::Result<bool> {
+        Ok(std::process::Command::new("/usr/bin/open")
+            .args(args)
+            .status()?
+            .success())
+    };
+    if run(&["-a", "Firefox", url])? || run(&[url])? {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("open exited with {status}")))
+        Err(std::io::Error::other("open failed"))
     }
 }
 
@@ -149,20 +165,25 @@ fn platform_open(url: &str) -> std::io::Result<()> {
             .chain(std::iter::once(0))
             .collect()
     };
-    let (verb, target) = (wide("open"), wide(url));
-    // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive the call.
-    let code = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            verb.as_ptr(),
-            target.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_SHOWNORMAL,
-        )
-    } as isize;
+    let verb = wide("open");
+    let shell = |file: &[u16], params: Option<&[u16]>| -> isize {
+        // SAFETY: every string is a NUL-terminated UTF-16 buffer that outlives the call.
+        (unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                params.map_or(std::ptr::null(), |p| p.as_ptr()),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        }) as isize
+    };
+    // "firefox.exe" is found through App Paths (installer) or the app execution alias
+    // (Microsoft Store build); the address needs no quoting (`firefox_arg`).
     // ShellExecuteW returns a value greater than 32 on success.
-    if code > 32 {
+    let code = shell(&wide("firefox.exe"), Some(&wide(url)));
+    if code > 32 || shell(&wide(url), None) > 32 {
         Ok(())
     } else {
         Err(std::io::Error::other(format!(
@@ -173,8 +194,35 @@ fn platform_open(url: &str) -> std::io::Result<()> {
 
 #[cfg(not(any(target_os = "macos", windows)))]
 fn platform_open(url: &str) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
+    std::process::Command::new("firefox")
         .arg(url)
         .spawn()
+        .or_else(|_| std::process::Command::new("xdg-open").arg(url).spawn())
         .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VFS-6 AC-12: only a plain web address becomes Firefox's argument.
+    #[test]
+    fn only_plain_web_addresses_reach_firefox() {
+        assert_eq!(
+            firefox_arg("https://cocina.es/flan?x=1"),
+            Some("https://cocina.es/flan?x=1")
+        );
+        assert_eq!(firefox_arg("HTTP://a.es"), Some("HTTP://a.es"));
+        for bad in [
+            "file:///C:/a.pdf",
+            "data:text/html,hola",
+            "ftp://a.es",
+            "-https://a.es",
+            "https://a.es/\" x\"",
+            "https://a.es/ -foreground",
+            "https://a.es/\nb",
+        ] {
+            assert_eq!(firefox_arg(bad), None, "{bad}");
+        }
+    }
 }

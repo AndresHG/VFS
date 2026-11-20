@@ -202,11 +202,12 @@ fn bookmark_commands_over_ipc() {
     let r = invoke(
         &webview,
         "search_sources",
-        json!({ "query": query, "sources": ["bookmarks"] }),
+        json!({ "query": query, "options": { "sources": ["bookmarks"], "sort": "relevance" } }),
     )
     .unwrap();
     let hits = r["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|h| h["isFolder"] == json!(false)));
     let web = hits.iter().find(|h| h["openable"] == json!(true)).unwrap();
     assert_eq!(web["source"], json!("bookmarks"));
     assert_eq!(web["root"], json!("menu"));

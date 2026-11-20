@@ -52,6 +52,8 @@ fn now() -> i64 {
 struct State {
     store: Store,
     entries: Vec<Entry>,
+    /// Profiles with at least one bookmark.
+    profiles: u32,
     multi_profile: bool,
     read_state: ReadState,
 }
@@ -59,9 +61,16 @@ struct State {
 impl State {
     fn reload(&mut self) -> Result<()> {
         let rows = self.store.load()?;
-        let first = rows.first().map(|r| r.profile.clone());
-        self.multi_profile = rows.iter().any(|r| Some(&r.profile) != first.as_ref());
-        self.entries = rows.into_iter().map(Entry::new).collect();
+        let mut with_bookmarks: Vec<i64> = rows
+            .iter()
+            .filter(|r| !r.is_folder)
+            .map(|r| r.profile_id)
+            .collect();
+        with_bookmarks.sort_unstable();
+        with_bookmarks.dedup();
+        self.profiles = with_bookmarks.len() as u32;
+        self.multi_profile = self.profiles > 1;
+        self.entries = search::entries(rows);
         Ok(())
     }
 }
@@ -89,6 +98,7 @@ impl Bookmarks {
         let mut state = State {
             store: Store::open(db_path)?,
             entries: Vec::new(),
+            profiles: 0,
             multi_profile: false,
             read_state: ReadState::Never,
         };
@@ -115,6 +125,7 @@ impl Bookmarks {
         st.store.set_enabled(on)?;
         if !on {
             st.entries.clear();
+            st.profiles = 0;
             st.multi_profile = false;
             st.read_state = ReadState::Never;
         }
@@ -124,15 +135,13 @@ impl Bookmarks {
 
     pub fn status(&self) -> BookmarkStatus {
         let st = lock(&self.state);
-        let mut profiles: Vec<&str> = st.entries.iter().map(|e| e.profile.as_str()).collect();
-        profiles.sort_unstable();
-        profiles.dedup();
         BookmarkStatus {
             enabled: st.store.enabled().unwrap_or(false),
             state: st.read_state,
-            count: st.entries.len() as u32,
-            profiles: profiles.len() as u32,
+            count: st.entries.iter().filter(|e| !e.is_folder).count() as u32,
+            profiles: st.profiles,
             last_read: st.store.last_read().ok().flatten(),
+            roots: search::places(&st.entries, st.multi_profile),
         }
     }
 
@@ -156,7 +165,7 @@ impl Bookmarks {
                 continue;
             }
             match firefox::read_profile(&p.dir, &self.work_dir.join("places")) {
-                Ok((list, origin)) => {
+                Ok((tree, origin)) => {
                     any_backup |= origin == Origin::Backup;
                     let mut st = lock(&self.state);
                     if !st.store.enabled()? {
@@ -167,7 +176,7 @@ impl Bookmarks {
                         &dir,
                         &p.name,
                         &sig,
-                        &list,
+                        &tree,
                         now(),
                     )?;
                 }
@@ -200,11 +209,18 @@ impl Bookmarks {
         Ok(self.status())
     }
 
-    /// Ranked bookmark hits for `query` (at most [`MAX_BOOKMARK_HITS`]); empty while off.
-    pub(crate) fn search(&self, query: &SearchQuery) -> Vec<Ranked> {
+    /// Ranked bookmark and folder hits for `query`, only inside the folder `inside` when
+    /// given (at most [`MAX_BOOKMARK_HITS`]; the flag says the list was cut).
+    pub(crate) fn search(&self, query: &SearchQuery, inside: Option<i64>) -> (Vec<Ranked>, bool) {
         let parsed = parse_query(&query.text);
         let st = lock(&self.state);
-        search::search(&st.entries, &parsed, &query.filters, st.multi_profile)
+        search::search(
+            &st.entries,
+            &parsed,
+            &query.filters,
+            inside,
+            st.multi_profile,
+        )
     }
 
     /// The address to open for a bookmark result: `not_found` for an unknown id,
@@ -216,7 +232,7 @@ impl Bookmarks {
             .iter()
             .find(|e| e.id == id)
             .ok_or_else(|| Error::NotFound(format!("bookmark {id}")))?;
-        if is_openable(&e.url) {
+        if !e.is_folder && is_openable(&e.url) {
             Ok(e.url.clone())
         } else {
             Err(Error::Unavailable("not a web address".into()))
@@ -255,7 +271,7 @@ impl Bookmarks {
         tx
     }
 
-    /// Bookmarks in the store (tests).
+    /// Bookmarks and folders in the store (tests).
     pub fn stored_count(&self) -> Result<u32> {
         lock(&self.state).store.count()
     }

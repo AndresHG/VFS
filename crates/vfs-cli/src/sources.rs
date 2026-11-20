@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use clap::ValueEnum;
 use vfs_bookmarks::firefox::Locator;
 use vfs_bookmarks::sources::search_sources;
-use vfs_bookmarks::{bookmarks_db_path, Bookmarks, Source, SourceHit};
+use vfs_bookmarks::{bookmarks_db_path, Bookmarks, SortOrder, Source, SourceHit, SourceOptions};
 use vfs_core::{SearchQuery, Vfs};
 
 use crate::gen::{civil_from_unix, AnyResult};
@@ -26,6 +26,24 @@ impl SourceArg {
             SourceArg::Files => vec![Source::Files],
             SourceArg::Bookmarks => vec![Source::Bookmarks],
             SourceArg::All => Vec::new(),
+        }
+    }
+}
+
+/// `--sort` of `vfs search`.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SortArg {
+    Relevance,
+    Newest,
+    Source,
+}
+
+impl From<SortArg> for SortOrder {
+    fn from(s: SortArg) -> SortOrder {
+        match s {
+            SortArg::Relevance => SortOrder::Relevance,
+            SortArg::Newest => SortOrder::Newest,
+            SortArg::Source => SortOrder::Source,
         }
     }
 }
@@ -73,10 +91,26 @@ pub fn cmd_bookmarks(
     Ok(())
 }
 
-pub fn cmd_search(db: &Path, query: &SearchQuery, source: SourceArg, json: bool) -> AnyResult<()> {
+pub fn cmd_search(
+    db: &Path,
+    query: &SearchQuery,
+    source: SourceArg,
+    sort: SortArg,
+    json: bool,
+) -> AnyResult<()> {
     let vfs = Vfs::open(db)?;
-    let bm = open(db, Vec::new())?;
-    let r = search_sources(&vfs, Some(&bm), query, &source.sources())?;
+    // A search creates no bookmark store; only `vfs bookmarks on` does.
+    let bm = if bookmarks_db_path(db).exists() {
+        Some(open(db, Vec::new())?)
+    } else {
+        None
+    };
+    let options = SourceOptions {
+        sources: source.sources(),
+        bookmark_folder: None,
+        sort: sort.into(),
+    };
+    let r = search_sources(&vfs, bm.as_ref(), query, &options)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&r)?);
         return Ok(());
@@ -90,8 +124,9 @@ pub fn cmd_search(db: &Path, query: &SearchQuery, source: SourceArg, json: bool)
             }
             SourceHit::Bookmarks(b) => {
                 let (y, m, d) = civil_from_unix(b.added);
+                let what = if b.is_folder { "carpeta " } else { "marcador" };
                 println!(
-                    "marcador  {y:04}-{m:02}-{d:02}  {:?}/{}  {}  <{}>",
+                    "{what}  {y:04}-{m:02}-{d:02}  {:?}/{}  {}  <{}>",
                     b.root,
                     b.folder.join("/"),
                     b.title,
