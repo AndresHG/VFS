@@ -1,5 +1,9 @@
 # Windows and macOS end-to-end results (VFS-8)
 
+> Defects 1–3 below (issues 106–108) are fixed by the v0.1.1 change (PR 113); the reveal
+> selection and the splash are checked by `apps/desktop/src-tauri/tests/windows_shell.rs`. The
+> tables record the v0.1.0 run as measured.
+
 First time the real VFS app was installed, launched and driven on Windows, and first time its
 window was seen on either OS. Spec: `specs/vfs-8-windows-e2e/spec.md`. Workflow:
 `.github/workflows/e2e.yml` (manual + nightly). Every number below is **measured** on a GitHub

@@ -13,7 +13,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │ apps/desktop/ui        static Spanish screen (JS, no build) │
 │        │  invoke(command) / listen(event)                   │
 │ apps/desktop/src-tauri commands.rs, reveal.rs, lib.rs,      │
-│        │               bookmarks.rs (VFS-6)                 │
+│        │               bookmarks.rs (VFS-6), splash.rs      │
 │ crates/vfs-bookmarks   Firefox reader, bookmarks.db, merge  │
 │        │                                                    │
 │ crates/vfs-core        Vfs facade (core/lib.rs)             │
@@ -466,18 +466,29 @@ Key shapes:
 `reveal` builds the path from the index. If it no longer exists on disk, it marks the folder
 for a re-list and rejects with `not_found`. Otherwise macOS runs `open -R <path>`, and if
 that fails `open -R` on the nearest existing ancestor, which Finder shows selected rather
-than opening it (an ancestor that is an `.app` bundle is never launched). Windows runs
-`explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
-the path is over 259 UTF-16 units; a trailing backslash (a drive root) is doubled so it
-cannot escape the closing quote under the Windows command-line rules (`explorer_arg`; the
-drive-root case is unverified on Windows). On a Windows runner (VFS-8) Explorer opens the
-right folder but does not select the item (issue 107); the long-path fallback works. See
-`apps/desktop/src-tauri/src/reveal.rs`. No file is opened with its application.
+than opening it (an ancestor that is an `.app` bundle is never launched). Windows calls the
+Shell's `SHOpenFolderAndSelectItems` on the item's ID list, on a short-lived thread with its
+own COM apartment, which selects the item and reuses an Explorer window already on that
+folder. When the call has to open a new Explorer window, the folder opens with nothing
+selected (issue 107: measured on the Windows CI runner, also with `explorer /select,`), so
+once a new window appears the call is repeated into it. Only if the call fails it runs
+`explorer.exe /select,"<path>"`. A path over 259 UTF-16 units opens the nearest ancestor
+Explorer can address instead; a trailing backslash (a drive root) is doubled so it cannot
+escape the closing quote under the Windows command-line rules (`explorer_arg`; the
+drive-root case is unverified on Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No
+file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
 log plugin), rotated at 1 MB with four old files kept. Below warning level only the
 indexer's diagnostic records (target `vfs::diag`, VFS-5) are written: per-minute walk rates,
 back-off, commit and checkpoint durations, overflows and memory, never a file name.
+
+The main window starts hidden and is shown when its page has loaded (or after 120 s). If
+its outer frame is larger than its monitor's work area (the screen minus the taskbar), it is
+shrunk to fit and centred, with its minimum size capped at the new size (`fit_window`, issue
+106). On Windows a native splash window (`splash.rs`, plain Win32 on its own thread) says
+"Preparando VFS…" until then, because WebView2 can take tens of seconds to paint on its
+first run (issue 108).
 
 The app opens the index at `<local app data dir>/index.db` in `setup` (Tauri
 `app_local_data_dir`: `%LOCALAPPDATA%\app.vfs.desktop` on Windows, never the roaming
@@ -540,11 +551,13 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
 
 The `cfg(windows)` code has run only on GitHub's Windows Server 2025 runners (CI, and the
 VFS-8 end-to-end journey on an SSD; `docs/research/windows-e2e-results.md`): the installer,
-the watcher, the catch-up at start and the Explorer reveal ran there; never on Windows 10/11,
-on an HDD, or on the target PC. Never run on Windows at all: for VFS-6, the copy of a
-`places.sqlite` that Firefox holds open, the Microsoft Store profile path and `ShellExecuteW`
-for "Abrir en Firefox". The move of an index out of the roaming folder has run only in unit
-tests, where both folders are temporary ones. Performance at 2 million
+the watcher, the catch-up at start, the Explorer reveal (selection checked by
+`tests/windows_shell.rs`) and the splash window ran there; never on Windows 10/11, on an
+HDD, or on the target PC. Window fitting has not run on a screen smaller than the window.
+Never run on Windows at all: for VFS-6, the copy of a `places.sqlite` that Firefox holds
+open, the Microsoft Store profile path and `ShellExecuteW` for "Abrir en Firefox". The move
+of an index out of the roaming folder has run only in unit tests, where both folders are
+temporary ones. Performance at 2 million
 files is checked only by `vfs bench` on a synthetic database on the development Mac (Apple
 Silicon, SSD), with warm OS file caches. There the warm p95 is close to the 150 ms limit:
 before the no-hit probe, two of three runs passed and the worst failed by under 10 ms on
