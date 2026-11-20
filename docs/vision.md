@@ -38,7 +38,8 @@ does not answer those; content, concept and cross-source search do.
 - **Your data stays local; the intelligence comes from an API.** The archive, the index and
   the user's notes stay on the user's computer. Language-model work (answers, graph
   generation, enrichment) goes through a model API the user configures with their own key
-  (Anthropic, OpenAI or another provider), not a model running on the PC. The API is
+  (Anthropic, OpenAI or another provider), not a language model running on the PC
+  (embeddings for search may be the one exception, see below). The API is
   opt-in and the user sees what is sent (roadmap, issue 38).
 - **Read-only over sources.** VFS never moves, edits, reorganises or deletes anything in a
   source (files, bookmarks, chats). What the user adds (notes, links, tags) lives in VFS's
@@ -70,7 +71,8 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
   found by name and metadata only, under the no-photo-content rule).
 - Notes and lists: Google Keep and similar note or list apps, from their exports.
 - Private YouTube playlists and other saved-link services.
-- An existing Obsidian vault or plain Markdown folders.
+- Plain Markdown folders, and perhaps an existing Obsidian vault (depends on the research
+  in issue 119).
 
 ### Content and concept search
 
