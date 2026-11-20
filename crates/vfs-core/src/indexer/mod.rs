@@ -10,10 +10,33 @@
 //!
 //! Full re-walks (start-up catch-up, manual, overflow, stale) are requests kept in `owed`
 //! and started one at a time, only while no root is being walked (VFS-1 I4, I10).
+//!
+//! Priority and pacing follow `sched` (VFS-5): walks run in the walk profile and back off
+//! while the disk is busy; small incremental work lists each directory in background mode
+//! and commits it alone, outside background mode, so the write lock is never held at
+//! very-low I/O priority.
 
 mod apply;
+mod sched;
 mod walk;
 mod watch;
+
+pub use sched::DIAG_TARGET;
+
+/// Options of the background indexer.
+#[derive(Clone, Debug)]
+pub struct IndexerOptions {
+    /// The start-up catch-up waits until the system has been up this long (VFS-5 R5).
+    pub boot_grace: Duration,
+}
+
+impl Default for IndexerOptions {
+    fn default() -> Self {
+        IndexerOptions {
+            boot_grace: SchedConfig::default().boot_grace,
+        }
+    }
+}
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -31,6 +54,7 @@ use crate::error::Result;
 use crate::fold::fold_key;
 use crate::types::{IndexProgress, IndexerState, RootProgress, RootStatus, ScanSummary};
 use crate::{platform, ProgressSink};
+use sched::{Mode, Sched, SchedConfig, Step};
 
 /// Commit after this many changed rows (VFS-1 I5)...
 const BATCH_ROWS: u64 = 20_000;
@@ -88,6 +112,47 @@ fn begin(conn: &Connection) -> Result<Transaction<'_>> {
         conn,
         TransactionBehavior::Immediate,
     )?)
+}
+
+/// Commits `tx` if one is open, timing it for the diagnostic log (VFS-5 R7).
+fn commit(tx: &mut Option<Transaction<'_>>, sched: &mut Sched) -> Result<()> {
+    if let Some(t) = tx.take() {
+        let start = Instant::now();
+        t.commit()?;
+        sched.diag.commit(start.elapsed());
+    }
+    Ok(())
+}
+
+/// Sleeps `d` in short slices; returns true as soon as `stop()` turns true.
+fn pause(d: Duration, stop: &dyn Fn() -> bool) -> bool {
+    const SLICE: Duration = Duration::from_millis(100);
+    let end = Instant::now() + d;
+    loop {
+        if stop() {
+            return true;
+        }
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        std::thread::sleep(left.min(SLICE));
+    }
+}
+
+/// Mode of the next pass: walk while a root is walked in full or many directories are
+/// pending (VFS-5 R1, R2).
+fn pass_mode(conn: &Connection, cfg: &SchedConfig) -> Result<Mode> {
+    if !walking(conn)?.is_empty() {
+        return Ok(Mode::Walk);
+    }
+    let pending: i64 = conn
+        .prepare_cached(&format!(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM dirs INDEXED BY dirs_pending WHERE {} LIMIT ?1)",
+            pending_condition()
+        ))?
+        .query_row([cfg.incremental_max_dirs as i64 + 1], |r| r.get(0))?;
+    Ok(sched::choose_mode(false, pending as u64, cfg))
 }
 
 /// Per-root counters of the current pass, for progress.
@@ -151,12 +216,14 @@ fn run(
     retries: &mut Retries,
     stop: &dyn Fn() -> bool,
     one_batch: bool,
+    sched: &mut Sched,
     tick: Tick,
 ) -> Result<Outcome> {
     let conn: &Connection = conn;
     if !finish_removing(conn, stop)? {
         return Ok(Outcome::Yielded);
     }
+    sched.mode = pass_mode(conn, &sched.cfg)?;
     let skip = data_dir(conn);
     let roots: Vec<ActiveRoot> = {
         let mut stmt =
@@ -170,6 +237,11 @@ fn run(
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
+    sched.drives = roots
+        .iter()
+        .filter_map(|r| platform::drive_of(Path::new(&r.path)))
+        .chain(skip.as_deref().and_then(platform::drive_of))
+        .collect();
     for mut root in roots {
         if !reachable(&root.path) {
             if root.status != RootStatus::Unavailable {
@@ -185,6 +257,7 @@ fn run(
             }
             root.status = RootStatus::Scanning;
             pass.back_online = true;
+            sched.mode = sched::Mode::Walk;
         }
         match scan_root(
             conn,
@@ -194,6 +267,7 @@ fn run(
             stop,
             one_batch,
             skip.as_deref(),
+            sched,
             tick,
         )? {
             RootOutcome::Finished => finalize_root(conn, &root, pass)?,
@@ -240,6 +314,9 @@ fn discard_recovered_copy(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Lists the pending directories of one root. In walk mode the transaction spans a batch
+/// of directories; in incremental mode each directory is listed with no transaction open
+/// and committed alone (VFS-5 R3). A back-off pause always commits first.
 #[allow(clippy::too_many_arguments)]
 fn scan_root(
     conn: &Connection,
@@ -249,16 +326,28 @@ fn scan_root(
     stop: &dyn Fn() -> bool,
     one_batch: bool,
     skip: Option<&Path>,
+    sched: &mut Sched,
     tick: Tick,
 ) -> Result<RootOutcome> {
-    let mut tx = begin(conn)?;
+    let mut tx: Option<Transaction<'_>> = None;
     let mut rows = 0u64;
     let mut started = Instant::now();
     loop {
         if stop() {
-            tx.commit()?;
+            commit(&mut tx, sched)?;
             pass.current = None;
             return Ok(RootOutcome::Yielded);
+        }
+        while let Step::Wait(d) = sched.step() {
+            // Never hold the write lock while the disk is left to others (VFS-5 R4).
+            commit(&mut tx, sched)?;
+            let paused = Instant::now();
+            let stopped = pause(d, stop);
+            sched.diag.backoff(paused.elapsed());
+            if stopped {
+                pass.current = None;
+                return Ok(RootOutcome::Yielded);
+            }
         }
         let now = Instant::now();
         let waiting: Vec<String> = retries
@@ -272,6 +361,8 @@ fn scan_root(
             format!(" AND id NOT IN ({})", waiting.join(","))
         };
         let next: Option<(i64, String, i64)> = tx
+            .as_deref()
+            .unwrap_or(conn)
             .prepare_cached(&format!(
                 "SELECT id, rel_path, scan_state FROM dirs INDEXED BY dirs_pending \
                  WHERE root_id = ?1 AND {}{not_waiting} ORDER BY id DESC LIMIT 1",
@@ -280,31 +371,38 @@ fn scan_root(
             .query_row([root.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .optional()?;
         let Some((dir_id, rel_path, state)) = next else {
-            tx.commit()?;
+            commit(&mut tx, sched)?;
             pass.current = None;
             return Ok(RootOutcome::Finished);
         };
-        if root.status == RootStatus::Pending {
-            set_root_status(&tx, root.id, RootStatus::Scanning)?;
-            root.status = RootStatus::Scanning;
-        }
         pass.finished.remove(&root.id);
         pass.current = Some((root.id, rel_path.clone()));
         let (added, removed) = (pass.summary.files_added, pass.summary.files_removed);
         let abs = db::join_rel(&root.path, &rel_path);
         let deep = state == ingest::ScanState::PendingDeep as i64;
-        let listing = if walk::behind_link(Path::new(&root.path), &rel_path) {
-            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
-        } else {
-            walk::list_dir(&abs, skip)
+        let listing = sched.listing(|| {
+            if walk::behind_link(Path::new(&root.path), &rel_path) {
+                Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+            } else {
+                walk::list_dir(&abs, skip)
+            }
+        });
+        let open = match tx.take() {
+            Some(open) => open,
+            None => begin(conn)?,
         };
+        let t: &Transaction<'_> = tx.insert(open);
+        if root.status == RootStatus::Pending {
+            set_root_status(t, root.id, RootStatus::Scanning)?;
+            root.status = RootStatus::Scanning;
+        }
         if !matches!(&listing, Err(e) if e.kind() != std::io::ErrorKind::NotFound) {
             retries.remove(&dir_id);
         }
         match listing {
             Ok(entries) => {
                 rows += apply::apply_listing(
-                    &tx,
+                    t,
                     root.id,
                     dir_id,
                     &rel_path,
@@ -314,17 +412,17 @@ fn scan_root(
                 )?;
                 if rel_path.is_empty() {
                     let mtime = walk::unix_secs(std::fs::metadata(&abs).and_then(|m| m.modified()));
-                    ingest::set_dir_mtime(&tx, dir_id, mtime)?;
+                    ingest::set_dir_mtime(t, dir_id, mtime)?;
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if rel_path.is_empty() || !reachable(&root.path) {
-                    tx.commit()?;
+                    commit(&mut tx, sched)?;
                     pass.current = None;
                     return Ok(RootOutcome::Unavailable);
                 }
                 // Gone since its parent was listed: drop it and everything below.
-                let gone = ingest::delete_dir_subtree(&tx, dir_id)?;
+                let gone = ingest::delete_dir_subtree(t, dir_id)?;
                 pass.summary.files_removed += gone;
                 rows += 1 + gone;
             }
@@ -341,7 +439,7 @@ fn scan_root(
                 retry.attempts += 1;
                 if retry.attempts >= RETRY_ATTEMPTS {
                     retries.remove(&dir_id);
-                    ingest::set_dir_state(&tx, dir_id, ingest::ScanState::Clean)?;
+                    ingest::set_dir_state(t, dir_id, ingest::ScanState::Clean)?;
                 } else {
                     retry.next_at = now + RETRY_FIRST * 2u32.pow(retry.attempts - 1);
                 }
@@ -353,18 +451,21 @@ fn scan_root(
         tally.files_delta += (pass.summary.files_added - added) as i64;
         tally.files_delta -= (pass.summary.files_removed - removed) as i64;
 
+        let incremental = sched.mode == Mode::Incremental;
+        if incremental {
+            commit(&mut tx, sched)?;
+        }
         if rows >= BATCH_ROWS || started.elapsed() >= BATCH_AGE {
-            tx.commit()?;
+            commit(&mut tx, sched)?;
             tick(conn, pass, true);
             if one_batch {
                 pass.current = None;
                 return Ok(RootOutcome::Yielded);
             }
-            tx = begin(conn)?;
             rows = 0;
             started = Instant::now();
         } else {
-            tick(&tx, pass, false);
+            tick(tx.as_deref().unwrap_or(conn), pass, incremental);
         }
     }
 }
@@ -647,11 +748,42 @@ pub(crate) struct IndexerHandle {
 }
 
 impl IndexerHandle {
-    /// Starts the thread (background priority via `platform`, watcher via `watch`), which
+    /// Starts the thread (priority and back-off via `sched`, watcher via `watch`), which
     /// first finishes roots left in `removing`, then resumes pending directories. The
     /// watcher ignores the directory holding `db_path`.
-    pub(crate) fn spawn(db_path: PathBuf, sink: Arc<dyn ProgressSink>) -> Result<IndexerHandle> {
-        let conn = db::open_rw(&db_path)?;
+    pub(crate) fn spawn(
+        db_path: PathBuf,
+        sink: Arc<dyn ProgressSink>,
+        options: IndexerOptions,
+    ) -> Result<IndexerHandle> {
+        let cfg = SchedConfig {
+            boot_grace: options.boot_grace,
+            ..SchedConfig::default()
+        };
+        let sched = Sched::new(
+            cfg,
+            Box::new(platform::OsThreadPriority::default()),
+            platform::disk_load(),
+            sched::log_sink(),
+        );
+        IndexerHandle::spawn_with(db_path, sink, sched, platform::uptime())
+    }
+
+    /// `spawn` with a given schedule and system uptime (tests use fakes).
+    fn spawn_with(
+        db_path: PathBuf,
+        sink: Arc<dyn ProgressSink>,
+        mut sched: Sched,
+        uptime: Option<Duration>,
+    ) -> Result<IndexerHandle> {
+        let mut conn = db::open_rw(&db_path)?;
+        sched::install_checkpoint_hook(
+            &mut conn,
+            Arc::clone(&sched.checkpoints),
+            db::WAL_AUTOCHECKPOINT_PAGES,
+        )?;
+        let catchup_delay = sched::catchup_delay(uptime, sched.cfg.boot_grace);
+        prepare_data_dir(&db_path, &mut sched, uptime, catchup_delay);
         let (tx, rx) = mpsc::channel();
         let shared = Arc::new(Shared {
             paused: AtomicBool::new(false),
@@ -683,6 +815,10 @@ impl IndexerHandle {
             last_progress: None,
             last_changed: Instant::now(),
             last_periodic: Instant::now(),
+            sched,
+            catchup_at: Instant::now() + catchup_delay,
+            catchup: Vec::new(),
+            db_path,
         };
         let join = std::thread::Builder::new()
             .name("vfs-indexer".into())
@@ -765,11 +901,47 @@ struct Worker {
     last_progress: Option<Instant>,
     last_changed: Instant,
     last_periodic: Instant,
+    sched: Sched,
+    /// The start-up catch-up re-walks in `catchup` are requested at `catchup_at`, once the
+    /// system has been up for the boot grace (VFS-5 R5).
+    catchup_at: Instant,
+    catchup: Vec<i64>,
+    db_path: PathBuf,
+}
+
+/// Prepares the folder holding the index (VFS-5 R9): not content-indexed on Windows, a
+/// warning when it lies in a Synology sync root, and the diagnostic `start` record.
+fn prepare_data_dir(
+    db_path: &Path,
+    sched: &mut Sched,
+    uptime: Option<Duration>,
+    catchup_delay: Duration,
+) {
+    let dir = db_path.parent().unwrap_or(Path::new(""));
+    let mut synced = false;
+    if !dir.as_os_str().is_empty() {
+        if let Err(e) = platform::exclude_from_content_index(dir) {
+            log::warn!("index folder still content-indexed: {e}");
+        }
+        synced = platform::inside_sync_root(dir);
+        if synced {
+            log::warn!("the index folder lies inside a Synology sync root");
+        }
+    }
+    let line = format!(
+        "start uptime_s={} catchup_deferred_s={} probe={} data_dir_in_sync_root={synced}",
+        uptime.map_or_else(|| "?".to_owned(), |u| u.as_secs().to_string()),
+        catchup_delay.as_secs(),
+        if sched.has_probe() { "pdh" } else { "none" },
+    );
+    sched.diag.emit(&line);
 }
 
 impl Worker {
     fn run(mut self) {
-        platform::enter_background_priority();
+        // The walk profile is the thread's base state; background mode is only entered
+        // around single listings of incremental work (VFS-5 R1, R2).
+        self.sched.walk_profile();
         if let Err(e) = self.init() {
             log::error!("indexer start: {e}");
         }
@@ -786,6 +958,11 @@ impl Worker {
                 return;
             }
             self.flush_dirty();
+            if !self.catchup.is_empty() && Instant::now() >= self.catchup_at {
+                let ids = std::mem::take(&mut self.catchup);
+                self.request(&ids, false);
+            }
+            self.memory_record();
             if self.last_periodic.elapsed() >= PERIODIC_CHECK {
                 self.last_periodic = Instant::now();
                 let r = stale_roots(&self.conn, PERIODIC_REWALK_SECS)
@@ -834,6 +1011,7 @@ impl Worker {
                 &mut self.retries,
                 &stop,
                 true,
+                &mut self.sched,
                 &mut tick,
             );
             let back_online = std::mem::take(&mut self.pass.back_online);
@@ -843,12 +1021,30 @@ impl Worker {
                 self.sync_watches();
             }
             match outcome {
-                Ok(Outcome::Yielded) => self.published = None,
+                Ok(Outcome::Yielded) => {
+                    self.published = None;
+                    let s = &mut self.sched;
+                    s.diag.tick(
+                        Instant::now(),
+                        s.mode,
+                        &self.pass.summary,
+                        self.retries.len(),
+                        &s.checkpoints,
+                    );
+                }
                 Ok(Outcome::Done) => {
                     if self.pass.summary.dirs_listed > 0 || self.pass.summary.errors > 0 {
                         self.sink.on_index_changed();
                         self.last_changed = Instant::now();
                     }
+                    let s = &mut self.sched;
+                    s.diag.pass_end(
+                        Instant::now(),
+                        s.mode,
+                        &self.pass.summary,
+                        self.retries.len(),
+                        &s.checkpoints,
+                    );
                     self.pass = Pass::default();
                     self.publish(IndexerState::Idle);
                     let mut timeout = match self.dirty_since {
@@ -857,6 +1053,10 @@ impl Worker {
                     };
                     if let Some(due) = self.retries.values().map(|r| r.next_at).min() {
                         timeout = timeout.min(due.saturating_duration_since(Instant::now()));
+                    }
+                    if !self.catchup.is_empty() {
+                        let due = self.catchup_at.saturating_duration_since(Instant::now());
+                        timeout = timeout.min(due);
                     }
                     self.wait(timeout.max(Duration::from_millis(10)));
                 }
@@ -870,6 +1070,19 @@ impl Worker {
         }
     }
 
+    /// The diagnostic `memory` record: working set, WAL and index size (VFS-5 R7).
+    fn memory_record(&mut self) {
+        let now = Instant::now();
+        if !self.sched.diag.memory_due(now) {
+            return;
+        }
+        let size = |p: &Path| std::fs::metadata(p).ok().map(|m| m.len());
+        let mut wal = self.db_path.as_os_str().to_owned();
+        wal.push(db::WAL_SUFFIX);
+        let (wal, main) = (size(Path::new(&wal)), size(&self.db_path));
+        self.sched.diag.memory(now, wal, main);
+    }
+
     fn log_err(&self, r: Result<()>) {
         if let Err(e) = r {
             log::warn!("indexer: {e}");
@@ -877,12 +1090,17 @@ impl Worker {
     }
 
     /// Finishes removals, then owes every root a catch-up re-walk: changes made while the
-    /// app was closed are not otherwise seen (VFS-1 I4). Then starts watching.
+    /// app was closed are not otherwise seen (VFS-1 I4). The catch-up waits for the boot
+    /// grace (VFS-5 R5); roots never fully scanned are walked at once. Then starts watching.
     fn init(&mut self) -> Result<()> {
         finish_removing(&self.conn, &|| false)?;
         refresh_counts(&self.conn, None)?;
         let ids = live_root_ids(&self.conn)?;
-        request_rewalk(&self.conn, &mut self.owed, &ids, false)?;
+        if Instant::now() >= self.catchup_at {
+            request_rewalk(&self.conn, &mut self.owed, &ids, false)?;
+        } else {
+            self.catchup = ids;
+        }
         self.watcher = start_watcher(self.watch_tx.clone(), self.ignore.clone());
         self.sync_watches();
         Ok(())
@@ -905,16 +1123,26 @@ impl Worker {
         match cmd {
             Cmd::Wake => {}
             Cmd::RootsChanged => self.sync_watches(),
-            Cmd::Rescan(Some(root_id)) => self.request(&[root_id], false),
+            Cmd::Rescan(Some(root_id)) => {
+                self.catchup.retain(|&id| id != root_id);
+                self.request(&[root_id], false)
+            }
             Cmd::Rescan(None) => match live_root_ids(&self.conn) {
-                Ok(ids) => self.request(&ids, false),
+                Ok(ids) => {
+                    self.catchup.clear();
+                    self.request(&ids, false)
+                }
                 Err(e) => log::warn!("indexer: {e}"),
             },
             Cmd::Watch(watch::WatchEvent::Dirty(path)) => {
                 self.dirty.push(path);
                 self.dirty_since.get_or_insert_with(Instant::now);
             }
-            Cmd::Watch(watch::WatchEvent::Rescan(root_id)) => self.request(&[root_id], true),
+            Cmd::Watch(watch::WatchEvent::Rescan(root_id)) => {
+                // An overflow or a failed watch: events were lost.
+                self.sched.diag.overflow(root_id);
+                self.request(&[root_id], true)
+            }
             Cmd::Watch(watch::WatchEvent::Renamed { from, to }) => {
                 match rename_dir(&mut self.conn, &from, &to) {
                     Ok(true) => log::debug!("{} renamed in place", from.display()),
@@ -1050,6 +1278,7 @@ pub(crate) fn scan_to_completion(
         &mut Retries::new(),
         &stop,
         false,
+        &mut Sched::inert(),
         &mut |_: &Connection, _: &Pass, _: bool| {},
     )?;
     Ok(pass.summary)

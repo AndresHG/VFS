@@ -7,9 +7,10 @@ pub mod commands;
 pub mod reveal;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, Window, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 pub use vfs_core::api::{ApiError, RevealOutcome, EVENT_INDEX_CHANGED, EVENT_INDEX_PROGRESS};
@@ -71,13 +72,17 @@ impl<R: Runtime> ProgressSink for EventSink<R> {
     }
 }
 
-/// Largest log file before it rotates; two old files are kept, so logs stay under ~3 MB.
+/// Largest log file before it rotates...
 const LOG_MAX_BYTES: u128 = 1024 * 1024;
+/// ...and old files kept: at most 5 MB, about two weeks of mostly idle use or three days of
+/// continuous indexing at one diagnostic record per minute (VFS-5 R7).
+const LOG_KEEP: usize = 4;
 
-/// Writes warnings and errors to `<local_data>/logs/vfs.log`, rotating at
-/// [`LOG_MAX_BYTES`], so a problem on the target PC can be diagnosed afterwards. Only
-/// warnings and errors are written; nothing at info level or below, where messages could
-/// name the user's files in passing.
+/// Writes warnings, errors and the indexer's diagnostic records to
+/// `<local_data>/logs/vfs.log`, rotating at [`LOG_MAX_BYTES`], so the target PC can be
+/// diagnosed afterwards. At info level only the diagnostic target
+/// ([`vfs_core::DIAG_TARGET`]) is written, whose records carry counts and durations, never a
+/// file name; other info messages could name the user's files in passing (VFS-5 R8).
 pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> tauri::Result<()> {
     use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
     app.plugin(
@@ -88,8 +93,9 @@ pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> taur
                 file_name: Some("vfs".into()),
             }))
             .level(log::LevelFilter::Warn)
+            .level_for(vfs_core::DIAG_TARGET, log::LevelFilter::Info)
             .max_file_size(LOG_MAX_BYTES)
-            .rotation_strategy(RotationStrategy::KeepSome(2))
+            .rotation_strategy(RotationStrategy::KeepSome(LOG_KEEP))
             .build(),
     )
 }
@@ -107,6 +113,88 @@ pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), S
     bookmarks::init(app, db_path);
     Ok(())
 }
+
+/// What the shell asks of the WebView2 controller when the main window is minimised or
+/// restored (VFS-5 R11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebviewPower {
+    /// Hide it and ask it to suspend, so Windows can reclaim the renderer's memory.
+    Suspend,
+    /// Make it visible again; a suspended WebView2 resumes on its own.
+    Resume,
+}
+
+/// The action for a window that is now `minimized`, given whether it was `suspended`; only
+/// Windows (WebView2) suspends, so elsewhere there is never an action.
+pub fn webview_power(minimized: bool, suspended: bool) -> Option<WebviewPower> {
+    if !cfg!(windows) {
+        return None;
+    }
+    match (minimized, suspended) {
+        (true, false) => Some(WebviewPower::Suspend),
+        (false, true) => Some(WebviewPower::Resume),
+        _ => None,
+    }
+}
+
+/// Whether the main window's WebView2 was asked to suspend (managed state).
+#[derive(Default)]
+struct WebviewSuspended(AtomicBool);
+
+/// On a resize, suspends the WebView2 of a minimised window or resumes it once restored.
+fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
+    if !matches!(event, WindowEvent::Resized(_)) {
+        return;
+    }
+    let Some(state) = window.try_state::<WebviewSuspended>() else {
+        return;
+    };
+    let minimized = window.is_minimized().unwrap_or(false);
+    let Some(action) = webview_power(minimized, state.0.load(Ordering::SeqCst)) else {
+        return;
+    };
+    state
+        .0
+        .store(action == WebviewPower::Suspend, Ordering::SeqCst);
+    if let Some(webview) = window.get_webview_window(window.label()) {
+        apply_webview_power(&webview, action);
+    }
+}
+
+/// `ICoreWebView2Controller::put_IsVisible` and `ICoreWebView2_3::TrySuspend`, as in
+/// Microsoft's own sample on `SIZE_MINIMIZED`. Never run on real hardware; failures are
+/// logged and harmless (TrySuspend fails while the WebView is visible).
+#[cfg(windows)]
+fn apply_webview_power<R: Runtime>(webview: &tauri::WebviewWindow<R>, action: WebviewPower) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_3;
+    use webview2_com::TrySuspendCompletedHandler;
+    use windows_core::Interface;
+
+    let r = webview.with_webview(move |pw| {
+        let controller = pw.controller();
+        // SAFETY: `with_webview` runs this on the WebView's UI thread, where its COM objects
+        // live; every pointer comes from the live controller.
+        let r = unsafe {
+            match action {
+                WebviewPower::Suspend => controller.SetIsVisible(false).and_then(|()| {
+                    let core = controller.CoreWebView2()?.cast::<ICoreWebView2_3>()?;
+                    let done = TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                    core.TrySuspend(&done)
+                }),
+                WebviewPower::Resume => controller.SetIsVisible(true),
+            }
+        };
+        if let Err(e) = r {
+            log::warn!("webview {action:?}: {e}");
+        }
+    });
+    if let Err(e) = r {
+        log::warn!("webview {action:?}: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_webview_power<R: Runtime>(_webview: &tauri::WebviewWindow<R>, _action: WebviewPower) {}
 
 /// Shows a native error and quits: a startup failure must never die silently.
 fn fail_startup<R: Runtime>(app: &AppHandle<R>, detail: &str) {
@@ -143,7 +231,9 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(commands::handler())
+        .on_window_event(on_window_event)
         .setup(|app| {
+            app.manage(WebviewSuspended::default());
             let handle = app.handle().clone();
             // The index lives in the local (never roaming) app data directory: a multi-GB
             // file must not be synced to a NAS or backed up with the user's profile.
@@ -190,6 +280,21 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-5 AC-12: minimising asks for one suspend and restoring for one resume, on Windows
+    /// only; repeated resizes in the same state ask for nothing.
+    #[test]
+    fn webview_suspends_when_minimised_on_windows() {
+        if cfg!(windows) {
+            assert_eq!(webview_power(true, false), Some(WebviewPower::Suspend));
+            assert_eq!(webview_power(false, true), Some(WebviewPower::Resume));
+        } else {
+            assert_eq!(webview_power(true, false), None);
+            assert_eq!(webview_power(false, true), None);
+        }
+        assert_eq!(webview_power(true, true), None);
+        assert_eq!(webview_power(false, false), None);
+    }
 
     /// VFS-1 C6: an index left in the old (roaming) directory moves with its sibling files and
     /// its session folder, the emptied old directory goes away, and a second call does nothing.

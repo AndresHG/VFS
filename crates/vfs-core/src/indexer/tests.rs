@@ -107,6 +107,7 @@ impl Fx {
             retries,
             &|| false,
             false,
+            &mut Sched::inert(),
             &mut |_: &Connection, _: &Pass, _: bool| {},
         )
         .unwrap();
@@ -144,6 +145,7 @@ fn rewalk_request_never_restarts_a_walk() {
         &mut Retries::new(),
         &stop,
         false,
+        &mut Sched::inert(),
         &mut |_: &Connection, _: &Pass, _: bool| {},
     )
     .unwrap();
@@ -171,7 +173,12 @@ fn overflow_storm_does_not_keep_a_root_walking() {
     let mut fx = fixture(&dirs);
     fx.scan();
     fx.set_last_scan(1000);
-    let h = IndexerHandle::spawn(fx.db_path.clone(), Arc::new(NullSink)).unwrap();
+    let h = IndexerHandle::spawn(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        IndexerOptions::default(),
+    )
+    .unwrap();
     let reader = db::open_ro(&fx.db_path).unwrap();
     let read = || -> (RootStatus, Option<i64>) {
         reader
@@ -510,4 +517,341 @@ fn recovered_copy_is_deleted_once_the_rebuild_completes() {
     tx.commit().unwrap();
     fx.scan();
     assert!(companions.iter().all(|p| !p.exists()));
+}
+
+/// Ordered log shared by a recording priority backend, the commit hook and fake probes.
+type Log = Arc<Mutex<Vec<String>>>;
+
+fn push(log: &Log, s: &str) {
+    log.lock().unwrap().push(s.to_owned());
+}
+
+/// A schedule recording priority calls into `log`, with `load` as the disk probe.
+fn recording_sched(
+    log: &Log,
+    cfg: SchedConfig,
+    load: Option<Box<dyn platform::DiskLoad>>,
+) -> Sched {
+    Sched::new(
+        cfg,
+        Box::new(sched::tests::Recorder(Arc::clone(log))),
+        load,
+        Box::new(|_| {}),
+    )
+}
+
+impl Fx {
+    /// Records every commit of the fixture's connection into `log`.
+    fn log_commits(&mut self, log: &Log) {
+        let l = Arc::clone(log);
+        self.conn
+            .commit_hook(Some(move || {
+                push(&l, "commit");
+                false
+            }))
+            .unwrap();
+    }
+
+    fn run_with(&mut self, sched: &mut Sched) -> ScanSummary {
+        let mut pass = Pass::default();
+        run(
+            &mut self.conn,
+            &mut pass,
+            &mut Retries::new(),
+            &|| false,
+            false,
+            sched,
+            &mut |_: &Connection, _: &Pass, _: bool| {},
+        )
+        .unwrap();
+        pass.summary
+    }
+
+    fn mark(&mut self, rels: &[&str]) {
+        let root = self.root();
+        let paths: Vec<PathBuf> = rels.iter().map(|r| root.join(r).join("x")).collect();
+        mark_dirty(&mut self.conn, &paths).unwrap();
+    }
+}
+
+/// VFS-5 AC-1: a first index runs entirely in the walk profile: no listing enters background
+/// mode.
+#[test]
+fn first_index_never_enters_background_mode() {
+    let mut fx = fixture(&["A/B", "C", "D/E/F"]);
+    let log: Log = Arc::default();
+    let mut s = recording_sched(&log, SchedConfig::default(), None);
+    let summary = fx.run_with(&mut s);
+    assert_eq!(summary.dirs_listed, 7);
+    assert_eq!(s.mode, Mode::Walk);
+    assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
+}
+
+/// VFS-5 AC-2, AC-3: a few watcher-marked directories are listed one by one in background
+/// mode, and every commit happens after the matching background-end, never inside; more
+/// than `incremental_max_dirs` pending directories use the walk profile.
+#[test]
+fn incremental_work_lists_in_background_and_commits_outside() {
+    let mut fx = fixture(&["A", "B", "C"]);
+    fx.scan();
+    let log: Log = Arc::default();
+    fx.log_commits(&log);
+    fx.mark(&["A", "B", "C"]);
+    log.lock().unwrap().clear();
+
+    let mut s = recording_sched(&log, SchedConfig::default(), None);
+    let summary = fx.run_with(&mut s);
+    assert_eq!(summary.dirs_listed, 3);
+    assert_eq!(s.mode, Mode::Incremental);
+    let calls = log.lock().unwrap().clone();
+    assert_eq!(
+        calls.iter().filter(|c| *c == "bg_begin").count(),
+        3,
+        "{calls:?}"
+    );
+    let mut background = false;
+    for c in &calls {
+        match c.as_str() {
+            "bg_begin" => {
+                assert!(!background, "nested background: {calls:?}");
+                background = true;
+            }
+            "bg_end" => background = false,
+            "commit" => assert!(!background, "commit in background mode: {calls:?}"),
+            _ => {}
+        }
+    }
+    assert!(!background);
+    assert!(
+        calls.iter().filter(|c| *c == "commit").count() >= 3,
+        "{calls:?}"
+    );
+
+    fx.mark(&["A", "B", "C"]);
+    log.lock().unwrap().clear();
+    let cfg = SchedConfig {
+        incremental_max_dirs: 2,
+        ..SchedConfig::default()
+    };
+    let mut s = recording_sched(&log, cfg, None);
+    assert_eq!(fx.run_with(&mut s).dirs_listed, 3);
+    assert_eq!(s.mode, Mode::Walk);
+    assert!(!log.lock().unwrap().iter().any(|c| c == "bg_begin"));
+}
+
+/// A probe reporting a full disk queue, which also records whether another connection
+/// could take the write lock at that moment.
+struct BusyProbe {
+    log: Log,
+    other: Connection,
+}
+
+impl platform::DiskLoad for BusyProbe {
+    fn sample(&mut self) -> Option<Vec<(String, f64)>> {
+        let free = self
+            .other
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .is_ok();
+        push(
+            &self.log,
+            if free { "sample_free" } else { "sample_locked" },
+        );
+        Some(vec![("_Total".into(), 100.0)])
+    }
+}
+
+/// VFS-5 AC-5, AC-6: on a permanently busy disk a walk still finishes, pausing between
+/// directories, and it commits before each pause, so another writer can take the lock while
+/// it waits.
+#[test]
+fn busy_disk_walk_commits_before_pausing_and_still_finishes() {
+    let dirs: Vec<String> = (0..40).map(|i| format!("d{i:02}")).collect();
+    let dirs: Vec<&str> = dirs.iter().map(String::as_str).collect();
+    let mut fx = fixture(&dirs);
+    let log: Log = Arc::default();
+    fx.log_commits(&log);
+    let other = Connection::open(&fx.db_path).unwrap();
+    other.busy_timeout(Duration::ZERO).unwrap();
+    let cfg = SchedConfig {
+        sample_every: Duration::from_millis(2),
+        max_backoff: Duration::from_millis(20),
+        min_work: Duration::from_millis(5),
+        ..SchedConfig::default()
+    };
+    let probe = BusyProbe {
+        log: Arc::clone(&log),
+        other,
+    };
+    let mut s = recording_sched(&log, cfg, Some(Box::new(probe)));
+    let started = Instant::now();
+    let summary = fx.run_with(&mut s);
+    assert_eq!(
+        summary.dirs_listed, 41,
+        "the walk finished despite the busy disk"
+    );
+    assert!(started.elapsed() >= Duration::from_millis(20), "it paused");
+    let calls = log.lock().unwrap().clone();
+    let commits = calls.iter().filter(|c| *c == "commit").count();
+    // Without back-off the 41 directories fit in one batch: a single commit.
+    assert!(commits >= 2, "no commit before a pause: {calls:?}");
+    assert!(
+        calls.iter().any(|c| c == "sample_free"),
+        "another writer never got the lock while paused: {calls:?}"
+    );
+    assert_eq!(fx.status(), RootStatus::Ready);
+}
+
+/// A diagnostic sink collecting records.
+fn capture() -> (Log, sched::DiagSink) {
+    let log: Log = Arc::default();
+    let l = Arc::clone(&log);
+    (log, Box::new(move |s: &str| push(&l, s)))
+}
+
+fn wait_until(what: &str, timeout: Duration, mut cond: impl FnMut() -> bool) {
+    let deadline = Instant::now() + timeout;
+    while !cond() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// VFS-5 AC-7: started 2 "minutes" after boot (scaled down), the catch-up re-walk waits
+/// until uptime reaches the boot grace, while a manual re-walk of another root starts at
+/// once.
+#[test]
+fn catchup_waits_for_boot_grace_but_manual_rewalk_does_not() {
+    let mut fx = fixture(&["A"]);
+    let tree2 = tempfile::tempdir().unwrap();
+    let root2 = dunce::canonicalize(tree2.path()).unwrap();
+    fs::create_dir(root2.join("B")).unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    let id2 = ingest::insert_root(&tx, "dos", root2.to_str().unwrap()).unwrap();
+    tx.commit().unwrap();
+    fx.scan();
+    fx.set_last_scan(1000);
+    fx.conn
+        .execute("UPDATE roots SET last_full_scan_at = 1000", [])
+        .unwrap();
+
+    let grace = Duration::from_millis(1500);
+    let cfg = SchedConfig {
+        boot_grace: grace,
+        ..SchedConfig::default()
+    };
+    let (records, sink) = capture();
+    let sched = Sched::new(
+        cfg,
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        sink,
+    );
+    let started = Instant::now();
+    let h = IndexerHandle::spawn_with(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        sched,
+        Some(Duration::from_millis(200)),
+    )
+    .unwrap();
+    h.rescan(Some(id2));
+    let reader = db::open_ro(&fx.db_path).unwrap();
+    let last = |id: i64| -> i64 {
+        reader
+            .query_row(
+                "SELECT last_full_scan_at FROM roots WHERE id = ?1",
+                [id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+            .unwrap_or(0)
+    };
+    wait_until("the manual re-walk", Duration::from_secs(10), || {
+        last(id2) > 1000
+    });
+    assert!(
+        started.elapsed() < grace - Duration::from_millis(400),
+        "the manual re-walk waited for the boot grace"
+    );
+    assert_eq!(
+        last(fx.root_id),
+        1000,
+        "the catch-up started during the grace"
+    );
+    wait_until("the catch-up", Duration::from_secs(10), || {
+        last(fx.root_id) > 1000
+    });
+    assert!(started.elapsed() >= grace - Duration::from_millis(250));
+    drop(h);
+    let records = records.lock().unwrap();
+    assert!(
+        records[0].starts_with("start uptime_s=0 catchup_deferred_s=1 probe=none"),
+        "{records:?}"
+    );
+}
+
+/// VFS-5 AC-8, AC-9: a running indexer writes `start`, `pass_end` and `watch_overflow`
+/// records, and none of them names a file or folder, even when a listing fails.
+#[test]
+fn diagnostic_records_never_name_files() {
+    let fx = fixture(&["Zorropálido_secreto/Quokka_privado"]);
+    fs::write(fx.root().join("Ornitorrinco_carta.txt"), b"x").unwrap();
+    let locked = fx.root().join("Pangolín_cerrado");
+    fs::create_dir(&locked).unwrap();
+    fs::write(locked.join("Lémur_nota.txt"), b"x").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let (records, sink) = capture();
+    let sched = Sched::new(
+        SchedConfig::default(),
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        sink,
+    );
+    let h = IndexerHandle::spawn_with(fx.db_path.clone(), Arc::new(NullSink), sched, None).unwrap();
+    wait_until("the first pass", Duration::from_secs(20), || {
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("pass_end "))
+    });
+    h.send(Cmd::Watch(watch::WatchEvent::Rescan(fx.root_id)));
+    wait_until("the overflow record", Duration::from_secs(10), || {
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("watch_overflow root="))
+    });
+    drop(h);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let records = records.lock().unwrap();
+    assert!(records[0].starts_with("start "), "{records:?}");
+    let end = records.iter().find(|r| r.starts_with("pass_end ")).unwrap();
+    assert!(end.contains("mode=walk"), "{end}");
+    if cfg!(unix) {
+        assert!(end.contains("errors=1"), "{end}");
+    }
+    let root = fx.root().to_string_lossy().into_owned();
+    for r in records.iter() {
+        for name in [
+            "Zorro",
+            "Quokka",
+            "Ornitorrinco",
+            "Pangol",
+            "Lémur",
+            "secreto",
+            root.as_str(),
+        ] {
+            assert!(!r.contains(name), "{name} in diagnostic record {r}");
+        }
+    }
 }

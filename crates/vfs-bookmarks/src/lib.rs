@@ -257,9 +257,10 @@ impl Bookmarks {
         }
     }
 
-    /// Refreshes now and then every [`REFRESH_INTERVAL`] on a background-priority thread
-    /// until the returned sender is dropped; sending `()` refreshes at once ("Buscar cambios
-    /// ahora", the setting turned on). `on_change` runs after every refresh.
+    /// Refreshes now and then every [`REFRESH_INTERVAL`] on a low-priority thread (the
+    /// indexer's walk profile, VFS-5 R1) until the returned sender is dropped; sending `()`
+    /// refreshes at once ("Buscar cambios ahora", the setting turned on). `on_change` runs
+    /// after every refresh.
     pub fn start_refresher(
         self: &Arc<Self>,
         on_change: impl Fn(&BookmarkStatus) + Send + 'static,
@@ -269,7 +270,7 @@ impl Bookmarks {
         let spawned = std::thread::Builder::new()
             .name("vfs-bookmarks".into())
             .spawn(move || {
-                vfs_core::enter_background_priority();
+                vfs_core::lower_thread_priority();
                 loop {
                     if me.is_enabled() {
                         match me.refresh() {

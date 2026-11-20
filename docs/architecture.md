@@ -207,9 +207,15 @@ can search meanwhile; the status bar says "Comprobando cambios…" while it runs
 
 ### The indexer thread
 
-`IndexerHandle::spawn` starts the thread `vfs-indexer`, which lowers its own priority
-(`platform::enter_background_priority`: macOS background QoS plus throttled disk I/O
-policy; Windows `THREAD_MODE_BACKGROUND_BEGIN`). The thread:
+`IndexerHandle::spawn` starts the thread `vfs-indexer` in the *walk profile*
+(`platform::OsThreadPriority`, VFS-5): normal disk I/O, lowest CPU priority and low memory
+priority (Windows `THREAD_PRIORITY_LOWEST` + `MEMORY_PRIORITY_LOW`; macOS utility QoS).
+Walks and large batches run in that profile and pause while the roots' disk is busy
+(`indexer/sched.rs`: PDH average queue length on Windows, a forced 20 % duty floor). Small
+incremental work lists each directory in background mode (Windows
+`THREAD_MODE_BACKGROUND_BEGIN`, macOS throttled disk I/O) and commits it alone after leaving
+it, so the write lock is never held at very-low I/O priority. The start-up catch-up waits
+until the system has been up 10 minutes. The thread:
 
 - takes commands from a channel: roots changed, rescan, pause, watcher events;
 - runs the scan loop one transaction batch at a time, yielding to any new command;
@@ -444,8 +450,9 @@ unverified on a real Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No fi
 opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
-log plugin), rotated at 1 MB with two old files kept; nothing below warning level is
-written.
+log plugin), rotated at 1 MB with four old files kept. Below warning level only the
+indexer's diagnostic records (target `vfs::diag`, VFS-5) are written: per-minute walk rates,
+back-off, commit and checkpoint durations, overflows and memory, never a file name.
 
 The app opens the index at `<local app data dir>/index.db` in `setup` (Tauri
 `app_local_data_dir`: `%LOCALAPPDATA%\app.vfs.desktop` on Windows, never the roaming
@@ -483,8 +490,9 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
   position, unique per profile and Firefox `guid`, so an item keeps its id across reads. A profile whose
   signature is unchanged is not read again. Turning the setting off deletes every profile
   and bookmark and vacuums the file.
-- **Refreshing**: thread `vfs-bookmarks` at background priority reads at start, when the
-  setting is turned on, on "Buscar cambios ahora", and every 30 minutes.
+- **Refreshing**: thread `vfs-bookmarks`, in the indexer's walk profile (low CPU priority,
+  normal I/O, VFS-5), reads at start, when the setting is turned on, on "Buscar cambios
+  ahora", and every 30 minutes.
 - **Searching** (`search.rs`, `sources.rs`): every stored item is in memory with folded keys
   (title; for a bookmark the address without scheme and `www.`, folder path, tags and
   keyword; for a folder its whole path), its ancestors' ids and its tree key (profile, then

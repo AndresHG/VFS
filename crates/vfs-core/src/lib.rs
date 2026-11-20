@@ -18,6 +18,7 @@ mod types;
 
 pub use error::{Error, Result};
 pub use fold::fold_key;
+pub use indexer::{IndexerOptions, DIAG_TARGET};
 pub use kind::file_kind;
 pub use types::*;
 
@@ -30,10 +31,12 @@ use rusqlite::{Connection, InterruptHandle};
 use indexer::IndexerHandle;
 use search::SearchState;
 
-/// Lowers the calling thread's CPU and disk priority, as the indexer does (VFS-1 I7); for
+/// Gives the calling thread the indexer's walk profile: lowest CPU and low memory priority,
+/// normal I/O, so its SQLite commits never run at very-low I/O priority (VFS-5 R1). For
 /// readers of other sources (VFS-6 bookmarks).
-pub fn enter_background_priority() {
-    platform::enter_background_priority();
+pub fn lower_thread_priority() {
+    use platform::ThreadPriority;
+    platform::OsThreadPriority::default().walk_profile();
 }
 
 /// Receives indexer progress; implemented by the app (Tauri events) and the CLI.
@@ -160,11 +163,24 @@ impl Vfs {
         })
     }
 
-    /// Starts the background indexer and watcher. Idempotent.
+    /// Starts the background indexer and watcher with the default options. Idempotent.
     pub fn start_indexer(&self, sink: Arc<dyn ProgressSink>) -> Result<()> {
+        self.start_indexer_with(sink, IndexerOptions::default())
+    }
+
+    /// Starts the background indexer and watcher. Idempotent.
+    pub fn start_indexer_with(
+        &self,
+        sink: Arc<dyn ProgressSink>,
+        options: IndexerOptions,
+    ) -> Result<()> {
         let mut slot = lock(&self.inner.indexer);
         if slot.is_none() {
-            *slot = Some(IndexerHandle::spawn(self.inner.db_path.clone(), sink)?);
+            *slot = Some(IndexerHandle::spawn(
+                self.inner.db_path.clone(),
+                sink,
+                options,
+            )?);
         }
         Ok(())
     }

@@ -9,8 +9,9 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 
 ## What it does
 
-- Indexes only the folders the user chooses ("carpetas"), in the background, at low CPU and
-  disk priority. Closing the app and opening it again resumes the scan where it stopped.
+- Indexes only the folders the user chooses ("carpetas"), in the background, at low CPU
+  priority, pausing while the disk is busy; small updates use very-low disk priority.
+  Closing the app and opening it again resumes the scan where it stopped.
 - Reads names, sizes and dates from the directory listing. It never opens, moves or changes
   a user file.
 - Searches as the user types. Every word must appear in the file name or in the folder path,
@@ -168,7 +169,8 @@ multi-GB index must not travel to the NAS. An index that an earlier build left i
 `%APPDATA%\app.vfs.desktop\` is moved to the local folder once, at start.
 
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
-that marks an open session, `logs/vfs.log` (warnings and errors only, at most about 3 MB),
+that marks an open session, `logs/vfs.log` (warnings, errors and the indexer's diagnostic
+records without file names, at most about 5 MB),
 and, after a recovery, `index.db.bad` until the rebuild has finished. With Firefox bookmarks
 included, `bookmarks.db` (with its `-wal` and `-shm`) holds the setting and the bookmarks
 read, and `bookmarks.db.snapshot/` exists only for the moment a copy of Firefox's database

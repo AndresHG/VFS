@@ -185,7 +185,7 @@ test `extension_point_is_present_and_unused`):
 | `SCHEMA_VERSION` and `PRAGMA user_version` | `crates/vfs-core/src/db.rs` | versioned schema; later versions add tables without touching existing ones, and an older build refuses a newer index (`schema_too_new`) instead of damaging it |
 | `MatchKind` | `crates/vfs-core/src/types.rs` | the result contract already says content search adds its own variant |
 | `files.kind` | `schema.sql`, `kind.rs` | selects which files are documents |
-| background priority, batched commits, persistent queue in the index | `crates/vfs-core/src/indexer/`, `platform.rs` | the patterns the extraction queue reuses |
+| low thread priority, batched commits, persistent queue in the index | `crates/vfs-core/src/indexer/`, `platform.rs` | the patterns the extraction queue reuses |
 
 What content search still has to add:
 

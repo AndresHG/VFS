@@ -26,6 +26,9 @@ tauri-plugin-log = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+# The WebView2 types tauri's `with_webview` hands out (VFS-5 R11): same versions as wry's.
+webview2-com = "0.39"
+windows-core = "0.62"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
