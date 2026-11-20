@@ -11,7 +11,8 @@ name = "vfs_desktop_lib"
 crate-type = ["rlib"]
 
 # VFS-8: `webdriver` embeds a W3C WebDriver server (localhost only) so the e2e workflow can
-# drive the window where no external driver exists (macOS). Never enabled in release builds.
+# drive the window on Windows and macOS (no external driver attached to the release build).
+# Never enabled in release builds.
 [features]
 webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 

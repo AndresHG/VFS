@@ -38,6 +38,9 @@ STATE_IDLE = "idle"
 STATE_SCANNING = "scanning"
 ROOT_READY = "ready"
 
+# Title of the native folder picker (`pick_folder`, apps/desktop/src-tauri/src/commands.rs).
+FOLDER_DIALOG_TITLE = "Elegir carpeta"
+
 # A `SearchQuery.filters` with no filter set.
 NO_FILTERS = {"kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": None,
               "sizeMax": None, "folder": None}
@@ -288,7 +291,7 @@ class Journey:
         q = self.wd.find("#q")
         self.wd.clear(q)
         # clear() does not fire `input`; select-all + backspace does, so the UI resets.
-        self.wd.type(q, "a")
+        self.wd.type(q, "\ue009a\ue003")
         if text:
             self.wd.type(q, text)
         return now()
@@ -468,7 +471,7 @@ class Journey:
                 self.wd.click(self.wd.find(f"#results .row[data-index='{idx}'] .reveal"))
                 how = "reveal button"
             except WebDriverError:
-                self.wd.type(self.wd.find("#q"), "")  # Enter on the selected row
+                self.wd.type(self.wd.find("#q"), "\ue007")  # Enter on the selected row
                 how = "Enter key"
             res = check_file_manager(target, expect, timeout=15)
             res["seconds"] = round(now() - t0, 2)
@@ -623,7 +626,7 @@ class Journey:
 def drive_windows_folder_dialog(path, journey):
     """Fills the Windows folder picker ("Elegir carpeta") with UI Automation."""
     from pywinauto import Desktop
-    dlg = Desktop(backend="uia").window(title="Elegir carpeta")
+    dlg = Desktop(backend="uia").window(title=FOLDER_DIALOG_TITLE)
     dlg.wait("visible", timeout=20)
     journey.shoot("folder-dialog")
     edit = dlg.child_window(auto_id="1152", control_type="Edit")
@@ -640,7 +643,7 @@ def drive_windows_folder_dialog(path, journey):
 def close_windows_folder_dialog():
     try:
         from pywinauto import Desktop
-        dlg = Desktop(backend="uia").window(title="Elegir carpeta")
+        dlg = Desktop(backend="uia").window(title=FOLDER_DIALOG_TITLE)
         if dlg.exists(timeout=1):
             dlg.close()
     except Exception:

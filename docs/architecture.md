@@ -469,8 +469,8 @@ that fails `open -R` on the nearest existing ancestor, which Finder shows select
 than opening it (an ancestor that is an `.app` bundle is never launched). Windows runs
 `explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
 the path is over 259 UTF-16 units; a trailing backslash (a drive root) is doubled so it
-cannot escape the closing quote under the Windows command-line rules (`explorer_arg`). On a
-Windows runner (VFS-8) Explorer opens the right folder but does not select the item
+cannot escape the closing quote under the Windows command-line rules (`explorer_arg`; the
+drive-root case is unverified on Windows). On a Windows runner (VFS-8) Explorer opens the right folder but does not select the item
 (issue 107); the long-path fallback works. See `apps/desktop/src-tauri/src/reveal.rs`. No file is
 opened with its application.
 

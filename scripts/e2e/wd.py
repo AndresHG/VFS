@@ -1,6 +1,6 @@
 """VFS-8: the few W3C WebDriver calls the journey needs, over plain HTTP (standard library
-only), so the same client talks to `tauri-driver` on Windows and to the embedded server of the
-`webdriver` build on macOS."""
+only). It talks to the server embedded in the `webdriver` build, on Windows and on macOS
+(spec decision 1)."""
 
 import base64
 import json

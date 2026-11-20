@@ -35,6 +35,12 @@ class GenTreeTest(unittest.TestCase):
         """VFS-8 AC-8: the tree has the requested file count, about 13 files per folder and
         folders up to 12 levels deep."""
         self.assertEqual(len(self.files), 3000)
+        root = gen_tree.fs_path(self.root)
+        depths = [os.path.relpath(d, root).count(os.sep) + 1
+                  for d, _, _ in os.walk(root) if d != root]
+        long_chain = gen_tree.LONG_LEVELS + 1
+        self.assertLessEqual(max(depths), max(gen_tree.MAX_DEPTH, long_chain))
+        self.assertGreaterEqual(max(depths), 5)
         self.assertEqual(self.m["files"], 3000)
         self.assertGreater(self.m["dirs"], 3000 // 20)
 

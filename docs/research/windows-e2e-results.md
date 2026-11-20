@@ -86,10 +86,32 @@ listing showed a delete only after 3 s.
 
 ## Slow-disk runs
 
-Not measured yet: the first complete run of `windows-slow-disk` (VHDX on V:, cold remounts,
-DiskSpd + sync/antivirus emulator, `vfs bench` on 2,000,000 files) was still running at the
-time of writing; its artifact `e2e-windows-slow-disk` will hold `measure-quiet.json`,
-`measure-busy.json`, `bench-quiet.json`, `bench-busy.json`.
+Same runner type, 2 vCPU AMD EPYC 9V45, 8 GB RAM. The tree (100,000 files) and the index sit on
+a 64 GB VHDX mounted as V:. The VHDX lives on the runner's C: (NVMe SSD). Each condition
+starts after a dismount and remount of V: (cold cache). "Busy" adds two loads on V:: DiskSpd
+doing random 64 KiB I/O with 30 % writes, capped at about 8 MB/s; and `contention.py` doing 200
+open+reads/s, 5 mtime touches/s and 2 × 2 MB written, fsynced and deleted per second. Measured
+on the installed `webdriver` build; times are wall clock.
+
+| | quiet | busy |
+|---|---|---|
+| Launch to usable UI (WebView2 profile on V:, cold) | 25.3 s | 18.3 s |
+| First scan, 100,000 files | 91.9 s, 1,089 files/s | 136.3 s, 741 files/s (+48 %) |
+| Search while scanning ("factura", app round trip) | 7–39 ms | 10–47 ms |
+| 10 queries after the scan: first run, round trip | 6–28 ms | 6–33 ms |
+| Same, median of 5 later runs | 2.9–5.4 ms | 2.7–7.0 ms |
+| Memory idle after the scan, RSS total (app + WebView2) | 400 MB (83 + 317) | 374 MB (80 + 294) |
+| Private bytes idle after the scan (app + WebView2) | 58 + 115 MB | 58 + 118 MB |
+| Catch-up at start after 1,000 new files and 1 delete | found in 11.8 s, idle at 11.8 s | not measured |
+| Index on disk after the scan | 45 MB + 3.5 MB WAL | — |
+
+Not measured: in the busy run, the remount between closing and reopening the app hung (from
+about 15:33 until the job's 120-minute limit). So there is no catch-up time under load, no
+foreground CLI scan for comparison, and no `vfs bench` on the 2,000,000-file index, quiet or
+busy. `slow-disk.ps1`'s busy remount needs fixing before the weekly run gives those numbers.
+
+The app's search round trip stays in milliseconds while scanning. The 16 s first search during
+the scan in the journey (defect 4) comes from the UI path, not from the engine.
 
 What the emulation can and cannot say: no tool on a hosted runner rate-limits I/O or adds seek
 latency without a custom driver (Hyper-V QoS needs a VM, Storage QoS a cluster, job-object I/O
