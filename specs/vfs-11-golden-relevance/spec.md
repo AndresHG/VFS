@@ -1,4 +1,4 @@
-# VFS-10 — Golden relevance tests in Spanish
+# VFS-11 — Golden relevance tests in Spanish
 
 - **Status**: approved
 - **Size**: M. Tests only, no behavior change, but it fixes the ranking contract that the next
@@ -18,7 +18,7 @@ between folder and name, years and short words.
 
 ## Acceptance scenarios
 
-Tests cite these ids (`VFS-10 AC-<m>`) in their doc comments.
+Tests cite these ids (`VFS-11 AC-<m>`) in their doc comments.
 
 - AC-1 Given the golden archive (about 60 named files and folders in the shapes of the end
   user's archive, plus a 200-photo phone roll and `Thumbs.db` noise) When each golden query

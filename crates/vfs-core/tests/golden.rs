@@ -1,4 +1,4 @@
-//! Golden relevance set in Spanish (VFS-10): a fixed archive modelled on the end user's
+//! Golden relevance set in Spanish (VFS-11): a fixed archive modelled on the end user's
 //! (photos by event, household papers, the tax adviser's folders, recipes, music) plus noise,
 //! and a fixed list of queries, each with the file or folder that must appear among the
 //! first results. It guards every ranking change (sort, frecency, query syntax, schema
@@ -447,7 +447,7 @@ fn ranked(g: &Golden, text: &str) -> Vec<String> {
     r.hits.iter().map(rel).collect()
 }
 
-/// VFS-10 AC-1, AC-2, AC-3: every golden query finds its expected file or folder among
+/// VFS-11 AC-1, AC-2, AC-3: every golden query finds its expected file or folder among
 /// its first `within` results (accents, ñ, typos, word starts, words split between folder
 /// and name, years, short words); all misses are reported together, with what came first.
 #[test]
@@ -480,7 +480,7 @@ fn golden_queries_find_the_expected_result_first() {
     );
 }
 
-/// VFS-10 AC-4: the set is big enough to mean something and every case names an entry of
+/// VFS-11 AC-4: the set is big enough to mean something and every case names an entry of
 /// the archive, so a typo in the set cannot pass as "not found".
 #[test]
 fn golden_set_is_well_formed() {
