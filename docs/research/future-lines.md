@@ -732,7 +732,7 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
   - Media files are not opened, only linked by path, so no extra HDD reads beyond Phase 1's walk.
   - Index growth: messages ~300 B each searchable → ~45 MB if all message text is indexed. Indexing only items (attachments, links, contacts) plus captions → ~10 MB.
 - oEmbed for YouTube links: about 1,000 GETs once, roughly 17 min at 1/s **[estimate]**.
-- Disk: exports duplicate phone media (+40 GB on the 8 TB HDD). Acceptable, but the importer could dedupe against already-synced WhatsApp Images by name + size.
+- Disk: exports duplicate phone media (+40 GB on the 8 TB HDD). Acceptable. The importer can link export media to an already-indexed WhatsApp Images copy by name + size, so a photo appears once in results; VFS never removes either copy.
 - API fees: €0.
 
 ### 6. Dependencies in VFS
@@ -978,7 +978,7 @@ by date (VFS-1 R8). Adding a sort and showing it as "Fecha" is trivial, but it i
 **Option B: a normalised two-date model (recommended).** Per item:
 ```
 published_at       INTEGER NULL   -- unix seconds, UTC
-published_src      TEXT           -- 'exif','youtube','schema_org','og','epub','pdf_info','ooxml','http_lm'
+published_src      TEXT           -- 'exif','youtube','epub','pdf_info','ooxml'; 'schema_org','og','http_lm' only if pages were fetched (not planned)
 published_conf     INTEGER        -- 0 unknown, 1 low, 2 medium, 3 high
 collected_at       INTEGER NULL
 collected_src      TEXT           -- 'mtime','ntfs_ctime','birthtime','ff_dateAdded','yt_added','tg_msg','wa_line'
@@ -1038,7 +1038,7 @@ source lines. The target-PC measurement plan for Synology timestamp behaviour.
 
 **Decided (owner, 2026-11-20): reasonable; the line most likely to be done soon.** The first
 step below is written to be specified (`/spec`, size M) and built without more research. It
-is based on `main` at commit `3af9d6e` (phase 1 and the «Papel» search screen).
+is based on `main` at commit `3af9d6e` (phase 1 and the «Papel» search screen; later commits to `main` before this document were docs-only).
 
 **What exists today.** `SearchQuery` (`crates/vfs-core/src/types.rs`) has filters, including a
 modified-date range, but no sort field. `rank.rs` orders hits by relevance tiers, then name
@@ -1424,7 +1424,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
 ### 6. Dependencies in VFS
 
 Phase 3 / #23 (text extraction worker: first-page text, EPUB OPF, PDF metadata, page render).
-VFS-6 / #63 (bookmark URLs). Line 5 URL normaliser (DOI/ASIN/ISBN from URLs). Multi-select or
+VFS-6 / #63 (bookmark URLs). URL normaliser (described in line 5; a shared piece of the source model) (DOI/ASIN/ISBN from URLs). Multi-select or
 "use these results" in the phase-1 UI.
 
 ### 7. Smallest useful first step
