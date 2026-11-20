@@ -909,3 +909,110 @@ fn vfs4_every_page_names_the_folder_of_its_hits() {
     all.retain(|&id| id != gone_file);
     assert_eq!(pages(), all);
 }
+
+/// VFS-19 AC-1, AC-2, AC-3: files with the same folded name and size are one result, the
+/// best-ranked one carrying the others as copies with their folders; another size, and
+/// folders with the same name, stay apart.
+#[test]
+fn vfs19_copies_of_a_file_are_one_result() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let a = w.dir(root, top, "Móvil", 1);
+    let b = w.dir(root, top, "Copia de seguridad", 1);
+    let c = w.dir(root, top, "Disco viejo", 1);
+    let newest = w.file(a, "Boda Íñigo.mp4", 700, 30);
+    let older = w.file(b, "boda inigo.MP4", 700, 20); // case and accents differ
+    let oldest = w.file(c, "Boda Íñigo.mp4", 700, 10);
+    let other_size = w.file(c, "Boda Íñigo editada.mp4", 900, 40);
+    let d = w.dir(root, top, "Recortes", 1);
+    let same_name_other_size = w.file(d, "Boda Íñigo.mp4", 1, 1);
+    let folder_x = w.dir(root, a, "Móvil/Boda iñigo", 1);
+    let folder_y = w.dir(root, b, "Copia de seguridad/Boda iñigo", 1);
+    drop(w);
+
+    let r = fx.text("boda inigo");
+    let grouped: Vec<&vfs_core::SearchHit> =
+        r.hits.iter().filter(|h| !h.copies.is_empty()).collect();
+    assert_eq!(grouped.len(), 1, "{:?}", r.hits);
+    let g = grouped[0];
+    // The best-ranked copy represents the group (same rank tier and length: the newest).
+    assert_eq!(g.id, newest);
+    let copies: Vec<(i64, &str)> = g.copies.iter().map(|c| (c.id, c.dir.as_str())).collect();
+    let dir = |rel: &str| Path::new("/datos").join(rel).to_string_lossy().into_owned();
+    let (b_dir, c_dir) = (dir("Copia de seguridad"), dir("Disco viejo"));
+    assert_eq!(
+        copies,
+        vec![(older, b_dir.as_str()), (oldest, c_dir.as_str())]
+    );
+    let others: Vec<(bool, i64)> = r
+        .hits
+        .iter()
+        .filter(|h| h.copies.is_empty())
+        .map(|h| (h.is_dir, h.id))
+        .collect();
+    for expected in [
+        (false, other_size),
+        (false, same_name_other_size),
+        (true, folder_x),
+        (true, folder_y),
+    ] {
+        assert!(others.contains(&expected), "{expected:?} in {others:?}");
+    }
+    assert_eq!(r.total as usize, r.hits.len());
+    assert_eq!(r.total, 5, "one group, two files, two folders");
+    let same_name = r
+        .hits
+        .iter()
+        .find(|h| h.id == same_name_other_size)
+        .unwrap();
+    assert!(
+        same_name.copies.is_empty(),
+        "same name, another size: not a copy"
+    );
+}
+
+/// VFS-19 AC-4: offsets and totals count results, and copies on a page served from the kept
+/// list name their folders.
+#[test]
+fn vfs19_pages_count_results_and_copies_name_their_folder() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let copia = w.dir(root, top, "Copia", 1);
+    let mut originals = Vec::new();
+    for i in 0..30 {
+        let name = format!("informe {i:02}.pdf");
+        originals.push(w.file(top, &name, i, 100));
+        w.file(copia, &name, i, 1);
+    }
+    drop(w);
+    let copia_dir = Path::new("/datos")
+        .join("Copia")
+        .to_string_lossy()
+        .into_owned();
+    let mut seen = Vec::new();
+    for offset in (0..30).step_by(7) {
+        let r = fx
+            .vfs
+            .search(&SearchQuery {
+                text: "informe".into(),
+                filters: SearchFilters::default(),
+                limit: 7,
+                offset,
+            })
+            .unwrap();
+        assert_eq!(r.total, 30, "thirty results for sixty files");
+        for h in &r.hits {
+            assert_eq!(h.copies.len(), 1, "{}", h.name);
+            assert_eq!(h.copies[0].dir, copia_dir);
+            assert_eq!(h.dir, "/datos");
+            seen.push(h.id);
+        }
+    }
+    seen.sort();
+    assert_eq!(
+        seen, originals,
+        "the newer copy, at the top, represents each pair"
+    );
+}

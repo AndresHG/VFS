@@ -37,7 +37,7 @@ use crate::fuzzy;
 use crate::matching::FUZZY_TRIGGER;
 use crate::rank::{self, Candidate};
 use crate::types::{
-    FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
+    FileCopy, FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
     SearchResponse, TruncatedBy,
 };
 
@@ -79,6 +79,8 @@ struct Cached {
     hits: Vec<SearchHit>,
     /// Per hit: the directory still to be written into `hit.dir` (see `resolve_dirs`).
     pending: Vec<Option<i64>>,
+    /// Per hit, per copy: the directory still to be written into its `dir` (VFS-19).
+    copy_pending: Vec<Vec<Option<i64>>>,
     truncated_by: Option<TruncatedBy>,
 }
 
@@ -148,7 +150,7 @@ fn search_snapshot(
     {
         let page = offset.min(c.hits.len())..(offset + limit).min(c.hits.len());
         return Ok(
-            match resolve_dirs(conn, &mut c.hits[page.clone()], &mut c.pending[page]) {
+            match resolve_page(conn, &mut c.hits, &mut c.pending, &mut c.copy_pending, page) {
                 Ok(()) => respond(&c.hits, c.truncated_by, offset, limit, start),
                 Err(Error::Db(e)) if is_interrupt(&e) => interrupted(offset, limit, start),
                 Err(e) => return Err(e),
@@ -183,14 +185,15 @@ fn search_snapshot(
     } else if candidates.len() > 1 {
         rank::rank(&mut candidates, &folded, &terms);
     }
-    if candidates.len() > MAX_HITS {
-        candidates.truncate(MAX_HITS);
+    let (mut hits, mut pending, mut copy_pending) = group_copies(candidates);
+    if hits.len() > MAX_HITS {
+        hits.truncate(MAX_HITS);
+        pending.truncate(MAX_HITS);
+        copy_pending.truncate(MAX_HITS);
         run.truncated.get_or_insert(TruncatedBy::Cap);
     }
-    let (mut hits, mut pending): (Vec<SearchHit>, Vec<Option<i64>>) =
-        candidates.into_iter().map(|c| (c.hit, c.dir_id)).unzip();
     let page = offset.min(hits.len())..(offset + limit).min(hits.len());
-    match resolve_dirs(conn, &mut hits[page.clone()], &mut pending[page]) {
+    match resolve_page(conn, &mut hits, &mut pending, &mut copy_pending, page) {
         Ok(()) => {}
         Err(Error::Db(e)) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
         Err(e) => return Err(e),
@@ -203,10 +206,81 @@ fn search_snapshot(
             data_version,
             hits,
             pending,
+            copy_pending,
             truncated_by: run.truncated,
         });
     }
     Ok(response)
+}
+
+/// VFS-19: the ranked candidates as hits, each file folded into the first (best-ranked)
+/// file with the same folded name and size as one of its `copies`; folders are never
+/// grouped. Returns the hits with, per hit, its pending directory and its copies' ones.
+#[allow(clippy::type_complexity)]
+fn group_copies(
+    candidates: Vec<Candidate>,
+) -> (Vec<SearchHit>, Vec<Option<i64>>, Vec<Vec<Option<i64>>>) {
+    let mut hits: Vec<SearchHit> = Vec::with_capacity(candidates.len());
+    let mut pending = Vec::with_capacity(candidates.len());
+    let mut copy_pending: Vec<Vec<Option<i64>>> = Vec::with_capacity(candidates.len());
+    let mut first: HashMap<(String, u64), usize> = HashMap::new();
+    for c in candidates {
+        if !c.hit.is_dir {
+            if let Some(&i) = first.get(&(c.name_key.clone(), c.hit.size)) {
+                hits[i].copies.push(FileCopy {
+                    id: c.hit.id,
+                    dir: c.hit.dir,
+                    modified: c.hit.modified,
+                });
+                copy_pending[i].push(c.dir_id);
+                continue;
+            }
+            first.insert((c.name_key, c.hit.size), hits.len());
+        }
+        hits.push(c.hit);
+        pending.push(c.dir_id);
+        copy_pending.push(Vec::new());
+    }
+    (hits, pending, copy_pending)
+}
+
+/// Fills the folders still pending on the hits of `page` and on their copies.
+fn resolve_page(
+    conn: &Connection,
+    hits: &mut [SearchHit],
+    pending: &mut [Option<i64>],
+    copy_pending: &mut [Vec<Option<i64>>],
+    page: std::ops::Range<usize>,
+) -> Result<()> {
+    resolve_dirs(conn, &mut hits[page.clone()], &mut pending[page.clone()])?;
+    // Copies often share a folder (a backup folder holds many): each is read once per page.
+    let mut folders: HashMap<i64, String> = HashMap::new();
+    for (hit, waiting) in hits[page.clone()].iter_mut().zip(&mut copy_pending[page]) {
+        for (copy, dir) in hit.copies.iter_mut().zip(waiting.iter_mut()) {
+            let Some(id) = *dir else { continue };
+            copy.dir = match folders.get(&id) {
+                Some(path) => path.clone(),
+                None => {
+                    let path = folder_of(conn, id)?;
+                    folders.insert(id, path.clone());
+                    path
+                }
+            };
+            *dir = None;
+        }
+    }
+    Ok(())
+}
+
+/// Absolute path of a directory, native separators.
+fn folder_of(conn: &Connection, dir_id: i64) -> Result<String> {
+    let (root, rel): (String, String) = conn
+        .prepare_cached(
+            "SELECT r.path, d.rel_path FROM dirs d JOIN roots r ON r.id = d.root_id \
+             WHERE d.id = ?1",
+        )?
+        .query_row([dir_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(join_rel(&root, &rel).to_string_lossy().into_owned())
 }
 
 /// Writes the directory of the file hits read without their directory row (`dir_id`
@@ -221,13 +295,7 @@ fn resolve_dirs(
         // Cleared only once written: an interrupted lookup leaves it to the next request
         // for the page, which the kept list serves.
         let Some(id) = *dir else { continue };
-        let (root, rel): (String, String) = conn
-            .prepare_cached(
-                "SELECT r.path, d.rel_path FROM dirs d JOIN roots r ON r.id = d.root_id \
-                 WHERE d.id = ?1",
-            )?
-            .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        hit.dir = join_rel(&root, &rel).to_string_lossy().into_owned();
+        hit.dir = folder_of(conn, id)?;
         *dir = None;
     }
     Ok(())
@@ -630,6 +698,7 @@ impl Ctx {
                 modified: r.mtime,
                 matched,
                 is_dir: false,
+                copies: Vec::new(),
             },
             name_key: r.name_key,
             dir_id: None,
@@ -673,6 +742,7 @@ impl Ctx {
                 modified: r.mtime,
                 matched,
                 is_dir: true,
+                copies: Vec::new(),
             },
             name_key: r.name_key,
             dir_id: None,
@@ -1140,6 +1210,7 @@ fn name_matches(
                     modified: row.get(5)?,
                     matched,
                     is_dir: false,
+                    copies: Vec::new(),
                 },
                 name_key,
                 dir_id: Some(dir_id),
@@ -1620,6 +1691,7 @@ mod tests {
             modified: 0,
             matched: MatchKind::Name,
             is_dir: false,
+            copies: Vec::new(),
         };
         let mut hits = vec![hit(), hit(), hit()];
         let mut pending = vec![Some(top), Some(sub + 1000), Some(sub)];

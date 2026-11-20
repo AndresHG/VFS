@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
+import { placesOf } from './copies.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -458,6 +459,14 @@ function main() {
     const nameParts = [nameText];
     const unavailable = unavailableRootFor(hit.dir);
     if (unavailable) nameParts.push(el('span', 'badge badge-unavailable', S.unavailableBadge));
+    const places = placesOf(hit).length;
+    if (places > 1) {
+      const copies = el('button', 'badge badge-copies', S.copiesBadge(places));
+      copies.type = 'button';
+      copies.tabIndex = -1; // the keyboard uses Mayús+Intro on the selected row
+      copies.setAttribute('aria-label', S.copiesBadgeLabel(places));
+      nameParts.push(copies);
+    }
     nameEl.replaceChildren(...nameParts);
 
     const ranges = F.matchRanges(hit.dir, state.terms);
@@ -475,7 +484,7 @@ function main() {
     kind.textContent = kindLabel;
     date.textContent = dateText;
     size.textContent = sizeText;
-    row.setAttribute('aria-label', S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable));
+    row.setAttribute('aria-label', S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable, places));
   }
 
   /** The row's one action: "Mostrar en carpeta", "Abrir en Firefox" or "Ver su contenido". */
@@ -548,7 +557,12 @@ function main() {
       case 'ArrowUp': e.preventDefault(); setActive(state.active - 1); break;
       case 'PageDown': e.preventDefault(); setActive(state.active + list.pageSize()); break;
       case 'PageUp': e.preventDefault(); setActive(state.active - list.pageSize()); break;
-      case 'Enter': e.preventDefault(); if (state.active >= 0) act(state.active); break;
+      case 'Enter':
+        e.preventDefault();
+        if (state.active < 0) break;
+        if (e.shiftKey && placesOf(hitAt(state.active)).length > 1) openPlaces(state.active);
+        else act(state.active);
+        break;
       case 'Escape':
         e.preventDefault();
         if (q.value) clearQuery();
@@ -574,12 +588,14 @@ function main() {
     setActive(Number(row.dataset.index));
   });
   listEl.addEventListener('click', (e) => {
+    const copies = e.target.closest('.badge-copies');
+    if (copies) { openPlaces(Number(copies.closest('.row').dataset.index)); return; }
     const btn = e.target.closest('.reveal');
     if (btn) act(Number(btn.closest('.row').dataset.index));
   });
   listEl.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.row');
-    if (row && !e.target.closest('.reveal')) act(Number(row.dataset.index));
+    if (row && !e.target.closest('.reveal, .badge-copies')) act(Number(row.dataset.index));
   });
 
   /** The selected result's one action (Intro, double click or its button). */
@@ -615,13 +631,44 @@ function main() {
   async function reveal(i) {
     const hit = hitAt(i);
     if (!hit) return;
+    await revealFile(hit.id, hit.isDir);
+  }
+
+  async function revealFile(id, isDir) {
     try {
-      const outcome = await api.reveal(hit.id, hit.isDir);
+      const outcome = await api.reveal(id, isDir);
       if (outcome === RevealOutcome.OPENED_PARENT) toast(S.revealedParent);
     } catch (err) {
       showError(errorText(err, S.errors.reveal));
     }
   }
+
+  /* ---------------------------------------------------------------- copies (VFS-19) */
+
+  const placesDialog = $('copies');
+  function openPlaces(i) {
+    const hit = hitAt(i);
+    const places = placesOf(hit);
+    if (places.length < 2) return;
+    $('copies-title').textContent = S.copiesTitle(hit.name, places.length);
+    $('copies-list').replaceChildren(...places.map((p) => {
+      const li = el('li', 'root');
+      const path = el('div', 'root-path');
+      path.append(icon(FileKind.FOLDER), el('span', null, p.dir));
+      const meta = el('div', 'root-meta');
+      meta.append(el('span', null, S.copiesModified(F.date(p.modified))));
+      const actions = el('div', 'root-actions');
+      const show = el('button', 'btn', S.revealButton);
+      show.type = 'button';
+      show.addEventListener('click', () => revealFile(p.id, false));
+      actions.append(show);
+      li.append(path, meta, actions);
+      return li;
+    }));
+    placesDialog.showModal();
+    $('copies-list').querySelector('button')?.focus();
+  }
+  placesDialog.addEventListener('close', () => q.focus({ preventScroll: true }));
 
   /* ---------------------------------------------------------------- summary, empty, details */
 

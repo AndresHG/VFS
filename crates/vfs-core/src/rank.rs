@@ -93,6 +93,7 @@ mod tests {
                 modified,
                 matched,
                 is_dir,
+                copies: Vec::new(),
             },
             name_key: fold_key(name),
             dir_id: None,
