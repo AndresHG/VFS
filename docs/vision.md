@@ -47,14 +47,19 @@ does not answer those; content, concept and cross-source search do.
 
 ## Future lines of work
 
-Rough order, not a commitment. Each becomes a spec when it starts.
+Grouped by theme, not ordered. The decided order of the lines that came from the end user's
+feedback, with costs and research, is in
+[`docs/research/future-lines-roadmap.md`](research/future-lines-roadmap.md) and
+[`docs/research/future-lines.md`](research/future-lines.md); this page adds the longer-term
+direction around them. Each line becomes a spec when it starts.
 
 ### More sources
 
 Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6):
 
 - Other browsers' bookmarks (Chrome, Edge, Safari).
-- Chat exports: WhatsApp and Telegram (messages, shared links, photos, contacts).
+- Chat exports: WhatsApp and Telegram (messages, shared links, contacts, and shared photos
+  found by name and metadata only, under the no-photo-content rule).
 - Notes and lists: Google Keep and similar note or list apps, from their exports.
 - Private YouTube playlists and other saved-link services.
 - An existing Obsidian vault or plain Markdown folders.
@@ -66,6 +71,7 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 - Semantic search with small local embeddings, so a query finds a concept even when the
   words differ.
 - Sort and filter by date and by source across everything.
+- A bibliographic list built from the documents found (issue 84).
 
 ### Ask your archive (RAG)
 
