@@ -70,6 +70,29 @@ impl<R: Runtime> ProgressSink for EventSink<R> {
     }
 }
 
+/// Largest log file before it rotates; two old files are kept, so logs stay under ~3 MB.
+const LOG_MAX_BYTES: u128 = 1024 * 1024;
+
+/// Writes warnings and errors to `<local_data>/logs/vfs.log`, rotating at
+/// [`LOG_MAX_BYTES`], so a problem on the target PC can be diagnosed afterwards. Only
+/// warnings and errors are written; nothing at info level or below, where messages could
+/// name the user's files in passing.
+pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> tauri::Result<()> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+    app.plugin(
+        tauri_plugin_log::Builder::new()
+            .clear_targets()
+            .target(Target::new(TargetKind::Folder {
+                path: local_data.join("logs"),
+                file_name: Some("vfs".into()),
+            }))
+            .level(log::LevelFilter::Warn)
+            .max_file_size(LOG_MAX_BYTES)
+            .rotation_strategy(RotationStrategy::KeepSome(2))
+            .build(),
+    )
+}
+
 /// Opens the index at `db_path` (creating its directory), manages it as [`AppState`] and
 /// starts the background indexer. Shared by [`run`] and the integration test.
 pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), String> {
@@ -127,6 +150,9 @@ pub fn run() {
                 .app_local_data_dir()
                 .map_err(|e| e.to_string())
                 .and_then(|dir| {
+                    if let Err(e) = install_logger(&handle, &dir) {
+                        eprintln!("VFS: log file unavailable: {e}");
+                    }
                     if let Ok(old_dir) = app.path().app_data_dir() {
                         if let Err(e) = move_legacy_index(&old_dir, &dir) {
                             log::warn!("index not moved from {}: {e}", old_dir.display());
@@ -163,7 +189,7 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    /// VFS-1: an index left in the old (roaming) directory moves with its sibling files and
+    /// VFS-1 C6: an index left in the old (roaming) directory moves with its sibling files and
     /// its session folder, the emptied old directory goes away, and a second call does nothing.
     #[test]
     fn legacy_index_is_moved_once() {
@@ -182,7 +208,7 @@ mod tests {
         assert!(!move_legacy_index(&old, &new).unwrap());
     }
 
-    /// VFS-1: an index already in the new directory is never overwritten by an old one,
+    /// VFS-1 C6: an index already in the new directory is never overwritten by an old one,
     /// other files in the old directory stay there, and identical directories move nothing.
     #[test]
     fn existing_index_wins_over_legacy_one() {

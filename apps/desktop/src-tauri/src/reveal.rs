@@ -1,9 +1,12 @@
 //! "Mostrar en carpeta" (VFS-1 AC-13): asks the OS file manager to show an item selected.
 //! macOS: `open -R <path>`. Windows: `explorer.exe /select,"<path>"`. Explorer cannot select
 //! items through a `\\?\` path or a path over `MAX_PATH`, so those open the nearest usable
-//! ancestor folder instead and report [`RevealOutcome::OpenedParent`]. Nothing is opened
-//! with its default application.
+//! ancestor folder instead and report [`RevealOutcome::OpenedParent`]. On macOS a failed
+//! `open -R` reveals the nearest existing ancestor with `open -R` too. Nothing is opened
+//! with its default application, and no ancestor is ever launched (an `.app` bundle would
+//! be).
 
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", windows))]
@@ -52,6 +55,33 @@ pub fn plan_windows(path: &Path, exists: impl Fn(&Path) -> bool) -> Option<Actio
     .map(|a| Action::OpenDir(dunce::simplified(&a).to_path_buf()))
 }
 
+/// Explorer's argument for `action`: `/select,"<path>"` or `"<path>"`. A trailing backslash
+/// (a drive root, `C:\`) is doubled, because under the Windows command-line rules
+/// (`CommandLineToArgvW`) a backslash before the closing quote escapes it, so `"C:\"` would
+/// read as `C:"` plus whatever follows; `"C:\\"` reads as `C:\`, and if Explorer splits the
+/// line naively instead, `C:\\` still names the same folder. Unverified on a real Windows.
+pub fn explorer_arg(action: &Action) -> String {
+    let quoted = |p: &Path| {
+        let s = p.display().to_string();
+        let tail = if s.ends_with('\\') { "\\" } else { "" };
+        format!("\"{s}{tail}\"")
+    };
+    match action {
+        Action::Select(p) => format!("/select,{}", quoted(p)),
+        Action::OpenDir(p) => quoted(p),
+    }
+}
+
+/// Arguments of `open` on macOS for `action`. Both reveal in Finder (`-R`): the fallback
+/// shows the ancestor selected in its own parent rather than opening it, so an ancestor that
+/// is an application bundle is never launched.
+pub fn open_args(action: &Action) -> Vec<OsString> {
+    let p = match action {
+        Action::Select(p) | Action::OpenDir(p) => p,
+    };
+    vec![OsString::from("-R"), p.clone().into_os_string()]
+}
+
 /// Shows `path` (which exists) selected in Finder/Explorer.
 #[cfg(windows)]
 pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
@@ -59,11 +89,8 @@ pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
     // Explorer parses its own command line: `/select,` must be followed by the quoted path in
     // the same argument, so it is passed raw. Windows paths cannot contain `"`.
     let (arg, outcome) = match plan_windows(path, |p| p.exists()) {
-        Some(Action::Select(p)) => (
-            format!("/select,\"{}\"", p.display()),
-            RevealOutcome::Revealed,
-        ),
-        Some(Action::OpenDir(p)) => (format!("\"{}\"", p.display()), RevealOutcome::OpenedParent),
+        Some(a @ Action::Select(_)) => (explorer_arg(&a), RevealOutcome::Revealed),
+        Some(a @ Action::OpenDir(_)) => (explorer_arg(&a), RevealOutcome::OpenedParent),
         None => {
             return Err(io::Error::other(format!(
                 "no folder of {} can be shown in Explorer",
@@ -79,12 +106,19 @@ pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
 /// Shows `path` (which exists) selected in Finder/Explorer.
 #[cfg(target_os = "macos")]
 pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
-    if Command::new("open").arg("-R").arg(path).status()?.success() {
+    let select = Action::Select(path.to_path_buf());
+    if Command::new("open")
+        .args(open_args(&select))
+        .status()?
+        .success()
+    {
         return Ok(RevealOutcome::Revealed);
     }
     let dir = nearest_ancestor(path, Path::is_dir)
         .ok_or_else(|| io::Error::other(format!("no folder of {}", path.display())))?;
-    let status = Command::new("open").arg(&dir).status()?;
+    let status = Command::new("open")
+        .args(open_args(&Action::OpenDir(dir.clone())))
+        .status()?;
     if status.success() {
         Ok(RevealOutcome::OpenedParent)
     } else {
@@ -122,6 +156,40 @@ mod tests {
             None,
             "the empty path is never a candidate"
         );
+    }
+
+    /// VFS-1 AC-13: Explorer gets the path quoted after `/select,`; a drive root's trailing
+    /// backslash is doubled so it cannot escape the closing quote.
+    #[test]
+    fn explorer_argument_strings() {
+        let sel = |p: &str| explorer_arg(&Action::Select(PathBuf::from(p)));
+        assert_eq!(
+            sel(r"C:\Datos\Notaría.pdf"),
+            r#"/select,"C:\Datos\Notaría.pdf""#
+        );
+        assert_eq!(sel("C:\\"), r#"/select,"C:\\""#);
+        assert_eq!(
+            explorer_arg(&Action::OpenDir(PathBuf::from(r"D:\Fotos"))),
+            r#""D:\Fotos""#
+        );
+        assert_eq!(
+            explorer_arg(&Action::OpenDir(PathBuf::from("D:\\"))),
+            r#""D:\\""#
+        );
+    }
+
+    /// VFS-1 AC-13: on macOS both the reveal and its fallback are `open -R`, so the fallback
+    /// ancestor is shown in Finder, never opened or launched (an `.app` bundle would run).
+    #[test]
+    fn open_always_reveals() {
+        for a in [
+            Action::Select(PathBuf::from("/Volumes/Archivo/Notaría.pdf")),
+            Action::OpenDir(PathBuf::from("/Applications/Calculator.app")),
+        ] {
+            let args = open_args(&a);
+            assert_eq!(args[0], "-R");
+            assert_eq!(args.len(), 2);
+        }
     }
 
     /// VFS-1 AC-13: the Explorer length limit counts UTF-16 units and rejects `\\?\` paths.

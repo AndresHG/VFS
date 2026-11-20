@@ -70,6 +70,25 @@ pub(crate) fn unix_secs(t: std::io::Result<SystemTime>) -> i64 {
 /// name-surrogate reparse points (junctions, mount points), so those are never followed;
 /// cloud placeholders are not name surrogates and are listed from their metadata without
 /// being downloaded. Entries that vanish or fail while listing are skipped.
+/// True when `root` or a directory of `rel` below it (`/`-separated) is now a symbolic link,
+/// junction or other name-surrogate reparse point (`FileType::is_symlink`). An indexed
+/// directory replaced by one is treated as gone: the walk never follows a link, even where a
+/// real directory used to be.
+pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
+    let is_link = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    let mut p = root.to_path_buf();
+    if is_link(&p) {
+        return true;
+    }
+    for c in rel.split('/').filter(|c| !c.is_empty()) {
+        p.push(c);
+        if is_link(&p) {
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<Entry>> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir)? {

@@ -68,8 +68,10 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// A root is reachable when it is a real directory; one replaced by a link is unavailable,
+/// never followed (root paths are canonical, so a link there is a change on disk).
 fn reachable(path: &str) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| m.is_dir())
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
 /// The directory holding the index, never indexed even when it lies inside a root.
@@ -202,7 +204,40 @@ fn run(
             RootOutcome::Yielded => return Ok(Outcome::Yielded),
         }
     }
+    discard_recovered_copy(conn)?;
     Ok(Outcome::Done)
+}
+
+/// After a recovery (VFS-1 C5) the unreadable index waits as `<index>.bad`, with its `-wal`
+/// and `-shm`, until the rebuild is complete: every root ready with a finished full scan.
+/// Then it is deleted, so a multi-GB copy does not stay on the system drive.
+fn discard_recovered_copy(conn: &Connection) -> Result<()> {
+    let Some(db_path) = conn.path().filter(|p| !p.is_empty()).map(PathBuf::from) else {
+        return Ok(());
+    };
+    let bad = db::bad_path(&db_path);
+    if !bad.exists() {
+        return Ok(());
+    }
+    let (roots, unfinished): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(status <> ?2 OR last_full_scan_at IS NULL), 0) \
+         FROM roots WHERE status <> ?1",
+        params![RootStatus::Removing.code(), RootStatus::Ready.code()],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if roots == 0 || unfinished > 0 {
+        return Ok(());
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let mut p = bad.as_os_str().to_owned();
+        p.push(suffix);
+        match std::fs::remove_file(PathBuf::from(p)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    log::info!("rebuild after recovery complete; removed the unreadable copy");
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -258,7 +293,11 @@ fn scan_root(
         let (added, removed) = (pass.summary.files_added, pass.summary.files_removed);
         let abs = db::join_rel(&root.path, &rel_path);
         let deep = state == ingest::ScanState::PendingDeep as i64;
-        let listing = walk::list_dir(&abs, skip);
+        let listing = if walk::behind_link(Path::new(&root.path), &rel_path) {
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        } else {
+            walk::list_dir(&abs, skip)
+        };
         if !matches!(&listing, Err(e) if e.kind() != std::io::ErrorKind::NotFound) {
             retries.remove(&dir_id);
         }

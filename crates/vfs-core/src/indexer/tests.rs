@@ -437,3 +437,76 @@ fn directory_rename_updates_paths_in_place() {
     assert_eq!((summary.files_added, summary.files_removed), (0, 0));
     assert_eq!(fx.files(), files);
 }
+
+/// VFS-1 AC-4, I13: a directory that was indexed and is
+/// later replaced by a symbolic link to a folder outside the root is treated as removed when
+/// it or a directory below it is listed again; nothing outside the root is indexed.
+#[cfg(unix)]
+#[test]
+fn directory_replaced_by_a_link_is_not_followed() {
+    let mut fx = fixture(&["Dentro/Sub", "Queda"]);
+    fx.scan();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(outside.path().join("Sub")).unwrap();
+    fs::write(outside.path().join("Sub").join("fuera.txt"), b"x").unwrap();
+    fs::write(outside.path().join("fuera.txt"), b"x").unwrap();
+    let root = fx.root();
+    fs::remove_dir_all(root.join("Dentro")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("Dentro")).unwrap();
+
+    // A directory below the link is due for a re-list (a watcher hint or a retry) and is
+    // listed before its parent notices the change.
+    fx.conn
+        .execute(
+            "UPDATE dirs SET scan_state = ?1 WHERE rel_path = 'Dentro/Sub'",
+            [ScanState::PendingShallow as i64],
+        )
+        .unwrap();
+    let outside_rows = |fx: &Fx| -> i64 {
+        fx.conn
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE name = 'fuera.txt'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    fx.scan();
+    assert_eq!(outside_rows(&fx), 0);
+    assert!(fx.dir("Dentro/Sub").is_none());
+    mark_dirty(&mut fx.conn, &[root.join("Dentro")]).unwrap();
+    fx.scan();
+    assert_eq!(outside_rows(&fx), 0);
+    assert!(fx.dir("Dentro").is_none());
+    assert!(fx.dir("Dentro/Sub").is_none());
+    assert!(fx.dir("Queda").is_some());
+}
+
+/// VFS-1 AC-6, C5: the unreadable copy a recovery leaves as `index.db.bad` (with `-wal` and
+/// `-shm`) is kept while the rebuild is incomplete, a root that cannot be reached included,
+/// and deleted once every root has finished a full scan.
+#[test]
+fn recovered_copy_is_deleted_once_the_rebuild_completes() {
+    let mut fx = fixture(&["Fotos"]);
+    let bad = db::bad_path(&fx.db_path);
+    let companions: Vec<PathBuf> = ["", "-wal", "-shm"]
+        .iter()
+        .map(|s| PathBuf::from(format!("{}{s}", bad.display())))
+        .collect();
+    for p in &companions {
+        fs::write(p, b"old").unwrap();
+    }
+    let tx = fx.conn.transaction().unwrap();
+    let missing = fx.tree.path().join("no-existe");
+    let gone = ingest::insert_root(&tx, "test", missing.to_str().unwrap()).unwrap();
+    tx.commit().unwrap();
+    fx.scan();
+    assert_eq!(fx.status_of(gone), RootStatus::Unavailable);
+    assert!(companions.iter().all(|p| p.exists()), "rebuild incomplete");
+
+    let tx = fx.conn.transaction().unwrap();
+    ingest::delete_root(&tx, gone).unwrap();
+    tx.commit().unwrap();
+    fx.scan();
+    assert!(companions.iter().all(|p| !p.exists()));
+}
