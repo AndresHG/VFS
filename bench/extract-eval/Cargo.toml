@@ -1,0 +1,38 @@
+# Hands-on evaluation of text-extraction libraries for VFS-2 (dev-machine tool, not part of
+# the app). Standalone package: its heavy dependencies never enter the VFS workspace.
+[package]
+name = "extract-eval"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+xberg = ["xberg-pdf", "xberg-office"]
+xberg-pdf = ["dep:xberg", "dep:tokio", "xberg/pdf"]
+xberg-office = ["dep:xberg", "dep:tokio", "xberg/office", "xberg/excel"]
+pdf-extract = ["dep:pdf-extract"]
+pdf-oxide = ["dep:pdf_oxide"]
+pdfium = ["dep:pdfium-render"]
+calamine = ["dep:calamine"]
+ooxml = ["dep:zip", "dep:quick-xml"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+xberg = { version = "=1.4.2", default-features = false, optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+pdf-extract = { version = "=0.12.1", optional = true }
+pdf_oxide = { version = "=0.3.78", default-features = false, optional = true }
+pdfium-render = { version = "=0.9.5", optional = true }
+calamine = { version = "=0.38.0", optional = true }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+quick-xml = { version = "0.37", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

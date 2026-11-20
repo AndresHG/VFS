@@ -10,9 +10,15 @@ publish.workspace = true
 name = "vfs"
 path = "src/main.rs"
 
+[features]
+default = []
+# VFS-2 prototype: `content-index`, `content-search`, `content-off`. Off by default.
+content = ["dep:vfs-content"]
+
 [dependencies]
 vfs-core.workspace = true
 vfs-bookmarks.workspace = true
+vfs-content = { path = "../vfs-content", optional = true }
 # Only for `Transaction`/`Connection` around `vfs_core::db::ingest` in `gen-db`.
 rusqlite.workspace = true
 clap.workspace = true

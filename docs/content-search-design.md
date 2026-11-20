@@ -1,6 +1,8 @@
 # Document content search: design
 
-Status: design only, not implemented (VFS-1 AC-15, requirement R12). It is milestone
+Status: design; a measured CLI-only prototype exists (VFS-2: `specs/vfs-2-content-search/`,
+crate `crates/vfs-content`, results in `docs/content-search-measurements.md`). Where the
+prototype settled a choice below, the text says so. It is milestone
 [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4), after
 name and path search (Fase 1) and validation on the real PC (Fase 2). Issues: extraction
 in an isolated process (#23),
@@ -86,26 +88,27 @@ search: name/path pass as today, plus a content pass; results merged
 
 ### 2. Extraction in an isolated worker
 
-- A separate executable (or the app binary started in a worker mode), one at a time, at
-  background CPU and I/O priority like the indexer thread today.
+- The app binary started in a worker mode (`vfs content-worker` in the prototype), one at a
+  time, the whole process at background CPU and I/O priority.
 - The app sends a path, receives `ExtractedText` or a failure. The worker is killed and
   restarted after a timeout or a crash; the file is marked `failed`, and the scan goes on.
-- Limits (starting values, to be tuned on the real PC) **[estimate]**:
+- Limits of the prototype (starting values, to be tuned on the real PC) **[estimate]**; the
+  largest worker peak measured on the test corpus was 123 MB **[measured]**:
 
   | Limit | Value | Why |
   |---|---|---|
-  | wall clock per file | 60 s | a hang costs at most a minute |
-  | worker memory | 256 MB | keeps the PC usable; a file that needs more is `failed` |
-  | input file size | 200 MB | larger "documents" are scans or exports, not text |
-  | extracted text per file | 2 MB | caps index growth from one giant spreadsheet |
-  | ZIP expansion (OOXML/ODF) | ratio and total caps | zip bombs |
+  | wall clock per file | 30 s; a timeout is retried once on a later run | a starved background worker is not a broken file |
+  | worker memory | 512 MB heap cap (counting allocator) | a file that needs more is `failed` |
+  | input file size | 100 MB, skipped unread | larger "documents" are scans or exports, not text |
+  | extracted text per file | 1 MB | caps index growth from one giant spreadsheet |
+  | ZIP expansion (OOXML/ODF) | Xberg's own security limits | zip bombs (the 1 GB bomb of the evaluation corpus and the 300 MB bomb of the AC-4 test fail cleanly) |
 
 - Password-protected files are `skipped`, not `failed`.
-- Library choice is a spike, not a decision yet. Candidates: Xberg (successor of Kreuzberg,
-  MIT, Rust, covers modern and legacy Office, mail and PDF through PDFium) **[published:
-  project documentation]**; or single-purpose crates (`calamine` for spreadsheets,
-  `pdfium-render`, `quick-xml` + `zip` for OOXML). Avoid MuPDF/PyMuPDF (AGPL) and Poppler
-  (GPL). Fidelity on real, partly corrupt legacy files is unverified for all of them.
+- Library: **Xberg 1.4.2** with its pure-Rust PDF backend, chosen after a hands-on
+  comparison with pdf-extract, pdf_oxide, PDFium, calamine and a zip + XML extractor; it is
+  the only one covering legacy DOC, XLS and PPT, at the cost of about 34 MB of binary
+  (measurements doc). Avoid MuPDF/PyMuPDF (AGPL) and Poppler (GPL). Fidelity on real, partly
+  corrupt legacy files from the owner's archive is still unverified.
 - Antivirus: extraction opens every document, so Windows Defender's real-time scan runs on
   each one (name indexing never opens files). Its cost on the target PC is unmeasured.
 
@@ -113,12 +116,16 @@ search: name/path pass as today, plus a content pass; results merged
 
 The first shippable step is lexical: no model, no download.
 
-- **Analyzer**: lowercase → fold accents exactly like `fold_key` (`crates/vfs-core/src/fold.rs`)
-  → Snowball Spanish stemmer (`facturas` → `factura`). Keep an unstemmed column too, for
-  quoted phrases and exact words.
+- **Analyzer** (prototype): lowercase → Snowball Spanish stemmer (`facturas` → `factura`) →
+  fold accents exactly like `fold_key` (`crates/vfs-core/src/fold.rs`); the stemmer runs
+  first because its rules expect accented input. Quoted phrases match on stemmed positions.
+  No unstemmed column yet: the stemmer over-merges some families (`arrendamiento` also finds
+  `arrendador`), and an exact-word boost is the open fix.
 - **Ranking**: BM25. SQLite FTS5 has a built-in `bm25()` function **[published: SQLite
   documentation]**.
-- **Engine, two options, settled by a spike:**
+- **Engine**: the prototype measured both options on 20,000 documents and chose FTS5, in a
+  separate `content.db` rather than `index.db`, with keys analysed in Rust before insertion
+  instead of a custom tokenizer (measurements doc). The options as first considered:
   1. *FTS5 in the same `index.db`* with a custom tokenizer that applies the analyzer. FTS5
      accepts custom tokenizers through its C API; its built-in `porter` stemmer is
      English-only **[published: SQLite documentation]**. One file, one transaction for base
@@ -137,9 +144,10 @@ The first shippable step is lexical: no model, no download.
   short passages small dense models were somewhat better (NanoBEIR-es: BM25 0.506, small
   models 0.53–0.60) **[published: same source]**. For an archive of contracts, invoices and
   reports, BM25 is the right first step.
-- **Snippets**: the highlighted fragment (#25) needs the text. Store the first part of the
-  extracted text compressed and capped, rather than re-reading the document from the HDD at
-  search time.
+- **Snippets**: the highlighted fragment (#25) needs the text. The prototype stores the
+  whole extracted text (capped at 1 MB) compressed once per document, plus addressable
+  chunks of about 2,000 characters (offsets and page), so search returns passages with a
+  citation without re-reading the document from the HDD.
 - **Query side**: query terms go through the same analyzer. Content hits are a separate
   `MatchKind` variant (the enum's doc comment already reserves it). Name and path hits keep
   ranking first; content hits follow, ordered by BM25. The content pass must respect the
