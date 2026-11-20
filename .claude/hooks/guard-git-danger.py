@@ -28,8 +28,9 @@ Verdicts:
     HEAD (scripts/pr_critic_verdict.py)                              -> "deny"
 
 Before matching, the command is: stripped of heredoc bodies (data, unless
-the opening line feeds the body to a shell, which is then analyzed as
-commands), split on shell operators outside quotes,
+the command outside bodies and substitutions names a shell, `eval`, `source`
+or `.`, which makes them commands; `$(…)` in an unquoted-delimiter body is
+always analyzed), split on shell operators outside quotes,
 expanded through `$(…)`/backtick substitutions, stripped of wrappers
 (`bash -c`, `eval`, `command`, `env`, `timeout`, `xargs`, `sudo -u x`,
 absolute paths, shell keywords like `if`/`then`/`do`) and tracked through
@@ -462,6 +463,12 @@ def _heredoc_delimiters(line, quote):
         elif c == "\\":
             i += 2
             continue
+        elif c == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+            break  # a comment: nothing after it opens a heredoc
+        elif line.startswith("((", i) or line.startswith("$((", i):
+            end = line.find("))", i)  # arithmetic: `1<<2` is a shift
+            i = n if end == -1 else end + 2
+            continue
         elif line.startswith("<<<", i):
             i += 3
             continue
@@ -549,7 +556,10 @@ def analyze(command, cwd, depth=0, runs=False):
     command, bodies = _heredocs(command)
     outside = command
     for inner in _substitutions(command):
-        outside = outside.replace(inner, "")
+        for wrapped in ("$(" + inner + ")", "`" + inner + "`"):
+            if wrapped in outside:  # this occurrence only, not every copy of the text
+                outside = outside.replace(wrapped, "", 1)
+                break
     runs = runs or _feeds_shell(outside)
     for body, quoted in bodies:
         for executed in [body] if runs else [] if quoted else _substitutions(body):
