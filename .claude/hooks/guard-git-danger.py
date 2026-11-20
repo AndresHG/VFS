@@ -18,8 +18,8 @@ Verdicts:
     resolved (a variable or `$(…)` refspec, `--all`, `--mirror`)     -> "ask"
   - `git push` of a claude/* branch (except deleting it remotely)    -> "deny"
   - bare `git stash`, `git stash pop|clear|save`, untagged `push`    -> "deny"
-  - `gh pr merge --auto` (main has no required checks, so it merges
-    before CI finishes)                                              -> "deny"
+  - `gh pr merge --auto` (merges later, unseen; merge only after
+    checking CI yourself)                                            -> "deny"
   - `gh pr merge`, `gh api repos/O/R/pulls/N/merge` while `gh pr checks`
     does not show both ci.yml test jobs as `pass`                    -> "deny"
   - `gh pr merge` (CI green or unreadable), `gh api …/pulls/N/merge`,
@@ -104,10 +104,9 @@ REQUIRED_CI_JOBS = ("test (macos-latest)", "test (windows-latest)")
 _MERGE_OPTS_WITH_VALUE = {"-b", "--body", "-F", "--body-file", "-t", "--subject",
                           "-A", "--author-email", "--match-head-commit"}
 AUTO_MERGE_REASON = (
-    "`gh pr merge --auto` merges at once here: main has no required status "
-    "checks (branch protection needs GitHub Pro on this private repo), so "
-    "nothing makes it wait for CI. Wait until `gh pr checks <n>` shows both "
-    "test jobs as pass, then merge without --auto."
+    "`gh pr merge --auto` merges later without you seeing the result. Wait "
+    "until `gh pr checks <n>` shows both test jobs as pass, then merge "
+    "without --auto."
 )
 CI_RED_REASON = (
     "CI is not green on this PR's head ({status}). CLAUDE.md lets a session "
