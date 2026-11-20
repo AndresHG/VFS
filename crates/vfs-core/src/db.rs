@@ -1,0 +1,1165 @@
+//! Connections, pragmas, migrations and the write helpers shared by the indexer and the
+//! synthetic database generator (`ingest`), so both produce exactly the same layout.
+
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
+
+use crate::error::{Error, Result};
+
+/// `PRAGMA user_version` written by this build. Later versions (such as document content
+/// search, VFS-1 AC-15) add tables without touching existing ones.
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// Migrations: entry `i` takes an index from version `i` to `i + 1`.
+const MIGRATIONS: [&str; 2] = [include_str!("schema.sql"), include_str!("schema_v2.sql")];
+
+/// Readers wait this long for a lock.
+const READER_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// A writer waits this long for the other writer (indexer vs facade root changes).
+const WRITER_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Page cache of a writer and of a reader, KiB (negative `cache_size`). With `mmap_size=0`
+/// these bound the index's resident memory (VFS-1 AC-9).
+const WRITER_CACHE_KIB: i64 = 32 * 1024;
+const READER_CACHE_KIB: i64 = 64 * 1024;
+/// WAL pages before an automatic checkpoint.
+const WAL_AUTOCHECKPOINT_PAGES: i64 = 4000;
+/// The WAL is truncated to this size after a checkpoint.
+const JOURNAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+/// Prepared statements kept per writer connection: every `prepare_cached` statement of the
+/// ingest helpers and the indexer loop stays cached.
+const WRITER_STATEMENT_CACHE: usize = 32;
+
+/// Suffixes of SQLite's companion files next to the index.
+pub(crate) const WAL_SUFFIX: &str = "-wal";
+const SHM_SUFFIX: &str = "-shm";
+
+/// Pragmas shared by every connection. `mmap_size=0` keeps resident memory bounded by the
+/// page caches (VFS-1 AC-9).
+fn apply_common_pragmas(conn: &Connection) -> Result<()> {
+    conn.busy_timeout(READER_BUSY_TIMEOUT)?;
+    let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+    conn.execute_batch(
+        "PRAGMA synchronous=NORMAL;
+         PRAGMA temp_store=MEMORY;
+         PRAGMA foreign_keys=OFF;",
+    )?;
+    let _mmap: Option<i64> = conn.query_row("PRAGMA mmap_size=0", [], |r| r.get(0)).ok();
+    Ok(())
+}
+
+fn schema_version(conn: &Connection) -> Result<u32> {
+    Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+/// Opens (creating if needed) the index for writing: writer pragmas, then creates or
+/// migrates the schema. Fails with `SchemaTooNew` for an index from a newer build.
+pub fn open_rw(db_path: &Path) -> Result<Connection> {
+    let mut conn = Connection::open(db_path)?;
+    apply_common_pragmas(&conn)?;
+    conn.busy_timeout(WRITER_BUSY_TIMEOUT)?;
+    conn.set_prepared_statement_cache_capacity(WRITER_STATEMENT_CACHE);
+    conn.execute_batch(&format!(
+        "PRAGMA cache_size=-{WRITER_CACHE_KIB};
+         PRAGMA wal_autocheckpoint={WAL_AUTOCHECKPOINT_PAGES};"
+    ))?;
+    let _limit: i64 = conn.query_row(
+        &format!("PRAGMA journal_size_limit={JOURNAL_SIZE_LIMIT_BYTES}"),
+        [],
+        |r| r.get(0),
+    )?;
+    let version = schema_version(&conn)?;
+    if version > SCHEMA_VERSION {
+        return Err(Error::SchemaTooNew);
+    }
+    if version < SCHEMA_VERSION {
+        let tx = conn.transaction()?;
+        for sql in &MIGRATIONS[version as usize..] {
+            tx.execute_batch(sql)?;
+        }
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        tx.commit()?;
+    }
+    Ok(conn)
+}
+
+/// Opens an existing index for reading only (`query_only=1`).
+pub fn open_ro(db_path: &Path) -> Result<Connection> {
+    let conn = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    apply_common_pragmas(&conn)?;
+    conn.execute_batch(&format!(
+        "PRAGMA cache_size=-{READER_CACHE_KIB};
+         PRAGMA query_only=1;"
+    ))?;
+    if schema_version(&conn)? > SCHEMA_VERSION {
+        return Err(Error::SchemaTooNew);
+    }
+    Ok(conn)
+}
+
+/// `<db_path>.bad`, where [`open_or_recover`] moves an unreadable index.
+pub fn bad_path(db_path: &Path) -> PathBuf {
+    let mut p = db_path.as_os_str().to_owned();
+    p.push(".bad");
+    PathBuf::from(p)
+}
+
+/// Suffix of the session directory next to the index: `<db_path>.session/`.
+pub(crate) const SESSION_DIR_SUFFIX: &str = ".session";
+/// Extension of a session marker file, `<pid>-<n>.lock`.
+pub(crate) const SESSION_MARKER_EXT: &str = "lock";
+/// Extension of a marker while it is being created and locked.
+const SESSION_TMP_EXT: &str = "tmp";
+
+/// `<db_path>.session/`: one marker file per open session, held under an OS file lock for
+/// the session's lifetime, so a CLI and the app can share an index.
+pub(crate) fn session_dir(db_path: &Path) -> PathBuf {
+    let mut p = db_path.as_os_str().to_owned();
+    p.push(SESSION_DIR_SUFFIX);
+    PathBuf::from(p)
+}
+
+/// An open session on an index. Dropping it is the clean shutdown: its marker file is
+/// unlocked and removed (and the session directory too, once empty).
+pub(crate) struct Session {
+    file: Option<File>,
+    path: PathBuf,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            let _ = file.unlock();
+        }
+        let _ = std::fs::remove_file(&self.path);
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::remove_dir(dir); // fails while other sessions are open
+        }
+    }
+}
+
+/// Starts a session and reports whether an earlier one ended uncleanly: a marker file that
+/// no live session holds locked (its process died) is stale; it is removed. A marker is
+/// created exclusively and locked under a temporary name, then renamed, so no other opener
+/// can mistake it for stale; only the holder of `<pid>-<n>.tmp` may create `<pid>-<n>.lock`.
+pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
+    let dir = session_dir(db_path);
+    let mut unclean = false;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().is_none_or(|e| e != SESSION_MARKER_EXT) {
+                continue;
+            }
+            let Ok(file) = File::options().read(true).write(true).open(&path) else {
+                continue;
+            };
+            if file.try_lock().is_ok() {
+                unclean = true;
+                let _ = file.unlock();
+                drop(file);
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let pid = std::process::id();
+    let mut n = 0u32;
+    loop {
+        let tmp = dir.join(format!("{pid}-{n}.{SESSION_TMP_EXT}"));
+        let path = dir.join(format!("{pid}-{n}.{SESSION_MARKER_EXT}"));
+        std::fs::create_dir_all(&dir)?;
+        match File::options().write(true).create_new(true).open(&tmp) {
+            Ok(file) if path.exists() => {
+                // Another session of this process owns `n`.
+                drop(file);
+                let _ = std::fs::remove_file(&tmp);
+                n += 1;
+            }
+            Ok(file) => {
+                file.lock()?;
+                std::fs::rename(&tmp, &path)?;
+                let session = Session {
+                    file: Some(file),
+                    path,
+                };
+                return Ok((session, unclean));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            // A closing session removed the empty directory in between: create it again.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+/// [`open_rw`] with integrity handling, for a caller that ends its session itself.
+/// `PRAGMA quick_check` reads the whole index, so it runs only when an earlier session did
+/// not end cleanly. If the index cannot be opened or fails the check, it is moved to
+/// `<db_path>.bad` (replacing an older one), a fresh index is created, and every root path
+/// that could still be read from the bad file is re-added pending deep, so the next scan
+/// rebuilds it (VFS-1 AC-6). `SchemaTooNew` is returned as is: a newer build's index is
+/// never discarded.
+pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
+    let (session, unclean) = begin_session(db_path)?;
+    let opened = open_rw(db_path).and_then(|c| {
+        if unclean {
+            quick_check(&c)?;
+        }
+        Ok(c)
+    });
+    let (conn, recovered) = match opened {
+        Ok(conn) => (conn, false),
+        Err(Error::SchemaTooNew) => return Err(Error::SchemaTooNew),
+        Err(e) => {
+            log::warn!("index {} unusable ({e}); recreating it", db_path.display());
+            (recover(db_path)?, true)
+        }
+    };
+    Ok((conn, recovered, session))
+}
+
+/// [`open_session`] whose session ends when this returns (one-shot tools). Returns the
+/// connection and whether recovery ran.
+pub fn open_or_recover(db_path: &Path) -> Result<(Connection, bool)> {
+    let (conn, recovered, _session) = open_session(db_path)?;
+    Ok((conn, recovered))
+}
+
+fn quick_check(conn: &Connection) -> Result<()> {
+    let verdict: String = conn.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+    if verdict == "ok" {
+        Ok(())
+    } else {
+        Err(Error::Db(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            Some(verdict),
+        )))
+    }
+}
+
+/// Root paths readable from a possibly damaged index; empty when nothing can be read.
+fn salvage_root_paths(db_path: &Path) -> Vec<String> {
+    let read = || -> rusqlite::Result<Vec<String>> {
+        let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut stmt = conn.prepare("SELECT path FROM roots ORDER BY id")?;
+        let paths = stmt.query_map([], |r| r.get(0))?.collect();
+        paths
+    };
+    read().unwrap_or_default()
+}
+
+/// Moves the index (and its `-wal`/`-shm` files) to `<db_path>.bad`, creates a fresh one and
+/// re-adds the salvaged roots pending deep.
+pub(crate) fn recover(db_path: &Path) -> Result<Connection> {
+    let roots = salvage_root_paths(db_path);
+    let bad = bad_path(db_path);
+    for suffix in ["", WAL_SUFFIX, SHM_SUFFIX] {
+        let mut from = db_path.as_os_str().to_owned();
+        from.push(suffix);
+        let mut to = bad.as_os_str().to_owned();
+        to.push(suffix);
+        if Path::new(&from).exists() {
+            std::fs::rename(&from, &to)?;
+        } else if Path::new(&to).exists() {
+            std::fs::remove_file(&to)?;
+        }
+    }
+    let mut conn = open_rw(db_path)?;
+    let tx = conn.transaction()?;
+    for path in &roots {
+        let volume = crate::platform::volume_key(Path::new(path));
+        ingest::insert_root(&tx, &volume, path)?;
+    }
+    tx.commit()?;
+    Ok(conn)
+}
+
+/// Absolute path of a directory: `roots.path` joined with the components of `rel_path`.
+pub fn dir_abs_path(conn: &Connection, dir_id: i64) -> Result<PathBuf> {
+    let (root, rel): (String, String) = conn
+        .query_row(
+            "SELECT r.path, d.rel_path FROM dirs d JOIN roots r ON r.id = d.root_id WHERE d.id = ?1",
+            [dir_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("directory {dir_id}")))?;
+    Ok(join_rel(&root, &rel))
+}
+
+/// Absolute path of a file, built from the original names.
+pub fn file_abs_path(conn: &Connection, file_id: i64) -> Result<PathBuf> {
+    let (root, rel, name): (String, String, String) = conn
+        .query_row(
+            "SELECT r.path, d.rel_path, f.name FROM files f JOIN dirs d ON d.id = f.dir_id \
+             JOIN roots r ON r.id = d.root_id WHERE f.id = ?1",
+            [file_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("file {file_id}")))?;
+    Ok(join_rel(&root, &rel).join(name))
+}
+
+/// `root` (absolute, native separators) joined with the '/'-separated `rel_path`.
+pub fn join_rel(root: &str, rel_path: &str) -> PathBuf {
+    let mut path = PathBuf::from(root);
+    path.extend(rel_path.split('/').filter(|c| !c.is_empty()));
+    path
+}
+
+/// Write helpers. Every FTS row is written here, in the caller's transaction, next to its
+/// base row (`files_fts.rowid = file_paths_fts.rowid = files.id`, `dirs_fts.rowid = dirs.id`).
+pub mod ingest {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use rusqlite::{params, Connection, OptionalExtension, Transaction};
+
+    use crate::error::{Error, Result};
+    use crate::fold::fold_key;
+    use crate::kind::file_kind;
+    use crate::types::RootStatus;
+
+    /// Value of `dirs.scan_state`; the persistent work queue of the indexer.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ScanState {
+        Clean = 0,
+        PendingDeep = 1,
+        PendingShallow = 2,
+    }
+
+    pub struct NewFile<'a> {
+        pub name: &'a str,
+        pub size: u64,
+        pub mtime: i64,
+        /// The on-disk name was not valid Unicode and `name` is its lossy form (`flags` bit 0).
+        pub lossy: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ChildFile {
+        pub id: i64,
+        pub name: String,
+        pub size: u64,
+        pub mtime: i64,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ChildDir {
+        pub id: i64,
+        /// Last component of `rel_path`.
+        pub name: String,
+        pub mtime: i64,
+    }
+
+    fn now() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Inserts a root (status pending) and its root directory row (`rel_path = ''`,
+    /// pending deep); creates the volume row if needed. `path` is absolute with native
+    /// separators and no trailing separator. Returns the root id.
+    pub fn insert_root(tx: &Transaction, volume_key: &str, path: &str) -> Result<i64> {
+        tx.execute(
+            "INSERT INTO volumes(volume_key) VALUES (?1) ON CONFLICT(volume_key) DO NOTHING",
+            [volume_key],
+        )?;
+        let volume_id: i64 = tx.query_row(
+            "SELECT id FROM volumes WHERE volume_key = ?1",
+            [volume_key],
+            |r| r.get(0),
+        )?;
+        let path_key = fold_key(&path.replace('\\', "/"));
+        tx.execute(
+            "INSERT INTO roots(volume_id, path, path_key, status, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![volume_id, path, path_key, RootStatus::Pending.code(), now()],
+        )?;
+        let root_id = tx.last_insert_rowid();
+        let root_name = path
+            .rsplit(['/', '\\'])
+            .find(|c| !c.is_empty())
+            .unwrap_or_default();
+        insert_dir_row(tx, root_id, None, "", root_name, 0)?;
+        Ok(root_id)
+    }
+
+    fn insert_dir_row(
+        tx: &Transaction,
+        root_id: i64,
+        parent_id: Option<i64>,
+        rel_path: &str,
+        name: &str,
+        mtime: i64,
+    ) -> Result<i64> {
+        let path_key = fold_key(rel_path);
+        let name_key = fold_key(name);
+        tx.prepare_cached(
+            "INSERT INTO dirs(root_id, parent_id, rel_path, path_key, name_key, mtime, scan_state) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?
+        .execute(params![
+                root_id,
+                parent_id,
+                rel_path,
+                path_key,
+                name_key,
+                mtime,
+                ScanState::PendingDeep as i64
+            ])?;
+        let id = tx.last_insert_rowid();
+        tx.prepare_cached("INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)")?
+            .execute(params![id, path_key, name_key])?;
+        Ok(id)
+    }
+
+    /// Inserts a directory (pending deep) and its `dirs_fts` row. `rel_path` is '/'-separated
+    /// original names relative to the root; `mtime` is the directory's own (unix seconds).
+    pub fn insert_dir(
+        tx: &Transaction,
+        root_id: i64,
+        parent_id: i64,
+        rel_path: &str,
+        mtime: i64,
+    ) -> Result<i64> {
+        let name = rel_path.rsplit('/').next().unwrap_or_default();
+        insert_dir_row(tx, root_id, Some(parent_id), rel_path, name, mtime)
+    }
+
+    /// Updates the stored modification time of a directory (shown on folder hits).
+    pub fn set_dir_mtime(tx: &Transaction, dir_id: i64, mtime: i64) -> Result<()> {
+        tx.prepare_cached("UPDATE dirs SET mtime = ?2 WHERE id = ?1")?
+            .execute(params![dir_id, mtime])?;
+        Ok(())
+    }
+
+    /// Inserts a file with its `files_fts` and `file_paths_fts` rows; computes `name_key`
+    /// and `kind`.
+    pub fn insert_file(tx: &Transaction, dir_id: i64, file: &NewFile) -> Result<i64> {
+        let name_key = fold_key(file.name);
+        tx.prepare_cached(
+            "INSERT INTO files(dir_id, name, name_key, kind, size, mtime, flags) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?
+        .execute(params![
+                dir_id,
+                file.name,
+                name_key,
+                file_kind(file.name).code(),
+                file.size as i64,
+                file.mtime,
+                i64::from(file.lossy),
+            ])?;
+        let id = tx.last_insert_rowid();
+        tx.prepare_cached("INSERT INTO files_fts(rowid, name_key) VALUES (?1, ?2)")?
+            .execute(params![id, name_key])?;
+        tx.prepare_cached(
+            "INSERT INTO file_paths_fts(rowid, path) SELECT ?1, \
+             CASE path_key WHEN '' THEN ?2 ELSE path_key || '/' || ?2 END FROM dirs WHERE id = ?3",
+        )?
+        .execute(params![id, name_key, dir_id])?;
+        Ok(id)
+    }
+
+    pub fn update_file(tx: &Transaction, file_id: i64, size: u64, mtime: i64) -> Result<()> {
+        tx.prepare_cached("UPDATE files SET size = ?2, mtime = ?3 WHERE id = ?1")?
+            .execute(params![file_id, size as i64, mtime])?;
+        Ok(())
+    }
+
+    /// Deletes a file and its FTS rows.
+    pub fn delete_file(tx: &Transaction, file_id: i64) -> Result<()> {
+        tx.prepare_cached("DELETE FROM files_fts WHERE rowid = ?1")?
+            .execute([file_id])?;
+        tx.prepare_cached("DELETE FROM file_paths_fts WHERE rowid = ?1")?
+            .execute([file_id])?;
+        tx.prepare_cached("DELETE FROM files WHERE id = ?1")?
+            .execute([file_id])?;
+        Ok(())
+    }
+
+    /// Deletes a directory, every directory below it and all their files, with their FTS
+    /// rows. Returns the number of files removed.
+    pub fn delete_dir_subtree(tx: &Transaction, dir_id: i64) -> Result<u64> {
+        let (root_id, rel_path): (i64, String) = tx
+            .query_row(
+                "SELECT root_id, rel_path FROM dirs WHERE id = ?1",
+                [dir_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("directory {dir_id}")))?;
+        // Descendants of `p` are exactly the rel_paths in [p + '/', p + '0'): '0' follows '/'.
+        let subtree = if rel_path.is_empty() {
+            "SELECT id FROM dirs WHERE root_id = ?1"
+        } else {
+            "SELECT id FROM dirs WHERE root_id = ?1 AND (rel_path = ?2 \
+             OR (rel_path >= ?2 || '/' AND rel_path < ?2 || '0'))"
+        };
+        let all = params![root_id, rel_path];
+        let p = if rel_path.is_empty() { &all[..1] } else { all };
+        let removed: i64 = tx.query_row(
+            &format!("SELECT COUNT(*) FROM files WHERE dir_id IN ({subtree})"),
+            p,
+            |r| r.get(0),
+        )?;
+        for fts in ["files_fts", "file_paths_fts"] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {fts} WHERE rowid IN \
+                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+                ),
+                p,
+            )?;
+        }
+        tx.execute(&format!("DELETE FROM files WHERE dir_id IN ({subtree})"), p)?;
+        tx.execute(
+            &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
+            p,
+        )?;
+        tx.execute(&format!("DELETE FROM dirs WHERE id IN ({subtree})"), p)?;
+        Ok(removed as u64)
+    }
+
+    /// Deletes a root with all its directories, files and FTS rows at once.
+    pub fn delete_root(tx: &Transaction, root_id: i64) -> Result<()> {
+        let subtree = "SELECT id FROM dirs WHERE root_id = ?1";
+        for fts in ["files_fts", "file_paths_fts"] {
+            tx.execute(
+                &format!(
+                    "DELETE FROM {fts} WHERE rowid IN \
+                     (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+                ),
+                [root_id],
+            )?;
+        }
+        tx.execute(
+            &format!("DELETE FROM files WHERE dir_id IN ({subtree})"),
+            [root_id],
+        )?;
+        tx.execute(
+            &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
+            [root_id],
+        )?;
+        tx.execute("DELETE FROM dirs WHERE root_id = ?1", [root_id])?;
+        tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
+        Ok(())
+    }
+
+    pub fn set_dir_state(tx: &Transaction, dir_id: i64, state: ScanState) -> Result<()> {
+        tx.prepare_cached("UPDATE dirs SET scan_state = ?2 WHERE id = ?1")?
+            .execute(params![dir_id, state as i64])?;
+        Ok(())
+    }
+
+    /// The files and the child directories of one directory, as stored.
+    pub fn list_children(
+        conn: &Connection,
+        dir_id: i64,
+    ) -> Result<(Vec<ChildFile>, Vec<ChildDir>)> {
+        let mut stmt =
+            conn.prepare_cached("SELECT id, name, size, mtime FROM files WHERE dir_id = ?1")?;
+        let files = stmt
+            .query_map([dir_id], |r| {
+                Ok(ChildFile {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    size: r.get::<_, i64>(2)? as u64,
+                    mtime: r.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stmt =
+            conn.prepare_cached("SELECT id, rel_path, mtime FROM dirs WHERE parent_id = ?1")?;
+        let dirs = stmt
+            .query_map([dir_id], |r| {
+                let rel: String = r.get(1)?;
+                Ok(ChildDir {
+                    id: r.get(0)?,
+                    name: rel.rsplit('/').next().unwrap_or_default().to_string(),
+                    mtime: r.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((files, dirs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ingest::*;
+    use super::*;
+    use crate::types::{FileKind, RootStatus};
+
+    fn fts_ids(conn: &Connection, table: &str, term: &str) -> Vec<i64> {
+        let sql = format!("SELECT rowid FROM {table} WHERE {table} MATCH ?1 ORDER BY rowid");
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map([format!("\"{term}\"")], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<i64>>>()
+            .unwrap()
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    /// VFS-1 AC-10: the bundled SQLite supports contentless-delete FTS5 trigram tables
+    /// (>= 3.43) and the schema is created once, at version 1, in WAL mode.
+    #[test]
+    fn schema_creates_and_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let conn = open_rw(&path).unwrap();
+        let version: String = conn
+            .query_row("SELECT sqlite_version()", [], |r| r.get(0))
+            .unwrap();
+        let parts: Vec<u32> = version.split('.').map(|p| p.parse().unwrap()).collect();
+        assert!(
+            (parts[0], parts[1]) >= (3, 43),
+            "SQLite {version} lacks contentless_delete"
+        );
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        drop(conn);
+        let again = open_rw(&path).unwrap();
+        assert_eq!(count(&again, "SELECT COUNT(*) FROM roots"), 0);
+        let ro = open_ro(&path).unwrap();
+        assert!(
+            ro.execute("DELETE FROM roots", []).is_err(),
+            "reader is query-only"
+        );
+    }
+
+    fn path_ids(conn: &Connection, grams: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT rowid FROM file_paths_fts WHERE file_paths_fts MATCH ?1 ORDER BY rowid",
+            )
+            .unwrap();
+        stmt.query_map([grams], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<i64>>>()
+            .unwrap()
+    }
+
+    /// VFS-1 S2, AC-9: opening a version-1 index migrates it to version 2 and fills the
+    /// per-file path index from the existing rows, so path searches work without a rescan.
+    #[test]
+    fn version_1_index_is_migrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute_batch(
+                "INSERT INTO dirs(id, root_id, parent_id, rel_path, path_key, name_key) \
+                   VALUES (7, 1, NULL, 'Año 2019', 'ano 2019', 'ano 2019');
+                 INSERT INTO files(id, dir_id, name, name_key, kind, size, mtime) \
+                   VALUES (3, 7, 'Banco.pdf', 'banco.pdf', 1, 1, 1);",
+            )
+            .unwrap();
+        }
+        let conn = open_rw(&path).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(path_ids(&conn, "\"201\" AND \"ban\""), vec![3]);
+    }
+
+    /// VFS-1 S2: every file write keeps its row in the per-file path index ("folder path /
+    /// name"), and deleting the file or its folder removes it.
+    #[test]
+    fn path_index_follows_file_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sub = insert_dir(&tx, root, top, "Viaje Cádiz", 1).unwrap();
+        let file = |name| NewFile {
+            name,
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        let a = insert_file(&tx, sub, &file("playa 2008.jpg")).unwrap();
+        let b = insert_file(&tx, top, &file("cadiz.txt")).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(path_ids(&conn, "\"cad\" AND \"008\""), vec![a]);
+        assert_eq!(path_ids(&conn, "\"adi\""), vec![a, b]);
+        let tx = conn.transaction().unwrap();
+        delete_file(&tx, b).unwrap();
+        delete_dir_subtree(&tx, sub).unwrap();
+        tx.commit().unwrap();
+        assert!(path_ids(&conn, "\"adi\"").is_empty());
+    }
+
+    /// An index written by a newer build is refused, not overwritten.
+    #[test]
+    fn newer_schema_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        open_rw(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        assert!(matches!(open_rw(&path), Err(Error::SchemaTooNew)));
+        assert!(matches!(open_ro(&path), Err(Error::SchemaTooNew)));
+    }
+
+    /// open_ro does not create a missing index.
+    #[test]
+    fn open_ro_requires_existing_index() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(open_ro(&dir.path().join("missing.db")).is_err());
+    }
+
+    /// VFS-1 AC-4, AC-8, AC-10: ingest round trip — roots, directories and files are stored
+    /// with folded keys and FTS rows, listed back, updated, and a subtree delete removes
+    /// exactly the subtree (siblings sharing a name prefix survive).
+    #[test]
+    fn ingest_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/Users/ana/Archivo").unwrap();
+        let root_dir: i64 = tx
+            .query_row(
+                "SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ''",
+                [root],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let gestoria = insert_dir(&tx, root, root_dir, "Gestoría", 50).unwrap();
+        let ano = insert_dir(&tx, root, gestoria, "Gestoría/Año 2019", 60).unwrap();
+        let sibling = insert_dir(&tx, root, root_dir, "Gestoría2", 70).unwrap();
+        let nfd = "Notari\u{0301}a Pe\u{0301}rez escritura 2019.pdf";
+        let deep = insert_file(
+            &tx,
+            ano,
+            &NewFile {
+                name: nfd,
+                size: 10,
+                mtime: 100,
+                lossy: false,
+            },
+        )
+        .unwrap();
+        let mid = insert_file(
+            &tx,
+            gestoria,
+            &NewFile {
+                name: "IMG_0001.JPG",
+                size: 20,
+                mtime: 200,
+                lossy: true,
+            },
+        )
+        .unwrap();
+        let keep = insert_file(
+            &tx,
+            sibling,
+            &NewFile {
+                name: "notaria copia.pdf",
+                size: 30,
+                mtime: 300,
+                lossy: false,
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let (name, name_key, kind, flags): (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT name, name_key, kind, flags FROM files WHERE id = ?1",
+                [deep],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(name, nfd, "original name is stored untouched");
+        assert_eq!(name_key, "notaria perez escritura 2019.pdf");
+        assert_eq!(FileKind::from_code(kind), FileKind::Document);
+        assert_eq!(flags, 0);
+        let flags: i64 = conn
+            .query_row("SELECT flags FROM files WHERE id = ?1", [mid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(flags, 1);
+        let root_key: String = conn
+            .query_row("SELECT path_key FROM roots WHERE id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(root_key, "/users/ana/archivo");
+
+        assert_eq!(fts_ids(&conn, "files_fts", "notaria"), vec![deep, keep]);
+        assert_eq!(fts_ids(&conn, "dirs_fts", "ano 2019"), vec![ano]);
+        assert_eq!(
+            fts_ids(&conn, "dirs_fts", "gestoria"),
+            vec![gestoria, ano, sibling]
+        );
+
+        // Folder hits (VFS-1 decision 13): the name_key column matches the folder's own name only;
+        // the root directory is named after the last component of the root path.
+        let by_name = |t: &str| {
+            let mut stmt = conn
+                .prepare("SELECT rowid FROM dirs_fts WHERE dirs_fts MATCH ?1 ORDER BY rowid")
+                .unwrap();
+            stmt.query_map([format!("name_key : \"{t}\"")], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<i64>>>()
+                .unwrap()
+        };
+        assert_eq!(by_name("gestoria"), vec![gestoria, sibling]);
+        assert_eq!(by_name("ano 2019"), vec![ano]);
+        assert_eq!(by_name("archivo"), vec![root_dir]);
+        assert_eq!(
+            dir_abs_path(&conn, ano).unwrap(),
+            Path::new("/Users/ana/Archivo")
+                .join("Gestoría")
+                .join("Año 2019")
+        );
+        assert_eq!(
+            file_abs_path(&conn, deep).unwrap(),
+            Path::new("/Users/ana/Archivo")
+                .join("Gestoría")
+                .join("Año 2019")
+                .join(nfd)
+        );
+        assert_eq!(
+            dir_abs_path(&conn, root_dir).unwrap(),
+            Path::new("/Users/ana/Archivo")
+        );
+        assert!(matches!(
+            file_abs_path(&conn, 9999),
+            Err(Error::NotFound(_))
+        ));
+
+        let (files, dirs) = list_children(&conn, gestoria).unwrap();
+        assert_eq!(
+            files,
+            vec![ChildFile {
+                id: mid,
+                name: "IMG_0001.JPG".into(),
+                size: 20,
+                mtime: 200
+            }]
+        );
+        assert_eq!(
+            dirs,
+            vec![ChildDir {
+                id: ano,
+                name: "Año 2019".into(),
+                mtime: 60
+            }]
+        );
+
+        let tx = conn.transaction().unwrap();
+        update_file(&tx, mid, 21, 201).unwrap();
+        set_dir_state(&tx, gestoria, ScanState::Clean).unwrap();
+        set_dir_mtime(&tx, gestoria, 99).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(list_children(&conn, gestoria).unwrap().0[0].mtime, 201);
+        assert_eq!(list_children(&conn, gestoria).unwrap().0[0].size, 21);
+        let top_dirs = list_children(&conn, root_dir).unwrap().1;
+        let g = top_dirs.iter().find(|d| d.id == gestoria).unwrap();
+        assert_eq!(g.mtime, 99);
+        assert_eq!(
+            count(
+                &conn,
+                &format!("SELECT scan_state FROM dirs WHERE id = {gestoria}")
+            ),
+            ScanState::Clean as i64
+        );
+
+        let tx = conn.transaction().unwrap();
+        delete_file(&tx, keep).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(fts_ids(&conn, "files_fts", "notaria"), vec![deep]);
+
+        let tx = conn.transaction().unwrap();
+        let tail = insert_file(
+            &tx,
+            sibling,
+            &NewFile {
+                name: "otro.txt",
+                size: 1,
+                mtime: 1,
+                lossy: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(delete_dir_subtree(&tx, gestoria).unwrap(), 2);
+        tx.commit().unwrap();
+        assert!(fts_ids(&conn, "files_fts", "notaria").is_empty());
+        assert!(fts_ids(&conn, "files_fts", "img_").is_empty());
+        assert_eq!(fts_ids(&conn, "dirs_fts", "gestoria"), vec![sibling]);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM dirs"), 2);
+        assert_eq!(fts_ids(&conn, "files_fts", "otro"), vec![tail]);
+
+        let tx = conn.transaction().unwrap();
+        assert_eq!(delete_dir_subtree(&tx, root_dir).unwrap(), 1);
+        tx.commit().unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM dirs"), 0);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 0);
+        assert!(fts_ids(&conn, "files_fts", "otro").is_empty());
+    }
+
+    /// VFS-1 AC-6: a garbage file in place of the index is moved to `index.db.bad` and a
+    /// fresh, usable index is created.
+    #[test]
+    fn garbage_index_is_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let garbage: Vec<u8> = (0..8192u32).map(|i| (i * 31 % 251) as u8).collect();
+        std::fs::write(&path, &garbage).unwrap();
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(recovered);
+        assert_eq!(std::fs::read(bad_path(&path)).unwrap(), garbage);
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM roots"), 0);
+        drop(conn);
+        let (_, again) = open_or_recover(&path).unwrap();
+        assert!(!again, "a healthy index is opened as is");
+    }
+
+    /// VFS-1 AC-6: recovery re-adds every readable root pending deep, so the next scan
+    /// rebuilds the index without the user adding folders again.
+    #[test]
+    fn recovery_keeps_roots_for_a_full_rescan() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut conn = open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/datos/Fotos").unwrap();
+        tx.execute(
+            "UPDATE roots SET status = ?2 WHERE id = ?1",
+            [root, RootStatus::Ready.code()],
+        )
+        .unwrap();
+        tx.execute("UPDATE dirs SET scan_state = ?1", [ScanState::Clean as i64])
+            .unwrap();
+        tx.commit().unwrap();
+        drop(conn);
+        let conn = recover(&path).unwrap();
+        assert!(bad_path(&path).exists());
+        let (rpath, status): (String, i64) = conn
+            .query_row("SELECT path, status FROM roots", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(
+            (rpath.as_str(), status),
+            ("/datos/Fotos", RootStatus::Pending.code())
+        );
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dirs WHERE rel_path = '' AND scan_state = ?1",
+                [ScanState::PendingDeep as i64],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 1);
+    }
+
+    /// An index from a newer build is never moved aside.
+    #[test]
+    fn newer_schema_is_not_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        open_rw(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        assert!(matches!(open_or_recover(&path), Err(Error::SchemaTooNew)));
+        assert!(!bad_path(&path).exists());
+    }
+
+    /// Relative paths are joined component by component with native separators.
+    #[test]
+    fn join_rel_builds_native_paths() {
+        assert_eq!(join_rel("/r", ""), Path::new("/r"));
+        assert_eq!(
+            join_rel("/r", "a/b c"),
+            Path::new("/r").join("a").join("b c")
+        );
+    }
+
+    /// Builds an index whose last page is overwritten: it opens, but fails quick_check.
+    fn corrupt_tail_index(path: &Path) {
+        let mut conn = open_rw(path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        for i in 0..3000 {
+            let name = format!("archivo número {i:05}.pdf");
+            let file = NewFile {
+                name: &name,
+                size: i,
+                mtime: 0,
+                lossy: false,
+            };
+            insert_file(&tx, top, &file).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(conn); // the last connection checkpoints the WAL into the main file
+        let mut bytes = std::fs::read(path).unwrap();
+        let page = 4096;
+        assert!(bytes.len() > 4 * page);
+        let len = bytes.len();
+        bytes[len - page..].fill(0xA5);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// VFS-1 AC-6: after a clean shutdown the next open skips the full integrity check (it
+    /// would read the whole index); after an unclean one the check runs and a damaged index
+    /// is moved to `index.db.bad` and rebuilt from its roots.
+    #[test]
+    fn integrity_check_runs_only_after_unclean_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        corrupt_tail_index(&path);
+
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(
+            !recovered,
+            "no earlier session: the damaged tail is not read at open"
+        );
+        drop(conn);
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(!recovered, "clean reopen does not run quick_check");
+        drop(conn);
+        assert!(!session_dir(&path).exists());
+
+        // A marker nobody holds locked is what a crashed session leaves behind.
+        std::fs::create_dir_all(session_dir(&path)).unwrap();
+        let stale = session_dir(&path).join(format!("99999-0.{SESSION_MARKER_EXT}"));
+        std::fs::write(stale, b"").unwrap();
+        let (conn, recovered) = open_or_recover(&path).unwrap();
+        assert!(recovered);
+        assert!(bad_path(&path).exists());
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM roots"), 1);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM files"), 0);
+        assert!(!session_dir(&path).exists(), "the stale marker was removed");
+    }
+
+    /// Two sessions on one index (CLI and app): the first to close leaves the other's marker
+    /// alone, and a live session is never taken for a crashed one.
+    #[test]
+    fn concurrent_sessions_keep_each_others_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let (a, unclean_a) = begin_session(&path).unwrap();
+        let (b, unclean_b) = begin_session(&path).unwrap();
+        assert!(!unclean_a && !unclean_b, "a live session is not stale");
+        let b_path = b.path.clone();
+        drop(a);
+        assert!(b_path.exists());
+        let (c, unclean_c) = begin_session(&path).unwrap();
+        assert!(!unclean_c);
+        drop(c);
+        assert!(b_path.exists());
+        drop(b);
+        assert!(!session_dir(&path).exists());
+    }
+
+    fn pragma(conn: &Connection, name: &str) -> i64 {
+        conn.query_row(&format!("PRAGMA {name}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// VFS-1 AC-9: no connection memory-maps the index (resident memory stays bounded by
+    /// the page caches), every connection is in WAL mode so readers never block the
+    /// indexer, and a reader refuses writes.
+    #[test]
+    fn connection_behaviour() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let w = open_rw(&path).unwrap();
+        let r = open_ro(&path).unwrap();
+        for c in [&w, &r] {
+            assert_eq!(pragma(c, "mmap_size"), 0);
+            let mode: String = c
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal");
+        }
+        assert!(
+            r.execute("DELETE FROM roots", []).is_err(),
+            "reader is query-only"
+        );
+        assert!(w.execute("DELETE FROM roots", []).is_ok());
+    }
+
+    /// VFS-1 AC-4: roots on one volume share its row; a Windows root is named after its last
+    /// component; unknown ids are `NotFound`.
+    #[test]
+    fn roots_volumes_and_missing_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let a = insert_root(&tx, "C:", r"C:\Users\Ana\Fotos").unwrap();
+        let b = insert_root(&tx, "C:", r"C:\Datos").unwrap();
+        tx.commit().unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM volumes"), 1);
+        let (key, name): (String, String) = conn
+            .query_row(
+                "SELECT r.path_key, d.name_key FROM roots r JOIN dirs d ON d.root_id = r.id \
+                 WHERE r.id = ?1",
+                [a],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (key.as_str(), name.as_str()),
+            ("c:/users/ana/fotos", "fotos")
+        );
+        assert_ne!(a, b);
+        assert!(matches!(dir_abs_path(&conn, 9999), Err(Error::NotFound(_))));
+        let tx = conn.transaction().unwrap();
+        assert!(matches!(
+            delete_dir_subtree(&tx, 9999),
+            Err(Error::NotFound(_))
+        ));
+    }
+
+    /// VFS-1 AC-6: recovery moves the index's `-wal` with it and drops companions of an
+    /// older `.bad` copy that no longer match.
+    #[test]
+    fn recovery_moves_companion_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let side = |base: &Path, suffix: &str| {
+            let mut p = base.as_os_str().to_owned();
+            p.push(suffix);
+            PathBuf::from(p)
+        };
+        std::fs::write(&path, b"garbage, not a database file at all").unwrap();
+        std::fs::write(side(&path, "-wal"), b"old wal").unwrap();
+        std::fs::write(side(&bad_path(&path), "-shm"), b"stale").unwrap();
+        // Called directly: a failed open_rw would already have discarded the invalid WAL.
+        drop(recover(&path).unwrap());
+        assert_eq!(
+            std::fs::read(side(&bad_path(&path), "-wal")).unwrap(),
+            b"old wal"
+        );
+        // The stale companion is gone (removed, or replaced by this index's own `-shm`).
+        let shm = std::fs::read(side(&bad_path(&path), "-shm")).unwrap_or_default();
+        assert_ne!(shm, b"stale");
+    }
+}

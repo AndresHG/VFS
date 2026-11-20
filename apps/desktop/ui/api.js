@@ -1,0 +1,71 @@
+// Backend bridge (VFS-1 spec, "Tauri commands and events"). In the app every call goes to the Tauri commands through
+// `window.__TAURI__` (withGlobalTauri). A rejected call yields an ApiError {code, message}.
+//
+// Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds;
+// the enum values are the sets of contract.js):
+//   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
+//   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs}
+//   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir}
+//   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
+//   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
+//   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
+//
+// Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
+// bundled `ui/` folder (frontendDist), so it is not in the packaged app at all. On top of that
+// the dynamic import below runs only when ALL of these hold:
+//   1. there is no Tauri runtime (`__TAURI__` and `__TAURI_INTERNALS__` are both absent);
+//   2. the page is served over plain http from exactly `localhost` or `127.0.0.1` (the app is
+//      served from `tauri://localhost` on macOS and `http://tauri.localhost` on Windows);
+//   3. the URL carries `?fake`, which nothing in the app ever adds.
+// Dev use: serve `apps/desktop/` and open http://localhost:<port>/ui/?fake
+
+import { UiErrorCode } from './contract.js';
+
+function tauriBackend(t) {
+  const { invoke } = t.core;
+  const { listen } = t.event;
+  return {
+    isFake: false,
+    listRoots: () => invoke('list_roots'),
+    pickFolder: () => invoke('pick_folder'),
+    addRoot: (path) => invoke('add_root', { path }),
+    removeRoot: (id) => invoke('remove_root', { id }),
+    search: (query) => invoke('search', { query }),
+    // File and folder ids are separate id spaces, so the shell needs `isDir` (-> is_dir).
+    reveal: (id, isDir) => invoke('reveal', { id, isDir }),
+    getProgress: () => invoke('get_progress'),
+    rescan: (id) => invoke('rescan', { id }),
+    setPaused: (paused) => invoke('set_paused', { paused }),
+    onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
+    onIndexChanged: (cb) => listen('index-changed', () => cb()),
+  };
+}
+
+function fakeAllowed() {
+  return !('__TAURI__' in window) && !('__TAURI_INTERNALS__' in window)
+    && location.protocol === 'http:'
+    && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    && new URLSearchParams(location.search).has('fake');
+}
+
+function missingBackend() {
+  const fail = () => Promise.reject({ code: UiErrorCode.BACKEND_MISSING, message: 'no Tauri runtime' });
+  return {
+    isFake: false,
+    missing: true,
+    listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
+    reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
+    onProgress: async () => () => {}, onIndexChanged: async () => () => {},
+  };
+}
+
+async function load() {
+  if (window.__TAURI__?.core) return tauriBackend(window.__TAURI__);
+  if (fakeAllowed()) {
+    const { createFakeBackend } = await import('../ui-dev/fake-backend.js');
+    return createFakeBackend(new URLSearchParams(location.search));
+  }
+  return missingBackend();
+}
+
+export const api = await load();

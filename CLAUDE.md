@@ -17,9 +17,13 @@ non-technical; the UI is Spanish. Product spec: `specs/vfs-1-core-search/spec.md
 
 ## Build and test
 
-<!-- BUILD-COMMANDS: implementation workers replace this block with the real commands
-(build, run the app, test one crate, fmt, clippy, frontend) once the workspace exists. -->
-_To be filled in when the cargo workspace and Tauri app land._
+Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/env" &&`.
+
+- Build: `cargo build --workspace`; CLI: `cargo run -p vfs-cli --`.
+- Test all: `cargo test --workspace`; one crate: `cargo test -p vfs-core`.
+- Lint: `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`.
+- Desktop app: in `apps/desktop/src-tauri`, `npx --yes @tauri-apps/cli@2.12.6 dev` (or
+  `build --bundles app`). The UI is static files in `apps/desktop/ui`; no npm build.
 
 ## Git
 
@@ -47,8 +51,9 @@ _To be filled in when the cargo workspace and Tauri app land._
   - **M** (one subsystem, one PR): short `specs/vfs-<n>-<slug>/spec.md`.
   - **L** (index schema, platform-specific path, installer, multi-PR): full spec from
     `.claude/skills/spec/template.md`. When unsure, pick the larger size.
-- No ticket system: ids are `VFS-<n>`, the next free number in `specs/`. The spec and the PR
-  body are the durable record. See `specs/README.md`.
+- Work is tracked in GitHub Issues, one milestone per phase (Fase 0–4), in `AndresHG/VFS`.
+  Spec ids are `VFS-<n>`, the next free number in `specs/`; the spec and the PR body are the
+  durable record of what a change must do. See `specs/README.md`.
 - Then list the affected components, the tests needed (new + existing) and the approach. Only
   then write code.
 

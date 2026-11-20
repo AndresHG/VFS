@@ -81,7 +81,7 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
   any segment of the path, ignores case and accents ("notaria" finds "Notaría") and tolerates
   one typo.
 - AC-11 (R8) Given indexed files, When the user combines filters by type (document, photo,
-  video, audio, other), date, size and folder, Then only files matching all of them are shown.
+  video, audio, other, folder), date, size and folder, Then only files matching all of them are shown.
 - AC-12 (R9) Given the app is open, When the user looks at it, Then there is one screen with a
   search box, results as they type, visible filters and Spanish copy.
 - AC-13 (R10) Given a result, When the user chooses "mostrar en carpeta", Then Finder/Explorer
@@ -129,18 +129,149 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
 | 7 | Minimum for v1? | Typo and accent tolerance, filters; no opening files, only "mostrar en carpeta" | owner | 2026-11-20 |
 | 8 | Repository and CI? | Private repo on the owner's account, GitHub Actions, unsigned installer | owner | 2026-11-20 |
 | 9 | Scale and performance targets? | Designed for 5 M files; synthetic test of 2 M, < 150 ms p95, < 300 MB | owner | 2026-11-20 |
-| 10 | Ticket system? | None; ids `VFS-n` in `specs/` (default) | owner | 2026-11-20 |
+| 10 | Ticket system? | GitHub Issues in `AndresHG/VFS`, one milestone per phase (Fase 0 Cimientos, Fase 1 Búsqueda por nombre y ruta, Fase 2 Validación en el PC real, Fase 3 Contenido de documentos, Fase 4 Pulido y distribución); spec ids stay `VFS-n` in `specs/` | owner | 2026-11-20 |
 | 11 | Branch model? | Protected `main` + `feat/<title>` branches, squash merge (default) | owner | 2026-11-20 |
 | 12 | Hook runtime? | Python 3 and bash, on the macOS dev machine only (default) | owner | 2026-11-20 |
+| 13 | Are folders results? | Yes. A folder whose name matches is its own result row (empty folders included), marked as a folder (`isDir` on the hit), with "mostrar en carpeta" revealing the folder; the type filter gains "carpeta" (`folder` kind) | owner | 2026-11-20 |
+| 14 | WebView2 on Windows? | `embedBootstrapper` (small installer): the target PC has internet at install time | owner | 2026-11-20 |
+| 15 | May the live watcher be cut for time? | No; it is the last item in any cut list | owner | 2026-11-20 |
+| 16 | UI wording? | Impersonal (usted) Spanish in plain words; user-facing text avoids "indexar", "índice", "reindexar" ("preparar la búsqueda", "revisar carpetas", "volver a revisar") | owner | 2026-11-20 |
+
+## Tauri commands and events
+
+The desktop app talks to the core only through these commands (Rust names; every argument
+is one word, so JS passes the same keys, except `isDir`, which Tauri maps to `is_dir`).
+Every command runs off the main thread and rejects with `ApiError { code, message }`, where
+`code` is one of `not_found`, `not_a_directory`, `overlapping_root`, `unavailable`,
+`schema_too_new`, `db`, `io`. Payload types are the camelCase serde types of
+`crates/vfs-core/src/types.rs`; `ApiError`, `RevealOutcome` and the event names are in
+`crates/vfs-core/src/api.rs`.
+
+| Command | Arguments | Returns |
+|---|---|---|
+| `list_roots` | — | `Root[]` |
+| `pick_folder` | — (native folder dialog) | `string \| null` |
+| `add_root` | `path: string` | `Root` |
+| `remove_root` | `id: number` | `null` |
+| `search` | `query: SearchQuery` | `SearchResponse` (`hits[].isDir`, `truncatedBy: null \| "cap" \| "deadline"`) |
+| `reveal` | `id: number`, `isDir: boolean` | `RevealOutcome`: `"revealed"` or `"opened_parent"` |
+| `get_progress` | — | `IndexProgress` |
+| `rescan` | `id: number \| null` | `null` |
+| `set_paused` | `paused: boolean` | `null` |
+
+Events: `index-progress` (payload `IndexProgress`, at most every 500 ms) and `index-changed`
+(payload `null`, at most every 2 s, after the indexer commits).
+
+Every `Root` carries `drive` (`"local"`, `"network"`, `"removable"` or `"unknown"`), asked of
+the system when roots are read, so the UI warns when a chosen folder is on a network or
+removable drive (U4). A root being removed does not block adding the same folder again:
+the new root supersedes the removal.
+
+## Implementation decisions
+
+Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 above.
+
+- C4. The search deadline comes from `SearchConfig` (default 1000 ms).
+- C5. An index that cannot be opened or fails `quick_check` (run only after an unclean
+  shutdown) is renamed to `index.db.bad` and rebuilt from its roots; the `.bad` file and
+  its companions are deleted once every root has finished a full scan.
+- C6. The app keeps the index in the local app data directory (Tauri `app_local_data_dir`;
+  `%LOCALAPPDATA%` on Windows), never the roaming one, so a multi-GB file is not synced or
+  backed up with the profile; at start it moves, once, an index an earlier build left in
+  the roaming directory.
+- S1. For each root, query terms already contained in the root's own path are ignored,
+  unless none would remain.
+- S2. Candidates are retrieved in ranking-tier order, so a full list never pushes out a
+  better tier: names starting with the first term, then names holding every term (read up
+  to 4,000 and ranked before the cut to 2,000 hits), then files whose relative path and
+  name hold every term (one intersection in `file_paths_fts`, schema version 2), then
+  typos. Filters are SQL predicates of every stage. Every candidate is verified against all
+  terms.
+- S3. The deadline applies to scans; FTS-driven stages run to completion, bounded at about
+  2 s.
+- S4. Typo tolerance: first the deletions and adjacent transpositions of a term (anchored at
+  the start of the name, then anywhere in it), then, for each edit position, FTS candidates
+  from the two parts of the term around it (parts shorter than 3 characters dropped); all
+  verified within one edit. A typo whose name starts near the first term ranks first.
+- S5. Terms shorter than 3 characters cannot use the trigram index: they are verified in
+  Rust, or scanned when they are the only terms.
+- S6. A new query interrupts the running one; `\` is folded to `/`; filter-only queries list
+  newest first; the folder filter is a directory range in SQL.
+- S7. The last ranked list is cached by (query, filters, index version), so pages are
+  consistent.
+- S8. A query with no hit after the path tier first probes `file_paths_fts` and `dirs_fts`
+  once for rows holding, for every term, the term or one of its one-edit alternatives (S4);
+  when none exists the typo tiers are skipped. The path-index intersection uses the
+  trigrams that cover each term without overlap, not all of them.
+- S9. At most 1 KB of query text and 128 characters per term are read; terms over 64
+  characters get no typo tolerance. The search box accepts at most 1,024 characters.
+- I1. A watcher event never downgrades a directory pending a deep re-list.
+- I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
+  requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its
+  rescan flag.
+- I3. Watcher events under the app data directory are ignored.
+- I4. Until a change journal is read, every start owes each root a catch-up re-walk
+  (resumable, low priority, searchable meanwhile); while running, roots are re-walked when
+  their last full scan is 7 days old or stored in the future (a clock set back).
+- I8. One exclusion list (`walk::is_excluded`: system names, `.SynologyWorkingDirectory`,
+  `@eaDir`, `#recycle`, `#snapshot`, `~$*`, `.~lock.*#`, `~*.tmp`, ...) serves the walker and
+  the watcher, which drops events for any excluded component below the root before
+  anything is marked dirty.
+- I9. A directory rename or move inside a root that the Windows watcher reports as an
+  old/new pair is applied as a path update of the subtree's `dirs` rows, folder search
+  entries and the files' `file_paths_fts` rows in one transaction; anything else falls
+  back to re-listing both parents.
+- I10. Full re-walks run one at a time and a walk in progress is never restarted: a request
+  for a root being walked owes one more pass after it. Requests from lost events
+  (overflow, a watch that failed), and those owed by a root that was being walked, wait
+  until that root's last full scan is 1 hour old; start-up and manual requests do not.
+- I11. A directory that fails to list keeps its rows, stays pending and counts as an error;
+  it is retried after 1 min, doubling, and after 6 failures waits for the next full walk.
+- I12. A root that cannot be watched is retried every minute and as soon as it is
+  reachable again; once watched it owes a re-walk (I10). Marking a folder dirty from the
+  app (a missing file at "mostrar en carpeta") wakes the indexer at once.
+- I5. The indexer commits every ~20,000 changed rows or 5 s.
+- I6. Roots left in `removing` are finished at start (also by the CLI).
+- I7. The watcher tests run on Windows CI too, polling up to 30 s.
+- U1. A deadline-cut search with no hits says "La búsqueda no terminó; inténtelo de nuevo.",
+  never "Sin resultados", and is not cached.
+- U2. During the first scan the UI says the user can search meanwhile and that closing the
+  program resumes the scan later.
+- U3. Results from unavailable roots are marked, and the banner names the missing folder.
+- U4. Adding a folder that overlaps a root names the relation (same, inside, contains);
+  a folder on a network or removable drive gets a warning.
+- U5. The development fake backend lives outside the bundled frontend and cannot load in
+  the app.
+- U6. The status bar says "Revisando carpetas…" during the first scan, "Comprobando
+  cambios…" during any later scan (the catch-up at start included) and, when idle,
+  "Última revisión: hoy 9:14" with the oldest completed check of the reachable folders;
+  the manual button reads "Buscar cambios ahora".
+- X1. One desktop test drives add_root, search and get_progress over IPC on Tauri's mock
+  runtime, on both systems in CI.
+- X2. CI also runs the CLAUDE.md budget check and the UI tests (`node --test`: status
+  wording, and the screen's copy and markup for AC-12). A Rust test keeps the closed sets
+  of `apps/desktop/ui/contract.js` equal to the serde values of the core's enums.
+- X3. Workflow actions are pinned by commit SHA, the Rust version by `rust-toolchain.toml`;
+  release builds use `--locked`, no build cache, and publish a SHA-256 checksum per
+  artifact.
+- C7. The app writes warnings and errors to a rotating log file in the local app data
+  directory (1 MB, two old files); nothing below warning level.
+- I13. Before a directory is re-listed, the root and every folder on its path are checked:
+  one replaced by a link since it was indexed is treated as removed, a root that became a
+  link as unavailable.
 
 ## Technical context
 
 - Planned design: flat directory walk (one I/O stream per HDD), SQLite WAL + FTS5 trigram over
   the accent-folded name, directory paths in their own table, volumes identified by GUID or
-  serial. Unmeasured risks: HDD scan time and FTS5 trigram at several million names
-  (alternative: an in-memory name buffer).
-- Phase 2 content search: extraction in an isolated worker, Spanish BM25; small embeddings
-  optional. BM25 outperforms dense models on long Spanish documents.
+  serial. Schema version 2 adds `file_paths_fts`, each file's folded relative path and name
+  as trigrams without positions (`detail=none`). Measured on the 2 M-file synthetic index:
+  +311 MB (577 MB → 889 MB); the same table with positions was put at about +1 GB during
+  the design (not re-measured). Unmeasured risks: HDD scan time and FTS5 trigram at several
+  million names (alternative: an in-memory name buffer).
+- Document content search (GitHub milestone Fase 3): extraction in an isolated worker,
+  Spanish BM25; small embeddings optional. BM25 outperforms dense models on long Spanish
+  documents.
 - No figure from the research has been measured on the real hardware.
 
 ## Open questions

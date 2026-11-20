@@ -1,0 +1,33 @@
+[package]
+name = "vfs-desktop"
+description = "VFS desktop app (Tauri 2 shell over vfs-core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "vfs_desktop_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+embed-resource = "3"
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+vfs-core.workspace = true
+serde_json.workspace = true
+log.workspace = true
+dunce.workspace = true
+tauri-plugin-log = "2"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[dev-dependencies]
+tauri = { version = "2.12", features = ["test"] }
+tempfile.workspace = true
+serde.workspace = true
+rusqlite.workspace = true
