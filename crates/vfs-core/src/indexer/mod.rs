@@ -119,6 +119,7 @@ fn commit(tx: &mut Option<Transaction<'_>>, sched: &mut Sched) -> Result<()> {
     if let Some(t) = tx.take() {
         let start = Instant::now();
         t.commit()?;
+        log::debug!(target: "vfs::probe", "commit ms={}", start.elapsed().as_millis());
         sched.diag.commit(start.elapsed());
     }
     Ok(())
@@ -344,6 +345,7 @@ fn scan_root(
             let paused = Instant::now();
             let stopped = pause(d, stop);
             sched.diag.backoff(paused.elapsed());
+            log::debug!(target: "vfs::probe", "backoff ms={}", paused.elapsed().as_millis());
             if stopped {
                 pass.current = None;
                 return Ok(RootOutcome::Yielded);
@@ -1135,6 +1137,7 @@ impl Worker {
                 Err(e) => log::warn!("indexer: {e}"),
             },
             Cmd::Watch(watch::WatchEvent::Dirty(path)) => {
+                log::debug!(target: "vfs::probe", "watch dirty");
                 self.dirty.push(path);
                 self.dirty_since.get_or_insert_with(Instant::now);
             }

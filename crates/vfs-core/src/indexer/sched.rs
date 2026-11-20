@@ -134,7 +134,9 @@ impl BackOff {
             .is_none_or(|t| now.saturating_duration_since(t) >= self.cfg.sample_every)
         {
             self.last_sample = Some(now);
-            let busy = load().is_some_and(|q| q >= self.cfg.busy_queue);
+            let q = load();
+            let busy = q.is_some_and(|q| q >= self.cfg.busy_queue);
+            log::debug!(target: "vfs::probe", "sample q={q:?} busy={busy}");
             self.samples.push_back(busy);
             while self.samples.len() > self.cfg.window {
                 self.samples.pop_front();
@@ -197,10 +199,12 @@ pub(crate) fn install_checkpoint_hook(
     conn.wal_hook(Some(move |wal: &mut rusqlite::hooks::Wal, n: i32| {
         if i64::from(n) >= pages {
             let start = Instant::now();
+            log::debug!(target: "vfs::probe", "checkpoint start pages={n}");
             if let Err(e) = wal.checkpoint() {
                 log::warn!("checkpoint: {e}");
             }
             stats.record(start.elapsed());
+            log::debug!(target: "vfs::probe", "checkpoint ms={}", start.elapsed().as_millis());
         }
         Ok(())
     }))
