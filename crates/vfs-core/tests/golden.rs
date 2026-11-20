@@ -127,7 +127,12 @@ const TREE: &[(&str, &[&str])] = &[
     ("Vídeos", &["Comunión Lucía 2015.mp4", "Bautizo Martín.avi"]),
     (
         "Cartas",
-        &["Carta a la señora Muñoz.docx", "Notas sueltas.txt"],
+        &[
+            "Carta a la señora Muñoz.docx",
+            "Notas sueltas.txt",
+            // Written decomposed (NFD).
+            "Felicitacio\u{301}n Nin\u{303}o Jesu\u{301}s.docx",
+        ],
     ),
     ("Colegio", &["Notas Lucía 3º ESO.pdf"]),
 ];
@@ -192,6 +197,11 @@ const CASES: &[Case] = &[
     case("bautizo martin", "Vídeos/Bautizo Martín.avi", 1),
     case("Lucía notas", "Colegio/Notas Lucía 3º ESO.pdf", TOP),
     case("cancion cuna", "Música/Nanas/Canción de cuna.mp3", 1),
+    case(
+        "felicitacion niño",
+        "Cartas/Felicitación Niño Jesús.docx",
+        1,
+    ),
     // ñ: typed with or without the tilde.
     case("cumpleaños", "Fotos/Cumpleaños/", TOP),
     case(
@@ -324,6 +334,11 @@ const CASES: &[Case] = &[
         1,
     ),
     case("3º", "Colegio/Notas Lucía 3º ESO.pdf", 1),
+    case(
+        "t1",
+        "Papeles de casa/Facturas agua/Factura agua 2023 T1.pdf",
+        1,
+    ),
     // Whole names and folder names.
     case(
         "vida laboral",

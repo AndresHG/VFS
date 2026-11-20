@@ -2,7 +2,8 @@
 
 - **Status**: implemented (PR #101)
 - **Size**: M. Tests only, no behavior change, but it fixes the ranking contract that the next
-  changes (VFS-11 sort, VFS-15 frecency, VFS-16 query syntax, schema work) must keep.
+  changes (sort P2/issue 66, frecency P5/issue 69, query syntax P8/issue 72, schema work)
+  must keep.
 - **Links**: [VFS-1](../vfs-1-core-search/spec.md) AC-10 (ranking tiers),
   `docs/research/prior-art-proposals.md` P6, GitHub issue 70.
 
