@@ -37,8 +37,10 @@ Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/
   divergence with a merge commit.
 - Commits are conventional with the spec id as scope: `feat(vfs-1): …`, `fix(vfs-3): …`.
 - **Changed code ends in a PR, unasked**: commit, run the `pr-critic`, push, open the PR. This
-  is standing authorization. Merging and pushes to `main` are always the user's call.
-- `guard-git-danger.py` enforces this: it asks before pushes to `main` and PR merges, and
+  is standing authorization. Then merge it yourself (squash) once the critic has passed the
+  head, CI is green on Windows and macOS, and the branch is rebased on `main`; the owner
+  reviews product decisions, not PRs. Direct pushes to `main` stay the user's call.
+- `guard-git-danger.py` asks before pushes to `main` and PR merges (answer per the rule above), and
   denies force-pushes to `main`, `claude/*` pushes, bare stash, and `gh pr create` without a
   critic verdict for HEAD.
 
