@@ -2,7 +2,7 @@
 
 > Defects 1–3 below (issues 106–108) are fixed by the v0.1.1 change (PR 113); the reveal
 > selection and the splash are checked by `apps/desktop/src-tauri/tests/windows_shell.rs`. The
-> tables record the v0.1.0 run as measured.
+> tables record the v0.1.0 run as measured; "After v0.1.1" below records the journey since.
 
 First time the real VFS app was installed, launched and driven on Windows, and first time its
 window was seen on either OS. Spec: `specs/vfs-8-windows-e2e/spec.md`. Workflow:
@@ -36,6 +36,17 @@ The journey drives an installed NSIS build with the opt-in `webdriver` feature (
 server). `tauri-driver` + Edge WebDriver could not attach to the release build (spec decision
 1); the release build got install/verify, the launch-and-screenshot test and uninstall.
 
+## After v0.1.1 (e2e run 44831975045, 2026-11-20)
+
+- "Mostrar en carpeta": `reveal-file`, `reveal-folder` and `reveal-long-path` pass. Explorer
+  opens on the folder with the file or folder selected. The journey compares the selected
+  items by full path: Explorer's display name drops the extension when extensions are hidden
+  (the default).
+- First launch on a fresh runner: the splash "Preparando VFS…" shows 0.36 s after launch,
+  text already drawn (`win-12-first-launch-splash.png`, captured then). The main window shows
+  already painted at 7.3 s, when the splash closes. There is no blank white window. Second
+  launch: splash at 0.32 s, window at 0.76 s.
+
 macOS (short journey, `webdriver` build of the `.app`, 20,000 files): every step passed,
 including Finder opening on the file **with it selected**. First scan 1.7 s (11,553 files/s);
 memory after a search 274 MB RSS (app 122 + all WebKit processes 152).
@@ -48,6 +59,7 @@ memory after a search 274 MB RSS (app 122 + all WebKit processes 152).
 - `win-06-search-name.png`, `win-07-search-folder.png`, `win-08-type-filter.png`
 - `win-09-reveal-file.png` — Explorer on "Año 2019", file not selected.
 - `win-10-reveal-long-path.png`, `win-11-catch-up.png`
+- `win-12-first-launch-splash.png` — v0.1.1 first launch: the native splash, 0.36 s after launch.
 - `mac-01-first-run.png` … `mac-05-reveal-file.png`
 
 ## Defects seen in the screenshots and runs
