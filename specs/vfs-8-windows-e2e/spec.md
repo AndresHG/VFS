@@ -14,7 +14,7 @@ either operating system: the dev Mac cannot run Windows binaries and its agents 
 capture. Every claim about the installed product (per-user install, Start menu entry, the
 WebView2 bootstrapper, "Mostrar en carpeta" opening Explorer on the right file, catch-up at
 start) is unverified, and nothing has been measured on a disk that is busy the way the target's
-single 8 TB HDD is. The probe script for the target-PC visit has never run on Windows either.
+single 8 TB HDD is. The probe script for the reference-machine field test has never run on Windows either.
 
 ## Requirements (EARS)
 
@@ -73,7 +73,7 @@ Tests cite these ids (`VFS-8 AC-<m>`) in their doc comments.
   and macOS 10× in a private repository.
 - No emulation of HDD seek latency: no credible tool exists on a hosted Windows runner without a
   custom driver (see Decisions). Contention is measured, latency is not.
-- Signing, auto-update, the real target PC (Fase 2 visit).
+- Signing, auto-update, a real reference machine (Fase 2 field test).
 
 ## Pre-mortem
 

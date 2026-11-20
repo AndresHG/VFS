@@ -67,7 +67,7 @@ const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().repl
 
 const people = ['Carmen', 'Lucía', 'Andrés', 'Concepción', 'José Luis', 'Mª Ángeles', 'Begoña', 'Iñaki', 'Pilar', 'Ramón'];
 const places = ['Galicia', 'Cuenca', 'Benidorm', 'Peñíscola', 'Salamanca', 'Albacete', 'Cádiz', 'Logroño', 'Ávila', 'Málaga'];
-const events = ['Boda de Lucía y Andrés', 'Navidad en casa de la abuela', 'Viaje a', 'Comunión de Iñaki', 'Cumpleaños de Pilar', 'Verano en', 'Fiestas del pueblo', 'Excursión a', 'Bautizo de Martín'];
+const events = ['Boda de Lucía y Marcos', 'Navidad en casa de la abuela', 'Viaje a', 'Comunión de Iñaki', 'Cumpleaños de Pilar', 'Verano en', 'Fiestas del pueblo', 'Excursión a', 'Bautizo de Martín'];
 const docs = [
   'Escritura notaría piso Calle Mayor', 'Declaración de la renta', 'Factura Iberdrola', 'Contrato de alquiler',
   'Receta de croquetas de la abuela', 'Póliza seguro hogar', 'Carta al ayuntamiento', 'Presupuesto reforma cocina',
@@ -103,7 +103,7 @@ function makeEntry(root, R) {
     const ev = R.pick(events);
     const evName = ev.endsWith(' a') || ev.endsWith(' en') ? `${ev} ${R.pick(places)}` : ev;
     const deep = R.rand() < 0.15
-      ? `\\Fotos escaneadas del álbum de la abuela Concepción\\Caja ${R.int(1, 9)} - Años sesenta y setenta\\${evName} con los primos de ${R.pick(places)}\\Sobre ${R.int(1, 40)} sin clasificar todavía\\Revisar con mamá antes de tirar nada de lo que hay aquí dentro, por favor`
+      ? `\\Fotos escaneadas del álbum de la abuela Concepción\\Caja ${R.int(1, 9)} - Años sesenta y setenta\\${evName} con los primos de ${R.pick(places)}\\Sobre ${R.int(1, 40)} sin clasificar todavía\\Revisar con calma antes de tirar nada de lo que hay aquí dentro, por favor`
       : `\\Fotos\\${y}\\${evName}`;
     const ext = R.pick(['JPG', 'JPG', 'jpg', 'jpeg', 'png', 'HEIC']);
     const name = R.rand() < 0.6 ? `IMG_${String(R.int(1, 9999)).padStart(4, '0')}.${ext}` : `${evName} ${R.int(1, 300)}.${ext}`;

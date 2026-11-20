@@ -87,7 +87,7 @@ const LOG_MAX_BYTES: u128 = 1024 * 1024;
 const LOG_KEEP: usize = 4;
 
 /// Writes warnings, errors and the indexer's diagnostic records to
-/// `<local_data>/logs/vfs.log`, rotating at [`LOG_MAX_BYTES`], so the target PC can be
+/// `<local_data>/logs/vfs.log`, rotating at [`LOG_MAX_BYTES`], so the reference machine can be
 /// diagnosed afterwards. At info level only the diagnostic target
 /// ([`vfs_core::DIAG_TARGET`]) is written, whose records carry counts and durations, never a
 /// file name; other info messages could name the user's files in passing (VFS-5 R8).

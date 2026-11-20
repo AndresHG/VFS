@@ -680,7 +680,7 @@ if ($all -or $Step -eq 'info') {
 if ($all -or $Step -eq 'usn') {
   Try-Step 'usn' {
     Save 'usn' ([VfsProbe]::Usn($DataRoot))
-    # Journal growth rate: a second query later in the visit gives bytes/hour (see the plan).
+    # Journal growth rate: a second query later in the field test gives bytes/hour (see the plan).
     Save 'usn-query-1' ([VfsProbe]::UsnQueryOnly($DataRoot))
   }
 }
@@ -774,7 +774,7 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
 }
 
 if ($all -or $Step -eq 'usn-query') {
-  # End-of-visit query only (no reads): compare with usn-query-1.json for bytes per hour.
+  # End-of-test query only (no reads): compare with usn-query-1.json for bytes per hour.
   Try-Step 'usn-query' { Save 'usn-query-2' ([VfsProbe]::UsnQueryOnly($DataRoot)) }
 }
 

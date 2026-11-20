@@ -7,7 +7,7 @@ syncing the same folders. VFS indexes about 5 M files in 400 k directories, with
 administrator rights, only while its window is open.
 
 The ranked changes that follow from this study are in
-[`windows-recommendations.md`](windows-recommendations.md). The visit script that measures
+[`windows-recommendations.md`](windows-recommendations.md). The field-test script that measures
 what is still guessed is [`target-pc-measurement-plan.md`](target-pc-measurement-plan.md).
 
 **Evidence labels.** Every figure and claim carries one:
@@ -392,7 +392,7 @@ USN)` at shutdown; at start, replay records into "re-list parent directory" mark
 the re-walk on any failure. That design needs directory FRNs only.
 
 Whether it pays off depends on two numbers only the real PC can give: N1 (does the call work
-on *her* build) and N2 (how many hours the journal holds). Probe steps 2 and 10 measure both.
+on *its* Windows build) and N2 (how many hours the journal holds). Probe steps 2 and 10 measure both.
 
 ### 4.6 Minimal test program (to confirm on the real PC)
 
@@ -406,7 +406,7 @@ on *her* build) and N2 (how many hours the journal holds). Probe steps 2 and 10 
    success rate and average time.
 3. Reads up to 4,000 buffers to measure catch-up speed.
 4. Tries the privileged read and `FSCTL_ENUM_USN_DATA` on the directory handle (expected error 5).
-5. Repeats the query at the end of the visit to derive journal bytes per hour.
+5. Repeats the query at the end of the field test to derive journal bytes per hour.
 
 ---
 

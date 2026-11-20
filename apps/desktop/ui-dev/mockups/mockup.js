@@ -2,16 +2,16 @@
 // same data. `?state=idle|results` picks the screen state. No backend, no behaviour.
 
 const ROWS = [
-  { kind: 'folder', name: 'Boda de Lucía y Andrés', dir: 'D:\\Archivo familiar\\Fotos\\2025', date: '8 nov 2025', size: '' },
-  { kind: 'photo', name: 'Boda de Lucía y Andrés 112.JPG', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Andrés', date: '8 nov 2025', size: '4,1 MB' },
-  { kind: 'video', name: 'Boda de Lucía y Andrés Cádiz.mp4', dir: 'D:\\Archivo familiar\\Vídeos\\2025', date: '9 nov 2025', size: '1,8 GB' },
-  { kind: 'folder', name: 'Boda de Lucía y Andrés', dir: 'E:\\Copias antiguas\\Fotos\\2009', date: '22 may 2009', size: '', unavailable: true },
+  { kind: 'folder', name: 'Boda de Lucía y Marcos', dir: 'D:\\Archivo familiar\\Fotos\\2025', date: '8 nov 2025', size: '' },
+  { kind: 'photo', name: 'Boda de Lucía y Marcos 112.JPG', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Marcos', date: '8 nov 2025', size: '4,1 MB' },
+  { kind: 'video', name: 'Boda de Lucía y Marcos Cádiz.mp4', dir: 'D:\\Archivo familiar\\Vídeos\\2025', date: '9 nov 2025', size: '1,8 GB' },
+  { kind: 'folder', name: 'Boda de Lucía y Marcos', dir: 'E:\\Copias antiguas\\Fotos\\2009', date: '22 may 2009', size: '', unavailable: true },
   { kind: 'document', name: 'Presupuesto boda restaurante.pdf', dir: 'C:\\Users\\Carmen\\Documents\\Casa', date: '3 feb 2025', size: '312 KB' },
-  { kind: 'photo', name: 'Boda de Lucía y Andrés 7.HEIC', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Andrés', date: '8 nov 2025', size: '2,6 MB' },
+  { kind: 'photo', name: 'Boda de Lucía y Marcos 7.HEIC', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Marcos', date: '8 nov 2025', size: '2,6 MB' },
   { kind: 'audio', name: '03 - Un año de amor (boda).mp3', dir: 'D:\\Archivo familiar\\Música\\Mocedades', date: '14 jun 2019', size: '7,2 MB' },
-  { kind: 'photo', name: 'Boda de Lucía y Andrés 41.jpg', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Andrés', date: '8 nov 2025', size: '3,9 MB' },
+  { kind: 'photo', name: 'Boda de Lucía y Marcos 41.jpg', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Marcos', date: '8 nov 2025', size: '3,9 MB' },
   { kind: 'document', name: 'Lista de invitados boda.xlsx', dir: 'C:\\Users\\Carmen\\Documents\\Varios', date: '12 ene 2025', size: '48 KB' },
-  { kind: 'photo', name: 'Boda de Lucía y Andrés 230.JPG', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Andrés', date: '8 nov 2025', size: '5,0 MB' },
+  { kind: 'photo', name: 'Boda de Lucía y Marcos 230.JPG', dir: 'D:\\Archivo familiar\\Fotos\\2025\\Boda de Lucía y Marcos', date: '8 nov 2025', size: '5,0 MB' },
   { kind: 'folder', name: 'Boda de la prima Begoña', dir: 'D:\\Archivo familiar\\Fotos\\1998', date: '30 ago 1998', size: '' },
   { kind: 'photo', name: 'IMG_0042.JPG', dir: 'D:\\Archivo familiar\\Fotos\\2012\\Boda de Iñaki', date: '6 oct 2012', size: '2,2 MB' },
 ];

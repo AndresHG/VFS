@@ -1,4 +1,4 @@
-# Future lines of work from the end user's feedback
+# Future lines of work from user feedback
 
 Status: research, with the owner's decisions of 2026-11-20 recorded per line. Nothing here is
 built or scheduled. Each section is written so that a
@@ -9,13 +9,13 @@ what the lines share and how they could become one later phase are in
 
 ## Where this comes from
 
-The end user sent feedback describing what she really wants: one command that searches
-several sources at once (her files, about 3,000 Firefox bookmarks, her private YouTube
+User feedback describes what the target user really wants: one command that searches
+several sources at once (their files, about 3,000 Firefox bookmarks, their private YouTube
 playlists, and the photos, video links and phone contacts exchanged over Telegram and
-WhatsApp), plus the open internet, keeping what she already has apart from what she does not.
-She wants results she can sort by publication date, by the date she collected them and by
-source. She wants her scattered bookmarks reorganised by a criterion she states, and a
-bibliographic list (cover images included) without typing it into Excel. Her example
+WhatsApp), plus the open internet, keeping what they already have apart from what they do not.
+They want results they can sort by publication date, by the date they collected them and by
+source. They want their scattered bookmarks reorganised by a criterion they state, and a
+bibliographic list (cover images included) without typing it into Excel. Their example
 requests are about themes, not file names:
 
 1. «Necesito estudiar todo lo que tengo sobre hígado graso»
@@ -32,16 +32,16 @@ The owner decided that, apart from Firefox bookmarks (issue
 built now. In phase 3 the owner had ruled out the *content* of images, audio and video
 ([decisions](../decisions.md),
 "Scope: names and paths first"). Examples 4 and 6 show that finding unnamed photos matters
-to her, so [line 2](#line-2) records what finding them would cost. The owner has kept the
+to them, so [line 2](#line-2) records what finding them would cost. The owner has kept the
 decision: image content stays out of scope, and photos are found by name and folder as today.
 Line 2 is kept as a future line with its findings, not as a proposal to reopen it.
 
 ## Owner decisions (2026-11-20)
 
 - **Product invariant: VFS is purely consultative.** It never operates on, modifies or writes
-  to any source: not her files, not Firefox, not YouTube, not her chats. Sources are read in
-  place or through an export she makes herself; anything VFS produces (an exported list, a
-  spreadsheet) is a new file written where she chooses, never a change to a source. No line
+  to any source: not their files, not Firefox, not YouTube, not their chats. Sources are read in
+  place or through an export the user makes themselves; anything VFS produces (an exported list, a
+  spreadsheet) is a new file written where the user chooses, never a change to a source. No line
   below proposes otherwise; where the research found a write path, it is marked as excluded
   by this invariant.
 - **[Line 5](#line-5), open-internet search: decided, will not do.** Any LLM or agent already
@@ -67,16 +67,16 @@ possibly without AVX2), fully offline by default, no administrator rights, Spani
   GeoNames lookup in line 2 (dump downloaded 2026-11-20) and one oEmbed call in line 3.
 - **[estimate]**: our arithmetic or judgement, with the assumptions stated.
 
-Nothing here was measured on the target PC. Prices and terms were checked against the
+Nothing here was measured on the reference machine. Prices and terms were checked against the
 providers' own pages in November 2026. They change: re-check them before a spec relies on
 them. Where a primary source could not be loaded, the text says so and names the secondary
 source used.
 
 ## Each section covers
 
-1. What she wants, in her words. 2. How it could work, with two or three options.
+1. What the user wants, in their words. 2. How it could work, with two or three options.
 3. What it needs from the user (accounts, consent, exports). 4. Privacy and
-terms-of-service constraints. 5. Cost on the target PC or in API fees. 6. What it depends on
+terms-of-service constraints. 5. Cost on the reference machine or in API fees. 6. What it depends on
 in VFS. 7. The smallest useful first step. 8. The recommendation. 9. Open product questions
 for the owner, the deciding one first. 10. Sources.
 
@@ -84,14 +84,14 @@ for the owner, the deciding one first. 10. Sources.
 
 | Line | Recommendation | Smallest first step | Deciding question for the owner | Issue |
 |---|---|---|---|---|
-| [1. Thematic gathering](#line-1) | **Do next**: Spanish full text + saved collections (exported as a new list, never written into a source). LLM query expansion later (phase 5). No local embeddings now. | Spanish stemming in the phase 3 full-text index + a test set built from her six sentences; then «Colecciones» | May concept understanding send only the search words (never documents) to an AI service with her key? | [#77](https://github.com/AndresHG/VFS/issues/77) |
+| [1. Thematic gathering](#line-1) | **Do next**: Spanish full text + saved collections (exported as a new list, never written into a source). LLM query expansion later (phase 5). No local embeddings now. | Spanish stemming in the phase 3 full-text index + a test set built from their six sentences; then «Colecciones» | May concept understanding send only the search words (never documents) to an AI service with their key? | [#77](https://github.com/AndresHG/VFS/issues/77) |
 | [2. Unnamed photos](#line-2) | **Out of scope (owner decision)**; kept as a future line. If ever revisited: metadata first (EXIF date, GPS, place name, events), embeddings computed on the Mac later, never faces. | (if revisited) Metadata-only photo index plus a coverage report | None now; the decision stands. | [#78](https://github.com/AndresHG/VFS/issues/78) |
-| [3. YouTube playlists](#line-3) | **Do next** (after VFS-6): Google Takeout import. OAuth live sync later. | Takeout playlist importer; titles via oEmbed as an optional pass | Does she save into named playlists, or mostly «Ver más tarde» (which the API cannot read)? | [#79](https://github.com/AndresHG/VFS/issues/79) |
-| [4. Telegram and WhatsApp](#line-4) | **Do later**, exports only. Never the Telegram API or WhatsApp database decryption. | Telegram `result.json` importer | Which app and which phone hold what she wants (the septic-tank photos, the contacts)? | [#80](https://github.com/AndresHG/VFS/issues/80) |
+| [3. YouTube playlists](#line-3) | **Do next** (after VFS-6): Google Takeout import. OAuth live sync later. | Takeout playlist importer; titles via oEmbed as an optional pass | Does the user save into named playlists, or mostly «Ver más tarde» (which the API cannot read)? | [#79](https://github.com/AndresHG/VFS/issues/79) |
+| [4. Telegram and WhatsApp](#line-4) | **Do later**, exports only. Never the Telegram API or WhatsApp database decryption. | Telegram `result.json` importer | Which app and which phone hold what the user wants (the septic-tank photos, the contacts)? | [#80](https://github.com/AndresHG/VFS/issues/80) |
 | [5. Open internet](#line-5) | **Decided: will not do.** Any LLM or agent already searches the web better. | — | — | [#81](https://github.com/AndresHG/VFS/issues/81) (closed, not planned) |
-| [6. Sorting by dates and source](#line-6) | **Do next; most likely to be done soon.** A sort selector over the collected date (files now, bookmarks with VFS-6), unknown dates last, a source label. Two-date model later. | Sort selector «Relevancia / Más recientes / Más antiguos» in core and UI (acceptance criteria in the section) | Does «fecha» mean when it was published or when she saved it? | [#82](https://github.com/AndresHG/VFS/issues/82) |
+| [6. Sorting by dates and source](#line-6) | **Do next; most likely to be done soon.** A sort selector over the collected date (files now, bookmarks with VFS-6), unknown dates last, a source label. Two-date model later. | Sort selector «Relevancia / Más recientes / Más antiguos» in core and UI (acceptance criteria in the section) | Does «fecha» mean when it was published or when the user saved it? | [#82](https://github.com/AndresHG/VFS/issues/82) |
 | [7. Reorganising bookmarks](#line-7) | **Decided: will not do for now** (VFS never writes to a source). | — | — | [#83](https://github.com/AndresHG/VFS/issues/83) (closed, not planned) |
-| [8. Bibliographic list](#line-8) | **Do later**, right after phase 3: offline extraction, XLSX + printable list. | ISBN/DOI and covers from EPUB/PDF, export to XLSX and HTML | An Excel sheet she keeps editing, a printed list, or both, and which Excel version? | [#84](https://github.com/AndresHG/VFS/issues/84) |
+| [8. Bibliographic list](#line-8) | **Do later**, right after phase 3: offline extraction, XLSX + printable list. | ISBN/DOI and covers from EPUB/PDF, export to XLSX and HTML | An Excel sheet the user keeps editing, a printed list, or both, and which Excel version? | [#84](https://github.com/AndresHG/VFS/issues/84) |
 
 <a id="line-1"></a>
 
@@ -99,9 +99,9 @@ for the owner, the deciding one first. 10. Sources.
 
 Issue: [#77](https://github.com/AndresHG/VFS/issues/77).
 
-### 1. What she wants
+### 1. What the user wants
 
-She wants one request to gather everything she has on a topic, not files she can name:
+The user wants one request to gather everything the user has on a topic, not files the user can name:
 - "Necesito estudiar todo lo que tengo sobre hígado graso" (ex. 1)
 - "¿Qué recetas usan coco rallado junto con harina de almendra?" (ex. 2)
 - "Reúne todo lo que tengo sobre propiedades y fuentes alimentarias del colágeno" (ex. 3)
@@ -109,7 +109,7 @@ She wants one request to gather everything she has on a topic, not files she can
 
 **The gap.** Phase 1 matches words in file names and folder paths only. A PDF called
 `Dra_Lopez_2019_dieta.pdf` that is all about esteatosis hepática, or a folder of recipes named
-`postres sin gluten/`, will never match "hígado graso" or "coco rallado". Her requests have
+`postres sin gluten/`, will never match "hígado graso" or "coco rallado". The user's requests have
 three levels of difficulty:
 
 | Level | Example | What is needed |
@@ -200,11 +200,11 @@ card. The 118 M and 568 M counts come from HF metadata and the BGE-M3 paper. The
   Small models know "solfeo" is near "solmisación", but whether they tie in "hexacordo" or Guido
   is doubtful. It also brings false positives the owner cannot explain.
 
-**Option D: LLM query expansion with her own API key (phase 5, #38/#40).** Send only the query
+**Option D: LLM query expansion with their own API key (phase 5, #38/#40).** Send only the query
 ("solmisación") to the model. It returns a list of Spanish/English/Latin terms and names: solfeo,
 do re mi, ut re mi fa sol la, Guido d'Arezzo, hexacordo, mano guidoniana, "Ut queant laxis".
 VFS then runs those terms as a weighted OR through local BM25. **No document leaves the PC**,
-and the expansion is shown to her and editable ("También busco: …"). This is the only option
+and the expansion is shown to them and editable ("También busco: …"). This is the only option
 that handles level C well and stays cheap. It fails without internet or a key.
 
 **Option E: full RAG.** Retrieve chunks locally, send them to the model, get a synthesis ("what
@@ -212,23 +212,23 @@ do my documents say about hígado graso"). That is #39/#40. Document text leaves
 consent is needed per send. It is useful for "necesito estudiar", but it is a different product
 from gathering.
 
-**The product concept: saved collections ("dossiers").** All of her requests end in "reúne":
-she wants a durable pile, not a one-off result list. Proposal: a *Colección* is a named, saved
-query (terms plus expansion plus filters plus sources), plus results she pinned or excluded by
-hand, re-run on demand so new files appear. It can be exported, as new files in a place she chooses (never inside or onto a source), as a folder of shortcuts
+**The product concept: saved collections ("dossiers").** All of their requests end in "reúne":
+the user wants a durable pile, not a one-off result list. Proposal: a *Colección* is a named, saved
+query (terms plus expansion plus filters plus sources), plus results the user pinned or excluded by
+hand, re-run on demand so new files appear. It can be exported, as new files in a place the user chooses (never inside or onto a source), as a folder of shortcuts
 (`.lnk` on Windows, aliases or symlinks on macOS, no copies) or as a printable list. Prior art:
 DEVONthink smart groups ("itself just a saved search", local or global) **[published,
 devontechnologies.com blog]**; Zotero collections (manual) plus saved searches; Recoll
 (query-time stemming, Windows installer) **[published, recoll.org/pages/features.html]**. The
-pinned/excluded overlay is what makes it trustworthy: the machine proposes, she disposes.
+pinned/excluded overlay is what makes it trustworthy: the machine proposes, the user disposes.
 
 ### 3. What it needs from the user
 
 - A, B, C: nothing beyond indexing time and disk. For DeCS, the developer signs the BIREME
   licence agreement.
-- D, E: her own Anthropic or OpenAI key (phase 5 flow) and consent. For D the consent covers
+- D, E: their own Anthropic or OpenAI key (phase 5 flow) and consent. For D the consent covers
   only the query text. For E it covers document excerpts.
-- Collections: a name per collection. Optionally she confirms or edits the suggested expansion
+- Collections: a name per collection. Optionally the user confirms or edits the suggested expansion
   terms.
 
 ### 4. Privacy and terms-of-service constraints
@@ -243,7 +243,7 @@ pinned/excluded overlay is what makes it trustworthy: the machine proposes, she 
 - E sends personal document text and needs per-send consent. Check the provider's data-retention
   terms in #38.
 
-### 5. Cost on the target PC and API fees
+### 5. Cost on the reference machine and API fees
 
 Assumptions **[estimate]**: 300,000 text-bearing documents out of 5 M files, extracted text
 averaging 8 chunks of ~300 tokens, so 2.4 M chunks. Older 4-core CPU, maybe no AVX2.
@@ -285,9 +285,9 @@ bookmarks. Bookmark titles, URLs and possibly page text join the same FTS index.
 ### 7. Smallest useful first step
 
 Inside phase 3 / #24: Spanish stemming via `rust-stemmers` in an FTS5 tokenizer, AND/phrase
-queries, and a golden test set built from her six sentences against a sample of her real files.
+queries, and a golden test set built from their six sentences against a sample of their real files.
 That measures how far level A gets before any concept work. Then, as a separate S/M ticket,
-"Colecciones": save a query plus pins and exclusions, and export it as a printable list or a shortcut folder written where she chooses. It works
+"Colecciones": save a query plus pins and exclusions, and export it as a printable list or a shortcut folder written where the user chooses. It works
 with name search today and grows with full text.
 
 ### 8. Recommendation
@@ -296,15 +296,15 @@ with name search today and grows with full text.
 are cheap and serve every example. **Do later:** LLM query expansion (D) as the first phase 5
 feature. It is the best value for level C, costs fractions of a cent, and sends no documents.
 After that a DeCS-based medical expansion if the licence is acceptable. **Do not do now:** local
-embeddings on the target PC. Days of CPU, a GB-scale index, a pre-v1 vector store and modest
-gain over BM25 plus expansion. Revisit in #41 with a measured benchmark on her machine.
+embeddings on the reference machine. Days of CPU, a GB-scale index, a pre-v1 vector store and modest
+gain over BM25 plus expansion. Revisit in #41 with a measured benchmark on their machine.
 
 ### 9. Open product questions for the owner
 
 1. **Is it acceptable that "understanding the concept" (ex. 5) uses the internet: only the
-   search words, never her documents, sent with her API key?** Or must it be strictly offline,
+   search words, never their documents, sent with their API key?** Or must it be strictly offline,
    accepting weaker results?
-2. What share of her recipes and articles are images or scans (decides #28's priority)?
+2. What share of their recipes and articles are images or scans (decides #28's priority)?
 3. Should a collection be live (re-run, new files appear) or frozen once saved?
 4. Export format: a folder of shortcuts, a printable list, or both?
 
@@ -336,7 +336,7 @@ Issue: [#78](https://github.com/AndresHG/VFS/issues/78).
 
 > **Decided (owner, 2026-11-20): out of scope.** Image, audio and video content stay out of scope; photos are found by name and folder as today. This section is kept as a future line: what finding unnamed photos would take and what it would cost, so the question can be revisited with evidence if the owner ever chooses to. It is not a recommendation to reopen the decision.
 
-### 1. What she wants
+### 1. What the user wants
 
 - Example 4: «Reúne todas las imágenes que tengo de la cocina de Valle de Ansó (sin nombre, en carpetas por año o sueltas)».
 - Example 6: «Todas las fotografías de localizar y quitar la fosa séptica antigua e instalar la nueva, por orden cronológico».
@@ -350,14 +350,14 @@ Neither photo set has a useful file name. Both requests combine three things: a 
 #### 2a. Free metadata: EXIF date, GPS, camera (no model)
 
 - **Fields.** Phone and camera JPEG/HEIC files carry `DateTimeOriginal` (0x9003), `OffsetTimeOriginal` (0x9011, the time zone), `SubSecTimeOriginal`, `Model` (0x0110), a GPS IFD with latitude and longitude, and often an embedded IFD1 thumbnail (`ThumbnailOffset`/`ThumbnailLength`) ([ExifTool EXIF tags](https://exiftool.org/TagNames/EXIF.html)).
-- **Cost to read.** In a JPEG, EXIF sits in the APP1 segment near the start of the file. A JPEG marker length field is 16 bits, so APP1 is at most about 64 KB. One small read per file is enough. HEIC keeps EXIF as an item in the `meta` box, which is usually near the start; that position is an assumption to verify on her files.
+- **Cost to read.** In a JPEG, EXIF sits in the APP1 segment near the start of the file. A JPEG marker length field is 16 bits, so APP1 is at most about 64 KB. One small read per file is enough. HEIC keeps EXIF as an item in the `meta` box, which is usually near the start; that position is an assumption to verify on their files.
 - **Rust crates.** `kamadak-exif` (BSD-2-Clause) reads TIFF, JPEG, HEIF, PNG and WebP ([docs.rs](https://docs.rs/kamadak-exif/latest/exif/)). `nom-exif` (MIT) also covers HEIC/AVIF and MP4/MOV video, offers a lazy iterator with early exit after the GPS tags, and accepts any `Read + Seek` ([README](https://docs.rs/crate/nom-exif/latest/source/README.md)). Neither documents how many bytes it reads. VFS should pass a capped 64–128 KB buffer itself rather than open the whole file.
 - **Coverage is uneven:**
   - Photos taken by phone: date almost always, GPS when the camera had location on.
   - Scans of paper prints: no capture date for the scene.
   - Older digital cameras: date but no GPS.
   - WhatsApp in normal photo mode: reportedly removes GPS and most EXIF; "send as document" keeps it. Only secondary blog sources say this ([fast.io](https://www.fast.io/resources/whatsapp-telegram-signal-photo-metadata-preservation/), [wildandfreetools](https://wildandfreetools.com/blog/does-whatsapp-remove-exif-data)). We found no Meta primary source, so it is **unverified**.
-  - We found **no published statistic** on what share of a family archive has GPS. Step 7 measures it on her archive.
+  - We found **no published statistic** on what share of a family archive has GPS. Step 7 measures it on their archive.
 - **Date fallback chain:**
   1. `DateTimeOriginal` (+ `OffsetTimeOriginal`).
   2. A date in the file name: `IMG_20190612_143005.jpg` (Android), `IMG-20190612-WA0003.jpg` (WhatsApp, the date it was received), `PXL_…`, `Screenshot_…`.
@@ -375,9 +375,9 @@ Neither photo set has a useful file name. Both requests combine three things: a 
 
 - **Data.** GeoNames `cities500.zip` (**13.9 MB** zip, **41.8 MB** text, **237,329** places [measured, downloaded 2026-11-20]) or `cities1000` (11 MB **[published]**); both CC BY 4.0 ([dump index](https://download.geonames.org/export/dump/)). Places in `cities500` have more than 500 inhabitants or are administrative seats down to PPLA4. A k-d tree over ECEF coordinates gives the nearest place, as the [reverse_geocoder](https://github.com/thampiman/reverse-geocoder) project does (that project is LGPL, so reimplement it; the method is small).
 - **Ansó resolves [measured].** `cities500` contains *Ansó* (PPLA3, 42.7579 N, −0.8295 W). The Spain file `ES.txt` (3.2 MB zip) also contains the valley as a feature: *Valle de Ansó* (T.VAL, 42.7625, −0.8304).
-- **Precision limit [measured].** Neighbouring seats are close: Fago is 5.0 km from Ansó and Echo 6.8 km. A photo taken up the valley toward Zuriza can resolve to the wrong village. A nearest-place name is good for display ("Ansó, Huesca") but weak as a filter. The better filter is **«cerca de aquí»**: a radius (e.g. 300 m to 2 km) around a point she picks, by choosing one known photo («más fotos tomadas aquí») or a place name.
-- **Her examples:**
-  - Example 4 works on GPS alone **if** the kitchen photos were taken by phone at the house. VFS can return every photo within 300 m of the house as a thumbnail grid for her to scan. Scanned prints and old cameras will not appear.
+- **Precision limit [measured].** Neighbouring seats are close: Fago is 5.0 km from Ansó and Echo 6.8 km. A photo taken up the valley toward Zuriza can resolve to the wrong village. A nearest-place name is good for display ("Ansó, Huesca") but weak as a filter. The better filter is **«cerca de aquí»**: a radius (e.g. 300 m to 2 km) around a point the user picks, by choosing one known photo («más fotos tomadas aquí») or a place name.
+- **The user's examples:**
+  - Example 4 works on GPS alone **if** the kitchen photos were taken by phone at the house. VFS can return every photo within 300 m of the house as a thumbnail grid for them to scan. Scanned prints and old cameras will not appear.
   - Example 6 works on **GPS + time clustering** with no content understanding: photos within ~200 m of home, inside the weeks of the job, in `DateTimeOriginal` order. The weak point: family and garden photos taken at home in the same weeks get mixed in. That is where content ranking (2b) helps.
 
 **Event grouping**
@@ -397,29 +397,29 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 | nllb-clip-base-siglip | (not verified) | 80.91 % [published, Immich] | Image 8.8 GFLOPs; text 414 M params | Heavy text side. |
 | M-CLIP XLM-R-Large + ViT-B/32 | Not stated on the card | Spanish COCO R@10 89.1 [published] ([HF](https://huggingface.co/M-CLIP/XLM-Roberta-Large-Vit-B-32)) | Image 8.8 GFLOPs | Licence unclear, so avoid. |
 | MobileCLIP / MobileCLIP2 S0–S2 (Apple) | Code MIT; **weights under Apple ML Research Model Terms** ([repo](https://github.com/apple/ml-mobileclip)) | English only | S0: 11.4 M image params, 1.5 ms on the repo's (unnamed) device **[published]**; IN-1k 67.8–77.2 % **[published]** | Fastest. Weight licence is likely research-only, so unsuitable unless verified. |
-| Jina CLIP v2 | **CC BY-NC 4.0** | 89 languages | 0.9 B params, 512 px ([HF](https://huggingface.co/jinaai/jina-clip-v2)) | Too heavy for the target PC. |
+| Jina CLIP v2 | **CC BY-NC 4.0** | 89 languages | 0.9 B params, 512 px ([HF](https://huggingface.co/jinaai/jina-clip-v2)) | Too heavy for the reference machine. |
 
 - **Spanish recall** is from Immich's multilingual benchmark on a Ryzen 7800X3D ([Immich searching](https://docs.immich.app/features/searching)). Immich lists ~3 GB of RAM **[published]** for the B-size multilingual models in that table. On an 8 GB PC that is a real cost.
-- **Quality, honestly.** "Kitchen" is an easy CLIP concept. "Septic tank work" is not a standard benchmark class. It will probably rank as "excavator / trench / pipes / concrete tank", which may be good enough as a ranking signal **inside** a GPS + date filter. That has to be tested on ~20 of her real photos before anything is promised.
+- **Quality, honestly.** "Kitchen" is an easy CLIP concept. "Septic tank work" is not a standard benchmark class. It will probably rank as "excavator / trench / pipes / concrete tank", which may be good enough as a ranking signal **inside** a GPS + date filter. That has to be tested on ~20 of their real photos before anything is promised.
 
 **Published CPU benchmark**
 
 - Immich with ViT-B/32 on an Intel i7-8559U (4 cores / 8 threads, 2018, no GPU) indexed 51,126 pre-made previews in **57 min 39 s ≈ 14.8 images/s**. The median model call was **0.124 s**; one text query took **0.038 s** [published, [mustafa.net](https://mustafa.net/2026/10/10/immich-without-gpu-intel-nuc/)].
 - That blog is a single source, and its figures exclude generating the previews.
 
-**Target PC [estimate]**
+**Reference machine [estimate]**
 
 - **Model time.** Assume an older 4-core with maybe no AVX2, at 3–4× slower than the i7-8559U, so ~4 img/s for B/32. 300,000 photos ≈ **21 h of full CPU**. SigLIP2-B/16 at ~4× the FLOPs ≈ **3–4 days**.
 - **Decoding.** A 12 MP JPEG must be decoded first. Full decode is roughly 60–150 ms on an old CPU **[estimate]**. libjpeg-turbo's IDCT scaling decodes straight to 1/8 size (4000×3000 → 500×375); 1/2, 1/4 and 1/8 are the fast cases ([libjpeg-turbo README](https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+show/refs/heads/main/README.md)). No published timing; we assume ~10–20 ms **[estimate]**.
   - The embedded EXIF thumbnail (often only 160×120) avoids reading the whole file. It is below CLIP's 224 px, so quality must be measured.
   - HEIC needs an HEVC decoder. Codec licensing on Windows is an open issue.
 - **I/O.** Reading 300,000 originals at ~4 MB is ~1.2 TB: ~4–6 h on a busy HDD.
-- **Total:** realistically **1–2 days of throttled background work** for B/32, spread over idle time across a week or more. New photos later cost seconds each, which the target PC can easily do locally.
+- **Total:** realistically **1–2 days of throttled background work** for B/32, spread over idle time across a week or more. New photos later cost seconds each, which the reference machine can easily do locally.
 - **Storage:** 512-d float32 = 2 KB per photo = **614 MB** for 300,000; int8 = 154 MB; binary = 19 MB. `sqlite-vec` stores these in SQLite. It is brute-force only and supports binary quantisation with oversample-and-rescore ([sqlite-vec BQ guide](https://alexgarcia.xyz/sqlite-vec/guides/binary-quant.html)). A brute-force scan of 300,000 × 512 int8 is ~0.1–0.3 s [estimate].
 
 #### 2c. Compute the embeddings on the owner's Mac, ship the vectors
 
-- **How it works.** Her files are already synced to the Synology. The owner's Apple Silicon Mac can read them from the NAS over the LAN, not from the slow PC, and run the same model's image encoder overnight.
+- **How it works.** The user's files are already synced to the Synology. The owner's Apple Silicon Mac can read them from the NAS over the LAN, not from the slow PC, and run the same model's image encoder overnight.
 - **Time [estimate].** I/O bound: ~1.2 TB over gigabit ≈ 3–4 h; Wi-Fi is slower. Model time on Apple Silicon is a small share; we found no published figure.
 - **What ships to the PC:** an int8 vector file (~150 MB) keyed by path + size + mtime, plus only the **text** encoder in ONNX Runtime CPU. That is ~65 MB int8 for B/32's text encoder, or ~280 MB for XLM-R-base [estimate]. A query costs well under a second.
 - **New photos:** embedded locally on the PC, a few per day.
@@ -427,14 +427,14 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 
 #### 2d. Captions through an API (owner's key, Phase 5)
 
-- **How it works.** Send each photo downscaled to ~512 px. Ask for a short Spanish caption plus keywords («cocina, azulejos, fogón de leña»). Store the text and index it with Phase 3's Spanish BM25. **Queries then stay offline.** Captions are also readable, so she can see *why* a photo matched.
+- **How it works.** Send each photo downscaled to ~512 px. Ask for a short Spanish caption plus keywords («cocina, azulejos, fogón de leña»). Store the text and index it with Phase 3's Spanish BM25. **Queries then stay offline.** Captions are also readable, so the user can see *why* a photo matched.
 - **Why not API embeddings.** Gemini Embedding 2 costs only $0.00006 per image in batch **[published]** ([pricing](https://aistudio.google.com/docs/pricing)), but every query would then also need the API online. That breaks VFS's offline rule.
 
 ### 3. What it needs from the user
 
 > Kept for reference: line 2 is out of scope by the owner's decision.
 
-- **A (metadata):** nothing. Optionally she picks "home" once by choosing a photo taken there.
+- **A (metadata):** nothing. Optionally the user picks "home" once by choosing a photo taken there.
 - **B:** acceptance of a long background job and ~0.2–0.6 GB of extra disk; a pause/resume control.
 - **C:** the owner runs a Mac job on LAN access to the NAS, then copies one file across.
 - **D:** an API key, explicit consent per folder set, and a preview of what leaves the PC (Phase 5 rule).
@@ -448,7 +448,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
   - Anthropic: API data deleted within 30 days and not used for training by default ([retention](https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data), [training](https://privacy.claude.com/en/articles/7996868-is-my-data-used-for-model-training)).
   - OpenAI: abuse logs kept up to 30 days; Batch inputs and files kept until deleted; Batch is not eligible for zero data retention; no training by default ([your data](https://developers.openai.com/api/docs/guides/your-data)).
   - Google: the paid tier does not use prompts to improve products and logs them "for a limited period". The **free tier may be used for training and human review** ([Gemini API terms](https://aistudio.google.com/docs/terms)). The free tier must never be used for this.
-- **Face recognition: not recommended.** Biometric data used to identify a person is a special category under GDPR Art. 9(1) ([text](https://gdpr-info.eu/art-9-gdpr/)). It concerns relatives and third parties who have not consented, and adds model weight and liability for a need she has not stated.
+- **Face recognition: not recommended.** Biometric data used to identify a person is a special category under GDPR Art. 9(1) ([text](https://gdpr-info.eu/art-9-gdpr/)). It concerns relatives and third parties who have not consented, and adds model weight and liability for a need the user has not stated.
 
 ### 5. Cost (300,000 photos)
 
@@ -493,7 +493,7 @@ Only if the owner ever revisits the decision: a **metadata-only photo index**, w
 - a «cerca de esta foto» radius filter, a date-range filter, chronological sort and event grouping;
 - a thumbnail grid for results.
 
-It ships with a **coverage report** for her archive: the share of photos with a capture date and with GPS. That number decides whether B/C is worth doing. Cost: one EXIF read per photo, about 2 h once.
+It ships with a **coverage report** for their archive: the share of photos with a capture date and with GPS. That number decides whether B/C is worth doing. Cost: one EXIF read per photo, about 2 h once.
 
 ### 8. Recommendation
 
@@ -507,7 +507,7 @@ It ships with a **coverage report** for her archive: the share of photos with a 
 | Option | One-time cost | Quality for ex. 4 / ex. 6 | Privacy |
 |---|---|---|---|
 | A metadata only | ~2 h disk; ~30 MB | Good when phone GPS exists; nothing for scans or WhatsApp copies; no content | Fully local |
-| B + local CLIP on target PC | 1–4 days of throttled CPU; 0.2–0.6 GB; RAM pressure | Adds "kitchen" for photos without GPS; niche concepts uncertain | Fully local |
+| B + local CLIP on reference machine | 1–4 days of throttled CPU; 0.2–0.6 GB; RAM pressure | Adds "kitchen" for photos without GPS; niche concepts uncertain | Fully local |
 | C + CLIP computed on the Mac | One night on the Mac + LAN; ~150 MB shipped | Same as B; can afford the better SigLIP2 model | Local to the owner's LAN |
 | D API captions | ≈ $7–32 batch for all 300,000 (cents for a subset); ~12 GB upload | Best on niche concepts; readable captions; offline queries afterwards | Photos leave the PC (30-day retention typical) |
 
@@ -515,9 +515,9 @@ It ships with a **coverage report** for her archive: the share of photos with a 
 
 None now: the owner has decided. If the line is ever revisited, these are the questions:
 
-1. Would metadata alone (A: dates, GPS, place names, no pixels read) be acceptable, given that her examples 4 and 6 cannot be answered by name?
+1. Would metadata alone (A: dates, GPS, place names, no pixels read) be acceptable, given that their examples 4 and 6 cannot be answered by name?
 2. Is the Mac + NAS route (C) acceptable to run, and to re-run after a model change?
-3. Would she accept any photos leaving the PC (D), and if so, only a filtered subset after a preview?
+3. Would the user accept any photos leaving the PC (D), and if so, only a filtered subset after a preview?
 4. Roughly how many photos are there, and what share is phone photos versus scans? (Step 7 will measure it.)
 
 ### 10. Sources
@@ -555,53 +555,53 @@ None now: the owner has decided. If the line is ever revisited, these are the qu
 
 <a id="line-3"></a>
 
-## Line 3. Her private YouTube playlists
+## Line 3. The user's private YouTube playlists
 
 Issue: [#79](https://github.com/AndresHG/VFS/issues/79).
 
-### 1. What she wants
+### 1. What the user wants
 
-She wants one search over several sources, including "sus listas de reproducción privadas de YouTube". The search should separate what she already has from what she does not, and sort by publication date, collection date and source. With her example "Necesito estudiar todo lo que tengo sobre hígado graso", a video saved months ago in a private playlist such as "Salud" should appear next to her PDFs and bookmarks. It should show its title, channel, publication date and the date she added it, plus a link that opens it.
+The user wants one search over several sources, including "sus listas de reproducción privadas de YouTube". The search should separate what the user already has from what the user does not, and sort by publication date, collection date and source. With their example "Necesito estudiar todo lo que tengo sobre hígado graso", a video saved months ago in a private playlist such as "Salud" should appear next to their PDFs and bookmarks. It should show its title, channel, publication date and the date the user added it, plus a link that opens it.
 
 ### 2. How it could work
 
 **Option A: Google Takeout import, no API and no Google Cloud project.**
-- She requests "YouTube y YouTube Music → listas de reproducción" (optionally history and subscriptions) at takeout.google.com, downloads the zip, and points VFS at it (or at a folder VFS already indexes).
-- Format **[published]**, Google Data Portability schema (the same data as Takeout, https://developers.google.com/data-portability/schema-reference/youtube): playlists are CSV. Per-playlist video rows carry only `Video ID` and `Playlist Video Creation Timestamp`, the date she added it. A separate playlists CSV carries Playlist ID, title, description, visibility and create/update timestamps. A community report says Takeout produces n+1 files for n playlists, and that the header language follows the Takeout UI language (https://github.com/iv-org/invidious/issues/4069, FreeTube issue #5057). **The playlist rows have no video titles** as far as the schema shows. Google's schema page mislabels some sections, so this needs confirming on a real export.
+- The user requests "YouTube y YouTube Music → listas de reproducción" (optionally history and subscriptions) at takeout.google.com, downloads the zip, and points VFS at it (or at a folder VFS already indexes).
+- Format **[published]**, Google Data Portability schema (the same data as Takeout, https://developers.google.com/data-portability/schema-reference/youtube): playlists are CSV. Per-playlist video rows carry only `Video ID` and `Playlist Video Creation Timestamp`, the date the user added it. A separate playlists CSV carries Playlist ID, title, description, visibility and create/update timestamps. A community report says Takeout produces n+1 files for n playlists, and that the header language follows the Takeout UI language (https://github.com/iv-org/invidious/issues/4069, FreeTube issue #5057). **The playlist rows have no video titles** as far as the schema shows. Google's schema page mislabels some sections, so this needs confirming on a real export.
 - Watch history is exported as JSON or HTML (`watch-history.json` with `title`, `titleUrl`, `time`, `subtitles[]` = channel) **[published]** per the My Activity schema (https://developers.google.com/data-portability/schema-reference/my_activity). Unlike playlists, history *does* carry titles.
 - Titles and thumbnails for playlist rows would come from YouTube's oEmbed endpoint (`https://www.youtube.com/oembed?url=…&format=json`, no key). One test call **[measured, 2026-11-20, one public video]** returned `title`, `author_name`, `author_url`, `thumbnail_url`. It does **not** return the publication date, and it only works for public or unlisted videos.
 - An alternative is `videos.list` with a plain API key (1 unit per 50 IDs **[published]**), which returns `snippet.title`, `snippet.publishedAt` and thumbnails. That needs a Cloud project and an API key, and it brings in the 30-day storage rule (section 4).
-- Trade-off: it is a one-off snapshot, and she must repeat Takeout to refresh. It needs no Google consent screen and no tokens, and it is the only route that also gives **watch history**.
+- Trade-off: it is a one-off snapshot, and the user must repeat Takeout to refresh. It needs no Google consent screen and no tokens, and it is the only route that also gives **watch history**.
 
 **Option B: YouTube Data API v3 with OAuth (live sync).**
 - `playlists.list?mine=true&part=snippet,contentDetails` and then `playlistItems.list?playlistId=…&part=snippet,contentDetails` (maxResults 50, 1 unit per call) **[published]** (https://developers.google.com/youtube/v3/docs/playlists/list, https://developers.google.com/youtube/v3/determine_quota_cost).
-- `playlistItems` gives title, description, the video owner's channel, thumbnails, `snippet.publishedAt` (added-to-playlist date) and `contentDetails.videoPublishedAt`. That covers both of her sort dates.
+- `playlistItems` gives title, description, the video owner's channel, thumbnails, `snippet.publishedAt` (added-to-playlist date) and `contentDetails.videoPublishedAt`. That covers both of their sort dates.
 - `mine` requires an authorized request, and private playlists cannot be read with an API key.
-- **Watch Later and History are not available.** Since 2016-09-12 the API returns the placeholder IDs `HL`/`WL`, and list calls on them return empty lists (https://developers.google.com/youtube/v3/revision_history, entry of 2016-09-15). `playlists.list` also documents `playlistOperationUnsupported` with "you can't list your watch later playlist". If she keeps things in "Ver más tarde", only Takeout can see them (Takeout's coverage of Watch Later is also unverified).
-- Transcripts: the Data API offers no transcripts for other people's videos. `captions.download` works only for captions the caller can edit, which in practice means her own uploads. Out of scope.
+- **Watch Later and History are not available.** Since 2016-09-12 the API returns the placeholder IDs `HL`/`WL`, and list calls on them return empty lists (https://developers.google.com/youtube/v3/revision_history, entry of 2016-09-15). `playlists.list` also documents `playlistOperationUnsupported` with "you can't list your watch later playlist". If the user keeps things in "Ver más tarde", only Takeout can see them (Takeout's coverage of Watch Later is also unverified).
+- Transcripts: the Data API offers no transcripts for other people's videos. `captions.download` works only for captions the caller can edit, which in practice means their own uploads. Out of scope.
 - OAuth for a desktop app **[published]** (https://developers.google.com/identity/protocols/oauth2/native-app): loopback redirect `http://127.0.0.1:<random port>`, PKCE with S256 ("Always use PKCE"). Desktop apps "are public clients and cannot keep secrets confidential", so the bundled client secret is not a secret. Store the refresh token in Windows Credential Manager / macOS Keychain via the `keyring` crate, as in Phase 5.
 - Trade-off: it gives live refresh and full metadata, but it adds a Google Cloud project, a consent screen, verification questions and the 30-day storage rule.
 
-**Option C: Google Data Portability API.** It covers the same content as Takeout but programmatically. It requires app verification, annual re-verification, a security assessment for restricted scopes and billing enabled **[published]** (https://developers.google.com/data-portability/user-guide/overview). That is far too heavy for one user. **Do not do.**
+**Option C: Google Data Portability API.** It covers the same content as Takeout but programmatically. It requires app verification, annual re-verification, a security assessment for restricted scopes and billing enabled **[published]** (https://developers.google.com/data-portability/user-guide/overview). That is far too heavy for a small desktop app. **Do not do.**
 
 ### 3. What it needs from the user
 
-- Option A: a Google login in her browser, the Takeout request form (a few clicks), waiting for the email, downloading the zip and choosing it in VFS. This is a one-time, guided flow that someone could do for her.
-- Option B: someone (the owner) creates a Google Cloud project. Ideally it is created **while signed in to her own Google account** with user type **Personal** (see section 4), the YouTube Data API is enabled, and a Desktop OAuth client is created. She then clicks "Conectar YouTube" once and approves `youtube.readonly` in her browser.
+- Option A: a Google login in their browser, the Takeout request form (a few clicks), waiting for the email, downloading the zip and choosing it in VFS. This is a one-time, guided flow that someone could do for them.
+- Option B: someone (the owner) creates a Google Cloud project. Ideally it is created **while signed in to their own Google account** with user type **Personal** (see section 4), the YouTube Data API is enabled, and a Desktop OAuth client is created. The user then clicks "Conectar YouTube" once and approves `youtube.readonly` in their browser.
 
 ### 4. Privacy and terms-of-service constraints
 
 - **Scope class:** `youtube.readonly` ("View your YouTube account"). We could not find Google's own table saying whether it is "sensitive" or "restricted". Google's docs list YouTube scopes as needing review, and secondary sources call all YouTube scopes sensitive (https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification). **Unverified; treat it as sensitive.** Check the Cloud Console Data Access page.
-- **Testing status** **[published]** (https://support.google.com/cloud/answer/15549945): up to 100 test users, and authorizations *and refresh tokens expire 7 days after consent* unless only name/email/profile scopes are requested. She would have to reconnect every week, which is unacceptable for her.
-- **Production but unverified:** she sees an "unverified app" warning screen. There is a lifetime cap of 100 new users for apps showing that screen (same page). It is workable but scary for a non-technical user.
-- **Personal user type** (same page, current text): it limits authorization "exclusively to the single Google Account that created the application". It needs no verification, has no user cap and has **no 7-day expiry**. It is a one-time choice that cannot be changed later. This fits VFS exactly if the project is created from her account. **Unverified:** whether Personal mode is offered to consumer @gmail.com accounts (the page only discusses Workspace caveats), and whether it removes the unverified-app screen. Test it before committing.
+- **Testing status** **[published]** (https://support.google.com/cloud/answer/15549945): up to 100 test users, and authorizations *and refresh tokens expire 7 days after consent* unless only name/email/profile scopes are requested. The user would have to reconnect every week, which is unacceptable for them.
+- **Production but unverified:** the user sees an "unverified app" warning screen. There is a lifetime cap of 100 new users for apps showing that screen (same page). It is workable but scary for a non-technical user.
+- **Personal user type** (same page, current text): it limits authorization "exclusively to the single Google Account that created the application". It needs no verification, has no user cap and has **no 7-day expiry**. It is a one-time choice that cannot be changed later. This fits VFS exactly if the project is created from their account. **Unverified:** whether Personal mode is offered to consumer @gmail.com accounts (the page only discusses Workspace caveats), and whether it removes the unverified-app screen. Test it before committing.
 - **YouTube API Services Developer Policies** (https://developers.google.com/youtube/terms/developer-policies), §III.E.4:
-  - Authorized Data (her playlists) may be stored **no more than 30 calendar days, then deleted or refreshed**. Tokens may be kept as long as needed.
+  - Authorized Data (their playlists) may be stored **no more than 30 calendar days, then deleted or refreshed**. Tokens may be kept as long as needed.
   - Non-authorized data (for example titles from an API-key `videos.list`) falls under the same 30-day limit.
-  - Delete stored data within 7 days of an in-app disconnect, and within 30 days if she revokes access from Google's security settings. VFS should check token validity periodically.
+  - Delete stored data within 7 days of an in-app disconnect, and within 30 days if the user revokes access from Google's security settings. VFS should check token validity periodically.
   - §III.H allows YouTube to audit. Quota increases need a compliance audit, but none is needed here.
   - The API client must also have a privacy policy and accept the terms. A short static page suffices.
-- Takeout data is her own export, not "API Data", so the 30-day rule does not apply to the CSVs themselves. oEmbed is a public embed endpoint that is not described in the API Services docs. Its terms status is unclear; use it sparingly (one call per new video ID, rate-limited) and cache.
+- Takeout data is their own export, not "API Data", so the 30-day rule does not apply to the CSVs themselves. oEmbed is a public embed endpoint that is not described in the API Services docs. Its terms status is unclear; use it sparingly (one call per new video ID, rate-limited) and cache.
 - Everything stays local. No VFS server ever sees tokens or data.
 
 ### 5. Cost
@@ -614,7 +614,7 @@ She wants one search over several sources, including "sus listas de reproducció
   - Daily or weekly sync is free. API fees: €0.
 - Takeout + oEmbed **[estimate]**: 10,000 oEmbed GETs at 1 request/s ≈ 2.8 h once, done in the background, then only new IDs.
 - Storage **[estimate]**: about 1 KB per item, so ~10 MB with thumbnails as URLs. Caching thumbnails (~15 KB hqdefault) would add ~150 MB. Store URLs and fetch thumbnails only for visible results, or cache the small `mqdefault`.
-- CPU/disk impact on her HDD is negligible.
+- CPU/disk impact on their HDD is negligible.
 
 ### 6. Dependencies in VFS
 
@@ -631,17 +631,17 @@ A **Takeout playlist importer**:
 - Show "Vídeo de YouTube · lista «Salud» · añadido 12/03/2024" with a link `https://www.youtube.com/watch?v=<id>`.
 - Fetch titles by oEmbed as a second, optional pass.
 
-Before writing the spec, get one real Takeout export from her account to pin the CSV format.
+Before writing the spec, get one real Takeout export from their account to pin the CSV format.
 
 ### 8. Recommendation
 
-**Do next (Takeout importer), do later (OAuth live sync).** Takeout needs no Google project, no consent screen, no 7-day token trap and no 30-day deletion duty, and it is the only path to her watch history. Add OAuth sync with a **Personal**-type project only after confirming Personal mode works on her consumer account and that she actually adds to playlists often enough to need live refresh.
+**Do next (Takeout importer), do later (OAuth live sync).** Takeout needs no Google project, no consent screen, no 7-day token trap and no 30-day deletion duty, and it is the only path to their watch history. Add OAuth sync with a **Personal**-type project only after confirming Personal mode works on their consumer account and that the user actually adds to playlists often enough to need live refresh.
 
 ### 9. Open product questions for the owner
 
-1. **Does she save videos into named playlists, or mostly into "Ver más tarde" or just watch them?** The API cannot read Watch Later or History, and that decides between Takeout and the API.
+1. **Does the user save videos into named playlists, or mostly into "Ver más tarde" or just watch them?** The API cannot read Watch Later or History, and that decides between Takeout and the API.
 2. Is a manual re-import every few months acceptable, or must new playlist items appear automatically?
-3. Should watch history (everything she watched, not saved) be searchable, or only what she deliberately saved?
+3. Should watch history (everything the user watched, not saved) be searchable, or only what the user deliberately saved?
 4. Is it acceptable that VFS contacts youtube.com (oEmbed) to fetch titles, given the "fully offline" promise? It could be a one-off, visible step.
 
 ### 10. Sources
@@ -666,9 +666,9 @@ Before writing the spec, get one real Takeout export from her account to pin the
 
 Issue: [#80](https://github.com/AndresHG/VFS/issues/80).
 
-### 1. What she wants
+### 1. What the user wants
 
-She wants the same single search to include "fotos, enlaces de vídeo y contactos" exchanged over Telegram and WhatsApp. Examples:
+The user wants the same single search to include "fotos, enlaces de vídeo y contactos" exchanged over Telegram and WhatsApp. Examples:
 - For "Todas las fotografías de localizar y quitar la fosa séptica antigua e instalar la nueva, por orden cronológico", the photos the plumber sent over WhatsApp, in date order, with who sent them and in which chat.
 - For "hígado graso", a YouTube link a friend shared on Telegram, with its title.
 - The phone number of a contact someone shared in a chat ("el contacto del fontanero que me pasó Pilar").
@@ -687,7 +687,7 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
   - Limits **[published, third-party only]**: about 10,000 latest messages with media, 40,000 without. Older media lines become "<Media omitted>", truncated silently (https://dev.to/chattopdf/whatsapp-chat-export-complete-guide-iphone-android-zip-pdf-2026-10lo, several vendor guides). We could not load WhatsApp's own FAQ page (https://faq.whatsapp.com/1180414079177245) to confirm.
   - There is no "export all chats" button; it is one chat at a time.
   - "Solicitar info. de mi cuenta" excludes messages, per WhatsApp's own form page (https://www.whatsapp.com/contact/forms/719247716111973).
-  - `_chat.txt` is plain text whose layout depends on platform and phone locale. **Illustrative examples, to be confirmed against real exports from her phone:**
+  - `_chat.txt` is plain text whose layout depends on platform and phone locale. **Illustrative examples, to be confirmed against real exports from their phone:**
     - Android, es-ES: `14/03/24, 18:05 - Pilar: IMG-20240314-WA0007.jpg (archivo adjunto)`
     - Android, en-US: `3/14/24, 6:05 PM - Pilar: IMG-20240314-WA0007.jpg (file attached)`
     - iOS, es-ES: `[14/3/24, 18:05:31] Pilar: ‎<adjunto: 00000123-PHOTO-2024-03-14-18-05-31.jpg>` (iOS inserts invisible U+200E marks)
@@ -703,27 +703,27 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 - Telegram via TDLib/MTProto needs an `api_id` from my.telegram.org and phone-code login **[published]** (https://core.telegram.org/api/obtaining_api_id):
   - Accounts logging in through unofficial clients are "under observation", and flooding gets permanent bans.
   - The API terms require privacy care and ban using Telegram data to train AI models (§1.5) (https://core.telegram.org/api/terms).
-  - Technically feasible, but heavy (TDLib build for Windows and macOS, session secrets) and an account-risk for her.
-- WhatsApp has no consumer API. The Business Platform does not apply to her personal account. **Not possible.**
+  - Technically feasible, but heavy (TDLib build for Windows and macOS, session secrets) and an account-risk for them.
+- WhatsApp has no consumer API. The Business Platform does not apply to their personal account. **Not possible.**
 
 **Option C: read local databases.**
 - Android `msgstore.db.crypt14/15` needs the key file (root) or the 64-digit E2E backup key. An iOS backup holds `ChatStorage.sqlite` (unencrypted only if the WhatsApp E2E backup is off). WhatsApp Desktop's local store is encrypted (internals not verified).
 - Tools exist (https://github.com/KnugiHK/Whatsapp-Chat-Exporter, which states it is not affiliated with WhatsApp).
 - WhatsApp's EEA Terms forbid reverse engineering, decompiling or extracting code, and collecting user information "in any impermissible or unauthorized manner" (https://www.whatsapp.com/legal/terms-of-service-eea, Acceptable Use).
-- Fragile across app versions, requires keys she cannot find, and conflicts with the terms. **Do not do.**
+- Fragile across app versions, requires keys the user cannot find, and conflicts with the terms. **Do not do.**
 
 ### 3. What it needs from the user
 
-- Telegram: install Telegram Desktop, log in by QR from her phone, export (JSON, with photos, videos and files) into the agreed folder. Repeat occasionally; an export is a snapshot.
-- WhatsApp: on the phone, export each important chat "Incluir archivos" and save or share the zip to the PC (or to a Synology-synced folder). This is tedious and per chat, and big chats hit the 10,000-message media cap. A helper should do the first round with her.
-- The rest of her phone media is already covered: if her camera roll or the `WhatsApp/Media/WhatsApp Images` folder syncs to the PC (Synology Photos / Drive), Phase 1 file search already finds those files by name and date. They lack sender and chat context, and WhatsApp names like `IMG-20240314-WA0007.jpg` carry the date.
+- Telegram: install Telegram Desktop, log in by QR from their phone, export (JSON, with photos, videos and files) into the agreed folder. Repeat occasionally; an export is a snapshot.
+- WhatsApp: on the phone, export each important chat "Incluir archivos" and save or share the zip to the PC (or to a Synology-synced folder). This is tedious and per chat, and big chats hit the 10,000-message media cap. A helper should do the first round with them.
+- The rest of their phone media is already covered: if their camera roll or the `WhatsApp/Media/WhatsApp Images` folder syncs to the PC (Synology Photos / Drive), Phase 1 file search already finds those files by name and date. They lack sender and chat context, and WhatsApp names like `IMG-20240314-WA0007.jpg` carry the date.
 
 ### 4. Privacy and terms-of-service constraints
 
-- GDPR Art. 2(2)(c): the Regulation does not apply to processing "by a natural person in the course of a purely personal or household activity" (https://gdpr-info.eu/art-2-gdpr/, Recital 18). Indexing other people's messages, photos and phone numbers on her own PC for her own use falls under this. It stays that way only if the data never leaves the PC. Phase 5 AI features must exclude chat content by default, or show it explicitly before sending.
+- GDPR Art. 2(2)(c): the Regulation does not apply to processing "by a natural person in the course of a purely personal or household activity" (https://gdpr-info.eu/art-2-gdpr/, Recital 18). Indexing other people's messages, photos and phone numbers on their own PC for their own use falls under this. It stays that way only if the data never leaves the PC. Phase 5 AI features must exclude chat content by default, or show it explicitly before sending.
 - Official exports are a sanctioned feature on both platforms. Parsing their output touches no service, so it raises no ToS issue.
 - The Telegram API (Option B) carries account-ban risk and terms obligations. WhatsApp database reading (Option C) conflicts with the WhatsApp Terms.
-- Chat exports are sensitive. VFS must not copy them elsewhere, should show them only for the "Chats" source when selected, and should let her delete one import cleanly.
+- Chat exports are sensitive. VFS must not copy them elsewhere, should show them only for the "Chats" source when selected, and should let them delete one import cleanly.
 
 ### 5. Cost
 
@@ -745,16 +745,16 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 
 ### 7. Smallest useful first step
 
-**A Telegram `result.json` importer.** The schema is documented and stable, dates are ISO 8601, and entities are typed, so it is the lowest-risk parser. It produces attachment, link and contact items from a folder she has exported, with sender, chat and date, sortable chronologically. Then the WhatsApp `_chat.txt` parser, written against 4 real sample exports (Android/iOS × es/en) collected first as test fixtures.
+**A Telegram `result.json` importer.** The schema is documented and stable, dates are ISO 8601, and entities are typed, so it is the lowest-risk parser. It produces attachment, link and contact items from a folder the user has exported, with sender, chat and date, sortable chronologically. Then the WhatsApp `_chat.txt` parser, written against 4 real sample exports (Android/iOS × es/en) collected first as test fixtures.
 
 ### 8. Recommendation
 
-**Do later** (after VFS-6 lands and Phase 3 is stable), **exports only**. Do not build the Telegram API, and never build WhatsApp database decryption. The value is real: chronological photos with sender context match her fosa séptica example. But the per-chat manual export, especially WhatsApp's chat-by-chat flow with its reported 10,000-message media cap (third-party sources only, see section 2), limits coverage. If her WhatsApp Images folder is synced to the PC, it already gives a cheaper partial answer through plain file search. Start with Telegram only if she actually uses Telegram Desktop or is willing to.
+**Do later** (after VFS-6 lands and Phase 3 is stable), **exports only**. Do not build the Telegram API, and never build WhatsApp database decryption. The value is real: chronological photos with sender context match their fosa séptica example. But the per-chat manual export, especially WhatsApp's chat-by-chat flow with its reported 10,000-message media cap (third-party sources only, see section 2), limits coverage. If their WhatsApp Images folder is synced to the PC, it already gives a cheaper partial answer through plain file search. Start with Telegram only if the user actually uses Telegram Desktop or is willing to.
 
 ### 9. Open product questions for the owner
 
-1. **Which app holds most of what she wants (the fosa séptica photos, the shared contacts), WhatsApp or Telegram, and on Android or iPhone?** That decides which parser comes first and which date format matters.
-2. Is her phone's WhatsApp media folder already synced to the PC by Synology? If so, is file search plus date enough, without sender and chat?
+1. **Which app holds most of what the user wants (the fosa séptica photos, the shared contacts), WhatsApp or Telegram, and on Android or iPhone?** That decides which parser comes first and which date format matters.
+2. Is their phone's WhatsApp media folder already synced to the PC by Synology? If so, is file search plus date enough, without sender and chat?
 3. Who will do the per-chat exports, and how often (one-off archive vs every few months)?
 4. Should message text itself be searchable, or only attachments, links and contacts? Indexing text is more intimate and larger.
 
@@ -775,32 +775,32 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 
 <a id="line-5"></a>
 
-## Line 5. Open-internet search alongside her own material, marking what she already has
+## Line 5. Open-internet search alongside their own material, marking what the user already has
 
 Issue: [#81](https://github.com/AndresHG/VFS/issues/81) (closed, not planned).
 
-> **Decided (owner, 2026-11-20): will not do.** Any LLM or agent already searches the open internet better than VFS could; VFS stays on her own material. The research below is kept for reference only and needs no further work. Its URL normalisation is still useful to deduplicate bookmarks and saved links.
+> **Decided (owner, 2026-11-20): will not do.** Any LLM or agent already searches the open internet better than VFS could; VFS stays on their own material. The research below is kept for reference only and needs no further work. Its URL normalisation is still useful to deduplicate bookmarks and saved links.
 
-### 1. What she wants
+### 1. What the user wants
 
 One command that searches "sus archivos, marcadores… y también internet", with results that
-separate what she already has from what she does not. Example: "Necesito estudiar todo lo que
-tengo sobre hígado graso" — she wants her own PDFs, notes and bookmarks first, then web
-results, with web results she already bookmarked or downloaded marked as such ("ya lo tienes").
+separate what the user already has from what the user does not. Example: "Necesito estudiar todo lo que
+tengo sobre hígado graso" — the user wants their own PDFs, notes and bookmarks first, then web
+results, with web results the user already bookmarked or downloaded marked as such ("ya lo tienes").
 
 ### 2. How it could work
 
 > Reference only: line 5 is decided, will not do.
 
 **Option A: a "Buscar también en internet" button (no API).** VFS opens
-`https://<her default engine>/search?q=<query>` in her default browser (Tauri `opener` plugin).
-Cost 0, integration about 20 lines **[estimate]**, no key, no new terms. She already uses her browser, so the
+`https://<their default engine>/search?q=<query>` in their default browser (Tauri `opener` plugin).
+Cost 0, integration about 20 lines **[estimate]**, no key, no new terms. The user already uses their browser, so the
 search engine sees nothing new. Limitation: VFS cannot see the web results, so it **cannot mark
-what she already has**. That half of the request is lost.
+what the user already has**. That half of the request is lost.
 
 **Option B: a search API via a key (VFS calls it directly).** VFS sends the query, gets back
-JSON (URL, title, snippet, sometimes date) and shows a "En internet" block under her local
-results. Each web result is matched against her bookmarks and indexed files (see "matching"
+JSON (URL, title, snippet, sometimes date) and shows a "En internet" block under their local
+results. Each web result is matched against their bookmarks and indexed files (see "matching"
 below) and tagged "Ya está en tus marcadores" / "Ya lo tienes descargado". Current providers:
 
 | Provider | Price | Free tier | Notes |
@@ -821,11 +821,11 @@ platform.claude.com web-search-tool]**. Results include `url`, `title`, `page_ag
 works. ZDR-eligible (excluding dynamic filtering). Citations must be shown when outputs are
 displayed. OpenAI web search tool: **$10 / 1,000 calls**, search content tokens billed at model
 rate **[published, developers.openai.com/api/docs/pricing]**. Advantage: same key and consent
-screen as phase 5; the model can also rewrite her thematic query ("hígado graso" → "esteatosis
+screen as phase 5; the model can also rewrite their thematic query ("hígado graso" → "esteatosis
 hepática no alcohólica dieta") and summarise. Drawback: needs the phase-5 module, costs tokens,
 and the provider (and its upstream search vendor) sees the query.
 
-**Matching web results against her material** (needed for B and C):
+**Matching web results against their material** (needed for B and C):
 - *URL normalisation* (pure Rust, `url` crate): lowercase scheme and host; drop `www.` and
   `m.`/`mobile.` host prefixes; drop default ports, fragment and trailing slash; drop tracking
   params (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `igshid`, `si`); sort remaining params; treat
@@ -837,9 +837,9 @@ and the provider (and its upstream search vendor) sees the query.
 - *Title fuzzy match* against local file names: downloaded PDFs are often named after the
   article title. Accent-fold and lowercase both, drop stopwords, compare with the trigram
   similarity that phase 1 already uses; flag "posiblemente ya lo tienes" above a threshold
-  (tune on her data), never "ya lo tienes".
+  (tune on their data), never "ya lo tienes".
 - *DOI match*: when a web result URL or snippet contains a DOI (Crossref regex, line 8), compare
-  with DOIs extracted from her PDFs (phase 3 / line 8).
+  with DOIs extracted from their PDFs (phase 3 / line 8).
 
 ### 3. What it needs from the user
 
@@ -855,7 +855,7 @@ and the provider (and its upstream search vendor) sees the query.
 
 > Reference only: line 5 is decided, will not do.
 
-- Her queries are health-revealing ("hígado graso", "colágeno"). With B/C they leave the PC
+- The user's queries are health-revealing ("hígado graso", "colágeno"). With B/C they leave the PC
   tied to an API key that identifies the owner's account.
 - Retention: Brave API query logs ≤ 90 days **[published]**; Mojeek 90 days default
   **[published]**; Anthropic API inputs/outputs deleted within 30 days by default **[published,
@@ -864,8 +864,8 @@ and the provider (and its upstream search vendor) sees the query.
   retention statement found.
 - UI rule (matches phase-5 design): off by default; one-time consent explaining which company
   receives the query; before each web search show the exact text being sent ("Se enviará a
-  Brave: «hígado graso»"); never send file names, paths or snippets of her documents as part of
-  a query unless she types them.
+  Brave: «hígado graso»"); never send file names, paths or snippets of their documents as part of
+  a query unless the user types them.
 - ToS: Brave standard plans forbid storing results without a custom plan, so VFS must not
   persist web results in its index (show only, re-query on demand). Anthropic requires showing
   citations. Avoid SerpAPI (scraping, litigation).
@@ -882,7 +882,7 @@ Assume 10–30 web searches/day ≈ 300–900/month **[estimate]**.
 - Anthropic web search: $3–9/month for searches, plus tokens. With Haiku 5.5 ($0.10/MTok input
   **[published]**) and ~10k tokens of results per search: ~$0.001/search → ~$1/month at 900
   searches **[estimate]**; larger models cost proportionally more.
-- Target PC: negligible (one HTTPS call, JSON parse, a few hundred indexed lookups).
+- Reference machine: negligible (one HTTPS call, JSON parse, a few hundred indexed lookups).
 
 ### 6. Dependencies in VFS
 
@@ -895,7 +895,7 @@ needs #38/#40). The unified "one command, several sources" result list is shared
 ### 7. Smallest useful first step
 
 None: decided, will not do. The research found that the cheapest form would have been a
-«Buscar también en internet» button opening her browser; the owner judged that any LLM or
+«Buscar también en internet» button opening their browser; the owner judged that any LLM or
 agent already covers this better. The URL normalisation in section 2 is still useful to
 deduplicate bookmarks and saved links within VFS.
 
@@ -903,7 +903,7 @@ deduplicate bookmarks and saved links within VFS.
 
 **Decided (owner, 2026-11-20): will not do.** Any LLM or agent already searches the web better
 than VFS could. Kept for reference: had it been built, Brave Search would have been the
-provider (free at her volume, documented 90-day retention), and SerpAPI, Google Custom Search
+provider (free at their volume, documented 90-day retention), and SerpAPI, Google Custom Search
 and Bing were to be avoided.
 
 ### 9. Open product questions
@@ -936,13 +936,13 @@ None now: the owner has decided.
 
 Issue: [#82](https://github.com/AndresHG/VFS/issues/82).
 
-### 1. What she wants
+### 1. What the user wants
 
 Results "sortable by publication date, collection date and source". Example 6: "Todas las
 fotografías de localizar y quitar la fosa séptica antigua e instalar la nueva, por orden
 cronológico". Two different dates matter:
 - **published_at**: when the work appeared (an article from 2014, a video uploaded in 2019).
-- **collected_at**: when *she* got it (downloaded, bookmarked, added to a playlist, received on
+- **collected_at**: when *the user* got it (downloaded, bookmarked, added to a playlist, received on
   WhatsApp, photo taken).
 
 For photos the two collapse into "when it was taken", which is what example 6 needs.
@@ -967,7 +967,7 @@ For photos the two collapse into "when it was taken", which is what example 6 ne
 Sources in §10. Synology Drive: **we could not find official documentation** on whether Drive
 Client preserves mtime or creation time. Community reports say sync tools on Windows commonly
 reset "Date created" on downloaded files while mtime usually survives, and one user reports
-Drive rewriting timestamps. **Treat creation time on her disk as untrustworthy** and verify
+Drive rewriting timestamps. **Treat creation time on their disk as untrustworthy** and verify
 during the target-PC measurement plan ([target-PC measurement plan](target-pc-measurement-plan.md)): stat a known file before and after a Drive
 round-trip.
 
@@ -991,7 +991,7 @@ Each source fills the fields it knows. A per-source precedence list picks the be
 always last and counted ("37 sin fecha").
 
 **Option C: also infer dates from content** (a year in the file name or folder like
-`2019/fosa/`, a date in the PDF's first page). It is useful for her year folders but heuristic.
+`2019/fosa/`, a date in the PDF's first page). It is useful for their year folders but heuristic.
 Use it as a low-confidence fallback only.
 
 **UI.** A sort control: "Más reciente / Más antiguo", then "por fecha de publicación / por
@@ -1005,9 +1005,9 @@ them.
 ### 3. What it needs from the user
 
 Nothing for files and bookmarks. For YouTube: a Takeout export, the first step of
-[line 3](#line-3); Takeout gives only the date she added each video, so a publication date
+[line 3](#line-3); Takeout gives only the date the user added each video, so a publication date
 needs the API (OAuth, the later step of line 3). For Telegram: a Desktop JSON export. For WhatsApp: per-chat
-exports from the phone. Optionally she confirms whether WhatsApp dates are day/month.
+exports from the phone. Optionally the user confirms whether WhatsApp dates are day/month.
 
 ### 4. Privacy and terms-of-service constraints
 
@@ -1016,7 +1016,7 @@ phase 3 isolated worker for untrusted files. Publication dates that need fetchin
 are not planned: open-internet search (line 5) was dropped, and VFS stays offline by default. The YouTube Data API
 returns both dates under the normal API terms.
 
-### 5. Cost on the target PC and/or API fees
+### 5. Cost on the reference machine and/or API fees
 
 - Two date pairs plus src/conf: ~20–30 bytes/row, so ~150 MB for 5 M rows **[estimate]**. A
   second-level index per sortable date adds ~100 MB **[estimate]**. Acceptable, but measure
@@ -1107,7 +1107,7 @@ authoring or export dates.
 
 ### 9. Open product questions for the owner
 
-1. **For her, does "fecha" by default mean when the thing was published or when she saved it?**
+1. **For the user, does "fecha" by default mean when the thing was published or when they saved it?**
    That decides the default sort and the label.
 2. Should items with only a low-confidence date (≈) sort among dated items or with the unknowns?
 3. For photos without EXIF, is a year folder (`2019/`) good enough as the date?
@@ -1136,16 +1136,16 @@ authoring or export dates.
 
 <a id="line-7"></a>
 
-## Line 7. Reorganising about 3,000 Firefox bookmarks by a criterion she states
+## Line 7. Reorganising about 3,000 Firefox bookmarks by a criterion the user states
 
 Issue: [#83](https://github.com/AndresHG/VFS/issues/83) (closed, not planned).
 
 > **Decided (owner, 2026-11-20): will not do for now.** Product invariant: VFS is purely consultative and never operates on, modifies or writes to any source, Firefox included. Every way found below to apply a new structure (HTML import, JSON restore, a WebExtension calling `bookmarks.move`) writes to Firefox and is excluded by that invariant. The research is kept for reference. Read-only parts (duplicates by normalised URL, counts per domain, dead-link reporting) could return as search features over VFS-6 bookmarks without touching Firefox.
 
-### 1. What she wants
+### 1. What the user wants
 
 "Reorganizar los marcadores según el criterio que yo diga", e.g. "por temas: salud, cocina,
-música, la casa…". She has ~3,000 bookmarks, presumably in a few large or messy folders. She
+música, la casa…". The user has ~3,000 bookmarks, presumably in a few large or messy folders. The user
 wants Firefox itself to end up organised, not just a view inside VFS.
 
 ### 2. How it could work
@@ -1158,22 +1158,22 @@ The approaches split into two parts: **deciding** the new folder for each bookma
 **Deciding — three options**
 
 - **D1. No model (deterministic).** Group by domain (youtube.com, a recipe site), by existing
-  folder, by keyword rules she can edit ("receta|horno|harina" → Cocina), plus TF-IDF clustering
+  folder, by keyword rules the user can edit ("receta|horno|harina" → Cocina), plus TF-IDF clustering
   of titles (optionally enriched with fetched `<title>`/`og:description`). Also flag duplicates
   by normalised URL (same normaliser as line 5) and dead links (below). Cheap, offline,
-  explainable. But keyword rules do not "understand" a criterion stated in her own words, and
+  explainable. But keyword rules do not "understand" a criterion stated in their own words, and
   TF-IDF clusters on 5–10-word Spanish titles are noisy.
 - **D2. Local multilingual embedding model + clustering.** E.g. a small multilingual sentence
   model (~100–500 MB) embeds title + URL path + description; cluster with HDBSCAN or k-means
-  (k = number of folders she names), or assign each bookmark to the nearest folder-name
+  (k = number of folders the user names), or assign each bookmark to the nearest folder-name
   embedding (zero-shot). Offline, no fees. Costs: model download and RAM on an 8 GB PC, and
   folder labels still need a human. It overlaps with #41 (embeddings: evaluate) and #28 and
   should reuse whatever that evaluation picks.
 - **D3. LLM via the owner's key (phase 5).** Send title + normalised URL (+ description if
-  fetched) in batches of ~50, along with the folder scheme she dictates ("por temas de salud,
+  fetched) in batches of ~50, along with the folder scheme the user dictates ("por temas de salud,
   cocina, música…"). The model returns `{id → folder}` plus "No sé" for unclear items. A
   first optional pass sends all titles (~60k tokens) and asks the model to *propose* a scheme
-  from her criterion, which she then edits. This handles her phrasing best. It sends bookmark
+  from their criterion, which the user then edits. This handles their phrasing best. It sends bookmark
   titles and URLs (which reveal health interests) to the provider.
 
 **Applying (all excluded by the consultative invariant; kept as research)**
@@ -1185,7 +1185,7 @@ The approaches split into two parts: **deciding** the new folder for each bookma
 - **Excluded by the invariant (writes to Firefox).** **HTML import (Library → Import and Backup → Import Bookmarks from HTML)** **adds**; it never
   replaces or de-duplicates. Imported items go under the Bookmarks Menu (often an "Imported"
   folder) **[published, Mozilla support; Bugzilla 1353217: import "creates new bookmarks
-  blindly… never de-dupes"]**. For a reorganisation this means the old copies remain, she
+  blindly… never de-dupes"]**. For a reorganisation this means the old copies remain, the user
   would have to delete them by hand, and Sync spreads the duplicates to other devices. HTML
   import is good for **adding** a new "Marcadores reorganizados" tree alongside the old one,
   not for moving.
@@ -1200,7 +1200,7 @@ The approaches split into two parts: **deciding** the new folder for each bookma
   Moves are real, incremental, Sync-aware and keep GUIDs, tags and keywords. VFS writes a move
   plan file and the extension applies it. Cost: release Firefox requires Mozilla signing; an
   **unlisted (self-distributed)** add-on gets automated validation (up to 24 h) and may be
-  manually reviewed later **[published, extensionworkshop.com]**. She would install it once
+  manually reviewed later **[published, extensionworkshop.com]**. The user would install it once
   from a file, and the owner maintains it on AMO. More moving parts; the safest of the write paths, all of which are excluded.
 
 **Undo (relevant only to the excluded write paths)**: Firefox keeps automatic backups in `<profile>/bookmarkbackups/bookmarks-YYYY-MM-DD_
@@ -1223,7 +1223,7 @@ private videos instead of loading pages.
 
 > Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
 
-- Her criterion in words, for an organised *view* inside VFS. Applying it to Firefox (closing
+- The user's criterion in words, for an organised *view* inside VFS. Applying it to Firefox (closing
   Firefox for a JSON restore, installing an extension, an HTML import) is excluded by the
   consultative invariant, and would in any case be steps a non-technical user can get wrong.
 - For D3: the phase-5 key and consent showing a sample of what is sent.
@@ -1236,11 +1236,11 @@ private videos instead of loading pages.
 - D1/D2 are local. D3 sends ~3,000 titles + URLs to Anthropic/OpenAI (30-day default retention,
   line 5 sources). Strip query strings and fragments before sending (they can contain tokens or
   session ids); send host + path + title only.
-- Dead-link checks and description fetching reveal each bookmarked URL to its site and her IP to
+- Dead-link checks and description fetching reveal each bookmarked URL to its site and their IP to
   ~1,000 hosts. Opt-in only, with a plain warning, a polite User-Agent with no personal data, and
   no cookies.
 - Firefox Sync: one more reason the write paths are excluded; any change applied to Firefox would
-  propagate to her other devices.
+  propagate to their other devices.
 - Wayback API: free public service; keep requests low (only for confirmed-dead links).
 
 ### 5. Cost
@@ -1254,7 +1254,7 @@ private videos instead of loading pages.
   - gpt-5.4-mini ($0.75 / $4.50 **[published]**): ≈ $0.41; gpt-5-nano ($0.05 / $0.40 **[published]**): ≈ $0.03.
   - With fetched descriptions (~+100 tokens each) input roughly doubles: still under $1.
   - Optional scheme-proposal pass (60k tokens in, 2k out): < $0.01 on Haiku 5.5.
-- D2 on the target PC **[estimate]**: a ~120 M-parameter multilingual encoder on an older 4-core
+- D2 on the reference machine **[estimate]**: a ~120 M-parameter multilingual encoder on an older 4-core
   CPU, ~20–50 short texts/s → 1–3 min for 3,000 titles, plus ~0.5–1 GB RAM while running.
   Unmeasured; depends on #41.
 - Dead-link check **[estimate]**: 90 % of URLs answer in ~1.5 s, 10 % hit the 10 s timeout →
@@ -1310,12 +1310,12 @@ send bookmark titles and URLs to an AI provider for classification?
 
 Issue: [#84](https://github.com/AndresHG/VFS/issues/84).
 
-### 1. What she wants
+### 1. What the user wants
 
 "Una lista bibliográfica (con imágenes de las portadas) sin tener que teclearlo en Excel." For
-example, all the books and papers she has on "solmisación" or "hígado graso", with title,
+example, all the books and papers the user has on "solmisación" or "hígado graso", with title,
 author, year, publisher and cover, ready to print or keep. The phrase "sin teclearlo en Excel"
-suggests she currently builds such lists by hand in Excel, so **an XLSX with one row per work and
+suggests the user currently builds such lists by hand in Excel, so **an XLSX with one row per work and
 a cover in a cell may be the real deliverable**, plus a printable version.
 
 ### 2. How it could work
@@ -1367,7 +1367,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
   **[published, bne.es linked-data page]**; ISBN querying not documented (needs a test). Good
   for older Spanish books; no covers.
 - **ISBNdb**: paid (secondary sources: plans ~$15–300/month **[published, secondary]**; official page returned 403).
-  Not needed at her scale.
+  Not needed at their scale.
 
 **Step 3 — output (three options, not exclusive):**
 - **O1. XLSX with covers** via `rust_xlsxwriter` (0.103.0): `Worksheet::embed_image()` places
@@ -1376,7 +1376,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
   works in all Excel versions **[published, docs.rs rust_xlsxwriter]**. PNG/JPG/GIF/BMP only (no
   WebP), so convert covers to JPEG at ~150 px height. Columns: Portada, Título, Autor, Año,
   Editorial, ISBN/DOI, Tipo, Dónde está (path with hyperlink), Fuente de datos. Default to
-  `insert_image_fit_to_cell` unless we know she has Excel 365; test in LibreOffice too.
+  `insert_image_fit_to_cell` unless we know the user has Excel 365; test in LibreOffice too.
 - **O2. Printable HTML → PDF** with thumbnails and a citation line per item, generated locally
   and opened in the browser for "Imprimir / Guardar como PDF". No new dependencies.
 - **O3. Citation formats**: CSV, BibTeX, RIS, CSL-JSON (simple serialisers). For formatted
@@ -1400,10 +1400,10 @@ a cover in a cell may be the real deliverable**, plus a printable version.
 - Lookups send only ISBNs/DOIs plus the PC's IP: low sensitivity, though a list of ISBNs on
   liver disease still reveals an interest. Never send file names or paths.
 - Open Library and Crossref ask for a contact in the User-Agent / `mailto`. Use a **project**
-  contact address chosen by the owner, never her personal email.
+  contact address chosen by the owner, never their personal email.
 - Open Library covers: display only, courtesy link, no bulk crawling. Rate-limit to < 100
   ISBN-keyed covers per 5 min, or resolve the cover ID through the Books API first (cover-ID
-  URLs are not rate-limited **[published]**). Cache covers locally (her own private list).
+  URLs are not rate-limited **[published]**). Cache covers locally (their own private list).
 - Google Books: no fee to users; keep cached data minimal and per its API terms (we could not
   load the full Google APIs ToS caching clause; check before shipping).
 - Copyright: covers and page-1 renders in a private personal list are low-risk; the feature must
@@ -1415,7 +1415,7 @@ a cover in a cell may be the real deliverable**, plus a printable version.
 - Time **[estimate]**: 300 books at Open Library's 1 req/s ≈ 5 min metadata; covers capped at
   100/5 min → 15 min for 300 by ISBN, or ~5 min via cover IDs. Run in the background with
   progress; the list is usable before covers arrive.
-- Target PC **[estimate]**: ISBN/DOI scan reuses phase-3 text (no extra disk pass if done at
+- Reference machine **[estimate]**: ISBN/DOI scan reuses phase-3 text (no extra disk pass if done at
   extraction time; otherwise first 5 pages per PDF ≈ 0.1–0.5 s each on a busy HDD, so 300 PDFs ≈
   1–3 min). EPUB OPF parsing takes milliseconds. Page-1 rendering ≈ 0.2–1 s per PDF in the
   worker. XLSX with 300 JPEG thumbnails of ~15 KB ≈ 5 MB.
@@ -1436,17 +1436,17 @@ Library + Crossref enrichment behind one consent switch.
 ### 8. Recommendation
 
 **Do later, right after phase 3 lands.** The local part is cheap once #23 exists, needs no AI and
-no accounts, and maps directly onto her request "sin teclearlo en Excel". Ship XLSX + printable
+no accounts, and maps directly onto their request "sin teclearlo en Excel". Ship XLSX + printable
 HTML first; add online enrichment (Open Library → Google Books fallback for Spanish titles →
-Crossref for DOIs) second; formatted CSL styles (hayagriva) only if she asks for a specific style.
+Crossref for DOIs) second; formatted CSL styles (hayagriva) only if the user asks for a specific style.
 
 ### 9. Open product questions
 
-1. **Is the deliverable an Excel sheet she keeps editing, a printed/PDF list, or both, and which
-   Excel version does she have (365 or older)?** This decides in-cell vs floating covers.
-2. Should a "work" also include bookmarked books she does *not* own (from Amazon/Casa del Libro
+1. **Is the deliverable an Excel sheet the user keeps editing, a printed/PDF list, or both, and which
+   Excel version does the user have (365 or older)?** This decides in-cell vs floating covers.
+2. Should a "work" also include bookmarked books the user does *not* own (from Amazon/Casa del Libro
    links)? That would mark "lo tengo" vs "solo marcador".
-3. Does she need a formal citation style (APA, Chicago), or just title/author/year/publisher?
+3. Does the user need a formal citation style (APA, Chicago), or just title/author/year/publisher?
 4. Which contact email may be sent to Open Library/Crossref (project address)?
 
 ### 10. Sources

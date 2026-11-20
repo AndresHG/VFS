@@ -13,7 +13,7 @@ Ranking changes can silently move the right file off the first screen: the unit 
 `rank.rs` and `tests/search.rs` check single rules on tiny archives, not what a real query
 on a real-looking archive returns first. Kensaku guards its ranking with a fixed set of
 queries over a fixture tree, asserted in CI. VFS needs the same, in Spanish and shaped like
-the end user's archive: accents, `ñ`, one-letter typos, the start of a word, words split
+the target user's archive: accents, `ñ`, one-letter typos, the start of a word, words split
 between folder and name, years and short words.
 
 ## Acceptance scenarios

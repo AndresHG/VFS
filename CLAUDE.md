@@ -4,8 +4,9 @@
 
 A desktop app for Windows and macOS that finds any file in a multi-TB personal archive (designed
 for 5 M files) by file name and folder path, with filters, typo and accent tolerance, and a
-"mostrar en carpeta" link that reveals the file in Explorer/Finder. Fully offline. The user is
-non-technical; the UI is Spanish. Product spec: `specs/vfs-1-core-search/spec.md`.
+"mostrar en carpeta" link that reveals the file in Explorer/Finder. Fully offline. Meant for
+anyone, including non-technical users, and tuned to run well even on a slow PC with a spinning
+disk and a busy sync client; the UI is Spanish. Product spec: `specs/vfs-1-core-search/spec.md`.
 
 ## Tech stack
 

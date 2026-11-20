@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """VFS-8: a background workload that keeps a tree busy the way a sync client and an antivirus
-do on the target PC, at a configurable rate, until it is killed or --seconds pass.
+do on the reference machine, at a configurable rate, until it is killed or --seconds pass.
 
 Per second, on average:
   --scan-rate  files opened, stat-ed and read (up to 64 KiB), as an on-access scanner does;

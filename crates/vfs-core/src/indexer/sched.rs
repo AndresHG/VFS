@@ -1,6 +1,6 @@
 //! Indexer scheduling policy (VFS-5): which priority a pass runs at, when a walk backs off
 //! because the disk is busy, how long the start-up catch-up waits after boot, and the
-//! diagnostic records that make all of it visible on the target PC.
+//! diagnostic records that make all of it visible on the reference machine.
 //!
 //! Everything here is plain logic over a clock value, load samples and a priority backend,
 //! so it is tested without Windows; the real probes live in `platform`.

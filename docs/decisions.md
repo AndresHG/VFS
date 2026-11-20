@@ -99,12 +99,12 @@ better-ranked match was read.
 in order in one transaction; version 2 fills the path index from the rows already in the
 index. A user with a version-1 index keeps searching after an update without rescanning a
 multi-TB archive from an HDD. Rejected: discarding an older index and scanning again, which
-is simple but costs hours on the target PC. An index from a newer build is refused, never
+is simple but costs hours on the reference machine. An index from a newer build is refused, never
 overwritten.
 
 ## A smaller index that reads fewer pages, same results (VFS-4)
 
-On the target PC a cold query pays about one disk seek per page read, and 83% of those pages
+On the reference machine a cold query pays about one disk seek per page read, and 83% of those pages
 were `files` and `dirs` rows, not FTS. Schema version 3 and its search code cut the 2 M-file
 index from 889 to 722 MiB and the pages a query reads by 55% at the median and 75% at p95,
 with every page of the AC-9 query set identical (`docs/research/index-footprint.md`): 16 KB
@@ -189,7 +189,7 @@ only on a GitHub Windows runner (VFS-8), where a rename was followed in about 2 
 
 The app keeps the index in the local app data folder (`%LOCALAPPDATA%` on Windows, Tauri
 `app_local_data_dir`), not the roaming one, and moves an index an earlier build left in the
-roaming folder once at start (spec C6). The target PC syncs folders to a NAS; a roaming
+roaming folder once at start (spec C6). The reference machine syncs folders to a NAS; a roaming
 profile folder can be synced or backed up, and a multi-GB file that changes constantly must
 not travel with it. On macOS both folders are the same. Rejected: the roaming folder, the
 first build's choice.
@@ -222,8 +222,8 @@ power cut in place.
 ## Unsigned installer with the WebView2 bootstrapper
 
 The Windows build is an unsigned NSIS installer, per user, in Spanish, with the WebView2
-bootstrapper embedded and run silently (spec decisions 8 and 14, `tauri.conf.json`). There
-is one known user, so the SmartScreen warning on first run is accepted; the target PC has
+bootstrapper embedded and run silently (spec decisions 8 and 14, `tauri.conf.json`). For a
+small, known audience the SmartScreen warning on first run is accepted; the reference machine has
 internet at install time, so the small bootstrapper can fetch WebView2 if it is missing.
 Rejected: a code-signing certificate (published prices of about $219–400 a year for an
 organisation-validated certificate, and Microsoft's cheaper signing service is not open to

@@ -553,7 +553,7 @@ The `cfg(windows)` code has run only on GitHub's Windows Server 2025 runners (CI
 VFS-8 end-to-end journey on an SSD; `docs/research/windows-e2e-results.md`): the installer,
 the watcher, the catch-up at start, the Explorer reveal (selection checked by
 `tests/windows_shell.rs`) and the splash window ran there; never on Windows 10/11, on an
-HDD, or on the target PC. Window fitting has not run on a screen smaller than the window.
+HDD, or on the reference machine. Window fitting has not run on a screen smaller than the window.
 Never run on Windows at all: for VFS-6, the copy of a `places.sqlite` that Firefox holds
 open, the Microsoft Store profile path and `ShellExecuteW` for "Abrir en Firefox". The move
 of an index out of the roaming folder has run only in unit tests, where both folders are

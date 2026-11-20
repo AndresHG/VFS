@@ -6,7 +6,7 @@
 
 ## Problem
 
-The end user switches the PC off with programs open, has one busy HDD with a sync client
+The target user switches the PC off with programs open, has one busy HDD with a sync client
 touching files, and an archive full of odd names. Phase 1 has unit and integration tests,
 but nothing had killed the real indexer mid-write, fed it a hostile tree, fuzzed the query
 path, raced two processes on one index or churned a tree for half an hour. This spec adds

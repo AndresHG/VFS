@@ -10,7 +10,8 @@ A non-technical user keeps a 4–5 TB personal archive on fixed internal HDDs (d
 million files) on a slow Windows PC, and cannot find files in it. VFS is an owned, extensible
 desktop app for Windows and macOS that finds any file instantly by file name and folder path,
 with filters, typo and accent tolerance, and a link that opens Explorer/Finder at the result.
-Searching inside text documents is a later optional extension. Target for today: the app
+It is meant for anyone: tuned to run well even on that slow PC, and just as well on ordinary
+or fast machines. Searching inside text documents is a later optional extension. Target for today: the app
 working on the owner's Mac plus a Windows installer built by CI.
 
 ## Constraints
@@ -19,13 +20,13 @@ working on the owner's Mac plus a Windows installer built by CI.
   later; no administrator rights.
 - Data: fixed internal HDDs (maybe SSD later). Only the folder(s) the user selects on a local
   disk are indexed. The backup NAS is not indexed.
-- The target PC is slow: indexing runs in the background, at low priority, resumable; metadata
+- The reference machine is slow: indexing runs in the background, at low priority, resumable; metadata
   comes from directory enumeration without opening files.
 - Fully offline. No LLM in v1.
 - Simple UI with options, in Spanish.
 - Reuse existing work where possible (Everything, Kensaku (MIT), etc.), respecting licences.
 - Private GitHub repository `VFS`; GitHub Actions with a Windows + macOS matrix; unsigned
-  installer (a single known user; the SmartScreen warning is accepted).
+  installer (a small, known audience; the SmartScreen warning is accepted).
 - Engineering system inherited from Calligence and adapted: spec-first, tests cite `AC-n`,
   fresh-context review (pr-critic + rubric), git guard hooks, CLAUDE.md budget.
 
@@ -133,7 +134,7 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
 | 11 | Branch model? | Protected `main` + `feat/<title>` branches, squash merge (default) | owner | 2026-11-20 |
 | 12 | Hook runtime? | Python 3 and bash, on the macOS dev machine only (default) | owner | 2026-11-20 |
 | 13 | Are folders results? | Yes. A folder whose name matches is its own result row (empty folders included), marked as a folder (`isDir` on the hit), with "mostrar en carpeta" revealing the folder; the type filter gains "carpeta" (`folder` kind) | owner | 2026-11-20 |
-| 14 | WebView2 on Windows? | `embedBootstrapper` (small installer): the target PC has internet at install time | owner | 2026-11-20 |
+| 14 | WebView2 on Windows? | `embedBootstrapper` (small installer): the reference machine has internet at install time | owner | 2026-11-20 |
 | 15 | May the live watcher be cut for time? | No; it is the last item in any cut list | owner | 2026-11-20 |
 | 16 | UI wording? | Impersonal (usted) Spanish in plain words; user-facing text avoids "indexar", "índice", "reindexar" ("preparar la búsqueda", "revisar carpetas", "volver a revisar") | owner | 2026-11-20 |
 

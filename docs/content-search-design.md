@@ -28,9 +28,9 @@ Every number in this document carries one of these labels:
   reproduced by us. Source named.
 - **[estimate]**: our arithmetic or judgement from other figures; the assumptions are given.
 
-Nothing in this document has been measured on the target PC.
+Nothing in this document has been measured on the reference machine.
 
-## The target machine
+## The reference machine
 
 One Windows 10+ PC, slow and short of memory, with the whole archive (4–5 TB, designed for
 5 million files) on **one 8 TB spinning hard disk** that a Synology sync client also uses.
@@ -107,7 +107,7 @@ search: name/path pass as today, plus a content pass; results merged
   `pdfium-render`, `quick-xml` + `zip` for OOXML). Avoid MuPDF/PyMuPDF (AGPL) and Poppler
   (GPL). Fidelity on real, partly corrupt legacy files is unverified for all of them.
 - Antivirus: extraction opens every document, so Windows Defender's real-time scan runs on
-  each one (name indexing never opens files). Its cost on the target PC is unmeasured.
+  each one (name indexing never opens files). Its cost on the reference machine is unmeasured.
 
 ### 3. Full-text index: BM25, Spanish stemming, accent folding (the first step)
 
@@ -156,7 +156,7 @@ Only after BM25 is in use and real queries show where it misses.
   used) **[published: model cards and the Bekko paper]**.
 - Throughput: bekko-a8m 364 passages/s on a Ryzen 9 7950X and 33/s on a Raspberry Pi 5;
   e5-small 226/s and 19/s **[published: Bekko paper, ~130-token passages, OpenVINO]**. On
-  the target PC, roughly 15–20 chunks/s for bekko-a8m and 10/s for e5-small, assuming the
+  the reference machine, roughly 15–20 chunks/s for bekko-a8m and 10/s for e5-small, assuming the
   PC is 1.5–2× a Pi 5 and a 350–400-token chunk costs 3× a benchmark passage
   **[estimate]**.
 - Chunks of 350–400 tokens, at most 20–30 per document; about 0.5–0.9 million vectors for
@@ -215,7 +215,7 @@ negligible next to the full-text index **[estimate]**. The index lives in the lo
 data folder on the system drive (`%LOCALAPPDATA%\app.vfs.desktop\` on Windows), not on the
 archive disk; free space there is unknown.
 
-Time on the target PC, for 60,000 documents:
+Time on the reference machine, for 60,000 documents:
 
 | Stage | Time | Label |
 |---|---|---|
@@ -250,7 +250,7 @@ At 500,000 documents these are about 8× longer **[estimate]**.
 
 ## Explicitly unverified
 
-- Anything on the target PC: CPU generation, AVX2, free space on the system drive, HDD
+- Anything on the reference machine: CPU generation, AVX2, free space on the system drive, HDD
   throughput, antivirus behaviour.
 - Throughput and fidelity of any extraction library on real files.
 - Whether a custom Spanish FTS5 tokenizer can be registered from Rust with acceptable effort.

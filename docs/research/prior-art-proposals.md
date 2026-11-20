@@ -1,8 +1,8 @@
 # What VFS should copy from existing tools, ranked
 
 Companion to [`prior-art.md`](prior-art.md), which holds the evidence and sources for every
-reference below. Each proposal says what the reference tool does, why it would help this user on
-this machine (one older, non-technical reader; 5 M files on one busy Windows HDD shared with
+reference below. Each proposal says what the reference tool does, why it would help the target user
+on the reference machine (an older, non-technical user; 5 M files on one busy Windows HDD shared with
 Synology sync; also macOS), what it would cost, what could go wrong, and which phase it belongs to.
 
 Costs are rough engineering effort for one developer with an agent: **S** (≤ 1 day), **M** (2–5
@@ -12,7 +12,7 @@ Fase 4 (polish and distribution), Fase 5 (optional AI assistant). Proposals that
 issue point to it instead of opening a new one.
 
 The ranking weighs, in order: how much the user's daily search gets better or more trustworthy,
-how much load it removes from the target PC, then cost.
+how much load it removes from the reference machine, then cost.
 
 ## Ranked proposals
 
@@ -21,7 +21,7 @@ how much load it removes from the target PC, then cost.
 - **Reference.** Everything replays the NTFS USN journal from its last position at start; Cardinal
   stores the FSEvents id taken before its first walk and resumes the stream from it at every
   launch. Neither re-walks the tree.
-- **For this user.** VFS re-walks every root at every start (spec I4). On 5 M files on a busy HDD
+- **For the target user.** VFS re-walks every root at every start (spec I4). On 5 M files on a busy HDD
   that is hours of seeking at each launch **[est]**, competing with Synology, with "Comprobando
   cambios…" on screen most of the time. A cursor makes a launch cost seconds.
 - **How.** Windows: the unprivileged USN read with a file-reference map (R5, issue 32), and the
@@ -39,7 +39,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Every Everything-class tool sorts any result set by any column instantly
   (Everything's fast sort, FSearch's pre-sorted arrays); WizFile and Agent Ransack likewise.
-- **For this user.** "La última factura de la luz" or "el vídeo más grande" is a sort, not a word.
+- **For the target user.** "La última factura de la luz" or "el vídeo más grande" is a sort, not a word.
   Today the only order is relevance, capped at 2,000 hits; filter-only queries already list newest
   first.
 - **How.** A small "Ordenar: Más relevantes · Más recientes · Nombre · Tamaño" select. For any
@@ -54,19 +54,19 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Everything's search history and "home search"; HoudahSpot's "Recent files"
   template; browser address bars.
-- **For this user.** Older users repeat the same few searches and may not remember the exact
+- **For the target user.** Older users repeat the same few searches and may not remember the exact
   words that worked last time. A list of the last ten searches under the empty box turns a
   remembered success into one click.
 - **How.** Store the last N (query text + filters) in the index's `meta` table or a small settings
   file, shown when the box is empty and focused; a "Borrar historial" link. Nothing leaves the PC.
-- **Cost.** S. **Risk.** Privacy on a shared PC (one user here); keep it clearable. **Phase.**
+- **Cost.** S. **Risk.** Privacy on a shared PC; keep it clearable. **Phase.**
   Fase 4.
 
 ### P4. Favourite folders as one-click scopes
 
 - **Reference.** Everything's bookmarks (search + filter + sort), Agent Ransack's saved `.srf`
   searches and Favorites, Finder's sidebar.
-- **For this user.** The archive has a few big areas ("Fotos", "Papeles de casa", "Gestoría").
+- **For the target user.** The archive has a few big areas ("Fotos", "Papeles de casa", "Gestoría").
   Choosing one as a scope today means the folder filter; a row of named chips ("Solo en Fotos")
   is easier than a picker.
 - **How.** Pin a folder from a result's "mostrar en carpeta" row or from the folder filter; pins
@@ -80,7 +80,7 @@ how much load it removes from the target PC, then cost.
 - **Reference.** Kensaku adds a bounded bonus `0.08·ln(1+opens)·e^(−days/14)` **[doc]**
   (`search/mod.rs:1682-1725` at commit b8b009f); Listary ranks fuzzy
   matches "by your habits"; Windows Search and Spotlight mix usage into ranking.
-- **For this user.** People look for the same documents again (the DNI scan, the deeds). A file
+- **For the target user.** People look for the same documents again (the DNI scan, the deeds). A file
   revealed last week should come first next time, among otherwise equal hits.
 - **How.** Count `reveal` per file id (and last time) in a small table; add it as a tie-breaker
   inside a tier (never across tiers, so it cannot bury an exact match). VFS never opens files, so
@@ -92,7 +92,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Kensaku's `tests/golden_set.rs`: a fixture tree, 43 queries, Recall@5 and MRR
   asserted in CI.
-- **For this user.** Ranking changes (P2, P5, VFS-4's schema, typo tiers) can silently move the
+- **For the target user.** Ranking changes (P2, P5, VFS-4's schema, typo tiers) can silently move the
   right file off the first screen. A fixed set of Spanish queries — accents, ñ, typos, words split
   between folder and name, "2019", short words — catches that before release.
 - **How.** A synthetic tree modelled on the real archive's shapes; 40–60 queries with the expected
@@ -105,7 +105,7 @@ how much load it removes from the target PC, then cost.
 - **Reference.** Recoll's `--diagsfile` writes one line per skipped file in fixed categories, yet
   users report not finding it; Kensaku's health warnings were confusing because they were not
   actionable.
-- **For this user.** When a folder cannot be listed (permissions, a sync lock, a cloud-only
+- **For the target user.** When a folder cannot be listed (permissions, a sync lock, a cloud-only
   folder), VFS keeps retrying (I11) but the user only sees missing results. One line in the
   folders panel — "3 carpetas no se pudieron revisar · Ver" — with the paths and a plain reason
   makes a missing file explainable to the owner over the phone.
@@ -119,7 +119,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Everything (`!palabra`, quotes, `ext:`), Recoll (`-palabra`, `ext:`, `dir:`),
   Kensaku (unknown `key:` is plain text; parse errors become hints, never zero results).
-- **For this user.** The user will not type operators, but the owner (helping by phone or remotely)
+- **For the target user.** The user will not type operators, but the owner (helping by phone or remotely)
   will, and two cases do come up for anyone: excluding a word ("contrato -borrador") and asking
   for one type by extension ("pdf"). A plain query must keep working exactly as today.
 - **How.** Only three forms, all optional: `-palabra` excludes, `"dos palabras"` must appear
@@ -133,7 +133,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Recoll's clickable spelling suggestions; Kensaku's empty-state hints ("Try a
   different query or broaden your filters"); Google's "¿Quiso decir…?".
-- **For this user.** "Sin resultados" is a dead end. VFS already proves cheaply that no one-typo
+- **For the target user.** "Sin resultados" is a dead end. VFS already proves cheaply that no one-typo
   variant exists (S8); when a short word (under 6 characters, no typo tolerance) or a filter is
   the cause, the screen can say so: "Ningún resultado con el filtro *Fotos*. ¿Buscar en todo?" or
   "¿Quería decir *boda*?" for a near spelling of a short word that does exist.
@@ -159,7 +159,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Everything's `dupe:` and `sizedupe:`; Kensaku groups versions and screenshot
   bursts.
-- **For this user.** A synced archive with backups holds the same document in several folders.
+- **For the target user.** A synced archive with backups holds the same document in several folders.
   Seeing "3 copias" on one row, expandable, answers "¿cuál es la buena?" and shortens the list.
 - **How.** Group hits with the same folded name and size in the ranked list (no hashing, no file
   reads); the newest copy leads.
@@ -172,7 +172,7 @@ how much load it removes from the target PC, then cost.
   cache keyed by extractor version and validated by mtime, Kensaku's per-file timeouts,
   `catch_unwind`, bounded channel and pending/retry flags, DocFetcher's out-of-memory crashes as
   the counter-example.
-- **For this user.** Content search will read terabytes from the busy HDD; one hostile PDF must not
+- **For the target user.** Content search will read terabytes from the busy HDD; one hostile PDF must not
   crash or stall it, and an extractor update must not re-read everything.
 - **How.** Already planned in issue 23 (isolated process); add: a timeout of 10–30 s per file (not
   Recoll's 1,200 s), a text cap per file, an `extractor_version` per format in the content state
@@ -204,7 +204,7 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Windows Search backs off silently ("waiting for computer to become idle") and its
   index stays incomplete with no visible sign — its top complaint.
-- **For this user.** When the planned busy-disk back-off (R3 in `windows-recommendations.md`, issue 20)
+- **For the target user.** When the planned busy-disk back-off (R3 in `windows-recommendations.md`, issue 20)
   pauses the walk, results may be incomplete.
   The status line should say so in words ("Revisión en pausa mientras el disco está ocupado; puede
   faltar algún archivo reciente"), not just stop moving.
