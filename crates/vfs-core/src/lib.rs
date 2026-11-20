@@ -210,10 +210,15 @@ impl Vfs {
         indexer::scan_to_completion(&mut conn, cancel)
     }
 
-    /// Marks the directories containing `paths` for a shallow re-list (what the watcher does).
+    /// Marks the directories containing `paths` for a shallow re-list (what the watcher does)
+    /// and wakes the running indexer to do it now.
     pub fn mark_dirty(&self, paths: &[PathBuf]) -> Result<()> {
         let mut conn = db::open_rw(&self.inner.db_path)?;
-        indexer::mark_dirty(&mut conn, paths)
+        indexer::mark_dirty(&mut conn, paths)?;
+        if let Some(h) = lock(&self.inner.indexer).as_ref() {
+            h.wake();
+        }
+        Ok(())
     }
 }
 

@@ -472,8 +472,9 @@ fn nfc_and_nfd_names() {
     assert_eq!(fx.find_files("NOTARÍA"), expected);
 }
 
-/// VFS-1 AC-8 (edge cases): a directory that cannot be read is counted as an error and
-/// skipped; the scan completes and indexes everything else.
+/// VFS-1 AC-8 (edge cases), I11: a directory that cannot be read is counted as an error and
+/// stays pending for a retry; the scan completes, the root is ready and everything else is
+/// indexed.
 #[cfg(unix)]
 #[test]
 fn unreadable_directory_does_not_abort_scan() {
@@ -496,9 +497,122 @@ fn unreadable_directory_does_not_abort_scan() {
             vec!["Abierta/visible.txt", "Zeta/final.txt"]
         );
         assert!(fx.all_dirs().contains(&"Cerrada".to_string()));
+        assert_eq!(fx.pending_dirs(), 1, "left pending for a retry");
     }
     assert_eq!(fx.status(), RootStatus::Ready);
-    assert_eq!(fx.pending_dirs(), 0);
+}
+
+/// The only root's `last_full_scan_at`.
+fn last_full_scan(fx: &Fixture) -> Option<i64> {
+    fx.reader()
+        .query_row("SELECT last_full_scan_at FROM roots", [], |r| r.get(0))
+        .unwrap()
+}
+
+/// VFS-1 AC-6, AC-7, I4: changes made while the app was closed are found at the next start,
+/// however recent the last finished check, and the check's time is recorded.
+#[test]
+fn startup_catches_up_changes_made_while_closed() {
+    let fx = Fixture::new();
+    fx.file("A/antes.txt", 1);
+    fx.scan();
+    let checked = last_full_scan(&fx).unwrap();
+    fx.file("A/mientras cerrado.txt", 1);
+    fs::remove_file(fx.root().join("A/antes.txt")).unwrap();
+    std::thread::sleep(Duration::from_millis(1100));
+
+    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    wait_until("catch-up", || {
+        fx.all_files() == vec!["A/mientras cerrado.txt"]
+            && fx.status() == RootStatus::Ready
+            && last_full_scan(&fx).is_some_and(|t| t > checked)
+    });
+    fx.vfs.shutdown();
+}
+
+/// VFS-1 AC-5, AC-7, I12: a directory marked dirty through the facade (a missing file at
+/// "mostrar en carpeta") is re-listed at once by the running indexer, not at its next idle
+/// wake-up, and the progress then reads idle again.
+#[test]
+fn mark_dirty_wakes_the_running_indexer() {
+    let fx = Fixture::new();
+    fx.file("A/uno.txt", 1);
+    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    wait_until("first scan", || {
+        fx.status() == RootStatus::Ready && fx.vfs.progress().state == IndexerState::Idle
+    });
+    // Let late watcher events about the tree's creation run their course first.
+    std::thread::sleep(Duration::from_secs(4));
+    // A row for a file that is not on disk, with no filesystem event the watcher could see.
+    let mut conn = db::open_rw(&fx.db_path).unwrap();
+    let tx = conn.transaction().unwrap();
+    let dir_id: i64 = tx
+        .query_row("SELECT id FROM dirs WHERE rel_path = 'A'", [], |r| r.get(0))
+        .unwrap();
+    let ghost = ingest::NewFile {
+        name: "fantasma.txt",
+        size: 1,
+        mtime: 1,
+        lossy: false,
+    };
+    ingest::insert_file(&tx, dir_id, &ghost).unwrap();
+    tx.commit().unwrap();
+    drop(conn);
+    std::thread::sleep(Duration::from_millis(300));
+
+    fx.vfs
+        .mark_dirty(&[fx.root().join("A/fantasma.txt")])
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fx.all_files() != vec!["A/uno.txt"] {
+        assert!(Instant::now() < deadline, "the indexer did not wake up");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    wait_until("idle progress", || {
+        fx.vfs.progress().state == IndexerState::Idle
+    });
+    fx.vfs.shutdown();
+}
+
+/// VFS-1 AC-7, I12: a root that cannot be watched at start (its folder is missing) is
+/// watched once it comes back: after its catch-up, a new file is found without any request.
+#[test]
+fn root_is_watched_again_when_it_comes_back() {
+    let fx = Fixture::new();
+    fx.file("A/uno.txt", 1);
+    fx.scan();
+    let away = fx.root().with_extension("fuera");
+    fs::rename(fx.root(), &away).unwrap();
+    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    wait_until("unavailable", || fx.status() == RootStatus::Unavailable);
+
+    fs::rename(&away, fx.tree.path()).unwrap();
+    fx.vfs.set_paused(false); // wakes the indexer, as any command does
+    wait_until("back online", || {
+        fx.status() == RootStatus::Ready
+            && fx.pending_dirs() == 0
+            && fx.vfs.progress().state == IndexerState::Idle
+    });
+
+    // Only the watcher can report these: write probes until one is indexed.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut n = 0;
+    loop {
+        fx.file(&format!("A/nuevo {n}.txt"), 1);
+        let probe_due = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < probe_due {
+            if fx.all_files().iter().any(|f| f.starts_with("A/nuevo")) {
+                fx.vfs.shutdown();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the root was never watched again"
+        );
+        n += 1;
+    }
 }
 
 /// VFS-1 AC-5: reads through a separate read connection succeed while a scan is writing,

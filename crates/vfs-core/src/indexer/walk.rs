@@ -17,7 +17,7 @@ pub(crate) struct Entry {
     pub kind: EntryKind,
 }
 
-/// Exact names (compared ignoring ASCII case) that are never indexed.
+/// Exact names (compared ignoring ASCII case) that are never indexed, nor watched.
 const EXCLUDED: &[&str] = &[
     "$RECYCLE.BIN",
     "System Volume Information",
@@ -30,12 +30,24 @@ const EXCLUDED: &[&str] = &[
     ".DS_Store",
     "Thumbs.db",
     "desktop.ini",
+    // Synology Drive client and DSM metadata, recycle bin and snapshots.
+    ".SynologyWorkingDirectory",
+    "@eaDir",
+    "#recycle",
+    "#snapshot",
 ];
 
-/// System and junk names never indexed (`$RECYCLE.BIN`, `.DS_Store`, `._*`, `~$*`, ...).
+/// System, sync-client and temporary names never indexed, and whose watcher events are
+/// dropped (`$RECYCLE.BIN`, `.DS_Store`, `._*`, `~$*`, `.~lock.*#`, `~*.tmp`, ...). The one
+/// list both the walker and the watcher use (VFS-1 I8).
 pub(crate) fn is_excluded(name: &str) -> bool {
+    let tmp_suffix = name.len() >= 4
+        && name.is_char_boundary(name.len() - 4)
+        && name[name.len() - 4..].eq_ignore_ascii_case(".tmp");
     name.starts_with("._")
         || name.starts_with("~$")
+        || (name.starts_with('~') && tmp_suffix)
+        || (name.starts_with(".~lock.") && name.ends_with('#'))
         || EXCLUDED.iter().any(|e| e.eq_ignore_ascii_case(name))
 }
 
@@ -100,7 +112,8 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
 mod tests {
     use super::*;
 
-    /// VFS-1 AC-4: system and junk names are excluded, ordinary names are not.
+    /// VFS-1 AC-4, I8: system, sync-client and temporary names are excluded, ordinary names
+    /// are not.
     #[test]
     fn exclusions() {
         for n in [
@@ -113,10 +126,27 @@ mod tests {
             "._IMG_0001.JPG",
             "~$informe.docx",
             ".fseventsd",
+            ".SynologyWorkingDirectory",
+            "@eaDir",
+            "#recycle",
+            "#Snapshot",
+            ".~lock.informe.odt#",
+            "~WRL0001.tmp",
+            "~DF1234.TMP",
         ] {
             assert!(is_excluded(n), "{n}");
         }
-        for n in ["Notaría.pdf", ".bashrc", "Trash", "informe~$.docx", "_x"] {
+        for n in [
+            "Notaría.pdf",
+            ".bashrc",
+            "Trash",
+            "informe~$.docx",
+            "_x",
+            "recycle",
+            "copia.tmp",
+            "~notas.txt",
+            ".~lock.informe.odt",
+        ] {
             assert!(!is_excluded(n), "{n}");
         }
     }

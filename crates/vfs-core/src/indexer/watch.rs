@@ -1,11 +1,15 @@
 //! Filesystem watcher: events are hints that mark directories dirty (VFS-1 AC-7).
 //! Owned by task T3b. macOS/Linux: `notify` (FSEvents), honouring its rescan flag. Windows:
 //! own `ReadDirectoryChangesW` loop with a 64 KB buffer; 0 bytes or an error queues a re-walk
-//! of the root and re-arms the watch. Events under the app data directory are dropped.
+//! of the root and re-arms the watch. Events under the app data directory, and events for
+//! names the walker excludes (`walk::is_excluded`, any component below the root), are
+//! dropped before they reach the indexer (VFS-1 I3, I8). On Windows a rename's old and new
+//! names in one buffer are also reported as a pair (VFS-1 I9).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::walk::is_excluded;
 use crate::error::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +19,10 @@ pub(crate) enum WatchEvent {
     Dirty(PathBuf),
     /// Events were lost for this root; queue a full re-walk.
     Rescan(i64),
+    /// `from` was renamed or moved to `to` (absolute paths). Sent in addition to `Dirty` for
+    /// both paths, so ignoring it is always safe.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Renamed { from: PathBuf, to: PathBuf },
 }
 
 /// Receives watcher events on the watcher's own thread(s); must not block.
@@ -60,18 +68,79 @@ impl Filter {
     fn ignored(&self, path: &Path) -> bool {
         self.0.iter().any(|p| path.starts_with(p))
     }
+
+    /// Whether events for `path`, under the watched `root`, are dropped: under the app data
+    /// directory, or with a component below the root that the walker excludes.
+    fn dropped(&self, path: &Path, root: &Path) -> bool {
+        self.ignored(path)
+            || path.strip_prefix(root).is_ok_and(|rel| {
+                rel.components()
+                    .any(|c| is_excluded(&c.as_os_str().to_string_lossy()))
+            })
+    }
+}
+
+/// `FILE_ACTION_RENAMED_OLD_NAME` and `FILE_ACTION_RENAMED_NEW_NAME` of a
+/// `FILE_NOTIFY_INFORMATION` record.
+#[cfg(any(windows, test))]
+const ACTION_RENAMED_OLD: u32 = 4;
+#[cfg(any(windows, test))]
+const ACTION_RENAMED_NEW: u32 = 5;
+
+/// Turns one `ReadDirectoryChangesW` buffer of `root` into events: `Dirty` for every name
+/// `filter` keeps, plus `Renamed` for each old-name record directly followed by its new-name
+/// record when both are kept.
+#[cfg(any(windows, test))]
+fn notify_events(bytes: &[u8], root: &Path, filter: &Filter) -> Vec<WatchEvent> {
+    let mut out = Vec::new();
+    let mut old: Option<PathBuf> = None;
+    for_each_notify_name(bytes, |action, name| {
+        let path = name
+            .split(|&u| u == u16::from(b'\\'))
+            .fold(root.to_path_buf(), |p, part| p.join(os_from_wide(part)));
+        let keep = !filter.dropped(&path, root);
+        match action {
+            ACTION_RENAMED_OLD => old = keep.then(|| path.clone()),
+            ACTION_RENAMED_NEW => {
+                if let (Some(from), true) = (old.take(), keep) {
+                    out.push(WatchEvent::Renamed {
+                        from,
+                        to: path.clone(),
+                    });
+                }
+            }
+            _ => old = None,
+        }
+        if keep {
+            out.push(WatchEvent::Dirty(path));
+        }
+    });
+    out
+}
+
+#[cfg(windows)]
+fn os_from_wide(wide: &[u16]) -> std::ffi::OsString {
+    std::os::windows::ffi::OsStringExt::from_wide(wide)
+}
+
+/// Unit tests on other systems feed UTF-16 test names.
+#[cfg(all(test, not(windows)))]
+fn os_from_wide(wide: &[u16]) -> std::ffi::OsString {
+    String::from_utf16_lossy(wide).into()
 }
 
 /// Walks the records of a `ReadDirectoryChangesW` buffer (`FILE_NOTIFY_INFORMATION`:
-/// next-entry offset, action, name length in bytes, UTF-16 name) and calls `f` with each name.
+/// next-entry offset, action, name length in bytes, UTF-16 name) and calls `f` with each
+/// action and name.
 #[cfg(any(windows, test))]
-fn for_each_notify_name(bytes: &[u8], mut f: impl FnMut(&[u16])) {
+fn for_each_notify_name(bytes: &[u8], mut f: impl FnMut(u32, &[u16])) {
     let u32_at =
         |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
     let mut off = 0usize;
     let mut name = Vec::new();
     while off + 12 <= bytes.len() {
         let next = u32_at(off) as usize;
+        let action = u32_at(off + 4);
         let len = u32_at(off + 8) as usize;
         let Some(raw) = bytes.get(off + 12..off + 12 + len) else {
             break;
@@ -83,7 +152,7 @@ fn for_each_notify_name(bytes: &[u8], mut f: impl FnMut(&[u16])) {
                 .iter()
                 .map(|c| u16::from_le_bytes(*c)),
         );
-        f(&name);
+        f(action, &name);
         if next == 0 {
             break;
         }
@@ -166,8 +235,13 @@ mod imp {
                 if matches!(event.kind, EventKind::Access(_)) {
                     return;
                 }
+                let roots = lock(roots).clone();
                 for path in event.paths {
-                    if !filter.ignored(&path) {
+                    let dropped = match roots.iter().find(|(_, r)| path.starts_with(r)) {
+                        Some((_, root)) => filter.dropped(&path, root),
+                        None => filter.ignored(&path),
+                    };
+                    if !dropped {
                         sink(WatchEvent::Dirty(path));
                     }
                 }
@@ -201,8 +275,7 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use std::collections::HashMap;
-    use std::ffi::OsString;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::thread::JoinHandle;
 
@@ -221,7 +294,7 @@ mod imp {
     };
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
-    use super::{for_each_notify_name, Filter, WatchEvent, WatchSink};
+    use super::{notify_events, Filter, WatchEvent, WatchSink};
     use crate::error::Result;
 
     /// 64 KB: the largest buffer `ReadDirectoryChangesW` accepts on network shares.
@@ -446,12 +519,9 @@ mod imp {
                 let data = unsafe {
                     std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), bytes as usize)
                 };
-                for_each_notify_name(data, |name| {
-                    let path = self.root.join(OsString::from_wide(name));
-                    if !self.filter.ignored(&path) {
-                        (self.sink)(WatchEvent::Dirty(path));
-                    }
-                });
+                for event in notify_events(data, &self.root, &self.filter) {
+                    (self.sink)(event);
+                }
             }
         }
     }
@@ -498,14 +568,37 @@ mod tests {
             buf.extend(r);
         }
         let mut names = Vec::new();
-        for_each_notify_name(&buf, |n| names.push(String::from_utf16_lossy(n)));
-        assert_eq!(names, ["Notaría.pdf", "sub\\nuevo.txt", "borrado"]);
+        for_each_notify_name(&buf, |a, n| names.push((a, String::from_utf16_lossy(n))));
+        assert_eq!(
+            names,
+            [
+                (1, "Notaría.pdf".to_string()),
+                (5, "sub\\nuevo.txt".to_string()),
+                (2, "borrado".to_string())
+            ]
+        );
 
         names.clear();
         let mut truncated = record(1, "largo-nombre.txt");
         truncated.truncate(16);
-        for_each_notify_name(&truncated, |n| names.push(String::from_utf16_lossy(n)));
+        for_each_notify_name(&truncated, |a, n| {
+            names.push((a, String::from_utf16_lossy(n)))
+        });
         assert!(names.is_empty());
+    }
+
+    /// Chains records into one buffer, setting each next-entry offset.
+    fn buffer(records: Vec<Vec<u8>>) -> Vec<u8> {
+        let n = records.len();
+        let mut buf = Vec::new();
+        for (i, mut r) in records.into_iter().enumerate() {
+            if i + 1 < n {
+                let next = r.len() as u32;
+                r[..4].copy_from_slice(&next.to_le_bytes());
+            }
+            buf.extend(r);
+        }
+        buf
     }
 
     /// VFS-1 AC-7: events under the app data directory are dropped.
@@ -514,5 +607,53 @@ mod tests {
         let f = Filter(Arc::new(vec![PathBuf::from("/datos/app")]));
         assert!(f.ignored(Path::new("/datos/app/index.db-wal")));
         assert!(!f.ignored(Path::new("/datos/apple.txt")));
+    }
+
+    /// VFS-1 AC-7, I8: events for names the walker excludes, at any depth below the root,
+    /// are dropped before they can mark a folder dirty; an excluded name above the root is
+    /// not a reason to drop.
+    #[test]
+    fn filter_drops_excluded_names_below_root() {
+        let f = Filter(Arc::new(vec![PathBuf::from("/datos/app")]));
+        let root = Path::new("/discos/#recycle/Archivo");
+        for p in [
+            "Fotos/.SynologyWorkingDirectory/x.db",
+            "Fotos/@eaDir/IMG_1.JPG/SYNOFILE_THUMB_M.jpg",
+            "Docs/~WRL0003.tmp",
+            "Docs/.~lock.cuentas.ods#",
+            "#snapshot",
+        ] {
+            assert!(f.dropped(&root.join(p), root), "{p}");
+        }
+        assert!(!f.dropped(&root.join("Docs/cuentas.ods"), root));
+        assert!(f.dropped(Path::new("/datos/app/index.db"), Path::new("/datos")));
+    }
+
+    /// VFS-1 AC-7, I8, I9: a Windows buffer yields `Dirty` for kept names only, and a rename
+    /// pair (old name, then new name) also yields `Renamed`; a pair with an excluded side
+    /// yields no `Renamed`.
+    #[test]
+    fn notify_buffer_pairs_renames_and_drops_excluded() {
+        let f = Filter(Arc::new(Vec::new()));
+        let root = Path::new("/r");
+        let buf = buffer(vec![
+            record(ACTION_RENAMED_OLD, "Viejo"),
+            record(ACTION_RENAMED_NEW, "sub\\Nuevo"),
+            record(1, "Docs\\~WRL0001.tmp"),
+            record(ACTION_RENAMED_OLD, "Docs\\~WRL0001.tmp"),
+            record(ACTION_RENAMED_NEW, "Docs\\informe.docx"),
+        ]);
+        assert_eq!(
+            notify_events(&buf, root, &f),
+            vec![
+                WatchEvent::Dirty(PathBuf::from("/r/Viejo")),
+                WatchEvent::Renamed {
+                    from: PathBuf::from("/r/Viejo"),
+                    to: PathBuf::from("/r/sub/Nuevo"),
+                },
+                WatchEvent::Dirty(PathBuf::from("/r/sub/Nuevo")),
+                WatchEvent::Dirty(PathBuf::from("/r/Docs/informe.docx")),
+            ]
+        );
     }
 }

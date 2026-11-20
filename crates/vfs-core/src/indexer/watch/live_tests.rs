@@ -42,6 +42,7 @@ fn fixture() -> Fixture {
                 r.dirty.insert(p);
             }
             WatchEvent::Rescan(id) => r.rescans.push(id),
+            WatchEvent::Renamed { .. } => {}
         }
     });
     let mut watcher = RootWatcher::start(sink, root.join("appdata")).unwrap();

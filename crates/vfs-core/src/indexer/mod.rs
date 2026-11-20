@@ -7,12 +7,15 @@
 //! watcher hint (one directory pending shallow) all run this same loop. Transactions commit
 //! between directories every ~20,000 changed rows or 5 s, so a killed run redoes at most
 //! the uncommitted directories.
+//!
+//! Full re-walks (start-up catch-up, manual, overflow, stale) are requests kept in `owed`
+//! and started one at a time, only while no root is being walked (VFS-1 I4, I10).
 
 mod apply;
 mod walk;
 mod watch;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -25,6 +28,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use crate::db::ingest::ScanState;
 use crate::db::{self, ingest};
 use crate::error::Result;
+use crate::fold::fold_key;
 use crate::types::{IndexProgress, IndexerState, RootProgress, RootStatus, ScanSummary};
 use crate::{platform, ProgressSink};
 
@@ -36,13 +40,19 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(500);
 const CHANGED_EVERY: Duration = Duration::from_secs(2);
 /// Watcher hints are coalesced this long before their directories are marked.
 const DIRTY_COALESCE: Duration = Duration::from_secs(2);
-/// On start, a root whose last full scan is older than this is re-walked (events may have
-/// been lost while the app was closed).
-const STARTUP_REWALK_SECS: i64 = 24 * 3600;
 /// While running, roots are re-walked when their last full scan is older than this.
 const PERIODIC_REWALK_SECS: i64 = 7 * 24 * 3600;
 const PERIODIC_CHECK: Duration = Duration::from_secs(3600);
 const IDLE_WAIT: Duration = Duration::from_secs(60);
+/// A deferred re-walk (events lost, or asked for while its root was being walked) starts no
+/// sooner than this after the root's last full scan ended (VFS-1 I10).
+const OWED_COOLDOWN_SECS: i64 = 3600;
+/// A directory that fails to list is retried after this, doubling each time (VFS-1 I11)...
+const RETRY_FIRST: Duration = Duration::from_secs(60);
+/// ...and left alone until the next full walk after this many failed attempts.
+const RETRY_ATTEMPTS: u32 = 6;
+/// Roots that could not be watched are retried this often, and at once when they come back.
+const WATCH_RETRY: Duration = Duration::from_secs(60);
 
 /// SQL condition of a directory waiting to be listed. The value of `ScanState::Clean` is
 /// spelled into the SQL text, not bound, so SQLite can prove the query matches the partial
@@ -95,7 +105,18 @@ struct Pass {
     current: Option<(i64, String)>,
     /// Roots already finalized in this pass with no work since.
     finished: HashSet<i64>,
+    /// A root unavailable before became reachable again in this pass.
+    back_online: bool,
 }
+
+/// Failed listings of one directory, left pending until `next_at` (VFS-1 I11).
+struct Retry {
+    attempts: u32,
+    next_at: Instant,
+}
+
+/// Directory id -> its failed listings, kept across passes by the caller of `run`.
+type Retries = HashMap<i64, Retry>;
 
 enum Outcome {
     Done,
@@ -120,10 +141,12 @@ type Tick<'a> = &'a mut dyn FnMut(&Connection, &Pass, bool);
 
 /// Finishes roots in `removing`, then lists pending directories, root by root, depth-first,
 /// until none is left (`Done`) or `stop()` turns true between directories (`Yielded`, after
-/// committing). With `one_batch`, also yields after each commit.
+/// committing). With `one_batch`, also yields after each commit. Directories waiting in
+/// `retries` are skipped until they are due.
 fn run(
     conn: &mut Connection,
     pass: &mut Pass,
+    retries: &mut Retries,
     stop: &dyn Fn() -> bool,
     one_batch: bool,
     tick: Tick,
@@ -153,14 +176,19 @@ fn run(
             continue;
         }
         if root.status == RootStatus::Unavailable {
-            // Back online: a full re-walk catches whatever changed while it was away.
-            queue_rewalk(conn, Some(root.id))?;
+            // Back online: a full re-walk catches whatever changed while it was away, once
+            // no other root is being walked (VFS-1 I10).
+            if !queue_rewalk(conn, root.id)? {
+                continue;
+            }
             root.status = RootStatus::Scanning;
+            pass.back_online = true;
         }
         match scan_root(
             conn,
             &mut root,
             pass,
+            retries,
             stop,
             one_batch,
             skip.as_deref(),
@@ -177,10 +205,12 @@ fn run(
     Ok(Outcome::Done)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn scan_root(
     conn: &Connection,
     root: &mut ActiveRoot,
     pass: &mut Pass,
+    retries: &mut Retries,
     stop: &dyn Fn() -> bool,
     one_batch: bool,
     skip: Option<&Path>,
@@ -195,10 +225,21 @@ fn scan_root(
             pass.current = None;
             return Ok(RootOutcome::Yielded);
         }
+        let now = Instant::now();
+        let waiting: Vec<String> = retries
+            .iter()
+            .filter(|(_, r)| r.next_at > now)
+            .map(|(id, _)| id.to_string())
+            .collect();
+        let not_waiting = if waiting.is_empty() {
+            String::new()
+        } else {
+            format!(" AND id NOT IN ({})", waiting.join(","))
+        };
         let next: Option<(i64, String, i64)> = tx
             .prepare_cached(&format!(
                 "SELECT id, rel_path, scan_state FROM dirs INDEXED BY dirs_pending \
-                 WHERE root_id = ?1 AND {} ORDER BY id DESC LIMIT 1",
+                 WHERE root_id = ?1 AND {}{not_waiting} ORDER BY id DESC LIMIT 1",
                 pending_condition()
             ))?
             .query_row([root.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
@@ -217,7 +258,11 @@ fn scan_root(
         let (added, removed) = (pass.summary.files_added, pass.summary.files_removed);
         let abs = db::join_rel(&root.path, &rel_path);
         let deep = state == ingest::ScanState::PendingDeep as i64;
-        match walk::list_dir(&abs, skip) {
+        let listing = walk::list_dir(&abs, skip);
+        if !matches!(&listing, Err(e) if e.kind() != std::io::ErrorKind::NotFound) {
+            retries.remove(&dir_id);
+        }
+        match listing {
             Ok(entries) => {
                 rows += apply::apply_listing(
                     &tx,
@@ -245,10 +290,22 @@ fn scan_root(
                 rows += 1 + gone;
             }
             Err(e) => {
-                // Permission or I/O error: keep what is indexed, count it, move on.
+                // Permission or I/O error (a busy or syncing disk): keep what is indexed,
+                // count it, and leave the directory pending for a retry after a growing
+                // delay; after `RETRY_ATTEMPTS` failures it waits for the next full walk.
                 log::warn!("cannot list {}: {e}", abs.display());
                 pass.summary.errors += 1;
-                ingest::set_dir_state(&tx, dir_id, ingest::ScanState::Clean)?;
+                let retry = retries.entry(dir_id).or_insert(Retry {
+                    attempts: 0,
+                    next_at: now,
+                });
+                retry.attempts += 1;
+                if retry.attempts >= RETRY_ATTEMPTS {
+                    retries.remove(&dir_id);
+                    ingest::set_dir_state(&tx, dir_id, ingest::ScanState::Clean)?;
+                } else {
+                    retry.next_at = now + RETRY_FIRST * 2u32.pow(retry.attempts - 1);
+                }
                 rows += 1;
             }
         }
@@ -327,19 +384,110 @@ fn set_root_status(conn: &Connection, root_id: i64, status: RootStatus) -> Resul
     Ok(())
 }
 
-/// Queues a full re-walk: the root directory becomes pending deep and the root scanning.
-fn queue_rewalk(conn: &Connection, root_id: Option<i64>) -> Result<()> {
-    let removing = RootStatus::Removing.code();
-    conn.execute(
-        "UPDATE dirs SET scan_state = ?2 WHERE rel_path = '' AND root_id IN \
-         (SELECT id FROM roots WHERE status <> ?3 AND (?1 IS NULL OR id = ?1))",
-        params![root_id, ScanState::PendingDeep as i64, removing],
+/// Ids of the roots being walked in full: a first scan (`pending`) or a re-walk (`scanning`).
+fn walking(conn: &Connection) -> Result<HashSet<i64>> {
+    let mut stmt = conn.prepare_cached("SELECT id FROM roots WHERE status IN (?1, ?2)")?;
+    let rows = stmt.query_map(
+        [RootStatus::Pending.code(), RootStatus::Scanning.code()],
+        |r| r.get(0),
     )?;
-    conn.execute(
-        "UPDATE roots SET status = ?2 WHERE status <> ?3 AND (?1 IS NULL OR id = ?1)",
-        params![root_id, RootStatus::Scanning.code(), removing],
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Starts a full re-walk of `root_id` (its root directory pending deep, the root scanning)
+/// unless some root is already being walked: then nothing changes and it returns false, so
+/// a walk in progress is never restarted and only one runs at a time (VFS-1 I10). Returns
+/// true when started, or when the root is gone or being removed.
+fn queue_rewalk(conn: &Connection, root_id: i64) -> Result<bool> {
+    if !walking(conn)?.is_empty() {
+        return Ok(false);
+    }
+    let marked = conn.execute(
+        "UPDATE roots SET status = ?2 WHERE id = ?1 AND status <> ?3",
+        params![
+            root_id,
+            RootStatus::Scanning.code(),
+            RootStatus::Removing.code()
+        ],
     )?;
+    if marked > 0 {
+        conn.execute(
+            "UPDATE dirs SET scan_state = ?2 WHERE root_id = ?1 AND rel_path = ''",
+            params![root_id, ScanState::PendingDeep as i64],
+        )?;
+    }
+    Ok(true)
+}
+
+/// Re-walks owed, by root id: `true` when deferred, so it waits until the root's last full
+/// scan is `OWED_COOLDOWN_SECS` old (VFS-1 I10).
+type Owed = BTreeMap<i64, bool>;
+
+/// Records a full re-walk request for each of `ids`, started by `start_owed` as soon as no
+/// root is being walked. It is deferred when it comes from `lost_events` (an overflow, a
+/// watch that failed) or when the root is being walked now (one more pass after this one),
+/// so churn never chains full walks back to back; manual and start-up requests are not.
+/// Requests for the same root merge, the undeferred one winning.
+fn request_rewalk(
+    conn: &Connection,
+    owed: &mut Owed,
+    ids: &[i64],
+    lost_events: bool,
+) -> Result<()> {
+    let busy = walking(conn)?;
+    for &id in ids {
+        let deferred = lost_events || busy.contains(&id);
+        owed.entry(id)
+            .and_modify(|d| *d = *d && deferred)
+            .or_insert(deferred);
+    }
     Ok(())
+}
+
+/// Starts the first owed re-walk that is due, when no root is being walked. Owed roots that
+/// are gone or being removed are dropped. A deferred one is due once its root's last full
+/// scan is `OWED_COOLDOWN_SECS` old, missing, or in the future (a clock set back).
+fn start_owed(conn: &Connection, owed: &mut Owed) -> Result<()> {
+    if owed.is_empty() || !walking(conn)?.is_empty() {
+        return Ok(());
+    }
+    let now = now_secs();
+    let mut start = None;
+    let mut gone = Vec::new();
+    for (&id, &deferred) in owed.iter() {
+        let row: Option<(i64, Option<i64>)> = conn
+            .query_row(
+                "SELECT status, last_full_scan_at FROM roots WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            None => gone.push(id),
+            Some((status, _)) if status == RootStatus::Removing.code() => gone.push(id),
+            Some((_, Some(last))) if deferred && last <= now && now - last < OWED_COOLDOWN_SECS => {
+            }
+            Some(_) => {
+                start = Some(id);
+                break;
+            }
+        }
+    }
+    for id in gone {
+        owed.remove(&id);
+    }
+    if let Some(id) = start {
+        owed.remove(&id);
+        queue_rewalk(conn, id)?;
+    }
+    Ok(())
+}
+
+/// Ids of every root not being removed.
+fn live_root_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached("SELECT id FROM roots WHERE status <> ?1 ORDER BY id")?;
+    let rows = stmt.query_map([RootStatus::Removing.code()], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Deletes the rows of roots in `removing` in batches, then the root rows (VFS-1 plan
@@ -484,9 +632,13 @@ impl IndexerHandle {
             sink,
             watcher: None,
             watched: HashSet::new(),
+            watch_failed: HashSet::new(),
+            last_watch_try: Instant::now(),
             dirty: Vec::new(),
             dirty_since: None,
             pass: Pass::default(),
+            retries: Retries::new(),
+            owed: Owed::new(),
             published: None,
             last_progress: None,
             last_changed: Instant::now(),
@@ -509,6 +661,11 @@ impl IndexerHandle {
 
     pub(crate) fn roots_changed(&self) {
         self.send(Cmd::RootsChanged);
+    }
+
+    /// Makes the thread look for pending directories now (after `mark_dirty`).
+    pub(crate) fn wake(&self) {
+        self.send(Cmd::Wake);
     }
 
     pub(crate) fn rescan(&self, root_id: Option<i64>) {
@@ -555,9 +712,14 @@ struct Worker {
     sink: Arc<dyn ProgressSink>,
     watcher: Option<watch::RootWatcher>,
     watched: HashSet<i64>,
+    /// Live roots whose last watch attempt failed (VFS-1 I12).
+    watch_failed: HashSet<i64>,
+    last_watch_try: Instant,
     dirty: Vec<PathBuf>,
     dirty_since: Option<Instant>,
     pass: Pass,
+    retries: Retries,
+    owed: Owed,
     /// Last state sent to the sink outside a scan, to avoid repeating it.
     published: Option<IndexerState>,
     last_progress: Option<Instant>,
@@ -586,8 +748,12 @@ impl Worker {
             self.flush_dirty();
             if self.last_periodic.elapsed() >= PERIODIC_CHECK {
                 self.last_periodic = Instant::now();
-                self.log_err(queue_stale(&self.conn, PERIODIC_REWALK_SECS));
+                let r = stale_roots(&self.conn, PERIODIC_REWALK_SECS)
+                    .and_then(|ids| request_rewalk(&self.conn, &mut self.owed, &ids, false));
+                self.log_err(r);
             }
+            let r = start_owed(&self.conn, &mut self.owed);
+            self.log_err(r);
             if self.shared.paused.load(Ordering::SeqCst) {
                 self.publish(IndexerState::Paused);
                 self.wait(Duration::from_secs(1));
@@ -603,6 +769,7 @@ impl Worker {
             let progress = &self.shared.progress;
             let last_progress = &mut self.last_progress;
             let last_changed = &mut self.last_changed;
+            let published = &mut self.published;
             let mut tick = |conn: &Connection, pass: &Pass, committed: bool| {
                 if committed && last_changed.elapsed() >= CHANGED_EVERY {
                     sink.on_index_changed();
@@ -613,13 +780,28 @@ impl Worker {
                         Ok(p) => {
                             *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clone();
                             sink.on_progress(&p);
+                            // The next idle or paused state must be sent again.
+                            *published = None;
                         }
                         Err(e) => log::warn!("progress: {e}"),
                     }
                     *last_progress = Some(Instant::now());
                 }
             };
-            let outcome = run(&mut self.conn, &mut self.pass, &stop, true, &mut tick);
+            let outcome = run(
+                &mut self.conn,
+                &mut self.pass,
+                &mut self.retries,
+                &stop,
+                true,
+                &mut tick,
+            );
+            let back_online = std::mem::take(&mut self.pass.back_online);
+            if !self.watch_failed.is_empty()
+                && (back_online || self.last_watch_try.elapsed() >= WATCH_RETRY)
+            {
+                self.sync_watches();
+            }
             match outcome {
                 Ok(Outcome::Yielded) => self.published = None,
                 Ok(Outcome::Done) => {
@@ -629,10 +811,13 @@ impl Worker {
                     }
                     self.pass = Pass::default();
                     self.publish(IndexerState::Idle);
-                    let timeout = match self.dirty_since {
+                    let mut timeout = match self.dirty_since {
                         Some(t) => DIRTY_COALESCE.saturating_sub(t.elapsed()),
                         None => IDLE_WAIT,
                     };
+                    if let Some(due) = self.retries.values().map(|r| r.next_at).min() {
+                        timeout = timeout.min(due.saturating_duration_since(Instant::now()));
+                    }
                     self.wait(timeout.max(Duration::from_millis(10)));
                 }
                 Err(e) => {
@@ -651,13 +836,21 @@ impl Worker {
         }
     }
 
+    /// Finishes removals, then owes every root a catch-up re-walk: changes made while the
+    /// app was closed are not otherwise seen (VFS-1 I4). Then starts watching.
     fn init(&mut self) -> Result<()> {
         finish_removing(&self.conn, &|| false)?;
         refresh_counts(&self.conn, None)?;
-        queue_stale(&self.conn, STARTUP_REWALK_SECS)?;
+        let ids = live_root_ids(&self.conn)?;
+        request_rewalk(&self.conn, &mut self.owed, &ids, false)?;
         self.watcher = start_watcher(self.watch_tx.clone(), self.ignore.clone());
         self.sync_watches();
         Ok(())
+    }
+
+    fn request(&mut self, ids: &[i64], lost_events: bool) {
+        let r = request_rewalk(&self.conn, &mut self.owed, ids, lost_events);
+        self.log_err(r);
     }
 
     fn wait(&mut self, timeout: Duration) {
@@ -672,13 +865,22 @@ impl Worker {
         match cmd {
             Cmd::Wake => {}
             Cmd::RootsChanged => self.sync_watches(),
-            Cmd::Rescan(root_id) => self.log_err(queue_rewalk(&self.conn, root_id)),
+            Cmd::Rescan(Some(root_id)) => self.request(&[root_id], false),
+            Cmd::Rescan(None) => match live_root_ids(&self.conn) {
+                Ok(ids) => self.request(&ids, false),
+                Err(e) => log::warn!("indexer: {e}"),
+            },
             Cmd::Watch(watch::WatchEvent::Dirty(path)) => {
                 self.dirty.push(path);
                 self.dirty_since.get_or_insert_with(Instant::now);
             }
-            Cmd::Watch(watch::WatchEvent::Rescan(root_id)) => {
-                self.log_err(queue_rewalk(&self.conn, Some(root_id)))
+            Cmd::Watch(watch::WatchEvent::Rescan(root_id)) => self.request(&[root_id], true),
+            Cmd::Watch(watch::WatchEvent::Renamed { from, to }) => {
+                match rename_dir(&mut self.conn, &from, &to) {
+                    Ok(true) => log::debug!("{} renamed in place", from.display()),
+                    Ok(false) => {}
+                    Err(e) => log::warn!("rename {}: {e}", from.display()),
+                }
             }
         }
     }
@@ -714,8 +916,11 @@ impl Worker {
         }
     }
 
-    /// Watches every root not being removed and unwatches the others.
+    /// Watches every root not being removed and unwatches the others. A root that cannot be
+    /// watched is retried later (`watch_failed`); once watched after a failure, it owes a
+    /// re-walk for the changes nobody saw meanwhile (VFS-1 I12).
     fn sync_watches(&mut self) {
+        self.last_watch_try = Instant::now();
         let Some(watcher) = self.watcher.as_mut() else {
             return;
         };
@@ -737,15 +942,26 @@ impl Worker {
             watcher.unwatch(gone);
             self.watched.remove(&gone);
         }
+        self.watch_failed.retain(|id| live.contains(id));
+        let mut recovered = Vec::new();
         for (id, path) in roots {
             if !self.watched.contains(&id) {
                 match watcher.watch(id, Path::new(&path)) {
                     Ok(()) => {
                         self.watched.insert(id);
+                        if self.watch_failed.remove(&id) {
+                            recovered.push(id);
+                        }
                     }
-                    Err(e) => log::warn!("cannot watch {path}: {e}"),
+                    Err(e) => {
+                        log::warn!("cannot watch {path}: {e}");
+                        self.watch_failed.insert(id);
+                    }
                 }
             }
+        }
+        if !recovered.is_empty() {
+            self.request(&recovered, true);
         }
     }
 }
@@ -764,27 +980,24 @@ fn start_watcher(tx: Sender<Cmd>, ignore: PathBuf) -> Option<watch::RootWatcher>
     }
 }
 
-/// Queues a re-walk of every ready root whose last full scan is older than `age_secs`.
-fn queue_stale(conn: &Connection, age_secs: i64) -> Result<()> {
-    let ids: Vec<i64> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM roots WHERE status = ?2 \
-             AND (last_full_scan_at IS NULL OR last_full_scan_at < ?1)",
-        )?;
-        let rows = stmt.query_map(
-            params![now_secs() - age_secs, RootStatus::Ready.code()],
-            |r| r.get(0),
-        )?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    for id in ids {
-        queue_rewalk(conn, Some(id))?;
-    }
-    Ok(())
+/// Ready roots whose last full scan is older than `age_secs`, or later than now: a time in
+/// the future (the clock was set forward, then corrected) proves nothing (VFS-1 I4).
+fn stale_roots(conn: &Connection, age_secs: i64) -> Result<Vec<i64>> {
+    let now = now_secs();
+    let mut stmt = conn.prepare(
+        "SELECT id FROM roots WHERE status = ?3 AND (last_full_scan_at IS NULL \
+         OR last_full_scan_at < ?1 OR last_full_scan_at > ?2)",
+    )?;
+    let rows = stmt.query_map(
+        params![now - age_secs, now, RootStatus::Ready.code()],
+        |r| r.get(0),
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Finishes roots left in `removing`, then processes pending directories on the calling
-/// thread until none is left or `cancel` is set.
+/// thread until none is left or `cancel` is set. A directory that fails to list is tried
+/// once per call and stays pending.
 pub(crate) fn scan_to_completion(
     conn: &mut Connection,
     cancel: &AtomicBool,
@@ -794,11 +1007,102 @@ pub(crate) fn scan_to_completion(
     run(
         conn,
         &mut pass,
+        &mut Retries::new(),
         &stop,
         false,
         &mut |_: &Connection, _: &Pass, _: bool| {},
     )?;
     Ok(pass.summary)
+}
+
+/// `rel` as stored in `dirs.rel_path`: '/'-separated components.
+fn rel_string(rel: &Path) -> String {
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Applies a directory rename or move inside one root as a path update (VFS-1 I9): the
+/// `dirs` rows of the subtree get their new `rel_path` and keys and the folder FTS entries
+/// are rewritten, in one transaction; files keep their rows, since they point at directory
+/// ids. Returns false, changing nothing, unless `from` is an indexed directory now gone from
+/// disk, `to` is a real directory in the same root that is not indexed yet, and the parent
+/// of `to` is indexed; the watcher's `Dirty` events then re-list both parents as usual.
+pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Result<bool> {
+    let roots: Vec<(i64, PathBuf)> = {
+        let mut stmt = conn.prepare("SELECT id, path FROM roots WHERE status <> ?1")?;
+        let rows = stmt.query_map([RootStatus::Removing.code()], |r| {
+            Ok((r.get(0)?, PathBuf::from(r.get::<_, String>(1)?)))
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    let Some((root_id, rel_from, rel_to)) = roots.iter().find_map(|(id, root)| {
+        let from = from.strip_prefix(root).ok()?;
+        let to = to.strip_prefix(root).ok()?;
+        Some((*id, rel_string(from), rel_string(to)))
+    }) else {
+        return Ok(false);
+    };
+    let to_is_dir = std::fs::symlink_metadata(to).is_ok_and(|m| m.is_dir());
+    if rel_from.is_empty()
+        || rel_to.is_empty()
+        || !to_is_dir
+        || std::fs::symlink_metadata(from).is_ok()
+    {
+        return Ok(false);
+    }
+    let (parent_rel, name) = rel_to.rsplit_once('/').unwrap_or(("", rel_to.as_str()));
+    let tx = conn.transaction()?;
+    let find = |rel: &str| -> Result<Option<i64>> {
+        Ok(tx
+            .prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?
+            .query_row(params![root_id, rel], |r| r.get(0))
+            .optional()?)
+    };
+    let (Some(dir_id), None, Some(parent_id)) =
+        (find(&rel_from)?, find(&rel_to)?, find(parent_rel)?)
+    else {
+        return Ok(false);
+    };
+    let subtree: Vec<(i64, String, String)> = {
+        // Descendants of `p` are exactly the rel_paths in [p + '/', p + '0'): '0' follows '/'.
+        let mut stmt = tx.prepare(
+            "SELECT id, rel_path, name_key FROM dirs WHERE root_id = ?1 AND (rel_path = ?2 \
+             OR (rel_path >= ?2 || '/' AND rel_path < ?2 || '0'))",
+        )?;
+        let rows = stmt.query_map(params![root_id, rel_from], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    {
+        let mut update = tx.prepare_cached(
+            "UPDATE dirs SET rel_path = ?2, path_key = ?3, name_key = ?4 WHERE id = ?1",
+        )?;
+        let mut fts_delete = tx.prepare_cached("DELETE FROM dirs_fts WHERE rowid = ?1")?;
+        let mut fts_insert = tx.prepare_cached(
+            "INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)",
+        )?;
+        for (id, rel, name_key) in subtree {
+            let new_rel = format!("{rel_to}{}", &rel[rel_from.len()..]);
+            let path_key = fold_key(&new_rel);
+            let name_key = if id == dir_id {
+                fold_key(name)
+            } else {
+                name_key
+            };
+            update.execute(params![id, new_rel, path_key, name_key])?;
+            fts_delete.execute([id])?;
+            fts_insert.execute(params![id, path_key, name_key])?;
+        }
+    }
+    tx.execute(
+        "UPDATE dirs SET parent_id = ?2 WHERE id = ?1",
+        params![dir_id, parent_id],
+    )?;
+    tx.commit()?;
+    Ok(true)
 }
 
 /// Marks the directories containing `paths` pending shallow, never downgrading a pending
@@ -858,3 +1162,6 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
     tx.commit()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
