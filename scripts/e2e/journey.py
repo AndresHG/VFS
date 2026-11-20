@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """VFS-8 AC-2, AC-3, AC-4, AC-5: drives the real VFS window through the user's journey and
-records a screenshot of the
-window and of the whole desktop at every step, plus timings and memory, into --out.
+records a screenshot of the window and of the whole desktop at every step, plus timings and
+memory, into --out.
 
 The app is a `--features webdriver` build (on Windows, installed from its NSIS installer): this
 script launches it with TAURI_WEBDRIVER_PORT set and talks W3C WebDriver to the server embedded
