@@ -35,7 +35,8 @@ SPLASH_CLASS = "VfsSplash"
 def watch_splash(t0, out, run, timeout):
     """Polls for the splash window from launch (`t0`) until it has shown and gone, or the
     main window is visible without it, or `timeout`. Screenshots the desktop and the splash
-    the first time it is seen. Times are seconds since launch."""
+    the first time it is seen, and the splash again 1 s later (the first capture can precede
+    its first paint). Times are seconds since launch."""
     import ctypes
     from ctypes import wintypes
     from PIL import ImageGrab
@@ -48,6 +49,7 @@ def watch_splash(t0, out, run, timeout):
 
     r = {"splash_seen": False, "time_to_splash_s": None, "splash_gone_s": None,
          "time_to_main_visible_s": None}
+    box = None
     while now() - t0 < timeout:
         h = visible(SPLASH_CLASS, None)
         main = visible(None, TITLE)
@@ -66,6 +68,13 @@ def watch_splash(t0, out, run, timeout):
                     os.path.join(out, f"release-{run}-splash.png"))
             except Exception as e:
                 r["splash_screenshot_error"] = f"{type(e).__name__}: {e}"
+        if h and box and t >= r["time_to_splash_s"] + 1:
+            try:
+                ImageGrab.grab(bbox=box, all_screens=True).save(
+                    os.path.join(out, f"release-{run}-splash-1s.png"))
+            except Exception as e:
+                r["splash_screenshot_error"] = f"{type(e).__name__}: {e}"
+            box = None
         if r["splash_seen"] and not h and r["splash_gone_s"] is None:
             r["splash_gone_s"] = t
         if main and (r["splash_gone_s"] is not None or not r["splash_seen"]):
