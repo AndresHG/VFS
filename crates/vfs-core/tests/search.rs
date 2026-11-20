@@ -1,10 +1,6 @@
-//! Exact search, filters and folder hits through the `Vfs` facade (VFS-1 AC-8, AC-10,
-//! AC-11). The database is populated with `db::ingest`, so it has the production layout.
-//!
-//! Until task T2b (fuzzy + ranking) lands, `rank::rank` and the `fuzzy` helpers are stubs:
-//! tests here keep text queries to at most one hit (ranking runs only for two or more) and
-//! to terms shorter than 6 characters (the typo pass only considers longer terms). Tests
-//! that need T2b end in `_needs_t2b` and are ignored until it merges.
+//! Exact and typo-tolerant search, filters and folder hits through the `Vfs` facade (VFS-1
+//! AC-8, AC-9, AC-10, AC-11). The database is populated with `db::ingest`, so it has the
+//! production layout.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -551,8 +547,7 @@ fn ac10_empty_query_and_fresh_results() {
 /// VFS-1 AC-10: the spec's own example, "notaria" finds "Notaría" (goes through the typo
 /// pass and ranking).
 #[test]
-#[ignore = "enable after T2b (fuzzy + rank) merges"]
-fn ac10_notaria_finds_notaria_needs_t2b() {
+fn ac10_notaria_finds_notaria() {
     let a = archive();
     assert_eq!(only(&a.fx.text("notaria")).id, a.notaria);
     assert_eq!(only(&a.fx.text("NOTARIA perez")).id, a.notaria);
@@ -560,8 +555,7 @@ fn ac10_notaria_finds_notaria_needs_t2b() {
 
 /// VFS-1 AC-8, AC-10: one query finding both the NFC and the NFD name (ranking).
 #[test]
-#[ignore = "enable after T2b (fuzzy + rank) merges"]
-fn ac8_nfc_and_nfd_in_one_query_needs_t2b() {
+fn ac8_nfc_and_nfd_in_one_query() {
     let fx = fixture();
     let mut w = fx.writer();
     let (_, top) = w.root("/datos");
@@ -573,8 +567,7 @@ fn ac8_nfc_and_nfd_in_one_query_needs_t2b() {
 
 /// VFS-1 AC-9, AC-10: a broad text query is cut at 2000 hits with `truncatedBy = cap`.
 #[test]
-#[ignore = "enable after T2b (fuzzy + rank) merges"]
-fn ac9_text_truncation_by_cap_needs_t2b() {
+fn ac9_text_truncation_by_cap() {
     let fx = fixture();
     let mut w = fx.writer();
     let (_, top) = w.root("/datos");
@@ -598,8 +591,7 @@ fn ac9_text_truncation_by_cap_needs_t2b() {
 
 /// VFS-1 AC-10: one typo is tolerated ("notaira" finds "Notaría").
 #[test]
-#[ignore = "enable after T2b (fuzzy + rank) merges"]
-fn ac10_one_typo_needs_t2b() {
+fn ac10_one_typo() {
     let a = archive();
     let r = a.fx.text("notaira");
     assert_eq!(only(&r).id, a.notaria);

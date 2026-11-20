@@ -79,12 +79,7 @@ fn write_file(path: &Path) {
 
 /// VFS-1 AC-4 + AC-5 + AC-10 (addendum X1): add_root -> search -> get_progress end to end
 /// over IPC, with the real indexer thread on a temporary tree.
-///
-/// ENABLE AFTER MERGE: needs the core roots, search and indexer (T2a/T3a). On the skeleton
-/// branch those are `todo!` or `Unavailable`, so the test is ignored there. The lead removes
-/// the `#[ignore]` once they are merged; it must then pass on macOS and Windows CI.
 #[test]
-#[ignore = "enable after T2a/T3a are merged (core roots/search/indexer are stubs)"]
 fn add_root_search_progress_end_to_end() {
     let data = tempfile::tempdir().unwrap();
     let tree = tempfile::tempdir().unwrap();
