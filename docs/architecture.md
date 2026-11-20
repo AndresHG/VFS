@@ -157,7 +157,9 @@ from `lstat`. It skips:
   temporary names (`._*`, `~$*`, `.~lock.*#`, `~*.tmp`). The watcher uses the same function
   (I8);
 - the app's own data directory;
-- entries that vanish or fail while being listed.
+- entries that vanish, or fail with an error other than permission denied, while being
+  listed. An entry whose metadata is denied fails the whole listing, so the folder is
+  retried like one that cannot be listed (VFS-3, #56).
 
 A name that is not valid Unicode is stored in its lossy form with `flags` bit 0 set.
 
