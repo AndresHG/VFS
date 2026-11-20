@@ -1073,7 +1073,7 @@ a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not 
 
 **Tests.** Unit tests in `rank.rs` (or the new sort function) for AC-1 to AC-4; a core search
 test for paging (AC-3) and truncation (AC-5); UI tests in `apps/desktop/ui-dev` for AC-6
-(note that PR 64 is rewriting the search screen, so build on whichever is in `main`); a
+(on the «Papel» search screen merged in PR 64, which still has no sort control); a
 combined-view test once VFS-6 lands (AC-7). Existing `rank.rs` and `tests/search.rs` tests
 must pass unchanged.
 
