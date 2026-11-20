@@ -1,0 +1,28 @@
+# VFS
+
+> VFS is an offline desktop app for Windows 10+ and macOS that finds any file in a huge personal archive (designed for 5 million files, 4–5 TB) by its name or by the folders it sits in, as you type. It ignores case and accents, tolerates one typo, filters by type, date, size and folder, and reveals the result in Explorer or Finder. Interface in Spanish. Built with Rust, SQLite FTS5 and Tauri 2. It never opens, moves or changes a user file and needs no administrator rights.
+
+VFS reads only names, sizes and dates from the directory listing. It does not search inside documents yet (planned for phase 3), does not index network drives, NAS or removable disks, and uses no LLM, OCR or cloud service. It can optionally include Firefox bookmarks as a second source, read-only.
+
+## Docs
+
+- [README](https://github.com/AndresHG/VFS/blob/main/README.md): what VFS does and does not do, build, run, installer, status
+- [Product spec VFS-1](https://github.com/AndresHG/VFS/blob/main/specs/vfs-1-core-search/spec.md): core search requirements and acceptance criteria
+- [Architecture](https://github.com/AndresHG/VFS/blob/main/docs/architecture.md): crates, index, indexer, watcher, search
+- [Decisions](https://github.com/AndresHG/VFS/blob/main/docs/decisions.md): why Rust + SQLite FTS5 + Tauri, no administrator rights, the index stays on this computer
+- [Content search design](https://github.com/AndresHG/VFS/blob/main/docs/content-search-design.md): planned full-text search inside documents
+
+## Direction
+
+- [Vision](https://github.com/AndresHG/VFS/blob/main/docs/vision.md): toward a local personal knowledge base over files, bookmarks, chats and notes, with answers that cite the original files (RAG, through a model API the user configures) and an automatically built knowledge graph
+
+## Specs
+
+- [Firefox bookmarks VFS-6](https://github.com/AndresHG/VFS/blob/main/specs/vfs-6-bookmarks/spec.md)
+- [Windows tuning VFS-5](https://github.com/AndresHG/VFS/blob/main/specs/vfs-5-windows-tuning/spec.md)
+- [All specs](https://github.com/AndresHG/VFS/tree/main/specs)
+
+## Optional
+
+- [Prior art](https://github.com/AndresHG/VFS/blob/main/docs/research/prior-art.md): comparable tools and what VFS takes from them
+- [Future lines research](https://github.com/AndresHG/VFS/blob/main/docs/research/future-lines.md): researched lines from user feedback, with costs
