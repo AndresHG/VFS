@@ -412,6 +412,25 @@ fn directory_rename_updates_paths_in_place() {
         vec![sub]
     );
     assert!(dirs_fts(&fx.conn, "\"viejo\"").is_empty());
+    let file_paths = |query: &str| -> Vec<i64> {
+        let mut stmt = fx
+            .conn
+            .prepare("SELECT rowid FROM file_paths_fts WHERE file_paths_fts MATCH ?1")
+            .unwrap();
+        let rows = stmt.query_map([query], |r| r.get(0)).unwrap();
+        rows.collect::<rusqlite::Result<_>>().unwrap()
+    };
+    let sub_file: i64 = fx
+        .conn
+        .query_row("SELECT id FROM files WHERE dir_id = ?1", [sub], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        file_paths("\"nue\" AND \"sub\" AND \"arc\""),
+        vec![sub_file]
+    );
+    assert!(file_paths("\"vie\"").is_empty());
 
     mark_dirty(&mut fx.conn, &[from, to]).unwrap();
     let summary = fx.scan();

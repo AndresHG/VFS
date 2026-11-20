@@ -1034,8 +1034,8 @@ fn rel_string(rel: &Path) -> String {
 
 /// Applies a directory rename or move inside one root as a path update (VFS-1 I9): the
 /// `dirs` rows of the subtree get their new `rel_path` and keys and the folder FTS entries
-/// are rewritten, in one transaction; files keep their rows, since they point at directory
-/// ids. Returns false, changing nothing, unless `from` is an indexed directory now gone from
+/// and the files' `file_paths_fts` entries are rewritten, in one transaction; files keep
+/// their rows, since they point at directory ids. Returns false, changing nothing, unless `from` is an indexed directory now gone from
 /// disk, `to` is a real directory in the same root that is not indexed yet, and the parent
 /// of `to` is indexed; the watcher's `Dirty` events then re-list both parents as usual.
 pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Result<bool> {
@@ -1093,6 +1093,13 @@ pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Resul
         let mut fts_insert = tx.prepare_cached(
             "INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)",
         )?;
+        let mut file_paths_delete = tx.prepare_cached(
+            "DELETE FROM file_paths_fts WHERE rowid IN (SELECT id FROM files WHERE dir_id = ?1)",
+        )?;
+        let mut file_paths_insert = tx.prepare_cached(
+            "INSERT INTO file_paths_fts(rowid, path) \
+             SELECT id, ?2 || '/' || name_key FROM files WHERE dir_id = ?1",
+        )?;
         for (id, rel, name_key) in subtree {
             let new_rel = format!("{rel_to}{}", &rel[rel_from.len()..]);
             let path_key = fold_key(&new_rel);
@@ -1104,6 +1111,9 @@ pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Resul
             update.execute(params![id, new_rel, path_key, name_key])?;
             fts_delete.execute([id])?;
             fts_insert.execute(params![id, path_key, name_key])?;
+            // `new_rel` is never empty, so every row is "folder path_key/name_key".
+            file_paths_delete.execute([id])?;
+            file_paths_insert.execute(params![id, path_key])?;
         }
     }
     tx.execute(
