@@ -113,7 +113,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\vfs-probe.ps1 -DataRoot D:
 
 The first pass lists directories with `FindFirstFileExW` + `FindExInfoBasic` (the call
 Rust's `std::fs::read_dir` makes). Every 2,000 directories it switches the thread between
-background mode (as the VFS indexer runs today) and normal priority, so one cold walk measures
+background mode (which VFS-5 keeps only for small incremental listings) and normal priority, so one cold walk measures
 both under the same disk conditions. That is the test of the starvation risk in
 `windows-io.md` §2.2. It stops after 30 min or 400,000 directories. The three warm passes re-list the same
 directories to compare the three listing calls (N5). Cold-versus-cold comparisons are not
