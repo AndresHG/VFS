@@ -18,6 +18,9 @@ export const S = {
   fFolder: 'Carpeta',
   fFrom: 'Desde',
   fTo: 'Hasta',
+  // The type button names what is chosen: "Todos los tipos", "Fotos, Vídeos", "Fotos y 2 más".
+  typeButton: (...names) => (!names.length ? 'Todos los tipos'
+    : names.length <= 2 ? names.join(', ') : `${names[0]} y ${names.length - 1} más`),
   clearFilters: 'Quitar filtros',
   clearFiltersN: (n) => `Quitar filtros (${n})`,
   rangeInverted: 'La fecha «Desde» es posterior a «Hasta».',
@@ -54,6 +57,7 @@ export const S = {
   fuzzyNote: 'No hay coincidencias exactas; se muestran resultados parecidos.',
   loadingRow: 'Cargando…',
   revealButton: 'Mostrar en carpeta',
+  revealKey: 'Intro',
   unavailableBadge: 'No disponible',
   rowLabel: (name, kind, dir, date, size, unavailable) =>
     [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible']

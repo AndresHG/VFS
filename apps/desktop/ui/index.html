@@ -23,9 +23,10 @@
     <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 13.5h5.5m-2.25-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5 22 20.5H2Z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1.15" fill="currentColor"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.25" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.75" r="1.15" fill="currentColor"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
-  <div class="app">
+  <div class="app" id="app" data-view="start">
     <header class="top">
       <h1 class="visually-hidden">Buscador de archivos</h1>
       <div class="search">
@@ -45,24 +46,34 @@
       <span id="dev-badge" class="dev-badge" hidden data-s="devBadge"></span>
     </header>
 
+    <!-- Filters stay on screen (VFS-1 R9) as one quiet line: a type checklist in a popover and
+         three native selects. Labels are kept for screen readers; the chosen value is the text. -->
     <form class="filters" id="filters" aria-labelledby="filters-title">
       <h2 id="filters-title" class="visually-hidden" data-s="filtersTitle"></h2>
-      <fieldset class="kinds">
-        <legend data-s="fType"></legend>
-        <div class="chips" id="kind-chips"></div>
-      </fieldset>
-      <div class="field">
-        <label for="f-date" data-s="fDate"></label>
+      <button id="f-type" class="filter" type="button" popovertarget="f-type-pop" aria-describedby="f-type-label">
+        <span id="f-type-text"></span>
+        <svg aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <span id="f-type-label" class="visually-hidden" data-s="fType"></span>
+      <div id="f-type-pop" class="type-pop" popover>
+        <fieldset class="kinds">
+          <legend data-s="fType"></legend>
+          <div class="chips" id="kind-chips"></div>
+        </fieldset>
+      </div>
+      <label class="filter filter-select">
+        <span class="visually-hidden" data-s="fDate"></span>
         <select id="f-date"></select>
-      </div>
-      <div class="field">
-        <label for="f-size" data-s="fSize"></label>
+      </label>
+      <label class="filter filter-select">
+        <span class="visually-hidden" data-s="fSize"></span>
         <select id="f-size"></select>
-      </div>
-      <div class="field field-folder">
-        <label for="f-folder" data-s="fFolder"></label>
+      </label>
+      <label class="filter filter-select field-folder">
+        <span class="visually-hidden" data-s="fFolder"></span>
         <select id="f-folder"></select>
-      </div>
+      </label>
+      <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" hidden data-s="clearFilters"></button>
       <div class="range" id="date-range" hidden>
         <div class="field">
           <label for="f-from" data-s="fFrom"></label>
@@ -95,29 +106,24 @@
 
     <main class="results" id="main">
       <h2 class="visually-hidden" data-s="resultsTitle"></h2>
-      <div class="results-head">
-        <p id="summary" class="summary"></p>
-        <p id="fuzzy-note" class="fuzzy-note" hidden data-s="fuzzyNote"></p>
-        <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" hidden data-s="clearFilters"></button>
-      </div>
+      <p id="fuzzy-note" class="fuzzy-note" hidden data-s="fuzzyNote"></p>
       <div class="list-wrap">
         <div id="results" class="list" role="listbox" tabindex="-1" data-s-label="resultsTitle">
           <div class="sizer" id="sizer" role="presentation"></div>
         </div>
         <div id="empty" class="empty" hidden></div>
       </div>
+      <p class="details" id="details" aria-live="off"></p>
     </main>
 
     <footer class="bottom">
-      <p class="details" id="details" aria-live="off"></p>
-      <div class="status">
-        <div class="status-text">
-          <progress id="scan-progress" hidden></progress>
-          <p id="status-text"></p>
-        </div>
-        <button id="pause" class="btn btn-quiet" type="button" hidden></button>
-        <button id="open-folders" class="btn" type="button"></button>
+      <div class="status-text">
+        <progress id="scan-progress" hidden></progress>
+        <p><strong id="summary" class="summary"></strong><span id="status-text"></span></p>
       </div>
+      <button id="pause" class="btn btn-quiet" type="button" hidden></button>
+      <button id="rescan-now" class="btn btn-quiet" type="button" hidden data-s="rescanAll"></button>
+      <button id="open-folders" class="btn btn-quiet" type="button"></button>
     </footer>
   </div>
 

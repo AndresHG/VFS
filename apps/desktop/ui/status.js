@@ -3,6 +3,7 @@
 // outside the browser (`apps/desktop/ui-dev/status.test.mjs`).
 
 import { IndexerState, RootStatus } from './contract.js';
+import { SearchState, View } from './choices.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 
@@ -48,4 +49,27 @@ export function statusText(p, roots, now = Date.now() / 1000) {
   const checks = roots.map((r) => r.lastFullScan).filter((t) => t != null);
   if (!checks.length) return S.statusFiles(files);
   return S.statusChecked(checkedAt(Math.min(...checks), now), files);
+}
+
+/**
+ * Start view (the box alone in the middle) until a search has been made, also when there is
+ * nothing to search yet (no folders, no backend); list view for results, no hits and errors.
+ */
+export function viewFor({ backendMissing, rootsLoaded, rootCount, searchState }) {
+  if (backendMissing) return View.START;
+  if (searchState === SearchState.ERROR) return View.LIST;
+  if (rootsLoaded && rootCount === 0) return View.START;
+  return searchState === SearchState.IDLE ? View.START : View.LIST;
+}
+
+/**
+ * Status-line buttons for progress `p`: "Pausar"/"Continuar" while folders are being checked,
+ * "Buscar cambios ahora" only when nothing is being checked (VFS-1 U6).
+ */
+export function footerActions(p) {
+  return {
+    pause: p?.state === IndexerState.SCANNING || p?.state === IndexerState.PAUSED,
+    paused: p?.state === IndexerState.PAUSED,
+    rescan: p?.state === IndexerState.IDLE,
+  };
 }

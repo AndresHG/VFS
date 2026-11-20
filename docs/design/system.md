@@ -103,6 +103,18 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
   The ellipsis means "asks something more" (a picker or a confirm).
 - No exclamation marks, no "¡Ups!", no blame ("ha introducido mal…").
 
+## Room for sources (planned, not built)
+
+Search will cover more than one source (files, and optionally Firefox bookmarks). The layout
+keeps room for it without changing shape:
+- **Where to search** is one more pill, first in the filter line ("Archivos", "Marcadores",
+  "Archivos y marcadores"), shown only when a second source is set up. It uses the same
+  checklist popover pattern as the type filter.
+- **Bookmark rows** reuse the result row: an icon slot, the title as the name, and the bookmark
+  folder path in the path line with the same middle truncation, because the folder path matters
+  as much as for files. Date and size slots carry what a bookmark has (date added) or stay empty.
+- The row action and its wording for a bookmark are a product decision still to make.
+
 ## Directions for the main screen
 
 Three static mockups use the same tokens and sample data. Open them by serving

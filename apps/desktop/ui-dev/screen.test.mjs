@@ -50,3 +50,19 @@ test('one Spanish screen with one search box', () => {
   assert.match(html, /<input id="q" type="search"[^>]*maxlength="\d+"/s);
   for (const id of ['kind-chips', 'f-date', 'f-size', 'f-folder']) assert.match(html, new RegExp(`id="${id}"`));
 });
+
+/** VFS-1 AC-11: the type filter names what it narrows to, so a chosen filter is visible
+ *  without opening it. */
+test('type button names the chosen types', () => {
+  assert.equal(S.typeButton(), 'Todos los tipos');
+  assert.equal(S.typeButton('Fotos'), 'Fotos');
+  assert.equal(S.typeButton('Fotos', 'Vídeos'), 'Fotos, Vídeos');
+  assert.equal(S.typeButton('Documentos', 'Fotos', 'Vídeos'), 'Documentos y 2 más');
+});
+
+/** VFS-1 AC-11, AC-12: the type checklist is a popover opened by its own button (keyboard and
+ *  light dismiss come from the platform), and the chips live inside it. */
+test('type checklist is a popover owned by the type button', () => {
+  assert.match(html, /<button id="f-type"[^>]*popovertarget="f-type-pop"/);
+  assert.match(html, /<div id="f-type-pop"[^>]*popover>\s*<fieldset[^>]*>[\s\S]*?id="kind-chips"[\s\S]*?<\/fieldset>\s*<\/div>/);
+});
