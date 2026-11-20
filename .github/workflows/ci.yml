@@ -46,3 +46,5 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: UI tests
+        run: node --test apps/desktop/ui-dev/status.test.mjs
