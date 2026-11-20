@@ -3,7 +3,6 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -83,11 +82,18 @@ pub fn bad_path(db_path: &Path) -> PathBuf {
     PathBuf::from(p)
 }
 
-/// `<db_path>.session/`: one `<pid>-<n>.lock` file per open session, held under an OS file
-/// lock for the session's lifetime, so a CLI and the app can share an index.
+/// Suffix of the session directory next to the index: `<db_path>.session/`.
+pub(crate) const SESSION_DIR_SUFFIX: &str = ".session";
+/// Extension of a session marker file, `<pid>-<n>.lock`.
+pub(crate) const SESSION_MARKER_EXT: &str = "lock";
+/// Extension of a marker while it is being created and locked.
+const SESSION_TMP_EXT: &str = "tmp";
+
+/// `<db_path>.session/`: one marker file per open session, held under an OS file lock for
+/// the session's lifetime, so a CLI and the app can share an index.
 pub(crate) fn session_dir(db_path: &Path) -> PathBuf {
     let mut p = db_path.as_os_str().to_owned();
-    p.push(".session");
+    p.push(SESSION_DIR_SUFFIX);
     PathBuf::from(p)
 }
 
@@ -112,15 +118,14 @@ impl Drop for Session {
 
 /// Starts a session and reports whether an earlier one ended uncleanly: a marker file that
 /// no live session holds locked (its process died) is stale; it is removed. A marker is
-/// created and locked under a temporary name, then renamed, so no other opener can mistake
-/// it for stale.
+/// created exclusively and locked under a temporary name, then renamed, so no other opener
+/// can mistake it for stale; only the holder of `<pid>-<n>.tmp` may create `<pid>-<n>.lock`.
 pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
     let dir = session_dir(db_path);
     let mut unclean = false;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for path in entries.flatten().map(|e| e.path()) {
-            if path.extension().is_none_or(|e| e != "lock") {
+            if path.extension().is_none_or(|e| e != SESSION_MARKER_EXT) {
                 continue;
             }
             let Ok(file) = File::options().read(true).write(true).open(&path) else {
@@ -134,31 +139,34 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
             }
         }
     }
-    let stem = format!(
-        "{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
-    let tmp = dir.join(format!("{stem}.tmp"));
-    let path = dir.join(format!("{stem}.lock"));
-    std::fs::create_dir_all(&dir)?;
-    // A closing session may remove the empty directory in between: retry once.
-    let file = match File::create(&tmp) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(&dir)?;
-            File::create(&tmp)?
+    let pid = std::process::id();
+    let mut n = 0u32;
+    loop {
+        let tmp = dir.join(format!("{pid}-{n}.{SESSION_TMP_EXT}"));
+        let path = dir.join(format!("{pid}-{n}.{SESSION_MARKER_EXT}"));
+        std::fs::create_dir_all(&dir)?;
+        match File::options().write(true).create_new(true).open(&tmp) {
+            Ok(file) if path.exists() => {
+                // Another session of this process owns `n`.
+                drop(file);
+                let _ = std::fs::remove_file(&tmp);
+                n += 1;
+            }
+            Ok(file) => {
+                file.lock()?;
+                std::fs::rename(&tmp, &path)?;
+                let session = Session {
+                    file: Some(file),
+                    path,
+                };
+                return Ok((session, unclean));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            // A closing session removed the empty directory in between: create it again.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
-        other => other?,
-    };
-    file.lock()?;
-    std::fs::rename(&tmp, &path)?;
-    Ok((
-        Session {
-            file: Some(file),
-            path,
-        },
-        unclean,
-    ))
+    }
 }
 
 /// [`open_rw`] with integrity handling, for a caller that ends its session itself.
@@ -739,8 +747,13 @@ mod tests {
         let tx = conn.transaction().unwrap();
         update_file(&tx, mid, 21, 201).unwrap();
         set_dir_state(&tx, gestoria, ScanState::Clean).unwrap();
+        set_dir_mtime(&tx, gestoria, 99).unwrap();
         tx.commit().unwrap();
+        assert_eq!(list_children(&conn, gestoria).unwrap().0[0].mtime, 201);
         assert_eq!(list_children(&conn, gestoria).unwrap().0[0].size, 21);
+        let top_dirs = list_children(&conn, root_dir).unwrap().1;
+        let g = top_dirs.iter().find(|d| d.id == gestoria).unwrap();
+        assert_eq!(g.mtime, 99);
         assert_eq!(
             count(
                 &conn,
@@ -914,7 +927,8 @@ mod tests {
 
         // A marker nobody holds locked is what a crashed session leaves behind.
         std::fs::create_dir_all(session_dir(&path)).unwrap();
-        std::fs::write(session_dir(&path).join("99999-0.lock"), b"").unwrap();
+        let stale = session_dir(&path).join(format!("99999-0.{SESSION_MARKER_EXT}"));
+        std::fs::write(stale, b"").unwrap();
         let (conn, recovered) = open_or_recover(&path).unwrap();
         assert!(recovered);
         assert!(bad_path(&path).exists());
@@ -941,5 +955,90 @@ mod tests {
         assert!(b_path.exists());
         drop(b);
         assert!(!session_dir(&path).exists());
+    }
+
+    fn pragma(conn: &Connection, name: &str) -> i64 {
+        conn.query_row(&format!("PRAGMA {name}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// VFS-1 AC-9: writer and reader pragmas bound memory (page caches, no mmap) and keep
+    /// readers from blocking (WAL, busy timeouts: 30 s writer, 5 s reader).
+    #[test]
+    fn connection_pragmas() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let w = open_rw(&path).unwrap();
+        assert_eq!(pragma(&w, "busy_timeout"), 30_000);
+        assert_eq!(pragma(&w, "cache_size"), -32768);
+        assert_eq!(pragma(&w, "wal_autocheckpoint"), 4000);
+        assert_eq!(pragma(&w, "journal_size_limit"), 67_108_864);
+        let r = open_ro(&path).unwrap();
+        assert_eq!(pragma(&r, "busy_timeout"), 5000);
+        assert_eq!(pragma(&r, "cache_size"), -65536);
+        assert_eq!(pragma(&r, "query_only"), 1);
+        for c in [&w, &r] {
+            assert_eq!(pragma(c, "synchronous"), 1, "NORMAL");
+            assert_eq!(pragma(c, "temp_store"), 2, "MEMORY");
+            assert_eq!(pragma(c, "foreign_keys"), 0);
+            assert_eq!(pragma(c, "mmap_size"), 0);
+        }
+    }
+
+    /// VFS-1 AC-4: roots on one volume share its row; a Windows root is named after its last
+    /// component; unknown ids are `NotFound`.
+    #[test]
+    fn roots_volumes_and_missing_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_rw(&dir.path().join("index.db")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let a = insert_root(&tx, "C:", r"C:\Users\Ana\Fotos").unwrap();
+        let b = insert_root(&tx, "C:", r"C:\Datos").unwrap();
+        tx.commit().unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM volumes"), 1);
+        let (key, name): (String, String) = conn
+            .query_row(
+                "SELECT r.path_key, d.name_key FROM roots r JOIN dirs d ON d.root_id = r.id \
+                 WHERE r.id = ?1",
+                [a],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (key.as_str(), name.as_str()),
+            ("c:/users/ana/fotos", "fotos")
+        );
+        assert_ne!(a, b);
+        assert!(matches!(dir_abs_path(&conn, 9999), Err(Error::NotFound(_))));
+        let tx = conn.transaction().unwrap();
+        assert!(matches!(
+            delete_dir_subtree(&tx, 9999),
+            Err(Error::NotFound(_))
+        ));
+    }
+
+    /// VFS-1 AC-6: recovery moves the index's `-wal` with it and drops companions of an
+    /// older `.bad` copy that no longer match.
+    #[test]
+    fn recovery_moves_companion_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let side = |base: &Path, suffix: &str| {
+            let mut p = base.as_os_str().to_owned();
+            p.push(suffix);
+            PathBuf::from(p)
+        };
+        std::fs::write(&path, b"garbage, not a database file at all").unwrap();
+        std::fs::write(side(&path, "-wal"), b"old wal").unwrap();
+        std::fs::write(side(&bad_path(&path), "-shm"), b"stale").unwrap();
+        // Called directly: a failed open_rw would already have discarded the invalid WAL.
+        drop(recover(&path).unwrap());
+        assert_eq!(
+            std::fs::read(side(&bad_path(&path), "-wal")).unwrap(),
+            b"old wal"
+        );
+        // The stale companion is gone (removed, or replaced by this index's own `-shm`).
+        let shm = std::fs::read(side(&bad_path(&path), "-shm")).unwrap_or_default();
+        assert_ne!(shm, b"stale");
     }
 }

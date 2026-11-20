@@ -66,7 +66,8 @@ impl Vfs {
     }
 
     /// Opens or creates the index and applies migrations; an unreadable index is moved to
-    /// `index.db.bad` and rebuilt from its roots (`db::open_or_recover`). Starts no thread.
+    /// `index.db.bad` and rebuilt from its roots, and a session starts (`db::open_session`).
+    /// Starts no thread.
     pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {
         let (conn, _recovered, session) = db::open_session(db_path)?;
         drop(conn);
@@ -233,6 +234,65 @@ mod tests {
         vfs.shutdown();
     }
 
+    /// VFS-1 AC-7: without a running indexer, `rescan` is refused as `Unavailable` and
+    /// `set_paused` is a no-op.
+    #[test]
+    fn indexer_controls_without_indexer() {
+        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::open(&dir.path().join("index.db")).unwrap();
+        assert!(matches!(vfs.rescan(None), Err(Error::Unavailable(_))));
+        assert!(matches!(vfs.rescan(Some(1)), Err(Error::Unavailable(_))));
+        vfs.set_paused(true);
+        let p = vfs.progress();
+        assert_eq!(
+            (p.state, p.files_indexed, p.roots.len()),
+            (IndexerState::Idle, 0, 0)
+        );
+    }
+
+    /// VFS-1 AC-5: stats count what is indexed.
+    #[test]
+    fn stats_count_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let vfs = Vfs::open(&path).unwrap();
+        let mut conn = db::open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = db::ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        db::ingest::insert_dir(&tx, root, top, "a", 0).unwrap();
+        for name in ["x.pdf", "y.jpg"] {
+            let file = db::ingest::NewFile {
+                name,
+                size: 1,
+                mtime: 1,
+                lossy: false,
+            };
+            db::ingest::insert_file(&tx, top, &file).unwrap();
+        }
+        tx.commit().unwrap();
+        let s = vfs.stats().unwrap();
+        assert_eq!((s.files, s.dirs, s.roots), (2, 2, 1));
+    }
+
+    /// VFS-1 AC-4: every root gets a non-empty volume key, the same for folders on one volume.
+    #[test]
+    fn volume_key_is_stable_per_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let ka = platform::volume_key(&a);
+        assert!(!ka.is_empty());
+        assert_eq!(ka, platform::volume_key(&b));
+        assert_eq!(ka, platform::volume_key(&a));
+    }
+
     /// VFS-1 AC-6: opening over a garbage file recovers to a fresh index and keeps the bad
     /// file as `index.db.bad`.
     #[test]
@@ -289,7 +349,7 @@ mod tests {
     fn session_marker_ends_on_shutdown_and_on_drop() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.db");
-        let marker = dir.path().join("index.db.session");
+        let marker = db::session_dir(&path);
 
         let vfs = Vfs::open(&path).unwrap();
         assert!(marker.exists());
@@ -311,7 +371,7 @@ mod tests {
     fn two_handles_share_an_index() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.db");
-        let marker = dir.path().join("index.db.session");
+        let marker = db::session_dir(&path);
         let app = Vfs::open(&path).unwrap();
         let cli = Vfs::open(&path).unwrap();
         cli.shutdown();

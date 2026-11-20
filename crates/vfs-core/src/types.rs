@@ -368,4 +368,16 @@ mod tests {
             assert_eq!(RootStatus::from_code(s.code()), s);
         }
     }
+
+    /// Unknown stored codes read as the safe defaults, and the search deadline defaults to
+    /// 1000 ms.
+    #[test]
+    fn unknown_codes_and_config_default() {
+        assert_eq!(FileKind::from_code(42), FileKind::Other);
+        assert_eq!(RootStatus::from_code(-1), RootStatus::Pending);
+        assert_eq!(
+            SearchConfig::default().deadline,
+            Duration::from_millis(1000)
+        );
+    }
 }
