@@ -94,12 +94,13 @@ class GenTreeTest(unittest.TestCase):
 class ScanDoneTest(unittest.TestCase):
     def test_scan_done_needs_idle_and_every_root_ready(self):
         """VFS-8 AC-2: the journey waits until the indexer is idle and every root is ready."""
-        from journey import scan_done
-        ready = {"status": "ready"}
-        self.assertTrue(scan_done({"state": "idle", "roots": [ready, ready]}))
-        self.assertFalse(scan_done({"state": "scanning", "roots": [ready]}))
-        self.assertFalse(scan_done({"state": "idle", "roots": [ready, {"status": "scanning"}]}))
-        self.assertFalse(scan_done({"state": "idle", "roots": []}))
+        from journey import ROOT_READY, STATE_IDLE, STATE_SCANNING, scan_done
+        ready = {"status": ROOT_READY}
+        self.assertTrue(scan_done({"state": STATE_IDLE, "roots": [ready, ready]}))
+        self.assertFalse(scan_done({"state": STATE_SCANNING, "roots": [ready]}))
+        self.assertFalse(scan_done({"state": STATE_IDLE,
+                                    "roots": [ready, {"status": STATE_SCANNING}]}))
+        self.assertFalse(scan_done({"state": STATE_IDLE, "roots": []}))
 
 
 class WebDriverTest(unittest.TestCase):

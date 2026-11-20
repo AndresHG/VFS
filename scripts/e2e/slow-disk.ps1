@@ -23,6 +23,10 @@ param(
   [int] $DiskSpdRate = 8192
 )
 $ErrorActionPreference = 'Stop'
+# The two disk conditions; the label names measure.py's output files.
+$Quiet = 'quiet'
+$Loaded = 'busy'
+$Conditions = @($Quiet, $Loaded)
 $here = $PSScriptRoot
 $work = 'C:\vfs-e2e'
 $vhd = Join-Path $work 'data.vhdx'
@@ -116,8 +120,8 @@ if (Test-Path $appData) { Remove-Item -Recurse -Force $appData }
 New-Item -ItemType Junction -Path $appData -Target 'V:\appdata' | Out-Null
 
 $failed = @()
-foreach ($label in @('quiet', 'busy')) {
-  $busy = $label -eq 'busy'
+foreach ($label in $Conditions) {
+  $busy = $label -eq $Loaded
   Get-ChildItem 'V:\appdata' -Force | Remove-Item -Recurse -Force
   Cycle $busy
   $between = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Action cycle" + $(if ($busy) { ' -Busy' } else { '' })
@@ -142,8 +146,8 @@ New-Item -ItemType Directory -Force -Path 'V:\bench' | Out-Null
 $t = [Diagnostics.Stopwatch]::StartNew()
 & $Cli gen-db --files $BenchFiles --out 'V:\bench\bench.db' | Out-Host
 Log ("gen-db {0:N0} s" -f $t.Elapsed.TotalSeconds)
-foreach ($label in @('quiet', 'busy')) {
-  Cycle ($label -eq 'busy')
+foreach ($label in $Conditions) {
+  Cycle ($label -eq $Loaded)
   Log "bench $label (cold V:)"
   # A non-zero exit is the AC-9 verdict (budgets for an SSD), recorded in the JSON, not a
   # failure of this run.

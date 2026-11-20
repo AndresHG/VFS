@@ -470,9 +470,9 @@ than opening it (an ancestor that is an `.app` bundle is never launched). Window
 `explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
 the path is over 259 UTF-16 units; a trailing backslash (a drive root) is doubled so it
 cannot escape the closing quote under the Windows command-line rules (`explorer_arg`; the
-drive-root case is unverified on Windows). On a Windows runner (VFS-8) Explorer opens the right folder but does not select the item
-(issue 107); the long-path fallback works. See `apps/desktop/src-tauri/src/reveal.rs`. No file is
-opened with its application.
+drive-root case is unverified on Windows). On a Windows runner (VFS-8) Explorer opens the
+right folder but does not select the item (issue 107); the long-path fallback works. See
+`apps/desktop/src-tauri/src/reveal.rs`. No file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
 log plugin), rotated at 1 MB with four old files kept. Below warning level only the
