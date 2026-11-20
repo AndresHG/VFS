@@ -113,7 +113,10 @@ keeps room for it without changing shape:
 - **Bookmark rows** reuse the result row: an icon slot, the title as the name, and the bookmark
   folder path in the path line with the same middle truncation, because the folder path matters
   as much as for files. Date and size slots carry what a bookmark has (date added) or stay empty.
-- The row action and its wording for a bookmark are a product decision still to make.
+- The bookmark row's one action is **"Abrir en Firefox"**: it opens the bookmarked page in
+  Firefox, like "Mostrar en carpeta" for files, with the same Intro/double-click behaviour.
+  Firefox cannot be told from outside to select a bookmark in its bookmark manager, so the
+  folder path on the row is what tells where the bookmark is saved (owner's decision).
 
 ## Directions for the main screen
 
