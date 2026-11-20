@@ -345,6 +345,8 @@ Neither photo set has a useful file name. Both requests combine three things: a 
 
 ### 2. How it could work
 
+> Kept for reference: line 2 is out of scope by the owner's decision.
+
 #### 2a. Free metadata: EXIF date, GPS, camera (no model)
 
 - **Fields.** Phone and camera JPEG/HEIC files carry `DateTimeOriginal` (0x9003), `OffsetTimeOriginal` (0x9011, the time zone), `SubSecTimeOriginal`, `Model` (0x0110), a GPS IFD with latitude and longitude, and often an embedded IFD1 thumbnail (`ThumbnailOffset`/`ThumbnailLength`) ([ExifTool EXIF tags](https://exiftool.org/TagNames/EXIF.html)).
@@ -430,12 +432,16 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 
 ### 3. What it needs from the user
 
+> Kept for reference: line 2 is out of scope by the owner's decision.
+
 - **A (metadata):** nothing. Optionally she picks "home" once by choosing a photo taken there.
 - **B:** acceptance of a long background job and ~0.2–0.6 GB of extra disk; a pause/resume control.
 - **C:** the owner runs a Mac job on LAN access to the NAS, then copies one file across.
 - **D:** an API key, explicit consent per folder set, and a preview of what leaves the PC (Phase 5 rule).
 
 ### 4. Privacy and terms-of-service constraints
+
+> Kept for reference: line 2 is out of scope by the owner's decision.
 
 - **A, B and C** keep everything local: no data leaves the PC, and C leaves only the owner's own LAN.
 - **D sends family photos off the PC.** They may include children, house interiors and photographed ID documents.
@@ -445,6 +451,8 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 - **Face recognition: not recommended.** Biometric data used to identify a person is a special category under GDPR Art. 9(1) ([text](https://gdpr-info.eu/art-9-gdpr/)). It concerns relatives and third parties who have not consented, and adds model weight and liability for a need she has not stated.
 
 ### 5. Cost (300,000 photos)
+
+> Kept for reference: line 2 is out of scope by the owner's decision.
 
 **Local options [estimate]:**
 - A: 1.3–2.5 h of disk time once, plus ~15–30 MB for the geodata and index columns.
@@ -466,6 +474,8 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 - **Cheaper hybrid:** caption only a metadata-filtered candidate set at query time, e.g. 2,000 photos near home in 2021, for **cents**. Far less data leaves the PC.
 
 ### 6. Dependencies in VFS
+
+> Kept for reference: line 2 is out of scope by the owner's decision.
 
 - **Phase 1:** path, size and mtime as cache keys; the new file-name date patterns live here.
 - **Phase 3:** the isolated worker process, needed because image and EXIF parsers run on untrusted files; Spanish BM25 for captions. Taking this line up would reverse the "no image content" exclusion, which the owner has kept.
@@ -780,9 +790,11 @@ results, with web results she already bookmarked or downloaded marked as such ("
 
 ### 2. How it could work
 
+> Reference only: line 5 is decided, will not do.
+
 **Option A: a "Buscar también en internet" button (no API).** VFS opens
 `https://<her default engine>/search?q=<query>` in her default browser (Tauri `opener` plugin).
-Cost 0, integration about 20 lines, no key, no new terms. She already uses her browser, so the
+Cost 0, integration about 20 lines **[estimate]**, no key, no new terms. She already uses her browser, so the
 search engine sees nothing new. Limitation: VFS cannot see the web results, so it **cannot mark
 what she already has**. That half of the request is lost.
 
@@ -831,6 +843,8 @@ and the provider (and its upstream search vendor) sees the query.
 
 ### 3. What it needs from the user
 
+> Reference only: line 5 is decided, will not do.
+
 - A: nothing.
 - B: an API account and key per provider (the owner creates it; credit card for most), stored
   in the OS credential store like the phase-5 key.
@@ -838,6 +852,8 @@ and the provider (and its upstream search vendor) sees the query.
 - For B/C: an explicit opt-in ("Buscar también en internet"), off by default.
 
 ### 4. Privacy and terms-of-service constraints
+
+> Reference only: line 5 is decided, will not do.
 
 - Her queries are health-revealing ("hígado graso", "colágeno"). With B/C they leave the PC
   tied to an API key that identifies the owner's account.
@@ -856,6 +872,8 @@ and the provider (and its upstream search vendor) sees the query.
 
 ### 5. Cost
 
+> Reference only: line 5 is decided, will not do.
+
 Assume 10–30 web searches/day ≈ 300–900/month **[estimate]**.
 - A: $0.
 - Brave: 300–900 × $5/1,000 = $1.50–4.50/month, inside the $5 monthly credit → **≈ $0** **[estimate]**.
@@ -867,6 +885,8 @@ Assume 10–30 web searches/day ≈ 300–900/month **[estimate]**.
 - Target PC: negligible (one HTTPS call, JSON parse, a few hundred indexed lookups).
 
 ### 6. Dependencies in VFS
+
+> Reference only: line 5 is decided, will not do.
 
 VFS-6 / #63 (bookmarks with stored normalised URL), phase 1 (fuzzy title match), phase 3 (DOIs
 in PDFs, optional), phase 5 #38 (key storage, consent and "what leaves the PC" screen; Option C
@@ -942,7 +962,7 @@ For photos the two collapse into "when it was taken", which is what example 6 ne
 | YouTube playlists (API; Takeout gives only the added date) | `contentDetails.videoPublishedAt` | `snippet.publishedAt` = "date and time that the item was added to the playlist" | High for both |
 | Telegram Desktop export (JSON) | forwarded original date, if exported | message `date` (ISO 8601) and `date_unixtime` | High (`edited` key unverified) |
 | WhatsApp export (.txt) | none | line-prefix timestamp, format depends on phone locale and OS (`12/06/19 18:03 -` vs `[12/6/19, 6:03:21 p. m.]`) | Medium: day/month ambiguity must be resolved per file. Exports reportedly cap at ~40k messages without media, ~10k with media (third-party guides, not confirmed by WhatsApp). |
-| Web results / bookmarked pages | schema.org `datePublished` ("date of first publication"), OG `article:published_time`, HTTP `Last-Modified` | when fetched or bookmarked | JSON-LD/OG: medium-high on news and blogs, absent elsewhere. `Last-Modified` is low (often the render time on CMS pages). |
+| Bookmarked pages (only if a page were fetched, which is not planned) | schema.org `datePublished` ("date of first publication"), OG `article:published_time`, HTTP `Last-Modified` | when fetched or bookmarked | JSON-LD/OG: medium-high on news and blogs, absent elsewhere. `Last-Modified` is low (often the render time on CMS pages). |
 
 Sources in §10. Synology Drive: **we could not find official documentation** on whether Drive
 Client preserves mtime or creation time. Community reports say sync tools on Windows commonly
@@ -976,7 +996,7 @@ Use it as a low-confidence fallback only.
 
 **UI.** A sort control: "Más reciente / Más antiguo", then "por fecha de publicación / por
 fecha en que lo guardé", then a group or filter by source ("Mis archivos · Marcadores ·
-YouTube · Telegram · WhatsApp · Internet"). Each result shows its date with the source in plain
+YouTube · Telegram · WhatsApp"). Each result shows its date with the source in plain
 words on hover ("Fecha de la foto (cámara)", "Añadido a marcadores"). Example 6 is "Fotos" +
 "fosa séptica" + sort ascending by taken date, but the photos have no names (example 4 problem),
 so finding them needs image content or folder context (another line). This line only orders
@@ -992,8 +1012,8 @@ exports from the phone. Optionally she confirms whether WhatsApp dates are day/m
 ### 4. Privacy and terms-of-service constraints
 
 All extraction is local. Reading EXIF and document metadata is in-process parsing, done in the
-phase 3 isolated worker for untrusted files. Web publication dates require fetching the page,
-which is an online action and belongs to the internet-search line, opt-in. The YouTube Data API
+phase 3 isolated worker for untrusted files. Publication dates that need fetching a web page
+are not planned: open-internet search (line 5) was dropped, and VFS stays offline by default. The YouTube Data API
 returns both dates under the normal API terms.
 
 ### 5. Cost on the target PC and/or API fees
@@ -1131,6 +1151,8 @@ wants Firefox itself to end up organised, not just a view inside VFS.
 
 ### 2. How it could work
 
+> Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
+
 The approaches split into two parts: **deciding** the new folder for each bookmark, and
 **applying** that change to Firefox safely.
 
@@ -1155,7 +1177,7 @@ The approaches split into two parts: **deciding** the new folder for each bookma
   from her criterion, which she then edits. This handles her phrasing best. It sends bookmark
   titles and URLs (which reveal health interests) to the provider.
 
-**Applying — what is safe**
+**Applying (all excluded by the consultative invariant; kept as research)**
 
 - **Never write `places.sqlite`.** Firefox holds locks on it while running, and readers get
   "database is locked" **[published, SQLite forum, Mozilla bugs 627936/1285041]**. Writing
@@ -1180,13 +1202,12 @@ The approaches split into two parts: **deciding** the new folder for each bookma
   plan file and the extension applies it. Cost: release Firefox requires Mozilla signing; an
   **unlisted (self-distributed)** add-on gets automated validation (up to 24 h) and may be
   manually reviewed later **[published, extensionworkshop.com]**. She would install it once
-  from a file, and the owner maintains it on AMO. More moving parts, but the safest result.
+  from a file, and the owner maintains it on AMO. More moving parts; the safest of the write paths, all of which are excluded.
 
-**Undo**: Firefox keeps automatic backups in `<profile>/bookmarkbackups/bookmarks-YYYY-MM-DD_
+**Undo (relevant only to the excluded write paths)**: Firefox keeps automatic backups in `<profile>/bookmarkbackups/bookmarks-YYYY-MM-DD_
 <count>_<hash>.jsonlz4`, 15 by default (`browser.bookmarks.max_backups`), written when bookmarks
-changed **[published, Mozilla support threads, ghacks]**. Before any apply step, VFS should also
-save its own full HTML and JSON export with a dated name in the VFS data folder, and show
-"Para deshacer: Restaurar → Elegir archivo → <file>".
+changed **[published, Mozilla support threads, ghacks]**. Since VFS never applies changes,
+VFS itself needs no undo.
 
 **Dead-link check (opt-in, separate button)**: HEAD request, falling back to GET (many servers
 reject HEAD) with 10 s timeout, ≤ 2 redirects followed and recorded, per-host limit of 1 request
@@ -1201,15 +1222,17 @@ private videos instead of loading pages.
 
 ### 3. What it needs from the user
 
-- Her criterion in words, then review of a **preview tree** ("Salud (412) → Hígado (37)…" with
-  each move listed; she can drag an item or reject a folder) before anything is applied.
-- Closing Firefox (JSON restore), or installing the extension once, or doing the HTML
-  import + manual cleanup. Each of these is a step a non-technical user can get wrong, so the
-  owner probably does the first run with her.
+> Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
+
+- Her criterion in words, for an organised *view* inside VFS. Applying it to Firefox (closing
+  Firefox for a JSON restore, installing an extension, an HTML import) is excluded by the
+  consultative invariant, and would in any case be steps a non-technical user can get wrong.
 - For D3: the phase-5 key and consent showing a sample of what is sent.
 - For the dead-link check: explicit opt-in.
 
 ### 4. Privacy and terms-of-service constraints
+
+> Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
 
 - D1/D2 are local. D3 sends ~3,000 titles + URLs to Anthropic/OpenAI (30-day default retention,
   line 5 sources). Strip query strings and fragments before sending (they can contain tokens or
@@ -1217,10 +1240,13 @@ private videos instead of loading pages.
 - Dead-link checks and description fetching reveal each bookmarked URL to its site and her IP to
   ~1,000 hosts. Opt-in only, with a plain warning, a polite User-Agent with no personal data, and
   no cookies.
-- Firefox Sync: any applied change propagates to her other devices. Say so in the confirm dialog.
+- Firefox Sync: one more reason the write paths are excluded; any change applied to Firefox would
+  propagate to her other devices.
 - Wayback API: free public service; keep requests low (only for confirmed-dead links).
 
 ### 5. Cost
+
+> Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
 
 - D3 tokens **[estimate]**: 3,000 bookmarks × ~80 input tokens + 60 batches × ~500 tokens of
   instructions ≈ 0.27 M input; ~15 output tokens per bookmark ≈ 0.045 M output.
@@ -1239,9 +1265,11 @@ private videos instead of loading pages.
 
 ### 6. Dependencies in VFS
 
+> Reference only: line 7 is decided, will not do for now; any write to Firefox is excluded.
+
 VFS-6 / #63 bookmarks reader (folder tree, GUIDs, normalised URL). Phase 5 #38 for D3. #41 for
-D2. Line 5 URL normaliser (shared). Optional: a small WebExtension project (new, out of the Rust
-workspace).
+D2. The URL normaliser described in line 5 (kept as a shared piece of the source model). The
+WebExtension that applying moves would need is excluded.
 
 ### 7. Smallest useful first step
 
