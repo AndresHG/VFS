@@ -129,14 +129,14 @@ pub struct SearchResponse {
     pub elapsed_ms: u32,
 }
 
-/// Default wall-clock budget of a search; scans and over-cap generators stop at it and the
-/// response says `truncatedBy = deadline` (VFS-1 AC-9).
+/// Default wall-clock budget of a search; filtered scans and the split-term typo pass stop
+/// at it and the response says `truncatedBy = deadline` (VFS-1 AC-9, S3).
 pub const DEFAULT_SEARCH_DEADLINE: Duration = Duration::from_millis(1000);
 
 /// Search tuning; not part of the UI contract.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
-    /// Wall-clock budget for scans and over-cap generators ([`DEFAULT_SEARCH_DEADLINE`]).
+    /// Wall-clock budget for scans and the typo pass ([`DEFAULT_SEARCH_DEADLINE`]).
     pub deadline: Duration,
 }
 

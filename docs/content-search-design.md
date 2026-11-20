@@ -237,7 +237,7 @@ At 500,000 documents these are about 8× longer **[estimate]**.
 - **Extractor fidelity** on legacy `.doc`, `.xls`, `.ppt` and damaged PDFs; unmeasured.
 - **Index growth**: the content index may be several times the name index. Show its size;
   allow switching content search off and deleting its tables.
-- **Memory**: the app process already has up to 224 MiB of page caches; the content pass
+- **Memory**: the app process already has up to 160 MiB of page caches; the content pass
   must reuse the search connection's cache, not add a new one.
 - **Two stores** (if Tantivy is chosen) can drift after a crash; SQLite stays authoritative.
 - **Spanish stemming over-merges** some words; keeping an unstemmed column and boosting exact
