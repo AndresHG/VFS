@@ -50,7 +50,16 @@ ordinary or fast machines. The product spec is
 - Index network drives, a NAS or removable disks. The app warns when a chosen folder is on
   one.
 - Need administrator rights, read the NTFS master file table, or install a service.
-- Use an LLM, OCR, code signing or auto-update.
+- Use an LLM, OCR, code signing or auto-update (today; see where it is heading below).
+
+## Where it is heading
+
+The long-term aim is a local, private **personal knowledge base** built from what a person
+already has: files, bookmarks, chats and notes on their own Windows or Mac computer. Find
+anything across every source, ask questions over it with answers that cite the original
+files (RAG), browse it as an Obsidian-like graph of connections, and keep adding to it.
+Sources stay read-only throughout. The direction, principles and future lines of work are
+in [`docs/vision.md`](docs/vision.md).
 
 ## Repository layout
 
@@ -63,7 +72,7 @@ ordinary or fast machines. The product spec is
 | `apps/desktop/ui` | The Spanish screen: static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
 | `specs/` | Specs with acceptance criteria (`VFS-<n>`); tests cite them. |
-| `docs/` | [Architecture](docs/architecture.md), [decisions](docs/decisions.md), [content-search design](docs/content-search-design.md). |
+| `docs/` | [Vision](docs/vision.md), [architecture](docs/architecture.md), [decisions](docs/decisions.md), [content-search design](docs/content-search-design.md). |
 
 ## Build, test and run
 
