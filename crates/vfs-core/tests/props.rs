@@ -12,9 +12,23 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    fold_key, FileKind, MatchKind, Result, SearchFilters, SearchHit, SearchQuery, SearchResponse,
-    Vfs,
+    fold_key, FileKind, MatchKind, Result, SearchConfig, SearchFilters, SearchHit, SearchQuery,
+    SearchResponse, TruncatedBy, Vfs,
 };
+
+/// The properties are about which rows a query returns, not how fast: searches get a
+/// deadline no run reaches, even on a loaded CI machine, so a deadline-cut list never
+/// passes for a wrong answer (latency is AC-9's benchmark).
+fn patient() -> SearchConfig {
+    SearchConfig {
+        deadline: std::time::Duration::from_secs(600),
+    }
+}
+
+/// Opens an index with the [`patient`] deadline.
+fn open_patient(path: &std::path::Path) -> Vfs {
+    Vfs::open_with(path, patient()).unwrap()
+}
 
 /// Proptest's default case count, times 16 with `VFS_STRESS=1`. Failures are not persisted
 /// to files: a shrunk failure becomes a plain `#[test]` below.
@@ -39,7 +53,7 @@ impl Ix {
     fn new() -> Ix {
         let dir = tempfile::tempdir().unwrap();
         let path: PathBuf = dir.path().join("index.db");
-        let vfs = Vfs::open(&path).unwrap();
+        let vfs = open_patient(&path);
         let conn = db::open_rw(&path).unwrap();
         Ix {
             _dir: dir,
@@ -94,12 +108,18 @@ impl Ix {
         limit: u32,
         offset: u32,
     ) -> Result<SearchResponse> {
-        self.vfs.search(&SearchQuery {
+        let r = self.vfs.search(&SearchQuery {
             text: text.to_string(),
             filters,
             limit,
             offset,
-        })
+        })?;
+        assert_ne!(
+            r.truncated_by,
+            Some(TruncatedBy::Deadline),
+            "{text:?} was cut by the deadline"
+        );
+        Ok(r)
     }
 
     fn text(&self, text: &str) -> SearchResponse {
@@ -406,7 +426,7 @@ proptest! {
         let all = ix.text(&query);
         evict();
         prop_assert_eq!(keys(&ix.text(&query).hits), keys(&all.hits));
-        let other = Vfs::open(&ix._dir.path().join("index.db")).unwrap();
+        let other = open_patient(&ix._dir.path().join("index.db"));
         let again = other
             .search(&SearchQuery { text: query.clone(), filters: SearchFilters::default(), limit: 500, offset: 0 })
             .unwrap();

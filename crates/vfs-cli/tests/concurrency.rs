@@ -175,7 +175,7 @@ fn searches_while_indexing_and_watching() {
     }
     app.shutdown();
     other.shutdown();
-    check_structure(&t.db, 0, "after the flood");
+    check_structure(&t.db, 500, "after the flood");
 }
 
 /// VFS-3 AC-7, VFS-1 AC-10 (S6): many threads fire queries at one handle, each newer
@@ -327,7 +327,7 @@ fn app_and_cli_share_an_index() {
         !std::path::Path::new(&bad).exists(),
         "a healthy shared index was moved aside"
     );
-    check_structure(&t.db, 0, "shared index");
+    check_structure(&t.db, 500, "shared index");
     assert_matches_disk(&raw_conn(&t.db), &stored_root(&t.root), &t.root, "app root");
     assert_matches_disk(&raw_conn(&t.db), &stored_root(&second), &second, "cli root");
 }

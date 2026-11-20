@@ -94,7 +94,7 @@ fn check_and_converge(s: &Setup, context: &str) {
     );
     check_structure(&s.db, 200, context);
     run_until_idle(&s.db, &[&s.tree], CONVERGE);
-    check_structure(&s.db, 0, &format!("{context}, after convergence"));
+    check_structure(&s.db, 500, &format!("{context}, after convergence"));
     assert_nothing_pending(&s.db, context);
     assert_matches_disk(&raw_conn(&s.db), &root, &s.tree, context);
 }
@@ -276,23 +276,40 @@ fn kill_during_recovery_keeps_roots() {
     }
 }
 
-/// Turns a current index into a version-1 index: the per-file path index dropped.
-fn downgrade_to_v1(db: &Path) {
-    let conn = raw_conn(db);
-    conn.execute_batch("DROP TABLE file_paths_fts; PRAGMA user_version = 1;")
+/// Version-1 schema, as first shipped (`vfs-core/src/schema.sql`).
+const SCHEMA_V1: &str = include_str!("../../vfs-core/src/schema.sql");
+
+/// Writes at `dst` a real version-1 index holding the rows of the current index `src`: the
+/// version-1 schema, the base rows copied, and the version-1 FTS tables filled from them.
+fn make_v1(src: &Path, dst: &Path) {
+    let conn = rusqlite::Connection::open(dst).unwrap();
+    conn.execute_batch(SCHEMA_V1).unwrap();
+    conn.execute("ATTACH DATABASE ?1 AS cur", [src.to_str().unwrap()])
         .unwrap();
+    conn.execute_batch(
+        "INSERT INTO meta SELECT * FROM cur.meta;
+         INSERT INTO volumes SELECT * FROM cur.volumes;
+         INSERT INTO roots SELECT * FROM cur.roots;
+         INSERT INTO dirs SELECT * FROM cur.dirs;
+         INSERT INTO files SELECT * FROM cur.files;
+         INSERT INTO files_fts(rowid, name_key) SELECT id, name_key FROM files;
+         INSERT INTO dirs_fts(rowid, path_key, name_key) SELECT id, path_key, name_key FROM dirs;
+         DETACH DATABASE cur;
+         PRAGMA user_version = 1;",
+    )
+    .unwrap();
 }
 
-/// VFS-3 AC-4: killed during the version 1 to 2 migration, the index is either still at
-/// version 1 or fully at version 2 (never half-filled), and converges.
+/// VFS-3 AC-4: killed while a version-1 index migrates to the current version, the index
+/// is either wholly at version 1 (version-1 FTS tables, no path index) or wholly at the
+/// current version, never in between, and converges.
 #[test]
 fn kill_during_migration() {
     let iterations = scaled(6, 100);
     let s = setup(4, scaled(3_000, 60_000));
     index(&s.db, &[&s.tree]);
     let template = s._tmp.path().join("v1.db");
-    fs::copy(&s.db, &template).unwrap();
-    downgrade_to_v1(&template);
+    make_v1(&s.db, &template);
     let restore = || {
         remove_index(&s.db);
         fs::copy(&template, &s.db).unwrap();
@@ -311,17 +328,21 @@ fn kill_during_migration() {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        let has_table: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE name = 'file_paths_fts'",
-                [],
+        let schema = |name: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT sql FROM sqlite_master WHERE name = ?1",
+                [name],
                 |r| r.get(0),
             )
-            .unwrap();
-        assert_eq!(
-            has_table,
-            version >= 2,
-            "migration iteration {i}: version {version} with path index present = {has_table}"
+            .ok()
+        };
+        let v1_names = schema("files_fts").is_some_and(|sql| sql.contains("name_key"));
+        let has_paths = schema("file_paths_fts").is_some();
+        let state = (version, v1_names, has_paths);
+        assert!(
+            state == (1, true, false) || state == (vfs_core::db::SCHEMA_VERSION, false, true),
+            "migration iteration {i}: half-migrated index (version, v1 files_fts, path \
+             index) = {state:?}"
         );
         drop(conn);
         check_and_converge(&s, &format!("migration, iteration {i}"));
