@@ -387,7 +387,7 @@ def _ci_states(pr, repo, cwd):
 def _ci_gate(pr, repo, cwd):
     """Deny a merge unless every REQUIRED_CI_JOBS check is `pass` on the PR head."""
     if pr is not None and _UNRESOLVABLE.search(pr):
-        return []  # a variable PR number: leave it to the ask
+        return [("ask", CI_UNKNOWN_REASON)]  # a variable PR number: can't check
     states = _ci_states(pr, repo, cwd)
     if states is None:
         return [("ask", CI_UNKNOWN_REASON)]
@@ -408,7 +408,7 @@ def _check_gh(args, cwd=""):
     if sub == "pr" and action == "merge":
         if "--disable-auto" in rest[1:]:
             return []  # cancels a pending auto-merge; merges nothing
-        if "--auto" in rest[1:]:
+        if any(t == "--auto" or t.startswith("--auto=") for t in rest[1:]):
             return [("deny", AUTO_MERGE_REASON)]
         pr, repo = _merge_target(rest[1:])
         return _ci_gate(pr, repo, cwd) or [("ask", MERGE_REASON)]

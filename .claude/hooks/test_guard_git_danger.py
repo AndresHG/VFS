@@ -59,6 +59,16 @@ class MergeGateTest(unittest.TestCase):
         self.assertEqual(decision, "deny")
         run.assert_not_called()
 
+    def test_auto_with_value_refused(self):
+        decision, _ = self.verdict("gh pr merge 95 --auto=true", checks("pass", "pass"))
+        self.assertEqual(decision, "deny")
+
+    def test_variable_pr_asks_without_claiming_green(self):
+        with mock.patch.object(guard.subprocess, "run") as run:
+            verdicts = guard.analyze("gh pr merge $N --squash", "")
+        run.assert_not_called()
+        self.assertEqual(verdicts, [("ask", guard.CI_UNKNOWN_REASON)])
+
     def test_disable_auto_is_not_a_merge(self):
         decision, _ = self.verdict("gh pr merge 95 --disable-auto", checks("pending", "pending"))
         self.assertIsNone(decision)
