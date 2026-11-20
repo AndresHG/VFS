@@ -20,9 +20,9 @@ single 8 TB HDD is. The probe script for the target-PC visit has never run on Wi
 
 - R1. WHEN the e2e workflow runs (manual dispatch or nightly), THE `windows-journey` job SHALL
   install the NSIS installer silently as the runner user and verify what was installed.
-- R2. WHEN the app is installed, THE journey SHALL drive the installed release binary through
-  the user's journey with W3C WebDriver (`tauri-driver` + Edge WebDriver) and capture a
-  screenshot of the window and of the whole desktop at every step.
+- R2. WHEN the app is installed, THE journey SHALL drive an installed build through the user's
+  journey with W3C WebDriver and capture a screenshot of the window and of the whole desktop at
+  every step; THE installed release build SHALL get a launch-and-screenshot smoke test.
 - R3. WHEN the e2e workflow runs, THE `macos-journey` job SHALL drive a built `.app` through a
   short version of the journey, with screenshots.
 - R4. WHEN the slow-disk job runs, THE job SHALL measure first scan, query latency, start-up
@@ -82,9 +82,9 @@ Tests cite these ids (`VFS-5 AC-<m>`) in their doc comments.
 - Native dialogs: WebDriver cannot drive the native folder picker. On Windows the job drives it
   with UI Automation; if that fails the journey falls back to the same `add_root` command the
   dialog leads to, and records which path it took.
-- Release build not drivable: if Edge WebDriver cannot attach to the installed release binary,
-  the journey runs against a `webdriver`-feature build and the installed release build gets a
-  launch-and-screenshot smoke test instead.
+- Release build not drivable (it happened, decision 1): the journey runs against an installed
+  `webdriver`-feature build and the installed release build gets a launch-and-screenshot smoke
+  test.
 - Index location: the slow-disk job relocates `%LOCALAPPDATA%\app.vfs.desktop` with a directory
   junction to the virtual disk; the app is unchanged.
 - Cost: jobs are capped with `timeout-minutes`; macOS is one short job.
@@ -96,8 +96,8 @@ Tests cite these ids (`VFS-5 AC-<m>`) in their doc comments.
 
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
-| 1 | How to drive the window on Windows | `tauri-driver` + Edge WebDriver, as the Tauri 2 docs describe; the journey talks raw W3C WebDriver from Python, no npm test stack | session (brief) | 2026-11-20 |
-| 2 | How to drive it on macOS (no WKWebView driver exists) | `tauri-plugin-wdio-webdriver` (embedded W3C server, the free provider Tauri docs point to) behind the opt-in `webdriver` cargo feature | session | 2026-11-20 |
+| 1 | How to drive the window on Windows | Tried first: `tauri-driver` 2.1.0 + Edge WebDriver matching the runner's WebView2 (157.0.4341.46), against the installed release build. The app started but the session failed with "DevToolsActivePort file doesn't exist". So the journey drives an installed NSIS build of the same app with the `webdriver` feature (decision 2), and the release installer gets install/verify, a launch-and-screenshot smoke test and uninstall; the smoke test also records whether the release build honours `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, the switch Edge WebDriver relies on | session | 2026-11-20 |
+| 2 | How to drive it on macOS (no WKWebView driver exists) and, after 1, on Windows | `tauri-plugin-wdio-webdriver` (embedded W3C server, the free provider the Tauri docs point to) behind the opt-in `webdriver` cargo feature; the journey talks raw W3C WebDriver from Python, no npm test stack | session | 2026-11-20 |
 | 3 | Disk throttling | None credible on a hosted runner: Hyper-V QoS needs a VM (nested virtualization unsupported), Storage QoS needs a cluster, job-object I/O rate control is documented as unsupported since 1607. Use a VHDX for isolation and cold cache (dismount/remount) plus a competing workload (DiskSpd at a capped rate and a sync/antivirus emulator touching the tree) | session | 2026-11-20 |
 | 4 | Trigger | `workflow_dispatch` + nightly `schedule`; not on push | brief | 2026-11-20 |
 

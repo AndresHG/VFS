@@ -33,7 +33,6 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   TAURI_CLI_VERSION: 2.12.6
-  TAURI_DRIVER_VERSION: 2.1.0
   PY_PACKAGES: psutil==7.2.2 pillow==13.0.0
 
 jobs:
@@ -50,16 +49,22 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
-      - name: Installer (release, unsigned, exactly as release.yml builds it)
+      - name: Release installer (unsigned, exactly as release.yml builds it)
         working-directory: apps/desktop/src-tauri
         run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis -- --locked
-      - name: CLI and tauri-driver
+      - name: Keep it apart
+        shell: bash
+        run: mkdir -p bin/release && mv target/release/bundle/nsis/*-setup.exe bin/release/
+      - name: Installer of the webdriver build (embedded W3C server; e2e only)
+        working-directory: apps/desktop/src-tauri
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis --features webdriver -- --locked
+      - name: CLI
         shell: bash
         run: |
           cargo build --release --locked -p vfs-cli
-          cargo install tauri-driver --locked --version "$TAURI_DRIVER_VERSION" --root "$RUNNER_TEMP/td"
-          mkdir -p bin
-          cp target/release/bundle/nsis/*-setup.exe target/release/vfs.exe "$RUNNER_TEMP/td/bin/tauri-driver.exe" bin/
+          mkdir -p bin/webdriver
+          mv target/release/bundle/nsis/*-setup.exe bin/webdriver/
+          cp target/release/vfs.exe bin/
       - name: VFS-5 AC-9 - the release build carries no WebDriver server
         shell: bash
         run: |
@@ -87,17 +92,32 @@ jobs:
           path: ${{ runner.temp }}/bin
       - name: Python packages
         run: python -m pip install --disable-pip-version-check $env:PY_PACKAGES.Split(' ') pywinauto==0.6.9
-      - name: Install silently, per user, and verify (AC-1)
+      - name: Hide the runner's console windows, so screenshots show the app
+        run: (New-Object -ComObject Shell.Application).MinimizeAll()
+      - name: Release installer - install silently, per user, and verify (AC-1)
         run: |
-          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\*-setup.exe").FullName
-          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/install | Select-Object -Last 1
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\release\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/release | Select-Object -Last 1
+          "RELEASE_EXE=$exe" >> $env:GITHUB_ENV
+      - name: Release build - launch and screenshot (AC-1)
+        run: python scripts/e2e/windows_smoke.py --app "$env:RELEASE_EXE" --out out/release
+      - name: Release build - uninstall and verify (AC-1)
+        if: always() && env.RELEASE_EXE != ''
+        run: |
+          Get-Process | Where-Object { $_.Path -eq $env:RELEASE_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue
+          & scripts/e2e/windows-install.ps1 -Uninstall -Out out/release
+          Remove-Item -Recurse -Force (Join-Path $env:LOCALAPPDATA 'app.vfs.desktop') -ErrorAction SilentlyContinue
+      - name: Webdriver build - install
+        run: |
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\webdriver\*-setup.exe").FullName
+          $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/webdriver | Select-Object -Last 1
           "VFS_EXE=$exe" >> $env:GITHUB_ENV
-      - name: Edge WebDriver matching WebView2
-        run: scripts/e2e/windows-driver.ps1
       - name: Generate the tree (~100,000 files)
         run: python scripts/e2e/gen_tree.py "$env:RUNNER_TEMP\e2e\Archivo" --manifest "$env:RUNNER_TEMP\e2e\manifest.json"
       - name: Journey (AC-2, AC-3, AC-4)
-        run: python scripts/e2e/journey.py --mode tauri-driver --app "$env:VFS_EXE" --manifest "$env:RUNNER_TEMP\e2e\manifest.json" --out out/journey --tauri-driver "$env:RUNNER_TEMP\bin\tauri-driver.exe" --native-driver "$env:MSEDGEDRIVER"
+        run: |
+          (New-Object -ComObject Shell.Application).MinimizeAll()
+          python scripts/e2e/journey.py --app "$env:VFS_EXE" --manifest "$env:RUNNER_TEMP\e2e\manifest.json" --out out/journey
       - name: App log and index files
         if: always()
         run: |
@@ -105,11 +125,11 @@ jobs:
           New-Item -ItemType Directory -Force out/app | Out-Null
           Copy-Item -Recurse -Force "$d\logs" out/app/ -ErrorAction SilentlyContinue
           Get-ChildItem $d -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length | ConvertTo-Json | Set-Content out/app/files.json
-      - name: Uninstall and verify (AC-1)
+      - name: Webdriver build - uninstall
         if: always() && env.VFS_EXE != ''
         run: |
           Get-Process | Where-Object { $_.Path -eq $env:VFS_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue
-          & scripts/e2e/windows-install.ps1 -Uninstall -Out out/install
+          & scripts/e2e/windows-install.ps1 -Uninstall -Out out/webdriver
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -133,15 +153,13 @@ jobs:
           path: ${{ runner.temp }}/bin
       - name: Python packages
         run: python -m pip install --disable-pip-version-check $env:PY_PACKAGES.Split(' ')
-      - name: Install
+      - name: Install the webdriver build
         run: |
-          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\*-setup.exe").FullName
+          $installer = (Get-ChildItem "$env:RUNNER_TEMP\bin\webdriver\*-setup.exe").FullName
           $exe = & scripts/e2e/windows-install.ps1 -Installer $installer -Out out/install | Select-Object -Last 1
           "VFS_EXE=$exe" >> $env:GITHUB_ENV
-      - name: Edge WebDriver matching WebView2
-        run: scripts/e2e/windows-driver.ps1
       - name: Slow-disk runs, quiet and busy (AC-6)
-        run: scripts/e2e/slow-disk.ps1 -Exe $env:VFS_EXE -Cli "$env:RUNNER_TEMP\bin\vfs.exe" -TauriDriver "$env:RUNNER_TEMP\bin\tauri-driver.exe" -Out out/slow-disk
+        run: scripts/e2e/slow-disk.ps1 -Exe $env:VFS_EXE -Cli "$env:RUNNER_TEMP\bin\vfs.exe" -Out out/slow-disk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -194,7 +212,7 @@ jobs:
         run: |
           app=$(ls target/release/bundle/macos/VFS.app/Contents/MacOS/* | head -1)
           "$RUNNER_TEMP/venv/bin/python" scripts/e2e/gen_tree.py "$RUNNER_TEMP/e2e/Archivo" --files 20000 --manifest "$RUNNER_TEMP/e2e/manifest.json"
-          "$RUNNER_TEMP/venv/bin/python" scripts/e2e/journey.py --mode embedded --app "$app" --manifest "$RUNNER_TEMP/e2e/manifest.json" --out out/journey --short
+          "$RUNNER_TEMP/venv/bin/python" scripts/e2e/journey.py --app "$app" --manifest "$RUNNER_TEMP/e2e/manifest.json" --out out/journey --short
       - name: App log
         if: always()
         run: cp -R "$HOME/Library/Logs/app.vfs.desktop" "$HOME/Library/Application Support/app.vfs.desktop/logs" out/ 2>/dev/null || true

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VFS-5 AC-6: measures the installed app on one disk condition, through `tauri-driver`:
+"""VFS-5 AC-6: measures the installed app (webdriver build) on one disk condition:
 first scan (seconds, files/s, memory peak), searches while it runs, in-app query latency after
 it, memory at rest, and the start-up catch-up after changes made while the app was closed.
 
@@ -43,16 +43,13 @@ def scanned(wd):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--app", required=True)
-    ap.add_argument("--driver", default="http://127.0.0.1:4444")
-    ap.add_argument("--tauri-driver", help="start this tauri-driver binary on :4444")
-    ap.add_argument("--native-driver", help="msedgedriver.exe for tauri-driver")
+    ap.add_argument("--port", type=int, default=4445)
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--label", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--between", default="")
     ap.add_argument("--timeout", type=int, default=3600)
     args = ap.parse_args(argv)
-    args.mode = "tauri-driver"
     os.makedirs(args.out, exist_ok=True)
     m = json.load(open(args.manifest, encoding="utf-8"))
     res = {"label": args.label, "tree_files": m["files"], "tree_dirs": m["dirs"]}
@@ -143,7 +140,6 @@ def main(argv=None):
     finally:
         save()
         app.stop()
-        app.stop_driver()
     print(json.dumps({k: res.get(k) for k in ("first_scan", "catch_up")}, default=str)[:2000])
     return 0
 

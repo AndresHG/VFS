@@ -2,10 +2,10 @@
 """VFS-5: drives the real VFS window through the user's journey and records a screenshot of the
 window and of the whole desktop at every step, plus timings and memory, into --out.
 
-Two ways to reach the window:
-  --mode tauri-driver  (Windows) a running `tauri-driver` at --driver launches --app itself.
-  --mode embedded      (macOS)   this script launches --app with TAURI_WEBDRIVER_PORT set; the
-                                 app is a `--features webdriver` build with the embedded server.
+The app is a `--features webdriver` build (on Windows, installed from its NSIS installer): this
+script launches it with TAURI_WEBDRIVER_PORT set and talks W3C WebDriver to the server embedded
+in it. Edge WebDriver through `tauri-driver` could not attach to the release build on a runner
+(see specs/vfs-5-windows-e2e/spec.md, decision 1); the release build gets windows_smoke.py.
 
 The tree comes from gen_tree.py (--manifest). Steps never stop the run: a failed step is
 recorded with its error and screenshot and the next one runs; the exit code is non-zero if any
@@ -65,42 +65,17 @@ class App:
 
     def __init__(self, args):
         self.args = args
-        self.mode = args.mode
         self.proc = None
         self.wd = None
 
-    def start_driver(self):
-        """Starts `tauri-driver` (once) when its path is given. It must run in the same CI step
-        as the journey: the Windows runner ends a step's processes when the step ends."""
-        if getattr(self, "driver_proc", None) or not getattr(self.args, "tauri_driver", None):
-            return
-        log = open(os.path.join(self.args.out, "tauri-driver.log"), "ab")
-        cmd = [self.args.tauri_driver, "--port", "4444"]
-        if self.args.native_driver:
-            cmd += ["--native-driver", self.args.native_driver]
-        self.driver_proc = subprocess.Popen(cmd, stdout=log, stderr=log)
-
-    def stop_driver(self):
-        p = getattr(self, "driver_proc", None)
-        if p:
-            p.terminate()
-            self.driver_proc = None
-
     def start(self):
         t0 = now()
-        if self.mode == "tauri-driver":
-            self.start_driver()
-            self.wd = WebDriver(self.args.driver)
-            self.wd.wait_ready(60)
-            self.wd.start({"browserName": "wry",
-                           "tauri:options": {"application": self.args.app}})
-        else:
-            env = dict(os.environ, TAURI_WEBDRIVER_PORT=str(self.args.port))
-            log = open(os.path.join(self.args.out, "app-stdout.log"), "ab")
-            self.proc = subprocess.Popen([self.args.app], env=env, stdout=log, stderr=log)
-            self.wd = WebDriver(f"http://127.0.0.1:{self.args.port}")
-            self.wd.wait_ready(90)
-            self.wd.start({})
+        env = dict(os.environ, TAURI_WEBDRIVER_PORT=str(self.args.port))
+        log = open(os.path.join(self.args.out, "app-stdout.log"), "ab")
+        self.proc = subprocess.Popen([self.args.app], env=env, stdout=log, stderr=log)
+        self.wd = WebDriver(f"http://127.0.0.1:{self.args.port}")
+        self.wd.wait_ready(90)
+        self.wd.start({})
         self.wd.set_script_timeout(120_000)
         # The page is ready when main.js has rendered the status line.
         wait_for(lambda: self.wd.js(
@@ -113,16 +88,13 @@ class App:
         """The app process and its descendants (WebView2 on Windows)."""
         import psutil
         roots = []
-        if self.proc:
-            roots = [psutil.Process(self.proc.pid)]
-        else:
-            exe = os.path.normcase(os.path.abspath(self.args.app))
-            for p in psutil.process_iter(["exe"]):
-                try:
-                    if p.info["exe"] and os.path.normcase(p.info["exe"]) == exe:
-                        roots.append(p)
-                except Exception:
-                    pass
+        exe = os.path.normcase(os.path.abspath(self.args.app))
+        for p in psutil.process_iter(["exe"]):
+            try:
+                if p.info["exe"] and os.path.normcase(p.info["exe"]) == exe:
+                    roots.append(p)
+            except Exception:
+                pass
         out = []
         for r in roots:
             out.append(r)
@@ -181,8 +153,7 @@ class App:
             except subprocess.TimeoutExpired:
                 self.proc.kill()
             self.proc = None
-        # tauri-driver closes the app with the session; make sure nothing is left running.
-        for p in self.pids():
+        for p in self.pids():  # nothing of the app may outlive a stop
             try:
                 p.terminate()
             except Exception:
@@ -324,9 +295,9 @@ class Journey:
     def s_first_run(self):
         secs = self.app.start()
         self.metrics["launch_to_ui_s"] = round(secs, 2)
-        title = self.text_of("#empty")
-        if "Añada una carpeta" not in nfc(title):
-            raise AssertionError(f"first-run empty state not shown: {title!r}")
+        # The empty state renders after the first list_roots answer.
+        wait_for(lambda: "Añada una carpeta" in nfc(self.text_of("#empty")), 30,
+                 what="first-run empty state")
         return {"launch_to_ui_s": round(secs, 2), "status": self.text_of("#status-text"),
                 "viewport": self.wd.js("return [innerWidth, innerHeight, devicePixelRatio]")}
 
@@ -717,11 +688,7 @@ def check_file_manager(target, expect, timeout):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--mode", choices=["tauri-driver", "embedded"], required=True)
-    ap.add_argument("--app", required=True, help="path to the app binary")
-    ap.add_argument("--driver", default="http://127.0.0.1:4444")
-    ap.add_argument("--tauri-driver", help="start this tauri-driver binary on :4444")
-    ap.add_argument("--native-driver", help="msedgedriver.exe for tauri-driver")
+    ap.add_argument("--app", required=True, help="path to the app binary (webdriver build)")
     ap.add_argument("--port", type=int, default=4445, help="embedded server port")
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--out", required=True)
@@ -735,7 +702,6 @@ def main(argv=None):
         return j.run()
     finally:
         j.app.stop()
-        j.app.stop_driver()
         j.save()
         shutil.copy(args.manifest, os.path.join(args.out, "manifest.json"))
 

@@ -5,7 +5,7 @@
   remounting it; "busy" adds a competing workload on the same disk (DiskSpd at a capped rate,
   plus contention.py emulating a sync client and an on-access scanner).
 
-  slow-disk.ps1 -Action run -Exe <installed app exe> -Cli <vfs.exe> -Out <dir>
+  slow-disk.ps1 -Action run -Exe <installed exe of the webdriver build> -Cli <vfs.exe> -Out <dir>
   slow-disk.ps1 -Action cycle [-Busy]   # used between runs: stop load, remount, restart load
 
   Nothing here throttles I/O or adds seek latency: no tool does that on a hosted runner
@@ -15,7 +15,6 @@ param(
   [ValidateSet('run', 'cycle')] [string] $Action = 'run',
   [string] $Exe = '',
   [string] $Cli = '',
-  [string] $TauriDriver = '',
   [string] $Out = '',
   [switch] $Busy,
   [int] $Files = 100000,
@@ -123,8 +122,7 @@ foreach ($label in @('quiet', 'busy')) {
   Cycle $busy
   $between = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Action cycle" + $(if ($busy) { ' -Busy' } else { '' })
   Log "measure $label"
-  & $py (Join-Path $here 'measure.py') --app $Exe --manifest 'V:\manifest.json' --label $label --out $Out --between $between `
-    --tauri-driver $TauriDriver --native-driver $env:MSEDGEDRIVER
+  & $py (Join-Path $here 'measure.py') --app $Exe --manifest 'V:\manifest.json' --label $label --out $Out --between $between
   if ($LASTEXITCODE) { $failed += "measure-$label" }
   Copy-Item -Recurse -Force 'V:\appdata\logs' (Join-Path $Out "app-logs-$label") -ErrorAction SilentlyContinue
   Get-ChildItem 'V:\appdata' -Filter 'index.db*' | Select-Object Name, Length |
