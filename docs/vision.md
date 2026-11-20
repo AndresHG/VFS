@@ -28,10 +28,10 @@ all-in-one product a non-technical person can use without assembling tools:
 4. **Grow** it: add things over time (a note, a link, a list, a new source) and have them
    join the same search, answers and graph.
 
-The real end user thinks this way already. Her requests are by topic across sources, not
-by file name: "everything I have about fatty liver", "recipes with grated coconut and
-almond flour", "photos of the septic tank, in chronological order". Name and path search
-does not answer those; content, concept and cross-source search do.
+People already look for things this way: by topic across sources, not by file name
+("everything I have about a health condition", "recipes that use two given ingredients",
+"photos of one place, in chronological order"). Name and path search does not answer
+those; content, concept and cross-source search do.
 
 ## Principles that hold as the scope grows
 
@@ -55,7 +55,7 @@ does not answer those; content, concept and cross-source search do.
 
 ## Future lines of work
 
-Grouped by theme, not ordered. The decided order of the lines that came from the end user's
+Grouped by theme, not ordered. The decided order of the lines that came from user
 feedback, with costs and research, is in
 [`docs/research/future-lines-roadmap.md`](research/future-lines-roadmap.md) and
 [`docs/research/future-lines.md`](research/future-lines.md); this page adds the longer-term
