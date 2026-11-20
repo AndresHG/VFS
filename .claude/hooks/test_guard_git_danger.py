@@ -148,6 +148,38 @@ class HeredocTest(unittest.TestCase):
         decision, _ = self.decision("cat <<EOF | sh\ngh pr merge 95 --auto\nEOF")
         self.assertEqual(decision, "deny")
 
+    def test_commit_message_mentioning_a_shell_stays_data(self):
+        decision, _ = self.decision(
+            "git commit -m \"$(cat <<'EOF'\nrun it with bash or sh\ngit stash pop\nEOF\n)\"")
+        self.assertIsNone(decision)
+
+    def test_commit_file_from_stdin_heredoc_is_ignored(self):
+        decision, _ = self.decision("git commit -F - <<'EOF'\ngit stash pop\nEOF")
+        self.assertIsNone(decision)
+
+    def test_heredoc_substitution_handed_to_eval_is_analyzed(self):
+        decision, _ = self.decision('eval "$(cat <<EOF\ngit stash pop\nEOF\n)"')
+        self.assertEqual(decision, "deny")
+
+    def test_heredoc_sourced_from_stdin_is_analyzed(self):
+        decision, _ = self.decision("source /dev/stdin <<EOF\ngit stash pop\nEOF")
+        self.assertEqual(decision, "deny")
+
+    def test_substitutions_in_unquoted_heredoc_body_are_analyzed(self):
+        decision, _ = self.decision("cat <<EOF\n$(git push --force origin main)\nEOF")
+        self.assertEqual(decision, "deny")
+        decision, _ = self.decision("cat <<EOF\n`git stash pop`\nEOF")
+        self.assertEqual(decision, "deny")
+
+    def test_substitutions_in_quoted_heredoc_body_stay_data(self):
+        for delim in ("'EOF'", '"EOF"', "\\EOF"):
+            decision, _ = self.decision(f"cat <<{delim}\n$(git stash pop)\nEOF")
+            self.assertIsNone(decision, delim)
+
+    def test_here_string_is_not_a_heredoc(self):
+        decision, _ = self.decision("cat <<< x\ngit stash")
+        self.assertEqual(decision, "deny")
+
     def test_quoted_double_angle_is_not_a_heredoc(self):
         decision, _ = self.decision('echo "<<EOF"\ngit stash')
         self.assertEqual(decision, "deny")
