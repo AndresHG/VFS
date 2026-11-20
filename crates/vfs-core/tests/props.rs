@@ -43,10 +43,13 @@ fn config() -> ProptestConfig {
 }
 
 /// A fresh index in a temporary directory plus a writer connection.
+/// Fields drop in order: the index closes before its directory is deleted, which Windows
+/// refuses for open files (`TempDir` ignores the error, and every case leaked an index
+/// until the CI runner's disk was full).
 struct Ix {
-    _dir: TempDir,
     vfs: Vfs,
     conn: Connection,
+    _dir: TempDir,
 }
 
 impl Ix {

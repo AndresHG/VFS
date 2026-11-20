@@ -43,11 +43,13 @@ pub fn scan_limit() -> Duration {
 }
 
 /// One index with one or more roots under a private temporary directory.
+/// Fields drop in order: the index closes before the directories are deleted, which
+/// Windows refuses for open files (`TempDir` ignores the error and leaks them).
 pub struct Env {
-    _db_dir: tempfile::TempDir,
-    pub tmp: tempfile::TempDir,
-    pub db_path: PathBuf,
     pub vfs: Vfs,
+    pub db_path: PathBuf,
+    pub tmp: tempfile::TempDir,
+    _db_dir: tempfile::TempDir,
 }
 
 impl Env {
