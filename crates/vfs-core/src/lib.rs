@@ -75,7 +75,7 @@ impl Vfs {
         Vfs::open_with(db_path, SearchConfig::default())
     }
 
-    /// Opens or creates the index and applies migrations; an unreadable index is moved to
+    /// Opens or creates the index and applies migrations; a damaged index is moved to
     /// `index.db.bad` and rebuilt from its roots, and a session starts (`db::open_session`).
     /// Starts no thread.
     pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {

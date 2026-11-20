@@ -146,7 +146,10 @@ fn soak_churn_under_the_app() {
     let half = Duration::from_secs(secs / 2);
     let peak =
         |f: &dyn Fn(Duration) -> bool| samples.iter().filter(|(t, _)| f(*t)).map(|(_, r)| *r).max();
-    if let (Some(first), Some(second)) = (peak(&|t| t <= half), peak(&|t| t > half)) {
+    let (Some(first), Some(second)) = (peak(&|t| t <= half), peak(&|t| t > half)) else {
+        panic!("resident memory could not be sampled in both halves of the soak");
+    };
+    {
         eprintln!(
             "soak: {steps} churn steps in {secs} s; peak RSS {} MiB then {} MiB",
             first >> 20,
