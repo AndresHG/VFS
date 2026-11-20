@@ -1,0 +1,177 @@
+//! Keeps the frontend's closed sets (`apps/desktop/ui/contract.js`) in step with the Rust
+//! enums whose serde values cross the IPC boundary (VFS-1 X1, AC-12): a variant added,
+//! renamed or removed on either side fails here.
+
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+use vfs_core::api::RevealOutcome;
+use vfs_core::{DriveKind, Error, FileKind, IndexerState, MatchKind, RootStatus, TruncatedBy};
+
+/// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
+/// name -> values in source order.
+fn js_sets(src: &str) -> BTreeMap<String, Vec<String>> {
+    let mut sets = BTreeMap::new();
+    for chunk in src.split("export const ").skip(1) {
+        let Some((name, rest)) = chunk.split_once(" = Object.freeze({") else {
+            continue;
+        };
+        let body = &rest[..rest.find("})").expect("unclosed set")];
+        let values = body
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect();
+        sets.insert(name.trim().to_string(), values);
+    }
+    sets
+}
+
+fn serde_names<T: Serialize>(all: &[T]) -> Vec<String> {
+    all.iter()
+        .map(|v| match serde_json::to_value(v).unwrap() {
+            serde_json::Value::String(s) => s,
+            other => panic!("not a string enum: {other}"),
+        })
+        .collect()
+}
+
+/// The match arms have no wildcard, so a new variant stops this from compiling until it is
+/// listed here (and then in contract.js).
+fn all_file_kinds() -> Vec<FileKind> {
+    use FileKind::*;
+    let all = vec![Other, Document, Photo, Video, Audio, Folder];
+    for k in &all {
+        match k {
+            Other | Document | Photo | Video | Audio | Folder => {}
+        }
+    }
+    all
+}
+
+fn all_root_statuses() -> Vec<RootStatus> {
+    use RootStatus::*;
+    let all = vec![Pending, Scanning, Ready, Unavailable, Removing];
+    for s in &all {
+        match s {
+            Pending | Scanning | Ready | Unavailable | Removing => {}
+        }
+    }
+    all
+}
+
+fn all_indexer_states() -> Vec<IndexerState> {
+    use IndexerState::*;
+    let all = vec![Idle, Scanning, Paused];
+    for s in &all {
+        match s {
+            Idle | Scanning | Paused => {}
+        }
+    }
+    all
+}
+
+fn all_truncations() -> Vec<TruncatedBy> {
+    use TruncatedBy::*;
+    let all = vec![Cap, Deadline];
+    for t in &all {
+        match t {
+            Cap | Deadline => {}
+        }
+    }
+    all
+}
+
+fn all_match_kinds() -> Vec<MatchKind> {
+    use MatchKind::*;
+    let all = vec![Name, Path, Fuzzy];
+    for m in &all {
+        match m {
+            Name | Path | Fuzzy => {}
+        }
+    }
+    all
+}
+
+fn all_drive_kinds() -> Vec<DriveKind> {
+    use DriveKind::*;
+    let all = vec![Local, Network, Removable, Unknown];
+    for d in &all {
+        match d {
+            Local | Network | Removable | Unknown => {}
+        }
+    }
+    all
+}
+
+fn all_reveal_outcomes() -> Vec<RevealOutcome> {
+    use RevealOutcome::*;
+    let all = vec![Revealed, OpenedParent];
+    for r in &all {
+        match r {
+            Revealed | OpenedParent => {}
+        }
+    }
+    all
+}
+
+fn all_error_codes() -> Vec<String> {
+    let all = vec![
+        Error::NotFound(String::new()),
+        Error::NotADirectory(String::new()),
+        Error::OverlappingRoot(String::new()),
+        Error::Unavailable(String::new()),
+        Error::SchemaTooNew,
+        Error::Db(rusqlite::Error::InvalidQuery),
+        Error::Io(std::io::Error::other("x")),
+    ];
+    for e in &all {
+        match e {
+            Error::NotFound(_)
+            | Error::NotADirectory(_)
+            | Error::OverlappingRoot(_)
+            | Error::Unavailable(_)
+            | Error::SchemaTooNew
+            | Error::Db(_)
+            | Error::Io(_) => {}
+        }
+    }
+    all.iter().map(|e| e.code().to_string()).collect()
+}
+
+/// VFS-1 X1, AC-12: every set of contract.js equals the serde values of its Rust enum, and
+/// contract.js has no set this test does not check (besides the UI's own `UiErrorCode`).
+#[test]
+fn contract_js_matches_the_rust_enums() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/contract.js");
+    let sets = js_sets(&std::fs::read_to_string(path).unwrap());
+    let expected: BTreeMap<String, Vec<String>> = [
+        ("FileKind", serde_names(&all_file_kinds())),
+        ("RootStatus", serde_names(&all_root_statuses())),
+        ("IndexerState", serde_names(&all_indexer_states())),
+        ("TruncatedBy", serde_names(&all_truncations())),
+        ("MatchKind", serde_names(&all_match_kinds())),
+        ("DriveKind", serde_names(&all_drive_kinds())),
+        ("RevealOutcome", serde_names(&all_reveal_outcomes())),
+        ("ErrorCode", all_error_codes()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    for (name, values) in &expected {
+        let mut js = sets
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} missing"))
+            .clone();
+        let mut rust = values.clone();
+        js.sort();
+        rust.sort();
+        assert_eq!(js, rust, "{name}");
+    }
+    let extra: Vec<&String> = sets
+        .keys()
+        .filter(|k| !expected.contains_key(*k) && *k != "UiErrorCode")
+        .collect();
+    assert!(extra.is_empty(), "unchecked sets in contract.js: {extra:?}");
+}

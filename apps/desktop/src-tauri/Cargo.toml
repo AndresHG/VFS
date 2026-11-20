@@ -20,6 +20,7 @@ vfs-core.workspace = true
 serde_json.workspace = true
 log.workspace = true
 dunce.workspace = true
+tauri-plugin-log = "2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
@@ -27,3 +28,5 @@ tauri-plugin-single-instance = "2"
 [dev-dependencies]
 tauri = { version = "2.12", features = ["test"] }
 tempfile.workspace = true
+serde.workspace = true
+rusqlite.workspace = true

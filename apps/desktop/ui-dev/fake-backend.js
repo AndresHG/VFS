@@ -16,6 +16,13 @@
 // opened_parent. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
+import {
+  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
+} from '../ui/contract.js';
+
+/** `?scenario=` values (see the header). */
+const Scenario = Object.freeze({ DEFAULT: '', EMPTY: 'empty', FIRST_SCAN: 'first-scan' });
+
 const TOTAL_FILES = 50_000;
 const NOW = Math.floor(Date.now() / 1000);
 const DAY = 86_400;
@@ -56,11 +63,11 @@ const songs = ['Españoleta', 'Entre dos aguas', 'Cántame', 'La bien pagá', 'M
 const singers = ['Joan Manuel Serrat', 'Paco de Lucía', 'Rocío Jurado', 'Raphael', 'Mocedades', 'Cecilia', 'Jarcha'];
 
 function makeRoots(scenario) {
-  const firstScan = scenario === 'first-scan';
+  const firstScan = scenario === Scenario.FIRST_SCAN;
   return [
-    { id: 1, path: 'C:\\Users\\Carmen\\Documents', status: firstScan ? 'scanning' : 'ready', files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 3 * DAY, weight: 0.3 },
-    { id: 2, path: 'D:\\Archivo familiar', status: 'scanning', files: 0, dirs: 0, lastFullScan: null, weight: 0.6 },
-    { id: 3, path: 'E:\\Copias antiguas', status: firstScan ? 'scanning' : 'unavailable', files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 400 * DAY, weight: 0.1, drive: 'removable' },
+    { id: 1, path: 'C:\\Users\\Carmen\\Documents', status: firstScan ? RootStatus.SCANNING : RootStatus.READY, files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 3 * DAY, weight: 0.3 },
+    { id: 2, path: 'D:\\Archivo familiar', status: RootStatus.SCANNING, files: 0, dirs: 0, lastFullScan: null, weight: 0.6 },
+    { id: 3, path: 'E:\\Copias antiguas', status: firstScan ? RootStatus.SCANNING : RootStatus.UNAVAILABLE, files: 0, dirs: 0, lastFullScan: firstScan ? null : NOW - 400 * DAY, weight: 0.1, drive: DriveKind.REMOVABLE },
   ];
 }
 
@@ -71,7 +78,7 @@ function makeEntry(root, R) {
     const sub = R.pick(['Banco', 'Casa', `Hacienda\\${y}`, 'Médico', 'Seguros', 'Recetas', 'Coche', `Facturas\\${y}\\${R.pick(months)}`, 'Varios']);
     const base = R.pick(docs);
     const name = `${base}${R.rand() < 0.5 ? ` ${R.pick(months)} ${y}` : ` ${y}`}.${R.pick(docExt)}`;
-    return { dir: `${root.path}\\${sub}`, name, kind: 'document', size: R.int(8_000, 4_000_000), modified: t };
+    return { dir: `${root.path}\\${sub}`, name, kind: FileKind.DOCUMENT, size: R.int(8_000, 4_000_000), modified: t };
   }
   const r = R.rand();
   if (r < 0.62) {
@@ -82,20 +89,20 @@ function makeEntry(root, R) {
       : `\\Fotos\\${y}\\${evName}`;
     const ext = R.pick(['JPG', 'JPG', 'jpg', 'jpeg', 'png', 'HEIC']);
     const name = R.rand() < 0.6 ? `IMG_${String(R.int(1, 9999)).padStart(4, '0')}.${ext}` : `${evName} ${R.int(1, 300)}.${ext}`;
-    return { dir: root.path + deep, name, kind: 'photo', size: R.int(400_000, 9_000_000), modified: t };
+    return { dir: root.path + deep, name, kind: FileKind.PHOTO, size: R.int(400_000, 9_000_000), modified: t };
   }
   if (r < 0.75) {
     const ev = R.pick(events);
-    return { dir: `${root.path}\\Vídeos\\${y}`, name: `${ev} ${R.pick(places)}.${R.pick(['mp4', 'MOV', 'avi'])}`, kind: 'video', size: R.int(20_000_000, 4_500_000_000), modified: t };
+    return { dir: `${root.path}\\Vídeos\\${y}`, name: `${ev} ${R.pick(places)}.${R.pick(['mp4', 'MOV', 'avi'])}`, kind: FileKind.VIDEO, size: R.int(20_000_000, 4_500_000_000), modified: t };
   }
   if (r < 0.9) {
     const singer = R.pick(singers);
-    return { dir: `${root.path}\\Música\\${singer}`, name: `${String(R.int(1, 14)).padStart(2, '0')} - ${R.pick(songs)}.mp3`, kind: 'audio', size: R.int(2_000_000, 12_000_000), modified: t };
+    return { dir: `${root.path}\\Música\\${singer}`, name: `${String(R.int(1, 14)).padStart(2, '0')} - ${R.pick(songs)}.mp3`, kind: FileKind.AUDIO, size: R.int(2_000_000, 12_000_000), modified: t };
   }
   if (r < 0.97) {
-    return { dir: `${root.path}\\Documentos de ${R.pick(people)}`, name: `${R.pick(docs)} ${y}.${R.pick(docExt)}`, kind: 'document', size: R.int(8_000, 3_000_000), modified: t };
+    return { dir: `${root.path}\\Documentos de ${R.pick(people)}`, name: `${R.pick(docs)} ${y}.${R.pick(docExt)}`, kind: FileKind.DOCUMENT, size: R.int(8_000, 3_000_000), modified: t };
   }
-  return { dir: `${root.path}\\Varios`, name: `${R.pick(['copia', 'backup', 'programa', 'datos'])}_${R.int(1, 999)}.${R.pick(['zip', 'exe', 'dat', 'iso'])}`, kind: 'other', size: R.int(1_000, 900_000_000), modified: t };
+  return { dir: `${root.path}\\Varios`, name: `${R.pick(['copia', 'backup', 'programa', 'datos'])}_${R.int(1, 999)}.${R.pick(['zip', 'exe', 'dat', 'iso'])}`, kind: FileKind.OTHER, size: R.int(1_000, 900_000_000), modified: t };
 }
 
 function buildCorpus(roots, R) {
@@ -118,7 +125,7 @@ function buildCorpus(roots, R) {
       const cut = d.lastIndexOf('\\');
       const parent = d.slice(0, cut);
       const name = d.slice(cut + 1);
-      dirs.set(d, { id: dirs.size + 1, rootId: root.id, seq, isDir: true, dir: parent, name, kind: 'folder', size: 0, modified: e.modified, fName: fold(name), fDir: fold(parent) });
+      dirs.set(d, { id: dirs.size + 1, rootId: root.id, seq, isDir: true, dir: parent, name, kind: FileKind.FOLDER, size: 0, modified: e.modified, fName: fold(name), fDir: fold(parent) });
       d = parent;
     }
   }
@@ -143,11 +150,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 export function createFakeBackend(params) {
-  const scenario = params.get('scenario') || '';
+  const scenario = params.get('scenario') || Scenario.DEFAULT;
   const slow = params.has('slow');
-  let roots = scenario === 'empty' ? [] : makeRoots(scenario);
+  let roots = scenario === Scenario.EMPTY ? [] : makeRoots(scenario);
   const R = makeRandom(20261120);
-  const corpus = buildCorpus(makeRoots(''), R);
+  const corpus = buildCorpus(makeRoots(Scenario.DEFAULT), R);
   const all = [...corpus.files, ...corpus.dirs];
   const totalOf = (id) => corpus.counts.get(id) || 0;
 
@@ -156,8 +163,8 @@ export function createFakeBackend(params) {
   const pending = new Map();
   for (const r of roots) {
     const total = totalOf(r.id);
-    done.set(r.id, r.status === 'scanning' ? Math.floor(total * (scenario === 'first-scan' ? 0.05 : 0.35)) : total);
-    pending.set(r.id, r.status === 'scanning' ? 900 : 0);
+    done.set(r.id, r.status === RootStatus.SCANNING ? Math.floor(total * (scenario === Scenario.FIRST_SCAN ? 0.05 : 0.35)) : total);
+    pending.set(r.id, r.status === RootStatus.SCANNING ? 900 : 0);
   }
   let paused = false;
   const progressCbs = new Set();
@@ -169,24 +176,24 @@ export function createFakeBackend(params) {
 
   const visible = (e) => {
     const r = roots.find((x) => x.id === e.rootId);
-    return r && r.status !== 'removing' && e.seq < done.get(r.id);
+    return r && r.status !== RootStatus.REMOVING && e.seq < done.get(r.id);
   };
 
   function rootView(r) {
     const n = done.get(r.id) || 0;
-    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? 'local' };
+    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? DriveKind.LOCAL };
   }
 
   function progress() {
-    const scanning = roots.some((r) => r.status === 'scanning' || r.status === 'pending');
+    const scanning = roots.some((r) => r.status === RootStatus.SCANNING || r.status === RootStatus.PENDING);
     return {
-      state: paused && scanning ? 'paused' : scanning ? 'scanning' : 'idle',
+      state: paused && scanning ? IndexerState.PAUSED : scanning ? IndexerState.SCANNING : IndexerState.IDLE,
       filesIndexed: roots.reduce((s, r) => s + (done.get(r.id) || 0), 0),
       roots: roots.map((r) => ({
         rootId: r.id, path: r.path, status: r.status,
         dirsDone: Math.round((done.get(r.id) || 0) / 22), dirsPending: pending.get(r.id) || 0,
         filesIndexed: done.get(r.id) || 0,
-        currentDir: r.status === 'scanning' ? `${r.path}\\Fotos\\2004` : null,
+        currentDir: r.status === RootStatus.SCANNING ? `${r.path}\\Fotos\\2004` : null,
       })),
     };
   }
@@ -195,15 +202,15 @@ export function createFakeBackend(params) {
     let changed = false;
     if (!paused) {
       for (const r of roots) {
-        if (r.status === 'pending') { r.status = 'scanning'; changed = true; }
-        if (r.status !== 'scanning') continue;
+        if (r.status === RootStatus.PENDING) { r.status = RootStatus.SCANNING; changed = true; }
+        if (r.status !== RootStatus.SCANNING) continue;
         const total = totalOf(r.id) || 4000;
         // Root 2 crawls slowly so the default page keeps showing a scan in progress.
-        const step = r.id === 2 && scenario !== 'first-scan' ? 40 : 160;
+        const step = r.id === 2 && scenario !== Scenario.FIRST_SCAN ? 40 : 160;
         done.set(r.id, Math.min(total, (done.get(r.id) || 0) + step));
         pending.set(r.id, Math.max(0, (pending.get(r.id) || 0) - (step > 100 ? 3 : 1)));
         if (done.get(r.id) >= total) {
-          r.status = 'ready'; r.lastFullScan = Math.floor(Date.now() / 1000); pending.set(r.id, 0);
+          r.status = RootStatus.READY; r.lastFullScan = Math.floor(Date.now() / 1000); pending.set(r.id, 0);
         }
         changed = true;
       }
@@ -230,19 +237,19 @@ export function createFakeBackend(params) {
     const out = [];
     for (const e of all) {
       if (!pass(e)) continue;
-      if (!ts.length) { out.push({ e, m: 'name', score: 0 }); continue; }
+      if (!ts.length) { out.push({ e, m: MatchKind.NAME, score: 0 }); continue; }
       let inName = 0; let ok = true;
       for (const t of ts) {
         if (e.fName.includes(t)) inName++;
         else if (!e.fDir.includes(t)) { ok = false; break; }
       }
-      if (ok) out.push({ e, m: inName === ts.length ? 'name' : 'path', score: inName === ts.length ? 0 : 1 });
+      if (ok) out.push({ e, m: inName === ts.length ? MatchKind.NAME : MatchKind.PATH, score: inName === ts.length ? 0 : 1 });
     }
     if (!out.length && ts.length) {
       for (const e of all) {
         if (!pass(e)) continue;
         const words = e.fName.split(/[^\p{L}\p{N}]+/u);
-        if (ts.every((t) => t.length >= 4 && words.some((w) => withinOneEdit(t, w)))) out.push({ e, m: 'fuzzy', score: 2 });
+        if (ts.every((t) => t.length >= 4 && words.some((w) => withinOneEdit(t, w)))) out.push({ e, m: MatchKind.FUZZY, score: 2 });
       }
     }
     if (ts.length) out.sort((a, b) => a.score - b.score || (b.e.isDir - a.e.isDir) || a.e.name.length - b.e.name.length);
@@ -265,17 +272,17 @@ export function createFakeBackend(params) {
       await sleep(120);
       const norm = (p) => fold(p).replace(/\/+$/, '');
       const clash = roots.find((r) => norm(path) === norm(r.path) || norm(path).startsWith(norm(r.path) + '/') || norm(r.path).startsWith(norm(path) + '/'));
-      if (clash) throw { code: 'overlapping_root', message: `overlaps an indexed folder: ${clash.path}` };
-      const drive = path.startsWith('\\\\') ? 'network' : 'local';
-      const r = { id: 100 + roots.length, path, status: 'pending', files: 0, dirs: 0, lastFullScan: null, drive };
+      if (clash) throw { code: ErrorCode.OVERLAPPING_ROOT, message: `overlaps an indexed folder: ${clash.path}` };
+      const drive = path.startsWith('\\\\') ? DriveKind.NETWORK : DriveKind.LOCAL;
+      const r = { id: 100 + roots.length, path, status: RootStatus.PENDING, files: 0, dirs: 0, lastFullScan: null, drive };
       roots.push(r); done.set(r.id, 0); pending.set(r.id, 40);
       return rootView(r);
     },
 
     async removeRoot(id) {
       const r = roots.find((x) => x.id === id);
-      if (!r) throw { code: 'not_found', message: `not found: ${id}` };
-      r.status = 'removing';
+      if (!r) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${id}` };
+      r.status = RootStatus.REMOVING;
       generation++;
       setTimeout(() => { roots = roots.filter((x) => x !== r); generation++; for (const cb of changedCbs) cb(); }, 1500);
     },
@@ -284,10 +291,10 @@ export function createFakeBackend(params) {
       const text = q.text || '';
       const f = q.filters || {};
       await sleep(slow ? R.int(400, 1200) : R.int(30, 220));
-      if (fold(text).includes('fallo')) throw { code: 'db', message: 'database is locked' };
+      if (fold(text).includes('fallo')) throw { code: ErrorCode.DB, message: 'database is locked' };
       if (fold(text).includes('tardar')) {
         await sleep(900);
-        return { hits: [], total: 0, truncated: true, truncatedBy: 'deadline', elapsedMs: 1000 };
+        return { hits: [], total: 0, truncated: true, truncatedBy: TruncatedBy.DEADLINE, elapsedMs: 1000 };
       }
       const key = JSON.stringify([text, f, generation]);
       if (!cache || cache.key !== key) cache = { key, list: rank(text, f) };
@@ -299,22 +306,22 @@ export function createFakeBackend(params) {
       const hits = list.slice(offset, Math.min(total, offset + limit)).map(({ e, m }) => ({
         id: e.id, name: e.name, dir: e.dir, kind: e.kind, size: e.size, modified: e.modified, matched: m, isDir: e.isDir,
       }));
-      return { hits, total, truncated: capped, truncatedBy: capped ? 'cap' : null, elapsedMs: R.int(8, 90) };
+      return { hits, total, truncated: capped, truncatedBy: capped ? TruncatedBy.CAP : null, elapsedMs: R.int(8, 90) };
     },
 
     async reveal(id, isDir) {
       await sleep(80);
       const e = (isDir ? corpus.dirs : corpus.files).find((x) => x.id === id);
-      if (!e) throw { code: 'not_found', message: `not found: ${id}` };
+      if (!e) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${id}` };
       const r = roots.find((x) => x.id === e.rootId);
-      if (r?.status === 'unavailable') throw { code: 'unavailable', message: `folder unavailable: ${r.path}` };
-      if (e.name.includes('borrado')) throw { code: 'not_found', message: `not found: ${e.name}` };
-      return (e.dir.length + e.name.length + 1 > 259) ? 'opened_parent' : 'revealed';
+      if (r?.status === RootStatus.UNAVAILABLE) throw { code: ErrorCode.UNAVAILABLE, message: `folder unavailable: ${r.path}` };
+      if (e.name.includes('borrado')) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${e.name}` };
+      return (e.dir.length + e.name.length + 1 > 259) ? RevealOutcome.OPENED_PARENT : RevealOutcome.REVEALED;
     },
 
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {
-      for (const r of roots) if ((id == null || r.id === id) && r.status === 'ready') { r.status = 'scanning'; pending.set(r.id, 30); }
+      for (const r of roots) if ((id == null || r.id === id) && r.status === RootStatus.READY) { r.status = RootStatus.SCANNING; pending.set(r.id, 30); }
     },
     async setPaused(p) { paused = p; },
     async onProgress(cb) { progressCbs.add(cb); return () => progressCbs.delete(cb); },

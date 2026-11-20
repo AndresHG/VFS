@@ -1,6 +1,9 @@
 // Every user-visible string (VFS-1 R9). Spanish, impersonal/usted, plain words: never
 // "indexar", "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values.
 
+import { DateChoice, SizeChoice } from './choices.js';
+import { ErrorCode, FileKind } from './contract.js';
+
 export const S = {
   searchLabel: 'Buscar por nombre de archivo o de carpeta',
   searchPlaceholder: 'Por ejemplo: escritura notaría',
@@ -20,21 +23,24 @@ export const S = {
   rangeInverted: 'La fecha «Desde» es posterior a «Hasta».',
 
   kindsPlural: {
-    document: 'Documentos', photo: 'Fotos', video: 'Vídeos',
-    audio: 'Audio', folder: 'Carpetas', other: 'Otros',
+    [FileKind.DOCUMENT]: 'Documentos', [FileKind.PHOTO]: 'Fotos', [FileKind.VIDEO]: 'Vídeos',
+    [FileKind.AUDIO]: 'Audio', [FileKind.FOLDER]: 'Carpetas', [FileKind.OTHER]: 'Otros',
   },
   kindSingular: {
-    document: 'Documento', photo: 'Foto', video: 'Vídeo',
-    audio: 'Audio', folder: 'Carpeta', other: 'Otro',
+    [FileKind.DOCUMENT]: 'Documento', [FileKind.PHOTO]: 'Foto', [FileKind.VIDEO]: 'Vídeo',
+    [FileKind.AUDIO]: 'Audio', [FileKind.FOLDER]: 'Carpeta', [FileKind.OTHER]: 'Otro',
   },
 
+  // Option order is display order.
   dateOptions: {
-    any: 'Cualquier fecha', week: 'Últimos 7 días', month: 'Últimos 30 días',
-    year: 'Último año', custom: 'Elegir fechas…',
+    [DateChoice.ANY]: 'Cualquier fecha', [DateChoice.WEEK]: 'Últimos 7 días',
+    [DateChoice.MONTH]: 'Últimos 30 días', [DateChoice.YEAR]: 'Último año',
+    [DateChoice.CUSTOM]: 'Elegir fechas…',
   },
   sizeOptions: {
-    any: 'Cualquier tamaño', small: 'Menos de 1 MB', medium: 'De 1 MB a 100 MB',
-    large: 'De 100 MB a 1 GB', huge: 'Más de 1 GB',
+    [SizeChoice.ANY]: 'Cualquier tamaño', [SizeChoice.SMALL]: 'Menos de 1 MB',
+    [SizeChoice.MEDIUM]: 'De 1 MB a 100 MB', [SizeChoice.LARGE]: 'De 100 MB a 1 GB',
+    [SizeChoice.HUGE]: 'Más de 1 GB',
   },
   folderAll: 'Todas las carpetas',
   folderPick: 'Elegir otra carpeta…',
@@ -123,16 +129,16 @@ export const S = {
   errors: {
     generic: 'Ha ocurrido un error. Inténtelo de nuevo.',
     reveal: {
-      not_found: 'El archivo ya no está en esa ubicación.',
-      unavailable: 'Esa carpeta no está disponible ahora. Compruebe que el disco está conectado.',
+      [ErrorCode.NOT_FOUND]: 'El archivo ya no está en esa ubicación.',
+      [ErrorCode.UNAVAILABLE]: 'Esa carpeta no está disponible ahora. Compruebe que el disco está conectado.',
     },
     addRoot: {
-      not_found: 'No se encuentra esa carpeta.',
-      not_a_directory: 'Eso no es una carpeta. Elija una carpeta.',
-      unavailable: 'No se puede abrir esa carpeta. Compruebe que el disco está conectado.',
+      [ErrorCode.NOT_FOUND]: 'No se encuentra esa carpeta.',
+      [ErrorCode.NOT_A_DIRECTORY]: 'Eso no es una carpeta. Elija una carpeta.',
+      [ErrorCode.UNAVAILABLE]: 'No se puede abrir esa carpeta. Compruebe que el disco está conectado.',
     },
     any: {
-      schema_too_new: 'Los datos de búsqueda los creó una versión más nueva del programa. Instale la versión más reciente.',
+      [ErrorCode.SCHEMA_TOO_NEW]: 'Los datos de búsqueda los creó una versión más nueva del programa. Instale la versión más reciente.',
     },
   },
   backendMissing: 'No se pudo conectar con el programa. Ciérrelo y vuelva a abrirlo.',

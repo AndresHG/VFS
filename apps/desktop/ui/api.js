@@ -1,12 +1,13 @@
 // Backend bridge (VFS-1 spec, "Tauri commands and events"). In the app every call goes to the Tauri commands through
 // `window.__TAURI__` (withGlobalTauri). A rejected call yields an ApiError {code, message}.
 //
-// Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds):
-//   SearchQuery    {text, filters: {kinds[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
-//   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: null|'cap'|'deadline', elapsedMs}
-//   SearchHit      {id, name, dir, kind, size, modified, matched: 'name'|'path'|'fuzzy', isDir}
-//   Root           {id, path, status, files, dirs, lastFullScan, drive: 'local'|'network'|'removable'|'unknown'}
-//   IndexProgress  {state: 'idle'|'scanning'|'paused', filesIndexed, roots: RootProgress[]}
+// Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds;
+// the enum values are the sets of contract.js):
+//   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
+//   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs}
+//   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir}
+//   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
+//   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
 //
 // Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
@@ -18,7 +19,7 @@
 //   3. the URL carries `?fake`, which nothing in the app ever adds.
 // Dev use: serve `apps/desktop/` and open http://localhost:<port>/ui/?fake
 
-import { ErrorCode } from './contract.js';
+import { UiErrorCode } from './contract.js';
 
 function tauriBackend(t) {
   const { invoke } = t.core;
@@ -48,7 +49,7 @@ function fakeAllowed() {
 }
 
 function missingBackend() {
-  const fail = () => Promise.reject({ code: ErrorCode.BACKEND_MISSING, message: 'no Tauri runtime' });
+  const fail = () => Promise.reject({ code: UiErrorCode.BACKEND_MISSING, message: 'no Tauri runtime' });
   return {
     isFake: false,
     missing: true,

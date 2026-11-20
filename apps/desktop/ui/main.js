@@ -6,25 +6,27 @@ import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { statusText, firstScanRunning as firstScanOf } from './status.js';
 import {
-  DriveKind, ErrorCode, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
+  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, RevealOutcome, RootStatus, TruncatedBy,
+  UiErrorCode,
 } from './contract.js';
+import { DateChoice, SizeChoice } from './choices.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 100;
 const DEBOUNCE_MS = 60;
-const KINDS = ['document', 'photo', 'video', 'audio', 'folder', 'other'];
+/** The type chips, in display order. */
+const KIND_CHIPS = [
+  FileKind.DOCUMENT, FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO, FileKind.FOLDER, FileKind.OTHER,
+];
 const MiB = 1024 * 1024;
 const SIZE_RANGES = {
-  any: [null, null],
-  small: [null, MiB - 1],
-  medium: [MiB, 100 * MiB],
-  large: [100 * MiB, 1024 * MiB],
-  huge: [1024 * MiB + 1, null],
+  [SizeChoice.ANY]: [null, null],
+  [SizeChoice.SMALL]: [null, MiB - 1],
+  [SizeChoice.MEDIUM]: [MiB, 100 * MiB],
+  [SizeChoice.LARGE]: [100 * MiB, 1024 * MiB],
+  [SizeChoice.HUGE]: [1024 * MiB + 1, null],
 };
-const DATE_DAYS = { week: 7, month: 30, year: 365 };
-/** Select values with a meaning of their own besides the keys above. */
-const ANY = 'any';
-const CUSTOM = 'custom';
+const DATE_DAYS = { [DateChoice.WEEK]: 7, [DateChoice.MONTH]: 30, [DateChoice.YEAR]: 365 };
 /** Folder-select value of the "Elegir otra carpeta…" entry. */
 const PICK_FOLDER = '__pick';
 /** Where the current search is (`state.searchState`). */
@@ -38,8 +40,8 @@ function main() {
   const state = {
     text: '',
     kinds: new Set(),
-    date: ANY,
-    size: ANY,
+    date: DateChoice.ANY,
+    size: SizeChoice.ANY,
     folder: '', // '' = all; otherwise an absolute path
     pickedFolder: null,
     roots: [],
@@ -81,7 +83,7 @@ function main() {
   /* ---------------------------------------------------------------- filters UI */
 
   const chips = $('kind-chips');
-  for (const k of KINDS) {
+  for (const k of KIND_CHIPS) {
     const label = el('label', 'chip');
     const input = el('input');
     input.type = 'checkbox';
@@ -119,7 +121,7 @@ function main() {
   }
 
   function activeFilterCount() {
-    return state.kinds.size + (state.date !== ANY) + (state.size !== ANY) + (state.folder !== '');
+    return state.kinds.size + (state.date !== DateChoice.ANY) + (state.size !== SizeChoice.ANY) + (state.folder !== '');
   }
 
   function renderClearButton() {
@@ -137,7 +139,7 @@ function main() {
 
   function dateRange() {
     if (DATE_DAYS[state.date]) return [Math.floor(Date.now() / 1000) - DATE_DAYS[state.date] * 86400, null];
-    if (state.date === CUSTOM) {
+    if (state.date === DateChoice.CUSTOM) {
       const from = $('f-from').value;
       const to = $('f-to').value;
       const a = from ? dayStart(from) : null;
@@ -171,8 +173,8 @@ function main() {
   });
   $('f-date').addEventListener('change', (e) => {
     state.date = e.target.value;
-    $('date-range').hidden = state.date !== CUSTOM;
-    if (state.date === CUSTOM) { $('f-from').focus(); return; }
+    $('date-range').hidden = state.date !== DateChoice.CUSTOM;
+    if (state.date === DateChoice.CUSTOM) { $('f-from').focus(); return; }
     $('range-error').textContent = '';
     filtersChanged();
   });
@@ -190,10 +192,10 @@ function main() {
   $('f-clear').addEventListener('click', () => {
     state.kinds.clear();
     for (const c of chips.querySelectorAll('input')) c.checked = false;
-    state.date = ANY; $('f-date').value = ANY;
+    state.date = DateChoice.ANY; $('f-date').value = DateChoice.ANY;
     $('date-range').hidden = true; $('f-from').value = ''; $('f-to').value = '';
     $('range-error').textContent = '';
-    state.size = ANY; $('f-size').value = ANY;
+    state.size = SizeChoice.ANY; $('f-size').value = SizeChoice.ANY;
     state.folder = ''; $('f-folder').value = '';
     filtersChanged();
     $('q').focus();
@@ -202,7 +204,7 @@ function main() {
 
   function filtersChanged() {
     renderClearButton();
-    if (state.date === CUSTOM && !rangeValid()) return;
+    if (state.date === DateChoice.CUSTOM && !rangeValid()) return;
     runSearch();
   }
 
@@ -349,7 +351,7 @@ function main() {
       return;
     }
     row.classList.remove('loading');
-    const kindKey = hit.isDir ? 'folder' : hit.kind;
+    const kindKey = hit.isDir ? FileKind.FOLDER : hit.kind;
     ico.dataset.kind = kindKey;
     ico.replaceChildren(icon(kindKey));
 
@@ -448,7 +450,7 @@ function main() {
       const outcome = await api.reveal(hit.id, hit.isDir);
       if (outcome === RevealOutcome.OPENED_PARENT) toast(S.revealedParent);
     } catch (err) {
-      showError(errorText(err, 'reveal'));
+      showError(errorText(err, S.errors.reveal));
     }
   }
 
@@ -489,7 +491,7 @@ function main() {
       actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
     } else if (!state.roots.length && state.rootsLoaded) {
       mode = 'no-roots';
-      parts.push(icon('folder'), el('h3', null, S.emptyNoRootsTitle), el('p', null, S.emptyNoRootsBody));
+      parts.push(icon(FileKind.FOLDER), el('h3', null, S.emptyNoRootsTitle), el('p', null, S.emptyNoRootsBody));
       actions = [button(S.addFolderEllipsis, 'btn btn-primary', () => addFolder())];
     } else if (state.searchState === SearchState.IDLE) {
       if (!state.rootsLoaded) { box.hidden = true; return; }
@@ -499,12 +501,12 @@ function main() {
         parts.push(icon('search'), el('h3', null, S.emptyFirstScanTitle), bar,
           el('p', null, S.emptyFirstScanBody(F.count(filesIndexed))));
       } else {
-        mode = 'idle';
+        mode = SearchState.IDLE;
         parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(F.count(filesIndexed))), el('p', null, S.emptyIdleBody));
       }
     } else if (state.searchState === SearchState.DONE && !state.total) {
       if (state.truncatedBy === TruncatedBy.DEADLINE) {
-        mode = 'deadline';
+        mode = TruncatedBy.DEADLINE;
         parts.push(icon('info'), el('h3', null, S.emptyDeadlineTitle), el('p', null, S.emptyDeadlineBody));
         actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
       } else {
@@ -572,10 +574,11 @@ function main() {
 
   /* ---------------------------------------------------------------- notices */
 
-  function errorText(err, action) {
+  /** Spanish text for a rejected call; `byCode` holds the texts of one action, if any. */
+  function errorText(err, byCode) {
     const code = err?.code;
-    if (code === ErrorCode.BACKEND_MISSING) return S.backendMissing;
-    return (action && S.errors[action]?.[code]) || S.errors.any[code] || S.errors.generic;
+    if (code === UiErrorCode.BACKEND_MISSING) return S.backendMissing;
+    return byCode?.[code] || S.errors.any[code] || S.errors.generic;
   }
 
   function showError(text) {
@@ -668,7 +671,7 @@ function main() {
   function buildRootItem(r) {
     const li = el('li', 'root');
     const path = el('div', 'root-path');
-    path.append(icon('folder'), el('span', null, r.path));
+    path.append(icon(FileKind.FOLDER), el('span', null, r.path));
     const meta = el('div', 'root-meta');
     const st = el('span', 'root-state');
     const files = el('span');
@@ -761,7 +764,7 @@ function main() {
         if (remote) showError(S.remoteWarning);
       }
     } catch (err) {
-      showError(err?.code === ErrorCode.OVERLAPPING_ROOT ? overlapText(path) : errorText(err, 'addRoot'));
+      showError(err?.code === ErrorCode.OVERLAPPING_ROOT ? overlapText(path) : errorText(err, S.errors.addRoot));
     }
   }
 

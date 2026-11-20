@@ -6,10 +6,11 @@ import assert from 'node:assert/strict';
 
 import { statusText, checkedAt } from '../ui/status.js';
 import { S } from '../ui/strings.js';
+import { IndexerState, RootStatus } from '../ui/contract.js';
 
 const secs = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime() / 1000;
 const NOW = secs(2026, 11, 20, 18, 30);
-const root = (over) => ({ id: 1, path: '/a', status: 'ready', files: 10, dirs: 1, lastFullScan: null, ...over });
+const root = (over) => ({ id: 1, path: '/a', status: RootStatus.READY, files: 10, dirs: 1, lastFullScan: null, ...over });
 const progress = (state, over = {}) => ({ state, filesIndexed: 1234, roots: [{ rootId: 1, dirsPending: 7 }], ...over });
 
 /** VFS-1 U6: the last completed check reads as today, yesterday, a date this year or older. */
@@ -27,7 +28,7 @@ test('idle status shows the last completed check', () => {
     root({ lastFullScan: secs(2026, 11, 20, 9, 14) }),
     root({ id: 2, lastFullScan: secs(2026, 11, 20, 17, 0) }),
   ];
-  assert.equal(statusText(progress('idle'), roots, NOW), S.statusChecked('hoy 9:14', '1.234'));
+  assert.equal(statusText(progress(IndexerState.IDLE), roots, NOW), S.statusChecked('hoy 9:14', '1.234'));
   assert.equal(statusText(null, [root({ lastFullScan: null })], NOW), S.statusFiles('10'));
 });
 
@@ -35,17 +36,17 @@ test('idle status shows the last completed check', () => {
  *  manual or periodic check) reads as checking for changes; the first scan keeps its
  *  own wording with the folders left. */
 test('scanning reads as checking for changes once a first scan has finished', () => {
-  const checked = [root({ status: 'scanning', lastFullScan: secs(2026, 11, 19, 9, 0) })];
-  assert.equal(statusText(progress('scanning'), checked, NOW), S.statusChecking('1.234'));
-  const first = [root({ status: 'scanning' })];
-  assert.equal(statusText(progress('scanning'), first, NOW), S.statusScanning('1.234', '7'));
+  const checked = [root({ status: RootStatus.SCANNING, lastFullScan: secs(2026, 11, 19, 9, 0) })];
+  assert.equal(statusText(progress(IndexerState.SCANNING), checked, NOW), S.statusChecking('1.234'));
+  const first = [root({ status: RootStatus.SCANNING })];
+  assert.equal(statusText(progress(IndexerState.SCANNING), first, NOW), S.statusScanning('1.234', '7'));
 });
 
 /** VFS-1 U3, U6: paused and unavailable states keep their own wording. */
 test('paused and unavailable states', () => {
-  const roots = [root({ lastFullScan: NOW }), root({ id: 2, status: 'unavailable', lastFullScan: NOW })];
-  assert.equal(statusText(progress('paused'), roots, NOW), S.statusPaused('1.234'));
-  assert.equal(statusText(progress('idle'), roots, NOW), S.statusReadyUnavailable('1.234', 1));
+  const roots = [root({ lastFullScan: NOW }), root({ id: 2, status: RootStatus.UNAVAILABLE, lastFullScan: NOW })];
+  assert.equal(statusText(progress(IndexerState.PAUSED), roots, NOW), S.statusPaused('1.234'));
+  assert.equal(statusText(progress(IndexerState.IDLE), roots, NOW), S.statusReadyUnavailable('1.234', 1));
 });
 
 /** VFS-1 decision 16: no status or button text says "indexar" or "índice". */
