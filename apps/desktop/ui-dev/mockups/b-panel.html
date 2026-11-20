@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Mockup B · Panel</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="b-panel.css">
+  <script type="module" src="mockup.js"></script>
+</head>
+<body>
+  <!-- Direction B: every option visible as a one-click list in a left panel (no menus), the
+       folders and their state live there too. Search and results take the rest. -->
+  <div class="app">
+    <aside class="side" aria-label="Filtros y carpetas">
+      <section>
+        <h2>Tipo</h2>
+        <ul class="opts">
+          <li><button type="button" aria-pressed="false"><svg aria-hidden="true"><use href="icons.svg#i-document"/></svg>Documentos</button></li>
+          <li><button type="button" aria-pressed="true" class="only-results"><svg aria-hidden="true"><use href="icons.svg#i-photo"/></svg>Fotos<svg class="tick" aria-hidden="true"><use href="icons.svg#i-check"/></svg></button>
+              <button type="button" aria-pressed="false" class="only-idle"><svg aria-hidden="true"><use href="icons.svg#i-photo"/></svg>Fotos</button></li>
+          <li><button type="button" aria-pressed="true" class="only-results"><svg aria-hidden="true"><use href="icons.svg#i-video"/></svg>Vídeos<svg class="tick" aria-hidden="true"><use href="icons.svg#i-check"/></svg></button>
+              <button type="button" aria-pressed="false" class="only-idle"><svg aria-hidden="true"><use href="icons.svg#i-video"/></svg>Vídeos</button></li>
+          <li><button type="button" aria-pressed="false"><svg aria-hidden="true"><use href="icons.svg#i-audio"/></svg>Audio</button></li>
+          <li><button type="button" aria-pressed="false"><svg aria-hidden="true"><use href="icons.svg#i-folder"/></svg>Carpetas</button></li>
+        </ul>
+      </section>
+      <section>
+        <h2>Fecha</h2>
+        <select aria-label="Fecha"><option>Cualquier fecha</option><option>Últimos 7 días</option><option>Últimos 30 días</option><option>Último año</option><option>Elegir fechas…</option></select>
+        <h2>Tamaño</h2>
+        <select aria-label="Tamaño"><option>Cualquier tamaño</option></select>
+      </section>
+      <section class="roots">
+        <h2>Dónde se busca</h2>
+        <ul>
+          <li><span class="dot ok" aria-hidden="true"></span><span><strong>Documents</strong><small>C:\Users\Carmen</small></span></li>
+          <li><span class="dot busy-dot" aria-hidden="true"></span><span><strong>Archivo familiar</strong><small>D:\ · revisando…</small></span></li>
+          <li class="off"><span class="dot warn" aria-hidden="true"></span><span><strong>Copias antiguas</strong><small>E:\ · no disponible</small></span></li>
+        </ul>
+        <button class="btn" type="button">Gestionar carpetas…</button>
+      </section>
+      <p class="status"><span class="busy" aria-hidden="true"><i></i><i></i><i></i></span>Comprobando cambios</p>
+    </aside>
+
+    <main class="main-col">
+      <div class="search-field">
+        <svg aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+        <input type="search" aria-label="Buscar por nombre de archivo o de carpeta"
+               placeholder="Escriba parte del nombre o de la carpeta" value="boda">
+      </div>
+      <div class="head">
+        <p class="summary only-results"><strong class="num">1.791</strong> resultados · Fotos, Vídeos</p>
+        <button class="btn only-results" type="button">Quitar filtros</button>
+      </div>
+      <div class="list only-results" role="listbox" aria-label="Resultados" id="rows"></div>
+      <div class="idle only-idle">
+        <h1>Escriba para buscar entre <span class="num">30.569</span> archivos</h1>
+        <p>Puede escribir parte del nombre o de la carpeta. No importan las mayúsculas, los acentos ni una letra equivocada.</p>
+      </div>
+    </main>
+  </div>
+
+  <template id="row">
+    <div class="row" role="option">
+      <span class="ico"><svg aria-hidden="true"><use href=""/></svg></span>
+      <span class="main">
+        <span class="name"><span data-f="name"></span><span class="badge" hidden>No disponible</span></span>
+        <span class="path" data-f="dir"></span>
+      </span>
+      <span class="date num" data-f="date"></span>
+      <span class="size num" data-f="size"></span>
+      <button class="btn reveal" type="button" tabindex="-1"><svg aria-hidden="true"><use href="icons.svg#i-reveal"/></svg>Mostrar en carpeta</button>
+    </div>
+  </template>
+</body>
+</html>

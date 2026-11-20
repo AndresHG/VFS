@@ -1,0 +1,164 @@
+/* DEVELOPMENT ONLY. Static design mockups (docs/design/system.md); never bundled.
+   Tokens shared by the three directions. Fonts come from the real UI folder. */
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("../../ui/fonts/atkinson-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("../../ui/fonts/atkinson-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #faf8f3;
+  --surface: #ffffff;
+  --sunk: #f1ede4;
+  --sunk-2: #e8e3d8;
+  --ink: #1f1e1b;
+  --ink-2: #5c584f;
+  --line: #e6e1d6;
+  --line-strong: #8a8579;
+  --accent: #a3471f;
+  --accent-hover: #8d3c19;
+  --on-accent: #ffffff;
+  --accent-soft: #f6e6dc;
+  --mark: #f5dfb3;
+  --warn-bg: #fbf0d9;
+  --warn-ink: #7a4f00;
+  --folder: #b07a2a;
+  --focus: #1f5fd6;
+
+  --font: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --t-search: 1.5rem;
+  --t-title: 1.375rem;
+  --t-name: 1.125rem;
+  --t-body: 1.125rem;
+  --t-meta: 1rem;
+  --t-small: 0.875rem;
+
+  --s1: 0.25rem; --s2: 0.5rem; --s3: 0.75rem; --s4: 1rem;
+  --s5: 1.5rem; --s6: 2rem; --s7: 3rem; --s8: 4rem;
+  --gutter: clamp(1rem, 2.5vw, 2rem);
+  --radius: 0.625rem;
+  --target: 2.75rem;
+
+  accent-color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1c1b19;
+    --surface: #242320;
+    --sunk: #2c2a27;
+    --sunk-2: #36342f;
+    --ink: #edeae3;
+    --ink-2: #aaa59a;
+    --line: #34322e;
+    --line-strong: #77726a;
+    --accent: #e39a73;
+    --accent-hover: #eeb090;
+    --on-accent: #2a1408;
+    --accent-soft: #3b2b22;
+    --mark: #5a4520;
+    --warn-bg: #2e2615;
+    --warn-ink: #f0c987;
+    --folder: #d9a557;
+    --focus: #8ab4ff;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: var(--t-body) / 1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+svg { width: 1.25em; height: 1.25em; flex: none; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+/* Shared pieces every direction uses. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  min-block-size: var(--target); padding: 0 var(--s4);
+  border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--ink-2);
+  font-weight: 700; white-space: nowrap; cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.btn:hover { background: var(--sunk); color: var(--ink); }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { background: var(--accent-hover); color: var(--on-accent); }
+.kbd {
+  font-size: var(--t-small); padding: 0 0.35em; border-radius: 0.3rem;
+  background: color-mix(in oklab, var(--on-accent) 22%, transparent);
+}
+
+.search-field {
+  display: flex; align-items: center; gap: var(--s3);
+  padding-inline: var(--s4) var(--s2);
+  background: var(--surface);
+  border: 1.5px solid var(--line-strong);
+  border-radius: 0.875rem;
+}
+.search-field:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.search-field > svg { width: 1.5rem; height: 1.5rem; color: var(--ink-2); }
+.search-field input {
+  flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
+  padding-block: var(--s3); font-size: var(--t-search);
+}
+.search-field input::placeholder { color: var(--ink-2); }
+.search-field input::-webkit-search-cancel-button { appearance: none; }
+
+.ico { display: grid; place-items: center; color: var(--ink-2); }
+.ico svg { width: 1.6rem; height: 1.6rem; }
+.ico[data-kind="folder"] { color: var(--folder); }
+mark { background: var(--mark); color: inherit; border-radius: 0.2rem; padding: 0 0.05em; }
+.badge {
+  flex: none; padding: 0 0.45rem; border-radius: 0.3rem;
+  background: var(--warn-bg); color: var(--warn-ink);
+  font-size: var(--t-small); font-weight: 700; line-height: 1.6;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+.notice {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s1) var(--s1) var(--s1) var(--s4);
+  border-radius: var(--radius);
+  background: var(--warn-bg); color: var(--warn-ink);
+  font-size: var(--t-meta);
+}
+.notice p { flex: 1; margin: 0; }
+.notice .btn { color: var(--warn-ink); min-block-size: 2.25rem; }
+.notice .btn:hover { background: color-mix(in oklab, var(--warn-ink) 12%, transparent); }
+
+.busy { display: inline-flex; gap: 0.2rem; }
+.busy i { width: 0.35rem; height: 0.35rem; border-radius: 50%; background: var(--accent); opacity: 0.35; }
+@media (prefers-reduced-motion: no-preference) {
+  .busy i { animation: pulse 1.4s ease-in-out infinite; }
+  .busy i:nth-child(2) { animation-delay: 0.2s; }
+  .busy i:nth-child(3) { animation-delay: 0.4s; }
+}
+@keyframes pulse { 50% { opacity: 1; } }
+
+@media (forced-colors: active) {
+  .row[aria-selected="true"] { outline: 3px solid Highlight; outline-offset: -3px; }
+  mark { forced-color-adjust: none; background: Mark; color: MarkText; }
+}
+
+/* Mockup state switch (mockup.js sets data-state on <html>). */
+[data-state="idle"] .only-results, :not([data-state="idle"]) > body .only-idle { display: none !important; }

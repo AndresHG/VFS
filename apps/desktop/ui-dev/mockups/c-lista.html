@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Mockup C · Lista</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="c-lista.css">
+  <script type="module" src="mockup.js"></script>
+</head>
+<body>
+  <!-- Direction C: closest to today. Search and filters share one bar; results are a clean
+       table with one line per item (name, folder, date, size) so many more fit. -->
+  <div class="app">
+    <header class="bar">
+      <div class="search-field">
+        <svg aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+        <input type="search" aria-label="Buscar por nombre de archivo o de carpeta"
+               placeholder="Buscar archivos y carpetas" value="boda">
+      </div>
+      <div class="filters">
+        <label><span class="visually-hidden">Tipo</span><select><option class="only-results">Fotos y vídeos</option><option>Todos los tipos</option></select></label>
+        <label><span class="visually-hidden">Fecha</span><select><option>Cualquier fecha</option></select></label>
+        <label><span class="visually-hidden">Tamaño</span><select><option>Cualquier tamaño</option></select></label>
+        <label><span class="visually-hidden">Carpeta</span><select><option>Todas las carpetas</option></select></label>
+      </div>
+    </header>
+
+    <div class="notice only-results">
+      <svg aria-hidden="true"><use href="icons.svg#i-warn"/></svg>
+      <p>No se encuentra el disco «E:\Copias antiguas». Sus archivos se muestran como «No disponible».</p>
+      <button class="btn" type="button">Entendido</button>
+    </div>
+
+    <main class="table">
+      <div class="thead only-results" aria-hidden="true">
+        <span></span><span>Nombre</span><span>Carpeta</span><span>Fecha</span><span class="r">Tamaño</span><span></span>
+      </div>
+      <div class="list only-results" role="listbox" aria-label="Resultados" id="rows"></div>
+      <div class="idle only-idle">
+        <h1>Escriba para buscar entre <span class="num">30.569</span> archivos</h1>
+        <p>No importan las mayúsculas, los acentos ni una letra equivocada.</p>
+      </div>
+    </main>
+
+    <footer class="bottom">
+      <p class="status"><strong class="num only-results">1.791 resultados</strong><span class="only-results"> · </span>Última revisión: hoy 9:14 · <span class="num">30.569</span> archivos</p>
+      <button class="btn" type="button">Buscar cambios ahora</button>
+      <button class="btn" type="button"><svg aria-hidden="true"><use href="icons.svg#i-folder"/></svg>Carpetas (3)</button>
+    </footer>
+  </div>
+
+  <template id="row">
+    <div class="row" role="option">
+      <span class="ico"><svg aria-hidden="true"><use href=""/></svg></span>
+      <span class="name"><span data-f="name"></span><span class="badge" hidden>No disponible</span></span>
+      <span class="path" data-f="dir"></span>
+      <span class="date num" data-f="date"></span>
+      <span class="size num" data-f="size"></span>
+      <span class="act"><button class="btn btn-primary reveal" type="button" tabindex="-1"><svg aria-hidden="true"><use href="icons.svg#i-reveal"/></svg>Mostrar</button></span>
+    </div>
+  </template>
+</body>
+</html>
