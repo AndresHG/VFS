@@ -1,6 +1,7 @@
 # Future lines of work from the end user's feedback
 
-Status: research only. Nothing here is built or scheduled. Each section is written so that a
+Status: research, with the owner's decisions of 2026-11-20 recorded per line. Nothing here is
+built or scheduled. Each section is written so that a
 later spec (`/spec`) can start from it without redoing the investigation. The ordering,
 what the lines share and how they could become one later phase are in
 [future-lines-roadmap.md](future-lines-roadmap.md). Tracking: milestone
@@ -31,8 +32,26 @@ The owner decided that, apart from Firefox bookmarks (issue
 built now. In phase 3 the owner had ruled out the *content* of images, audio and video
 ([decisions](https://github.com/AndresHG/VFS/blob/feat/vfs-1-release/docs/decisions.md),
 "Scope: names and paths first"). Examples 4 and 6 show that finding unnamed photos matters
-to her, so [line 2](#line-2) sets out the evidence and the costs as an **option for the owner
-to reconsider**, not as a decision.
+to her, so [line 2](#line-2) records what finding them would cost. The owner has kept the
+decision: image content stays out of scope, and photos are found by name and folder as today.
+Line 2 is kept as a future line with its findings, not as a proposal to reopen it.
+
+## Owner decisions (2026-11-20)
+
+- **Product invariant: VFS is purely consultative.** It never operates on, modifies or writes
+  to any source: not her files, not Firefox, not YouTube, not her chats. Sources are read in
+  place or through an export she makes herself; anything VFS produces (an exported list, a
+  spreadsheet) is a new file written where she chooses, never a change to a source. No line
+  below proposes otherwise; where the research found a write path, it is marked as excluded
+  by this invariant.
+- **[Line 5](#line-5), open-internet search: decided, will not do.** Any LLM or agent already
+  searches the web better than VFS could. The research is kept for reference only.
+- **[Line 7](#line-7), reorganising bookmarks: decided, will not do for now**, because it
+  would write to a source.
+- **[Line 2](#line-2), photo content: still out of scope.** Kept as a future line with honest
+  costs.
+- **[Line 6](#line-6), sorting by dates and by source: reasonable**, the line most likely to be
+  done soon. Its section and issue carry implementation-ready acceptance criteria.
 
 Context assumed throughout, from [windows-io.md](windows-io.md) and the
 [content search design](https://github.com/AndresHG/VFS/blob/feat/vfs-1-release/docs/content-search-design.md):
@@ -44,8 +63,8 @@ possibly without AVX2), fully offline by default, no administrator rights, Spani
 
 - **[published]**: a third-party figure (documentation, pricing page, paper, project), with
   the source named or linked.
-- **[measured]**: measured by us, with how. The only measurement in this document is the
-  GeoNames lookup in line 2 (dump downloaded 2026-11-20).
+- **[measured]**: measured by us, with how. The only measurements in this document are the
+  GeoNames lookup in line 2 (dump downloaded 2026-11-20) and one oEmbed call in line 3.
 - **[estimate]**: our arithmetic or judgement, with the assumptions stated.
 
 Nothing here was measured on the target PC. Prices and terms were checked against the
@@ -65,13 +84,13 @@ for the owner, the deciding one first. 10. Sources.
 
 | Line | Recommendation | Smallest first step | Deciding question for the owner | Issue |
 |---|---|---|---|---|
-| [1. Thematic gathering](#line-1) | **Do next**: Spanish full text + saved collections. LLM query expansion later (phase 5). No local embeddings now. | Spanish stemming in the phase 3 full-text index + a test set built from her six sentences; then «Colecciones» | May concept understanding send only the search words (never documents) to an AI service with her key? | [#77](https://github.com/AndresHG/VFS/issues/77) |
-| [2. Unnamed photos](#line-2) | **Do next if the owner reopens scope**: metadata only (EXIF date, GPS, place name, events). Embeddings computed on the Mac later. No faces. | Metadata-only photo index plus a coverage report | Does image content come back into scope, at least as metadata? | [#78](https://github.com/AndresHG/VFS/issues/78) |
+| [1. Thematic gathering](#line-1) | **Do next**: Spanish full text + saved collections (exported as a new list, never written into a source). LLM query expansion later (phase 5). No local embeddings now. | Spanish stemming in the phase 3 full-text index + a test set built from her six sentences; then «Colecciones» | May concept understanding send only the search words (never documents) to an AI service with her key? | [#77](https://github.com/AndresHG/VFS/issues/77) |
+| [2. Unnamed photos](#line-2) | **Out of scope (owner decision)**; kept as a future line. If ever revisited: metadata first (EXIF date, GPS, place name, events), embeddings computed on the Mac later, never faces. | (if revisited) Metadata-only photo index plus a coverage report | None now; the decision stands. | [#78](https://github.com/AndresHG/VFS/issues/78) |
 | [3. YouTube playlists](#line-3) | **Do next** (after VFS-6): Google Takeout import. OAuth live sync later. | Takeout playlist importer; titles via oEmbed as an optional pass | Does she save into named playlists, or mostly «Ver más tarde» (which the API cannot read)? | [#79](https://github.com/AndresHG/VFS/issues/79) |
 | [4. Telegram and WhatsApp](#line-4) | **Do later**, exports only. Never the Telegram API or WhatsApp database decryption. | Telegram `result.json` importer | Which app and which phone hold what she wants (the septic-tank photos, the contacts)? | [#80](https://github.com/AndresHG/VFS/issues/80) |
-| [5. Open internet](#line-5) | **Do next, small**: a «Buscar también en internet» button. A search API (Brave) later, opt-in. | The browser button; store normalised URLs in VFS-6 | Is marking what she already has worth sending her (health) queries to a third party? | [#81](https://github.com/AndresHG/VFS/issues/81) |
-| [6. Sorting by dates and source](#line-6) | **Do next, small**: collected-date sort for files and bookmarks. Two-date model later. | «Modificado» / «Añadido» sort and a source column in VFS-6 | Does «fecha» mean when it was published or when she saved it? | [#82](https://github.com/AndresHG/VFS/issues/82) |
-| [7. Reorganising bookmarks](#line-7) | **Do later** (after VFS-6): read-only report first; moves through a signed extension. | Duplicates, per-domain counts, opt-in dead-link check | Must Firefox itself be reorganised, or is an organised view inside VFS enough? | [#83](https://github.com/AndresHG/VFS/issues/83) |
+| [5. Open internet](#line-5) | **Decided: will not do.** Any LLM or agent already searches the web better. | — | — | [#81](https://github.com/AndresHG/VFS/issues/81) (closed, not planned) |
+| [6. Sorting by dates and source](#line-6) | **Do next; most likely to be done soon.** A sort selector over the collected date (files now, bookmarks with VFS-6), unknown dates last, a source label. Two-date model later. | Sort selector «Relevancia / Más recientes / Más antiguos» in core and UI (acceptance criteria in the section) | Does «fecha» mean when it was published or when she saved it? | [#82](https://github.com/AndresHG/VFS/issues/82) |
+| [7. Reorganising bookmarks](#line-7) | **Decided: will not do for now** (VFS never writes to a source). | — | — | [#83](https://github.com/AndresHG/VFS/issues/83) (closed, not planned) |
 | [8. Bibliographic list](#line-8) | **Do later**, right after phase 3: offline extraction, XLSX + printable list. | ISBN/DOI and covers from EPUB/PDF, export to XLSX and HTML | An Excel sheet she keeps editing, a printed list, or both, and which Excel version? | [#84](https://github.com/AndresHG/VFS/issues/84) |
 
 <a id="line-1"></a>
@@ -196,7 +215,7 @@ from gathering.
 **The product concept: saved collections ("dossiers").** All of her requests end in "reúne":
 she wants a durable pile, not a one-off result list. Proposal: a *Colección* is a named, saved
 query (terms plus expansion plus filters plus sources), plus results she pinned or excluded by
-hand, re-run on demand so new files appear. It can be exported as a folder of shortcuts
+hand, re-run on demand so new files appear. It can be exported, as new files in a place she chooses (never inside or onto a source), as a folder of shortcuts
 (`.lnk` on Windows, aliases or symlinks on macOS, no copies) or as a printable list. Prior art:
 DEVONthink smart groups ("itself just a saved search", local or global) **[published,
 devontechnologies.com blog]**; Zotero collections (manual) plus saved searches; Recoll
@@ -268,7 +287,7 @@ bookmarks. Bookmark titles, URLs and possibly page text join the same FTS index.
 Inside phase 3 / #24: Spanish stemming via `rust-stemmers` in an FTS5 tokenizer, AND/phrase
 queries, and a golden test set built from her six sentences against a sample of her real files.
 That measures how far level A gets before any concept work. Then, as a separate S/M ticket,
-"Colecciones": save a query plus pins and exclusions, and export a shortcut folder. It works
+"Colecciones": save a query plus pins and exclusions, and export it as a printable list or a shortcut folder written where she chooses. It works
 with name search today and grows with full text.
 
 ### 8. Recommendation
@@ -315,7 +334,7 @@ gain over BM25 plus expansion. Revisit in #41 with a measured benchmark on her m
 
 Issue: [#78](https://github.com/AndresHG/VFS/issues/78).
 
-> Status: this is an **option for the owner to reconsider**. Image content was ruled out of scope in Phase 3. This section sets out what the evidence says it would cost. It is not a decision.
+> **Decided (owner, 2026-11-20): out of scope.** Image, audio and video content stay out of scope; photos are found by name and folder as today. This section is kept as a future line: what finding unnamed photos would take and what it would cost, so the question can be revisited with evidence if the owner ever chooses to. It is not a recommendation to reopen the decision.
 
 ### 1. What she wants
 
@@ -370,15 +389,15 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 
 | Model | Licence | Spanish | Image cost | Note |
 |---|---|---|---|---|
-| OpenAI/OpenCLIP ViT-B/32 | MIT | No (English only) | **8.8 GFLOPs** at 224 px; 88 M image + 63 M text params ([open_clip profile](https://raw.githubusercontent.com/mlfoundations/open_clip/main/docs/model_profile.csv)) | Figures of 4.4 seen elsewhere are GMACs (= 8.8 GFLOPs). Immich's default. |
+| OpenAI/OpenCLIP ViT-B/32 | MIT | No (English only) | **8.8 GFLOPs** **[published]** at 224 px; 88 M image + 63 M text params ([open_clip profile](https://raw.githubusercontent.com/mlfoundations/open_clip/main/docs/model_profile.csv)) | Figures of 4.4 seen elsewhere are GMACs (= 8.8 GFLOPs). Immich's default. |
 | XLM-RoBERTa-base + ViT-B/32 (OpenCLIP, LAION) | MIT | Yes; Spanish recall **75.99 %** [published, Immich] | Same 8.8 GFLOPs image side; text encoder 278 M params | Cheapest multilingual option. |
-| SigLIP 2 ViT-B/16 (multilingual WebLI) | Apache-2.0 ([HF](https://huggingface.co/google/siglip2-base-patch16-224)) | Spanish recall **83.61 %** [published, Immich] | ≈35 GFLOPs (ViT-B/16 class) | Best quality per cost; ~4× the compute of B/32. |
+| SigLIP 2 ViT-B/16 (multilingual WebLI) | Apache-2.0 ([HF](https://huggingface.co/google/siglip2-base-patch16-224)) | Spanish recall **83.61 %** [published, Immich] | ≈35 GFLOPs (ViT-B/16 class) **[estimate]** | Best quality per cost; ~4× the compute of B/32. |
 | nllb-clip-base-siglip | (not verified) | 80.91 % [published, Immich] | Image 8.8 GFLOPs; text 414 M params | Heavy text side. |
 | M-CLIP XLM-R-Large + ViT-B/32 | Not stated on the card | Spanish COCO R@10 89.1 [published] ([HF](https://huggingface.co/M-CLIP/XLM-Roberta-Large-Vit-B-32)) | Image 8.8 GFLOPs | Licence unclear, so avoid. |
-| MobileCLIP / MobileCLIP2 S0–S2 (Apple) | Code MIT; **weights under Apple ML Research Model Terms** ([repo](https://github.com/apple/ml-mobileclip)) | English only | S0: 11.4 M image params, 1.5 ms on the repo's (unnamed) device; IN-1k 67.8–77.2 % | Fastest. Weight licence is likely research-only, so unsuitable unless verified. |
+| MobileCLIP / MobileCLIP2 S0–S2 (Apple) | Code MIT; **weights under Apple ML Research Model Terms** ([repo](https://github.com/apple/ml-mobileclip)) | English only | S0: 11.4 M image params, 1.5 ms on the repo's (unnamed) device **[published]**; IN-1k 67.8–77.2 % | Fastest. Weight licence is likely research-only, so unsuitable unless verified. |
 | Jina CLIP v2 | **CC BY-NC 4.0** | 89 languages | 0.9 B params, 512 px ([HF](https://huggingface.co/jinaai/jina-clip-v2)) | Too heavy for the target PC. |
 
-- **Spanish recall** is from Immich's multilingual benchmark on a Ryzen 7800X3D ([Immich searching](https://docs.immich.app/features/searching)). Immich lists ~3 GB of RAM for the B-size multilingual models in that table. On an 8 GB PC that is a real cost.
+- **Spanish recall** is from Immich's multilingual benchmark on a Ryzen 7800X3D ([Immich searching](https://docs.immich.app/features/searching)). Immich lists ~3 GB of RAM **[published]** for the B-size multilingual models in that table. On an 8 GB PC that is a real cost.
 - **Quality, honestly.** "Kitchen" is an easy CLIP concept. "Septic tank work" is not a standard benchmark class. It will probably rank as "excavator / trench / pipes / concrete tank", which may be good enough as a ranking signal **inside** a GPS + date filter. That has to be tested on ~20 of her real photos before anything is promised.
 
 **Published CPU benchmark**
@@ -389,7 +408,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 **Target PC [estimate]**
 
 - **Model time.** Assume an older 4-core with maybe no AVX2, at 3–4× slower than the i7-8559U, so ~4 img/s for B/32. 300,000 photos ≈ **21 h of full CPU**. SigLIP2-B/16 at ~4× the FLOPs ≈ **3–4 days**.
-- **Decoding.** A 12 MP JPEG must be decoded first. Full decode is roughly 60–150 ms on an old CPU. libjpeg-turbo's IDCT scaling decodes straight to 1/8 size (4000×3000 → 500×375); 1/2, 1/4 and 1/8 are the fast cases ([libjpeg-turbo README](https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+show/refs/heads/main/README.md)). No published timing; I assume ~10–20 ms.
+- **Decoding.** A 12 MP JPEG must be decoded first. Full decode is roughly 60–150 ms on an old CPU **[estimate]**. libjpeg-turbo's IDCT scaling decodes straight to 1/8 size (4000×3000 → 500×375); 1/2, 1/4 and 1/8 are the fast cases ([libjpeg-turbo README](https://chromium.googlesource.com/chromium/deps/libjpeg_turbo/+show/refs/heads/main/README.md)). No published timing; we assume ~10–20 ms **[estimate]**.
   - The embedded EXIF thumbnail (often only 160×120) avoids reading the whole file. It is below CLIP's 224 px, so quality must be measured.
   - HEIC needs an HEVC decoder. Codec licensing on Windows is an open issue.
 - **I/O.** Reading 300,000 originals at ~4 MB is ~1.2 TB: ~4–6 h on a busy HDD.
@@ -399,7 +418,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 #### 2c. Compute the embeddings on the owner's Mac, ship the vectors
 
 - **How it works.** Her files are already synced to the Synology. The owner's Apple Silicon Mac can read them from the NAS over the LAN, not from the slow PC, and run the same model's image encoder overnight.
-- **Time [estimate].** I/O bound: ~1.2 TB over gigabit ≈ 3–4 h; Wi-Fi is slower. Model time on Apple Silicon is a small share; We found no published figure.
+- **Time [estimate].** I/O bound: ~1.2 TB over gigabit ≈ 3–4 h; Wi-Fi is slower. Model time on Apple Silicon is a small share; we found no published figure.
 - **What ships to the PC:** an int8 vector file (~150 MB) keyed by path + size + mtime, plus only the **text** encoder in ONNX Runtime CPU. That is ~65 MB int8 for B/32's text encoder, or ~280 MB for XLM-R-base [estimate]. A query costs well under a second.
 - **New photos:** embedded locally on the PC, a few per day.
 - **Constraint:** both machines must use the identical model and preprocessing.
@@ -407,7 +426,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 #### 2d. Captions through an API (owner's key, Phase 5)
 
 - **How it works.** Send each photo downscaled to ~512 px. Ask for a short Spanish caption plus keywords («cocina, azulejos, fogón de leña»). Store the text and index it with Phase 3's Spanish BM25. **Queries then stay offline.** Captions are also readable, so she can see *why* a photo matched.
-- **Why not API embeddings.** Gemini Embedding 2 costs only $0.00006 per image in batch ([pricing](https://aistudio.google.com/docs/pricing)), but every query would then also need the API online. That breaks VFS's offline rule.
+- **Why not API embeddings.** Gemini Embedding 2 costs only $0.00006 per image in batch **[published]** ([pricing](https://aistudio.google.com/docs/pricing)), but every query would then also need the API online. That breaks VFS's offline rule.
 
 ### 3. What it needs from the user
 
@@ -449,7 +468,7 @@ The model maps an image and a Spanish sentence («una cocina», «excavación de
 ### 6. Dependencies in VFS
 
 - **Phase 1:** path, size and mtime as cache keys; the new file-name date patterns live here.
-- **Phase 3:** the isolated worker process, needed because image and EXIF parsers run on untrusted files; Spanish BM25 for captions. This line **reverses Phase 3's "no image content"** exclusion, for metadata at least.
+- **Phase 3:** the isolated worker process, needed because image and EXIF parsers run on untrusted files; Spanish BM25 for captions. Taking this line up would reverse the "no image content" exclusion, which the owner has kept.
 - **Phase 5 / #38:** the consent screen and key storage for D.
 - **#41 and #28:** this line is the concrete evaluation those issues ask for.
 - **VFS-6 source selector:** add «Fotos».
@@ -468,8 +487,10 @@ It ships with a **coverage report** for her archive: the share of photos with a 
 
 ### 8. Recommendation
 
-- **Do next (as its own M/L spec): option A.** It is cheap, offline, has no model, and may already answer examples 4 and 6 for phone photos.
-- **Do later: option C** (Mac-computed SigLIP2 or XLM-R B/32 vectors, local text encoder), only if A's coverage report and a 20-photo test show that content ranking adds recall. B is the fallback if the Mac route is impractical.
+**Not scheduled: out of scope by the owner's decision.** If it is ever revisited, the evidence points to this order:
+
+- **First: option A.** It is cheap, offline, has no model, and may already answer examples 4 and 6 for phone photos.
+- **Then, only with evidence: option C** (Mac-computed SigLIP2 or XLM-R B/32 vectors, local text encoder), only if A's coverage report and a 20-photo test show that content ranking adds recall. B is the fallback if the Mac route is impractical.
 - **D (API captions):** only as the opt-in, query-time hybrid on a filtered subset, never a bulk upload by default.
 - **Do not do:** face recognition.
 
@@ -482,7 +503,9 @@ It ships with a **coverage report** for her archive: the share of photos with a 
 
 ### 9. Open product questions for the owner
 
-1. **Does image content come back into scope**, at least as metadata (A), given that her examples 4 and 6 cannot be answered otherwise?
+None now: the owner has decided. If the line is ever revisited, these are the questions:
+
+1. Would metadata alone (A: dates, GPS, place names, no pixels read) be acceptable, given that her examples 4 and 6 cannot be answered by name?
 2. Is the Mac + NAS route (C) acceptable to run, and to re-run after a model change?
 3. Would she accept any photos leaving the PC (D), and if so, only a filtered subset after a preview?
 4. Roughly how many photos are there, and what share is phone photos versus scans? (Step 7 will measure it.)
@@ -536,8 +559,8 @@ She wants one search over several sources, including "sus listas de reproducció
 - She requests "YouTube y YouTube Music → listas de reproducción" (optionally history and subscriptions) at takeout.google.com, downloads the zip, and points VFS at it (or at a folder VFS already indexes).
 - Format **[published]**, Google Data Portability schema (the same data as Takeout, https://developers.google.com/data-portability/schema-reference/youtube): playlists are CSV. Per-playlist video rows carry only `Video ID` and `Playlist Video Creation Timestamp`, the date she added it. A separate playlists CSV carries Playlist ID, title, description, visibility and create/update timestamps. A community report says Takeout produces n+1 files for n playlists, and that the header language follows the Takeout UI language (https://github.com/iv-org/invidious/issues/4069, FreeTube issue #5057). **The playlist rows have no video titles** as far as the schema shows. Google's schema page mislabels some sections, so this needs confirming on a real export.
 - Watch history is exported as JSON or HTML (`watch-history.json` with `title`, `titleUrl`, `time`, `subtitles[]` = channel) **[published]** per the My Activity schema (https://developers.google.com/data-portability/schema-reference/my_activity). Unlike playlists, history *does* carry titles.
-- Titles and thumbnails for playlist rows would come from YouTube's oEmbed endpoint (`https://www.youtube.com/oembed?url=…&format=json`, no key). One test call returned `title`, `author_name`, `author_url`, `thumbnail_url`. It does **not** return the publication date, and it only works for public or unlisted videos.
-- An alternative is `videos.list` with a plain API key (1 unit per 50 IDs), which returns `snippet.title`, `snippet.publishedAt` and thumbnails. That needs a Cloud project and an API key, and it brings in the 30-day storage rule (section 4).
+- Titles and thumbnails for playlist rows would come from YouTube's oEmbed endpoint (`https://www.youtube.com/oembed?url=…&format=json`, no key). One test call **[measured, 2026-11-20, one public video]** returned `title`, `author_name`, `author_url`, `thumbnail_url`. It does **not** return the publication date, and it only works for public or unlisted videos.
+- An alternative is `videos.list` with a plain API key (1 unit per 50 IDs **[published]**), which returns `snippet.title`, `snippet.publishedAt` and thumbnails. That needs a Cloud project and an API key, and it brings in the 30-day storage rule (section 4).
 - Trade-off: it is a one-off snapshot, and she must repeat Takeout to refresh. It needs no Google consent screen and no tokens, and it is the only route that also gives **watch history**.
 
 **Option B: YouTube Data API v3 with OAuth (live sync).**
@@ -744,7 +767,9 @@ She wants the same single search to include "fotos, enlaces de vídeo y contacto
 
 ## Line 5. Open-internet search alongside her own material, marking what she already has
 
-Issue: [#81](https://github.com/AndresHG/VFS/issues/81).
+Issue: [#81](https://github.com/AndresHG/VFS/issues/81) (closed, not planned).
+
+> **Decided (owner, 2026-11-20): will not do.** Any LLM or agent already searches the open internet better than VFS could; VFS stays on her own material. The research below is kept for reference only and needs no further work. Its URL normalisation is still useful to deduplicate bookmarks and saved links.
 
 ### 1. What she wants
 
@@ -776,7 +801,7 @@ below) and tagged "Ya está en tus marcadores" / "Ya lo tienes descargado". Curr
 | SerpAPI (scrapes Google) | Free 250 / month; $25 / 1,000 / month **[published, serpapi.com/pricing]** | 250 / month | Google sued SerpApi in Dec 2025 (DMCA anti-circumvention); DMCA claims reportedly dismissed July 2026, case ongoing **[published, blog.google; Search Engine Land]**. Grey area; avoid |
 | Google Custom Search JSON API | 100 free/day, $5 / 1,000 **[published]** | — | **Closed to new customers; discontinued 1 Jan 2027** **[published, developers.google.com/custom-search]**. Successor Vertex AI Search covers ≤ 50 domains, not the open web. Not an option |
 | Bing Web Search API | — | — | **Retired 11 Aug 2025** **[published, Microsoft Lifecycle]**. Replacement "Grounding with Bing Search" is $14 / 1,000 and usable only inside Azure AI Foundry; outputs "not directly accessible for use in other applications" **[published, microsoft.com/bing/apis/grounding-pricing]**. Not usable by VFS |
-| DuckDuckGo | — | — | No documented full web-results API (the Instant Answer API returns only zero-click summaries; We could not load DDG's help page to re-confirm) |
+| DuckDuckGo | — | — | No documented full web-results API (the Instant Answer API returns only zero-click summaries; we could not load DDG's help page to re-confirm) |
 
 **Option C: the LLM provider's web search tool via the owner's key (phase 5).** Anthropic's
 `web_search` server tool: **$10 / 1,000 searches plus tokens** for result content **[published,
@@ -919,7 +944,7 @@ For photos the two collapse into "when it was taken", which is what example 6 ne
 | EPUB | `dc:date` = "publication date of the EPUB publication… not the same as the last modified date" | n/a | Medium: the edition's date, not the original work's |
 | Photos and video | EXIF `DateTimeOriginal` (0x9003) plus `OffsetTimeOriginal` (0x9011) when present; video `creation_time` | same as taken | High for camera and phone originals (no time zone without the offset tag). WhatsApp-recompressed images usually lose EXIF and fall back to file time or the name pattern `IMG-20190612-WA0003.jpg`. |
 | Firefox bookmarks | none in places.sqlite | `moz_bookmarks.dateAdded`, PRTime = µs since 1970 (divide by 1,000,000) | High. Imported bookmarks may carry the import date instead of the original. |
-| YouTube playlists | `contentDetails.videoPublishedAt` | `snippet.publishedAt` = "date and time that the item was added to the playlist" | High for both |
+| YouTube playlists (API; Takeout gives only the added date) | `contentDetails.videoPublishedAt` | `snippet.publishedAt` = "date and time that the item was added to the playlist" | High for both |
 | Telegram Desktop export (JSON) | forwarded original date, if exported | message `date` (ISO 8601) and `date_unixtime` | High (`edited` key unverified) |
 | WhatsApp export (.txt) | none | line-prefix timestamp, format depends on phone locale and OS (`12/06/19 18:03 -` vs `[12/6/19, 6:03:21 p. m.]`) | Medium: day/month ambiguity must be resolved per file. Exports reportedly cap at ~40k messages without media, ~10k with media (third-party guides, not confirmed by WhatsApp). |
 | Web results / bookmarked pages | schema.org `datePublished` ("date of first publication"), OG `article:published_time`, HTTP `Last-Modified` | when fetched or bookmarked | JSON-LD/OG: medium-high on news and blogs, absent elsewhere. `Last-Modified` is low (often the render time on CMS pages). |
@@ -964,8 +989,9 @@ them.
 
 ### 3. What it needs from the user
 
-Nothing for files and bookmarks. For YouTube: OAuth consent to read her private playlists
-(another line covers access). For Telegram: a Desktop JSON export. For WhatsApp: per-chat
+Nothing for files and bookmarks. For YouTube: a Takeout export, the first step of
+[line 3](#line-3); Takeout gives only the date she added each video, so a publication date
+needs the API (OAuth, the later step of line 3). For Telegram: a Desktop JSON export. For WhatsApp: per-chat
 exports from the phone. Optionally she confirms whether WhatsApp dates are day/month.
 
 ### 4. Privacy and terms-of-service constraints
@@ -980,7 +1006,7 @@ returns both dates under the normal API terms.
 - Two date pairs plus src/conf: ~20–30 bytes/row, so ~150 MB for 5 M rows **[estimate]**. A
   second-level index per sortable date adds ~100 MB **[estimate]**. Acceptable, but measure
   against the phase 1 footprint budget.
-- EXIF needs only the first 64 KB of each JPEG/HEIC. For ~500k photos that is ~32 GB of reads,
+- EXIF needs only the first 64 KB of each JPEG/HEIC. For ~500k photos (a deliberately high count; line 2 assumes 300,000) that is ~32 GB of reads,
   about 2–3 h of sequential-ish reads on a busy HDD, more if seeks dominate **[estimate:
   50–100 random reads/s, 500k files → 1.5–3 h]**. It breaks phase 1's "never opens files" rule,
   so it is a phase 3-style background pass. NTFS creation time comes free with the directory
@@ -995,16 +1021,72 @@ source lines. The target-PC measurement plan for Synology timestamp behaviour.
 
 ### 7. Smallest useful first step
 
-In phase 1 / VFS-6: show and sort by **collected date** for files (mtime, labelled "Modificado")
-and bookmarks (`dateAdded`, labelled "Añadido"), with unknown dates last, plus a source column
-in the combined view. Store the NTFS creation time / `st_birthtime` alongside, but do not
-display it until the target-PC measurements show whether Synology preserves it.
+**Decided (owner, 2026-11-20): reasonable; the line most likely to be done soon.** The first
+step below is written to be specified (`/spec`, size M) and built without more research. It
+is based on phase 1 as merged into `main` (commit `cfab8c0`).
+
+**What exists today.** `SearchQuery` (`crates/vfs-core/src/types.rs`) has filters, including a
+modified-date range, but no sort field. `rank.rs` orders hits by relevance tiers, then name
+length, then newest `modified`, then id; a filter-only query is newest first. The search ranks
+at most 2,000 hits (`MAX_HITS` in `search.rs`) and returns a page `[offset, offset + limit)`.
+Each `SearchHit` already carries `modified` (unix seconds). Folders have `mtime = 0` until their
+parent is listed. The UI shows «modificado el …» per row (`apps/desktop/ui/strings.js`) and has
+a date filter but no sort control. Firefox bookmarks (VFS-6, issue #63) are not merged yet.
+
+**Change.**
+
+1. Core: add `sort: Relevance | NewestFirst | OldestFirst` to `SearchQuery`, default
+   `Relevance` through serde, so existing callers and stored queries keep working.
+2. Core: `NewestFirst` / `OldestFirst` reorder the **whole ranked list** (≤ 2,000 hits) by the
+   hit's collected date before the page is cut, so paging is stable. Ties keep relevance
+   order. A date of 0 (unknown, such as an unlisted folder) sorts **last in both directions**.
+   No new SQL, index or schema change: the dates are already on the hits.
+3. When the search was truncated (`truncated_by` set), the result line says that the order
+   covers the first 2,000 matches, so «Más antiguos» is not mistaken for the oldest file on
+   the disk.
+4. UI: a sort selector next to the filters, «Relevancia» (default), «Más recientes»,
+   «Más antiguos». It is kept for the session and reset to «Relevancia» on restart. The row's
+   date label follows the source: «modificado el …» for files and folders, «añadido el …» for
+   bookmarks.
+5. With VFS-6: a bookmark hit's collected date is `moz_bookmarks.dateAdded` (µs → s), and
+   each hit carries its source. In the combined view each row shows a source label
+   («Archivo», «Carpeta», «Marcador»), and the selector sorts files and bookmarks together.
+   Sorting *by source* is the source selector plus this label; a separate «por fuente» order
+   is not needed.
+
+**Acceptance criteria.**
+
+- AC-1: With «Más recientes», hits are in descending collected date; with «Más antiguos»,
+  ascending; in both, hits with an unknown date come after all dated hits.
+- AC-2: Equal dates keep the relevance order of the default sort (deterministic for any input
+  order).
+- AC-3: The order is computed over the whole ranked list before paging: concatenating pages
+  0, 1, 2… gives the same sequence as one large page.
+- AC-4: A query without `sort` behaves exactly as today (existing ranking tests unchanged).
+- AC-5: A truncated search sorted by date shows that the order covers the first 2,000 matches.
+- AC-6: The selector offers the three Spanish labels, defaults to «Relevancia», and survives a
+  new query in the same session.
+- AC-7 (with VFS-6): files and bookmarks sort together by collected date; each row shows its
+  source label and «modificado» or «añadido» as fits.
+- AC-8: Sorting adds no measurable latency: under 5 ms for 2,000 hits on the benchmark
+  machine **[estimate: an in-memory sort of 2,000 keys]**.
+
+**Tests.** Unit tests in `rank.rs` (or the new sort function) for AC-1 to AC-4; a core search
+test for paging (AC-3) and truncation (AC-5); UI tests in `apps/desktop/ui-dev` for AC-6
+(note that PR 64 is rewriting the search screen, so build on whichever is in `main`); a
+combined-view test once VFS-6 lands (AC-7). Existing `rank.rs` and `tests/search.rs` tests
+must pass unchanged.
+
+**Out of this step.** Publication dates; NTFS creation time and macOS `st_birthtime` (store
+them only after the target-PC measurements show whether Synology preserves them; a schema
+change other sessions own); EXIF dates (photos are found by name and folder only, by the owner's decision); dates from other
+sources, which arrive with their importers.
 
 ### 8. Recommendation
 
-**Do next** (small): collected-date sort for files and bookmarks in VFS-6. **Do later:** the
-normalised two-date model with source/confidence, filled per source as each source line lands.
-EXIF `DateTimeOriginal` first, because example 6 depends on it. **Do not do:** treat PDF/Office
+**Do next**: the sort selector above, files first, bookmarks as soon as VFS-6 lands. **Do
+later:** the normalised two-date model (`published_at`, `collected_at`, each with source and
+confidence), filled per source as each source line lands. **Do not do:** treat PDF/Office
 creation dates as publication dates without a "≈" low-confidence marker. They are mostly
 authoring or export dates.
 
@@ -1041,7 +1123,9 @@ authoring or export dates.
 
 ## Line 7. Reorganising about 3,000 Firefox bookmarks by a criterion she states
 
-Issue: [#83](https://github.com/AndresHG/VFS/issues/83).
+Issue: [#83](https://github.com/AndresHG/VFS/issues/83) (closed, not planned).
+
+> **Decided (owner, 2026-11-20): will not do for now.** Product invariant: VFS is purely consultative and never operates on, modifies or writes to any source, Firefox included. Every way found below to apply a new structure (HTML import, JSON restore, a WebExtension calling `bookmarks.move`) writes to Firefox and is excluded by that invariant. The research is kept for reference. Read-only parts (duplicates by normalised URL, counts per domain, dead-link reporting) could return as search features over VFS-6 bookmarks without touching Firefox.
 
 ### 1. What she wants
 
