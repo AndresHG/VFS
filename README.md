@@ -23,6 +23,14 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
 - "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected. On Windows,
   a path Explorer cannot address (over 259 characters) opens the nearest folder it can.
+- Optionally includes Firefox bookmarks ("Incluir marcadores de Firefox" in the "Carpetas"
+  panel, off by default; spec [VFS-6](specs/vfs-6-bookmarks/spec.md)). Bookmarks are found by
+  title, address, folder path, tags and keyword with the same rules as files; bookmark
+  folders are results and can be chosen as the "Carpeta" filter; "Buscar en" picks files,
+  bookmarks or both, and "Orden" sorts by relevance, date or source. "Abrir en Firefox"
+  opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
+  place, never written, and only bookmark tables are read (no history, passwords or
+  cookies).
 - Follows changes: a live watcher while the app runs, a catch-up re-walk of every folder at
   each start (resumable, and searchable meanwhile), and a re-walk every 7 days while
   running. Full re-walks run one at a time; a folder that fails to list is retried. System,
@@ -33,7 +41,9 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 - Search inside documents. That is planned for milestone Fase 3; the design is in
   [`docs/content-search-design.md`](docs/content-search-design.md).
 - Understand photos, audio or video. They are found by name, folder and filters only.
-- Open files or show previews.
+- Open files or show previews. (A bookmark's web page is opened in Firefox on request.)
+- Change anything in a source: no file, and nothing in Firefox (bookmarks are never edited,
+  moved or reorganised).
 - Index network drives, a NAS or removable disks. The app warns when a chosen folder is on
   one.
 - Need administrator rights, read the NTFS master file table, or install a service.
@@ -44,8 +54,9 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 | Path | What it is |
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
-| `crates/vfs-cli` | `vfs` command line: `index`, `search`, `gen-db`, `bench`. |
-| `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta". |
+| `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
+| `crates/vfs-cli` | `vfs` command line: `index`, `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`. |
+| `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
 | `apps/desktop/ui` | The Spanish screen: static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
 | `specs/` | Specs with acceptance criteria (`VFS-<n>`); tests cite them. |
@@ -92,7 +103,13 @@ cargo run -p vfs-cli -- index --db /tmp/vfs.db ~/Documents     # scan to complet
 cargo run -p vfs-cli -- search --db /tmp/vfs.db notaria         # search
 cargo run -p vfs-cli -- search --db /tmp/vfs.db --kind folder ano
 cargo run -p vfs-cli -- search --help                           # all filters
+cargo run -p vfs-cli -- bookmarks --db /tmp/vfs.db on           # read Firefox bookmarks
+cargo run -p vfs-cli -- search --db /tmp/vfs.db --source bookmarks recetas
+cargo run -p vfs-cli -- bookmarks --db /tmp/vfs.db off          # forget them again
 ```
+
+`vfs bookmarks on|off|refresh|status` keeps its store in `bookmarks.db` next to the `--db`
+file; `--firefox-root <dir>` points it at another folder holding `profiles.ini`.
 
 `gen-db` writes a synthetic index shaped like a Spanish personal archive, and `bench` runs
 the fixed query set of acceptance criterion AC-9 (p95 under 150 ms and under 300 MB of
@@ -152,9 +169,11 @@ multi-GB index must not travel to the NAS. An index that an earlier build left i
 
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
 that marks an open session, `logs/vfs.log` (warnings and errors only, at most about 3 MB),
-and, after a recovery, `index.db.bad` until the rebuild has finished. Deleting the folder while
-the app is closed resets VFS: the folders have to be added again and are scanned from
-scratch. The indexer never indexes this folder, even when it lies inside a chosen folder.
+and, after a recovery, `index.db.bad` until the rebuild has finished. With Firefox bookmarks
+included, `bookmarks.db` (with its `-wal` and `-shm`) holds the setting and the bookmarks
+read, and `bookmarks.db.snapshot/` exists only for the moment a copy of Firefox's database
+is being read. Deleting the folder while the app is closed resets VFS: the folders have to
+be added again and are scanned from scratch, and the bookmark setting is off again. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
 The index has schema version 3 (version 2 added a per-file path index; version 3 makes the
 index about a sixth smaller, VFS-4). An index written by an older build is upgraded in place
@@ -176,7 +195,8 @@ build is refused, never overwritten.
   limit: before the no-hit probe two of three runs passed and the worst failed by under
   10 ms on two query classes; with it three of three passed, the slowest class at 114–133
   ms per run, while other work kept the load average at 4.4–5.1. Treat it as marginal.
-- `cargo audit` (RustSec database of 2026-11-20): no vulnerabilities. Six warnings, all in
+- `cargo audit` (RustSec database of 2026-11-20, rerun after adding `lz4_flex` for VFS-6):
+  no vulnerabilities. Six warnings, all in
   crates that come with Tauri: `chrono` (unmaintained; locked but not compiled),
   `proc-macro-error` and `glib` 0.18 (unmaintained and unsound, RUSTSEC-2024-0429; the Linux
   GTK stack, not built for Windows or macOS), and `zbus_names`, `zvariant`,
@@ -184,7 +204,8 @@ build is refused, never overwritten.
   None has a fix VFS can apply short of a Tauri update.
 - **Nothing has been run on Windows yet.** The Windows watcher, volume identity, background
   priority, long-path reveal and the installer are compiled only on Windows and have never
-  executed. The CI and release workflows have not run on GitHub yet.
+  executed; so are, for VFS-6, the copy of a `places.sqlite` that Firefox holds open on
+  Windows, the Microsoft Store profile folder and "Abrir en Firefox" (`ShellExecuteW`). The CI and release workflows have not run on GitHub yet.
 - No figure has been measured on Windows, on an HDD, or on the target PC (slow 8 TB HDD).
   Milestone Fase 2 exists for that.
 

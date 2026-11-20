@@ -49,6 +49,7 @@ function makeRandom(seed) {
 
 /** A few bookmarks for the VFS-6 source (title, url, root, folder, days ago). */
 const BOOKMARKS = [
+  ['Recetas', '', BookmarkRoot.MENU, [], 800],
   ['Receta de croquetas caseras', 'https://www.cocina-casera.es/croquetas', BookmarkRoot.MENU, ['Recetas', 'Entrantes'], 40],
   ['Flan de huevo de la abuela', 'https://recetasdelaabuela.es/flan', BookmarkRoot.MENU, ['Recetas', 'Postres'], 400],
   ['Banco - acceso clientes', 'https://www.banco.es/clientes', BookmarkRoot.TOOLBAR, [], 1200],
@@ -56,8 +57,10 @@ const BOOKMARKS = [
   ['Ruta por Galicia en coche', 'https://viajes.es/galicia', BookmarkRoot.MENU, ['Viajes'], 700],
   ['Documento guardado en el equipo', 'file:///C:/Users/Carmen/receta.pdf', BookmarkRoot.UNFILED, [], 90],
 ].map(([title, url, root, folder, days], i) => ({
-  id: i + 1, title, url, root, folder, profile: null, added: NOW - days * DAY,
+  id: i + 1, isFolder: !url, title, url, root, folder, profile: null, added: NOW - days * DAY,
   openable: url.startsWith('http'),
+  // Folder ids: 1 is the "Recetas" folder (the first entry), 1001 the menu, 1003 "Otros marcadores".
+  parent: folder[0] === 'Recetas' ? 1 : root === BookmarkRoot.UNFILED ? 1003 : 1001,
 }));
 
 const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\\/g, '/');
@@ -185,7 +188,7 @@ export function createFakeBackend(params) {
   const progressCbs = new Set();
   const changedCbs = new Set();
   const bookmarkCbs = new Set();
-  const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null };
+  const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   let lastChanged = 0;
   let picks = 0;
   let generation = 0;
@@ -336,26 +339,30 @@ export function createFakeBackend(params) {
       return (e.dir.length + e.name.length + 1 > 259) ? RevealOutcome.OPENED_PARENT : RevealOutcome.REVEALED;
     },
 
-    async searchSources(q, sources) {
-      const files = sources.length === 0 || sources.includes(Source.FILES);
+    async searchSources(q, options = {}) {
+      const sources = options.sources || [];
+      const inside = options.bookmarkFolder ?? null;
+      const files = inside == null && (sources.length === 0 || sources.includes(Source.FILES));
       const marks = bookmarks.enabled && (sources.length === 0 || sources.includes(Source.BOOKMARKS));
       const f = q.filters || {};
       const blocked = (f.kinds || []).length || f.sizeMin != null || f.sizeMax != null || f.folder;
       const ts = fold(q.text || '').split(/\s+/).filter(Boolean);
-      const found = marks && !blocked && ts.length
-        ? BOOKMARKS.filter((b) => ts.every((t) => fold(`${b.title} ${b.url} ${b.folder.join(' ')}`).includes(t)))
-          .map((b) => ({ ...b, source: Source.BOOKMARKS, matched: MatchKind.NAME }))
+      const pool = BOOKMARKS.filter((b) => inside == null || b.parent === inside);
+      const found = marks && !blocked && (ts.length || inside != null)
+        ? pool.filter((b) => ts.every((t) => fold(`${b.title} ${b.url} ${b.folder.join(' ')}`).includes(t)))
+          .map(({ parent, ...b }) => ({ ...b, source: Source.BOOKMARKS, matched: MatchKind.NAME }))
         : [];
+      const offset = q.offset || 0;
+      const limit = q.limit || 100;
       if (!files) {
         await sleep(30);
-        const offset = q.offset || 0;
-        return { hits: found.slice(offset, offset + (q.limit || 100)), total: found.length, truncated: false, truncatedBy: null, elapsedMs: 1 };
+        return { hits: found.slice(offset, offset + limit), total: found.length, truncated: false, truncatedBy: null, elapsedMs: 1 };
       }
-      const r = await this.search({ ...q, offset: Math.max(0, (q.offset || 0) - found.length) });
+      const r = await this.search({ ...q, offset: Math.max(0, offset - found.length) });
       const fileHits = r.hits.map((h) => ({ ...h, source: Source.FILES }));
       // Bookmarks first, then files: enough for looking at the screen.
-      const head = (q.offset || 0) < found.length ? found.slice(q.offset || 0) : [];
-      return { ...r, hits: [...head, ...fileHits].slice(0, q.limit || 100), total: r.total + found.length };
+      const head = offset < found.length ? found.slice(offset) : [];
+      return { ...r, hits: [...head, ...fileHits].slice(0, limit), total: r.total + found.length };
     },
     async getBookmarksStatus() { await sleep(20); return { ...bookmarks }; },
     async setBookmarksEnabled(on) {
@@ -364,7 +371,10 @@ export function createFakeBackend(params) {
       bookmarks.count = 0;
       if (on) {
         setTimeout(() => {
-          Object.assign(bookmarks, { state: ReadState.OK, count: BOOKMARKS.length, profiles: 1, lastRead: Math.floor(Date.now() / 1000) });
+          Object.assign(bookmarks, {
+            state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000),
+            roots: [{ id: 1001, root: BookmarkRoot.MENU, profile: null }, { id: 1003, root: BookmarkRoot.UNFILED, profile: null }],
+          });
           for (const cb of bookmarkCbs) cb({ ...bookmarks });
         }, 1000);
       }

@@ -257,7 +257,7 @@ pub(crate) fn search(
             }
         }
     }
-    out.sort_by(|a, b| (a.key, a.hit.id).cmp(&(b.key, b.hit.id)));
+    out.sort_by_key(|r| (r.key, r.hit.id));
     let cut = out.len() > MAX_BOOKMARK_HITS;
     out.truncate(MAX_BOOKMARK_HITS);
     (out, cut)

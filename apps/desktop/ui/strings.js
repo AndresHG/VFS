@@ -2,7 +2,7 @@
 // "indexar", "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values.
 
 import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, ReadState } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, ReadState, SortOrder } from './contract.js';
 
 export const S = {
   searchLabel: 'Buscar por nombre de archivo o de carpeta',
@@ -47,8 +47,15 @@ export const S = {
   },
   fSource: 'Buscar en',
   sourceOptions: {
-    [SourceChoice.ALL]: 'Todo', [SourceChoice.FILES]: 'Archivos', [SourceChoice.BOOKMARKS]: 'Marcadores',
+    [SourceChoice.BOTH]: 'Archivos y marcadores', [SourceChoice.FILES]: 'Archivos',
+    [SourceChoice.BOOKMARKS]: 'Marcadores',
   },
+  fSort: 'Orden',
+  sortOptions: {
+    [SortOrder.RELEVANCE]: 'Lo más parecido primero', [SortOrder.NEWEST]: 'Lo más reciente primero',
+    [SortOrder.SOURCE]: 'Archivos primero, luego marcadores',
+  },
+  folderGroupBookmarks: 'Marcadores de Firefox',
   folderAll: 'Todas las carpetas',
   folderPick: 'Elegir otra carpeta…',
   folderInside: (name) => `Dentro de: ${name}`,
@@ -63,15 +70,18 @@ export const S = {
   revealButton: 'Mostrar en carpeta',
   revealKey: 'Intro',
   unavailableBadge: 'No disponible',
-  openButton: 'Abrir en el navegador',
+  openButton: 'Abrir en Firefox',
+  folderContentsButton: 'Ver su contenido',
   bookmarkKind: 'Marcador',
+  bookmarkFolderKind: 'Carpeta de marcadores',
   bookmarkRoots: {
     [BookmarkRoot.MENU]: 'Menú de marcadores', [BookmarkRoot.TOOLBAR]: 'Barra de marcadores',
     [BookmarkRoot.UNFILED]: 'Otros marcadores', [BookmarkRoot.MOBILE]: 'Marcadores del móvil',
   },
-  bookmarkRowLabel: (title, path, site, date) =>
-    [title, 'marcador', `en ${path}`, site, date && `guardado el ${date}`].filter(Boolean).join(', '),
+  bookmarkRowLabel: (title, kind, path, date) =>
+    [title, kind, `en ${path}`, date && `guardado el ${date}`].filter(Boolean).join(', '),
   detailsBookmark: 'Dirección:',
+  detailsBookmarkFolder: 'Guardado en:',
   rowLabel: (name, kind, dir, date, size, unavailable) =>
     [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible']
       .filter(Boolean).join(', '),

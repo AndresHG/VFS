@@ -750,12 +750,11 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .row mark { forced-color-adjust: none; background: Mark; color: MarkText; }
 }
 
-/* VFS-6: bookmarks as a source. Structural only; the visual redesign restyles these. */
-.chip input:disabled + span { opacity: 0.5; cursor: not-allowed; }
+/* VFS-6: bookmarks as a source (docs/design/system.md "Sources"). */
 .row .ico[data-kind="bookmark"] { color: var(--accent); }
-.bookmarks-setting { padding: 0.9rem 1.5rem 0; border-block-start: 1px solid var(--border); }
-.bookmarks-setting h3 { margin: 0 0 0.4rem; font-size: 1rem; }
-.bookmarks-setting .drawer-intro { padding: 0.4rem 0 0; }
-.toggle { display: inline-flex; align-items: center; gap: 0.5rem; min-block-size: 2.5rem; font-weight: 700; }
-.toggle input { inline-size: 1.25rem; block-size: 1.25rem; }
-.bookmarks-status { margin: 0.25rem 0 0.9rem; color: var(--muted); }
+.bookmarks-setting { padding: var(--s4) var(--s5) 0; border-block-start: 1px solid var(--line); }
+.bookmarks-setting h3 { margin: 0 0 var(--s1); font-size: 1rem; }
+.bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }
+.toggle { display: inline-flex; align-items: center; gap: var(--s2); min-block-size: 2.5rem; font-weight: 700; }
+.toggle input { inline-size: 1.25rem; block-size: 1.25rem; accent-color: var(--accent); }
+.bookmarks-status { margin: var(--s1) 0 var(--s4); color: var(--ink-2); }

@@ -107,7 +107,7 @@ soon as it has been read.
   bookmarks.
 - **UI**: a "Buscar en" pill, first in the filter line, bookmark and bookmark-folder rows,
   bookmark roots in the "Carpeta" filter and a sort choice, behind the setting
-  (`docs/design/system.md` "Room for sources").
+  (`docs/design/system.md` "Sources").
 
 ### The folder tree (owner decision D10)
 
@@ -152,7 +152,8 @@ Bookmarks live in `bookmarks.db`, not in `index.db`. They have nothing in common
 index schema (in flux under other work) untouched, and turning the option off deletes one
 file's rows. There is no FTS index: 3,000 (even 30,000) bookmarks are scanned in memory in
 a few milliseconds with exactly the file rules (substring of folded keys, one typo), which
-an FTS trigram index would only approximate. Table `bookmarks(id, browser, profile, root,
+an FTS trigram index would only approximate. Tables `profiles(id, browser, dir, name,
+signature, read_at)` and `items(id, profile_id, guid, is_folder, parent_guid, position, root,
 folder, title, url, tags, keyword, added, modified)`; `folder` holds the folder names below
 the root joined by U+001F.
 

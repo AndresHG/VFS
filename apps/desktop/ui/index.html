@@ -18,6 +18,8 @@
     <symbol id="i-audio" viewBox="0 0 24 24"><path d="M9 18V5.5l11-2.25V15.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="17.5" cy="15.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
     <symbol id="i-other" viewBox="0 0 24 24"><path d="M6 2.75h8.2L19.25 7.8V20a1.25 1.25 0 0 1-1.25 1.25H6A1.25 1.25 0 0 1 4.75 20V4A1.25 1.25 0 0 1 6 2.75Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.75 3.25h10.5a1 1 0 0 1 1 1v16.5l-6.25-4.5-6.25 4.5V4.25a1 1 0 0 1 1-1Z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M13.5 4.75h5.75v5.75M19 5l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.25 13.5v5a1.75 1.75 0 0 1-1.75 1.75h-10A1.75 1.75 0 0 1 3.75 18.5v-10A1.75 1.75 0 0 1 5.5 6.75h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 13.5h5.5m-2.25-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -50,6 +52,11 @@
          three native selects. Labels are kept for screen readers; the chosen value is the text. -->
     <form class="filters" id="filters" aria-labelledby="filters-title">
       <h2 id="filters-title" class="visually-hidden" data-s="filtersTitle"></h2>
+      <!-- VFS-6: where to search, first in the line, only while Firefox bookmarks are included. -->
+      <label class="filter filter-select" id="f-source-pill" hidden>
+        <span class="visually-hidden" data-s="fSource"></span>
+        <select id="f-source"></select>
+      </label>
       <button id="f-type" class="filter" type="button" popovertarget="f-type-pop" aria-describedby="f-type-label">
         <span id="f-type-text"></span>
         <svg aria-hidden="true"><use href="#i-chevron"/></svg>
@@ -72,6 +79,10 @@
       <label class="filter filter-select field-folder">
         <span class="visually-hidden" data-s="fFolder"></span>
         <select id="f-folder"></select>
+      </label>
+      <label class="filter filter-select" id="f-sort-pill" hidden>
+        <span class="visually-hidden" data-s="fSort"></span>
+        <select id="f-sort"></select>
       </label>
       <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" hidden data-s="clearFilters"></button>
       <div class="range" id="date-range" hidden>
@@ -144,6 +155,12 @@
       <p id="folders-msg-text"></p>
     </div>
     <ul class="roots" id="roots" role="list"></ul>
+    <section class="bookmarks-setting" aria-labelledby="bookmarks-title">
+      <h3 id="bookmarks-title" data-s="bookmarksTitle"></h3>
+      <label class="toggle"><input type="checkbox" id="bookmarks-on"> <span data-s="bookmarksToggle"></span></label>
+      <p class="bookmarks-intro" data-s="bookmarksIntro"></p>
+      <p class="bookmarks-status" id="bookmarks-status" aria-live="polite"></p>
+    </section>
     <div class="drawer-foot">
       <button id="add-folder" class="btn btn-primary" type="button" data-s="addFolder"></button>
       <button id="rescan-all" class="btn btn-quiet" type="button" data-s="rescanAll"></button>
