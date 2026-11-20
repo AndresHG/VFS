@@ -77,7 +77,8 @@ how much load it removes from the target PC, then cost.
 
 ### P5. Learn from what the user reveals (frecency)
 
-- **Reference.** Kensaku adds a bounded bonus `0.08·ln(1+opens)·e^(−days/14)`; Listary ranks fuzzy
+- **Reference.** Kensaku adds a bounded bonus `0.08·ln(1+opens)·e^(−days/14)` **[doc]**
+  (`search/mod.rs:1682-1725` at commit b8b009f); Listary ranks fuzzy
   matches "by your habits"; Windows Search and Spotlight mix usage into ranking.
 - **For this user.** People look for the same documents again (the DNI scan, the deeds). A file
   revealed last week should come first next time, among otherwise equal hits.
@@ -183,7 +184,8 @@ how much load it removes from the target PC, then cost.
 
 ### P13. Static embeddings as the cheapest semantic option
 
-- **Reference.** Kensaku's default embedder is potion-base-8M (MIT): a 7 MB i8 lookup table, a
+- **Reference.** Kensaku's default embedder is potion-base-8M (MIT): a lookup table stored as i8, about 7.3 MiB
+  **[doc]** (`embed/table.rs` at commit b8b009f), a
   weighted mean of token vectors, no ONNX runtime at query time, exact scan over i8 vectors.
 - **For this machine.** If semantic search is ever worth it (issue 41), this is the only model
   class that a slow PC can run over a big archive without a GPU.
@@ -202,10 +204,11 @@ how much load it removes from the target PC, then cost.
 
 - **Reference.** Windows Search backs off silently ("waiting for computer to become idle") and its
   index stays incomplete with no visible sign — its top complaint.
-- **For this user.** When VFS-5's busy-disk back-off pauses the walk, results may be incomplete.
+- **For this user.** When the planned busy-disk back-off (R3 in `windows-recommendations.md`, issue 20)
+  pauses the walk, results may be incomplete.
   The status line should say so in words ("Revisión en pausa mientras el disco está ocupado; puede
   faltar algún archivo reciente"), not just stop moving.
-- **Cost.** S. **Phase.** Fase 2 (comment on issue 45).
+- **Cost.** S. **Phase.** Fase 2 (comment on issue 20).
 
 ## Things VFS should deliberately not do
 
@@ -249,7 +252,7 @@ Created in `AndresHG/VFS` for this study (titles in Spanish, as the tracker is):
 | P12 | comment on existing 23 | Fase 3 |
 | P13 | comment on existing 41 | Fase 5 |
 | P14 | comment on existing 49 | Fase 2 |
-| P15 | comment on existing 45 | Fase 2 |
+| P15 | comment on existing 20 | Fase 2 |
 
 Issues 32 and 34 also got a comment recommending them before the first install on the real PC
 (issue 17).

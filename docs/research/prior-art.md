@@ -13,9 +13,11 @@ Evidence tags, as in the rest of `docs/research/`:
 - **[doc]** official documentation, changelog, licence file or source code read at a stated commit;
 - **[author]** the tool's author or vendor speaking (forum post, README claim, marketing);
 - **[3p]** third-party report or measurement (forum user, review, issue tracker);
-- **[est]** our own inference or arithmetic, with the reasoning given.
+- **[est]** our own inference or arithmetic, with the reasoning given;
+- **[measured]** a VFS figure measured on the phase-1 branch (development Mac, synthetic tree), as
+  recorded in its `docs/architecture.md` and `docs/decisions.md`.
 
-Nothing in this document was measured by us: no tool was installed or run. Source code was read
+No other tool was installed or run for this study. Source code was read
 (Kensaku, FSearch, Cardinal, ripgrep-all, fd); Reddit could not be fetched, so user complaints come
 from the tools' own forums and issue trackers, review sites and Apple/Microsoft community pages.
 
@@ -88,7 +90,7 @@ limited IPC to clients in the same Windows session **[doc]** [E1][E2][E3].
   consistent with a parent-linked array of names scanned linearly **[est]**.
 - Precomputed **fast sort** orders for name, run count, recently changed (always) and optionally
   size, dates, path, extension; size costs 8 bytes per entry and its fast sort 16 more
-  **[doc]** [E11], **[author]** [E14]. Without a size index a size sort "will take minutes" **[3p]**.
+  **[doc]** [E11], **[author]** [E14]. Without a size index a size sort "will take minutes" **[3p]** (voidtools forum, <https://mail.voidtools.com/forum/viewtopic.php?p=13677>).
 - **Memory:** 1 M files ≈ 100 MB RAM and 45 MB on disk **[doc]** [E5]; "around 100MB per 1
   million files" **[author]** [E15]; "700MB is expected for 8 million files" **[author]** [E14];
   a 30 M-item index used 6–10 GB **[3p]** [E15]. At 5 M files: about 0.5 GB RAM and 225 MB on disk
@@ -343,7 +345,7 @@ Name and path search only. "RAM / 1 M" is resident memory per million indexed fi
 | Windows Search | crawl + USN | backs off when busy | ESE / SQLite | n/a | ~10 % of content [doc] | word prefix | undocumented | folded by default | Copilot+ only | no | OS |
 | Spotlight | FSEvents + importers | FSEvents | per-volume, undocumented | n/a | n/p | attribute + wildcards | usage (UI) | opt-in `d` | no | no | OS |
 | Agent Ransack | live walk per search | n/a | none | n/a | none | substring, boolean | none | n/p | LIKE (content) | no | proprietary |
-| **VFS (phase 1)** | walk, one I/O stream | own RDCW / FSEvents watcher; **full re-walk at every start** | SQLite FTS5 trigram, contentless | page caches, < 300 MB budget; 123 MB peak at 2 M [measured] | ~445 MB (889 MB at 2 M) [measured] | substring, name + path | tiers: exact, prefix, name, path, typo | folded both ways | one edit, words ≥ 6 chars | no | private |
+| **VFS (phase 1)** | walk, one I/O stream | own RDCW / FSEvents watcher; **full re-walk at every start** | SQLite FTS5 trigram, contentless | page caches, < 300 MB budget; 123 MB peak at 2 M [measured] | ~445 MB [est] (889 MB at 2 M [measured]) | substring, name + path | tiers: exact, prefix, name, path, typo | folded both ways | one edit, words ≥ 6 chars | no | private |
 
 n/p: not published. Content tools (Recoll, DocFetcher, AnyTXT, rga) are in §2.4–2.6.
 
@@ -360,7 +362,8 @@ n/p: not published. Content tools (Recoll, DocFetcher, AnyTXT, rga) are in §2.4
 
 ## 4. Everything against VFS
 
-The owner was asked early why not use Everything and could not answer (spec decision 5). This is
+The owner had not tried Everything when VFS was specified (spec decision 5: "Untried; an owned,
+extensible product"). This is
 the frank answer for the user's core need: find a file by part of its name or folder in a 5 M-file
 archive on one busy HDD, on a Windows PC, without understanding search syntax.
 
@@ -377,8 +380,8 @@ archive on one busy HDD, on a Windows PC, without understanding search syntax.
 4. **Warm-RAM queries.** Every query scans RAM; no query waits for a cold disk. VFS's FTS pages
    live on disk and the first query after boot may read from the HDD (issue 18).
 5. **Footprint.** About 0.5 GB RAM and 225 MB on disk at 5 M files **[est from doc]** against
-   VFS's ~2.2 GB index at 5 M **[est, linear from 889 MB at 2 M measured]** (VFS-4 is reducing
-   it).
+   VFS's ~2.2 GB index at 5 M **[est, linear from 889 MB at 2 M measured]** (VFS-4, on its own
+   branch, reduces it).
 6. **Maturity and extras.** Twenty years of edge cases, folder sizes, duplicates, a syntax that
    covers every filter, and since April 2026 a Spanish translation.
 
@@ -451,7 +454,8 @@ and works on Windows only. The proposals list it under "do not do".
   returns nothing" rule, arrived at independently).
 - One exclusion list for walker and watcher, including Synology's `@eaDir` and `#recycle`.
 - A watcher buffer of 64 KB and a re-walk on overflow (the same as Everything's folder indexing),
-  with a cooldown (Everything has none, and its users report stalls).
+  with a cooldown (Everything's folder-indexing docs describe no cooldown, and its users
+  report rescans stalling other I/O [E10]).
 
 **Where the study disagrees.**
 1. **The catch-up re-walk at every start (spec I4) is the design's biggest cost.** No fast tool
@@ -467,7 +471,8 @@ and works on Windows only. The proposals list it under "do not do".
    would silently show the newest of the 2,000 best-ranked hits rather than the newest overall.
 3. **Index footprint.** At about 2.2 GB for 5 M files **[est]**, the index is five to ten times
    Everything's on-disk snapshot, on the system disk of a slow PC, and cold queries pay for it.
-   VFS-4 (contentless `detail=none`, smaller pages) is working on this. Cardinal's unique-name
+   VFS-4 (position-less `files_fts`, 16 KB pages, fewer pages read per query; implemented on
+   its own branch) addresses this. Cardinal's unique-name
    map suggests one more lever: archives repeat names massively, and an FTS table over distinct
    folded names (with files pointing to a name id) could shrink `files_fts` by the duplicate
    ratio. Worth measuring on the real archive (new issue).
