@@ -1,9 +1,9 @@
 # Document content search: design
 
-Status: design only, not implemented (VFS-1 AC-15, requirement R12). The VFS-1 spec calls
-this "phase 2", the step after name and path search; on GitHub it is milestone
-[Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4), because
-validation on the real PC comes first. Issues: extraction in an isolated process (#23),
+Status: design only, not implemented (VFS-1 AC-15, requirement R12). It is milestone
+[Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4), after
+name and path search (Fase 1) and validation on the real PC (Fase 2). Issues: extraction
+in an isolated process (#23),
 Spanish full-text search (#24), content results with a highlighted fragment (#25).
 
 ## Goal and scope
@@ -45,8 +45,9 @@ Constraints that follow:
   spinning disk make both slower. Extraction shares the disk with the name indexer and with
   the sync client.
 - **Memory.** The app's budget is under 300 MB with the index open (AC-9). The name-search
-  page caches alone may grow to 224 MiB (32 writer + 64 reader + 128 search, set in
-  `crates/vfs-core/src/db.rs`). Content search cannot add another large cache inside the app
+  page caches alone may grow to 160 MiB (32 writer + 64 reader + 64 search, set in
+  `crates/vfs-core/src/db.rs`; measured peak RSS of the 2 M-file benchmark: about 123 MB).
+  Content search cannot add another large cache inside the app
   process; extraction must run in a separate process with its own cap.
 - **Hostile input.** A decades-old archive holds corrupt, truncated, password-protected and
   enormous files. An extractor crash or hang must never take the app or the name indexer
@@ -173,7 +174,7 @@ Only after BM25 is in use and real queries show where it misses.
 The v1 code reserves the extension point without using it (`crates/vfs-core/src/content.rs`,
 test `extension_point_is_present_and_unused`):
 
-| Piece | Where | What it gives phase 2 |
+| Piece | Where | What it gives content search |
 |---|---|---|
 | `files.content_state INTEGER NOT NULL DEFAULT 0` | `crates/vfs-core/src/schema.sql` | per-file pipeline state already in every row; v1 writes 0 only |
 | `enum ContentState { None = 0, Queued = 1, Indexed = 2, Failed = 3, Skipped = 4 }` | `content.rs` | the values of that column |
@@ -184,10 +185,11 @@ test `extension_point_is_present_and_unused`):
 | `files.kind` | `schema.sql`, `kind.rs` | selects which files are documents |
 | background priority, batched commits, persistent queue in the index | `crates/vfs-core/src/indexer/`, `platform.rs` | the patterns the extraction queue reuses |
 
-What phase 2 still has to add:
+What content search still has to add:
 
-- A migration from version 1 to 2. `db::open_rw` today only creates the schema on an empty
-  file (`user_version = 0`); it has no upgrade step yet.
+- A migration to schema version 3. `db::open_rw` already applies missing migrations in
+  order (`MIGRATIONS` in `db.rs`; version 2 added the per-file path index), so this is one
+  more SQL file.
 - An index on the queue, e.g. a partial index `WHERE content_state = 1`; v1 has none,
   because nothing reads the column.
 - The content FTS table (or Tantivy directory), the snippet store, the worker executable,
@@ -201,15 +203,15 @@ For the 60,000-document budget case:
 | Item | Size | Label |
 |---|---|---|
 | Name index today, per file | about 280 bytes (5.4 MB for 20,000 synthetic files and 1,538 folders) | [measured: `vfs gen-db --files 20000` on the development Mac, 2026-11-20] |
-| Name index at 2 M files | about 0.57 GB, if that per-file size holds | [estimate] |
+| Name and path index at 2 M files, schema version 2 | 889 MB (577 MB before the per-file path index) | [measured: `vfs gen-db --files 2000000` on the development Mac] |
 | Extracted text, compressed (snippet store, if full text were kept) | 0.3–0.5 GB | [estimate] |
 | Full-text index with positions | 0.8–1.2 GB | [estimate] |
 | Vectors, int8 + 1-bit copy (optional step) | 0.2–0.4 GB | [estimate] |
 
 Capping the snippet store (for example the first 4 KB of text per document) makes it
-negligible next to the full-text index **[estimate]**. The index lives in the app data
-folder on the system drive (`%APPDATA%\app.vfs.desktop\` on Windows), not on the archive
-disk; free space there is unknown.
+negligible next to the full-text index **[estimate]**. The index lives in the local app
+data folder on the system drive (`%LOCALAPPDATA%\app.vfs.desktop\` on Windows), not on the
+archive disk; free space there is unknown.
 
 Time on the target PC, for 60,000 documents:
 

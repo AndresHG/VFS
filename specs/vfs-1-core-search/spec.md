@@ -129,7 +129,7 @@ Tests cite these ids (`VFS-1 AC-<m>`) in their doc comments.
 | 7 | Minimum for v1? | Typo and accent tolerance, filters; no opening files, only "mostrar en carpeta" | owner | 2026-11-20 |
 | 8 | Repository and CI? | Private repo on the owner's account, GitHub Actions, unsigned installer | owner | 2026-11-20 |
 | 9 | Scale and performance targets? | Designed for 5 M files; synthetic test of 2 M, < 150 ms p95, < 300 MB | owner | 2026-11-20 |
-| 10 | Ticket system? | None; ids `VFS-n` in `specs/` (default) | owner | 2026-11-20 |
+| 10 | Ticket system? | GitHub Issues in `AndresHG/VFS`, one milestone per phase (Fase 0 Cimientos, Fase 1 Búsqueda por nombre y ruta, Fase 2 Validación en el PC real, Fase 3 Contenido de documentos, Fase 4 Pulido y distribución); spec ids stay `VFS-n` in `specs/` | owner | 2026-11-20 |
 | 11 | Branch model? | Protected `main` + `feat/<title>` branches, squash merge (default) | owner | 2026-11-20 |
 | 12 | Hook runtime? | Python 3 and bash, on the macOS dev machine only (default) | owner | 2026-11-20 |
 | 13 | Are folders results? | Yes. A folder whose name matches is its own result row (empty folders included), marked as a folder (`isDir` on the hit), with "mostrar en carpeta" revealing the folder; the type filter gains "carpeta" (`folder` kind) | owner | 2026-11-20 |
@@ -174,6 +174,10 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 - C4. The search deadline comes from `SearchConfig` (default 1000 ms).
 - C5. An index that cannot be opened or fails `quick_check` (run only after an unclean
   shutdown) is renamed to `index.db.bad` and rebuilt from its roots.
+- C6. The app keeps the index in the local app data directory (Tauri `app_local_data_dir`;
+  `%LOCALAPPDATA%` on Windows), never the roaming one, so a multi-GB file is not synced or
+  backed up with the profile; at start it moves, once, an index an earlier build left in
+  the roaming directory.
 - S1. For each root, query terms already contained in the root's own path are ignored,
   unless none would remain.
 - S2. Candidates are retrieved in ranking-tier order, so a full list never pushes out a
@@ -211,8 +215,9 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   the watcher, which drops events for any excluded component below the root before
   anything is marked dirty.
 - I9. A directory rename or move inside a root that the Windows watcher reports as an
-  old/new pair is applied as a path update of the subtree's `dirs` rows and folder search
-  entries in one transaction; anything else falls back to re-listing both parents.
+  old/new pair is applied as a path update of the subtree's `dirs` rows, folder search
+  entries and the files' `file_paths_fts` rows in one transaction; anything else falls
+  back to re-listing both parents.
 - I10. Full re-walks run one at a time and a walk in progress is never restarted: a request
   for a root being walked owes one more pass after it. Requests from lost events
   (overflow, a watch that failed), and those owed by a root that was being walked, wait
@@ -247,11 +252,13 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 - Planned design: flat directory walk (one I/O stream per HDD), SQLite WAL + FTS5 trigram over
   the accent-folded name, directory paths in their own table, volumes identified by GUID or
   serial. Schema version 2 adds `file_paths_fts`, each file's folded relative path and name
-  as trigrams without positions (`detail=none`): +322 MB at 2 M files (577 MB → about
-  940 MB), against +1066 MB with positions. Unmeasured risks: HDD scan time and FTS5 trigram at several million names
-  (alternative: an in-memory name buffer).
-- Phase 2 content search: extraction in an isolated worker, Spanish BM25; small embeddings
-  optional. BM25 outperforms dense models on long Spanish documents.
+  as trigrams without positions (`detail=none`). Measured on the 2 M-file synthetic index:
+  +311 MB (577 MB → 889 MB); the same table with positions was put at about +1 GB during
+  the design (not re-measured). Unmeasured risks: HDD scan time and FTS5 trigram at several
+  million names (alternative: an in-memory name buffer).
+- Document content search (GitHub milestone Fase 3): extraction in an isolated worker,
+  Spanish BM25; small embeddings optional. BM25 outperforms dense models on long Spanish
+  documents.
 - No figure from the research has been measured on the real hardware.
 
 ## Open questions

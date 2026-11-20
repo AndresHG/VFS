@@ -14,19 +14,23 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 - Reads names, sizes and dates from the directory listing. It never opens, moves or changes
   a user file.
 - Searches as the user types. Every word must appear in the file name or in the folder path,
-  ignoring case and accents ("notaria" finds "Notaría"; NFC and NFD names match).
+  ignoring case and accents ("notaria" finds "Notaría"; NFC and NFD names match). Results
+  are gathered best first: names that start with the first word, names holding every word,
+  then files whose folders and name together hold them, then typos.
 - Tolerates one typo in words of 6 or more letters, when the exact search finds fewer than
-  20 results.
+  20 results. Shorter words match exactly.
 - Shows folders as results too, marked as folders.
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
 - "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected. On Windows,
   a path Explorer cannot address (over 259 characters) opens the nearest folder it can.
-- Follows changes: a live watcher while the app runs, plus a full re-walk of each folder on
-  start when the last one is more than a day old, and every 7 days while running.
+- Follows changes: a live watcher while the app runs, a catch-up re-walk of every folder at
+  each start (resumable, and searchable meanwhile), and a re-walk every 7 days while
+  running. Full re-walks run one at a time; a folder that fails to list is retried. System,
+  Synology and temporary files are skipped by both the walker and the watcher.
 
 ## What it deliberately does not do
 
-- Search inside documents. That is a later phase; the design is in
+- Search inside documents. That is planned for milestone Fase 3; the design is in
   [`docs/content-search-design.md`](docs/content-search-design.md).
 - Understand photos, audio or video. They are found by name, folder and filters only.
 - Open files or show previews.
@@ -100,7 +104,8 @@ cargo run --release -p vfs-cli -- bench --db /tmp/vfs-2m.db
 ```
 
 `bench` measures with warm and with cold SQLite page caches; it cannot drop the operating
-system's file cache, so it does not show cold-disk latency on an HDD.
+system's file cache, so it does not show cold-disk latency on an HDD. The 2 M-file index is
+889 MB (measured); see the status below for the results.
 
 ## Windows installer
 
@@ -128,27 +133,46 @@ default branch, `main`. Then download the artifact from the run page, or with
 
 ## Where the index lives
 
-The app keeps one SQLite database, `index.db`, in the per-user app data folder of its
+The app keeps one SQLite database, `index.db`, in the per-user local app data folder of its
 identifier `app.vfs.desktop`:
 
 | System | Folder |
 |---|---|
 | macOS | `~/Library/Application Support/app.vfs.desktop/` |
-| Windows | `%APPDATA%\app.vfs.desktop\` (the roaming app data folder) |
+| Windows | `%LOCALAPPDATA%\app.vfs.desktop\` (never the roaming folder) |
+
+On Windows the roaming folder can be synced or backed up with the user profile, and a
+multi-GB index must not travel to the NAS. An index that an earlier build left in
+`%APPDATA%\app.vfs.desktop\` is moved to the local folder once, at start.
 
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
 that marks an open session, and, after a recovery, `index.db.bad`. Deleting the folder while
 the app is closed resets VFS: the folders have to be added again and are scanned from
 scratch. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
+The index has schema version 2 (it adds a per-file path index). An index written by an
+older build is upgraded in place when the app opens it, without a rescan; one written by a
+newer build is refused, never overwritten.
+
 ## Status: what has and has not been run
 
 - On macOS (the development Mac): `cargo build`, `cargo test --workspace`, `cargo fmt
-  --check` and `cargo clippy` pass, and the CLI indexes and searches a real folder.
+  --check` and `cargo clippy` pass, and the CLI indexes and searches a real folder. The
+  Windows target passes `cargo xwin clippy` (cross-compiled lint, not run).
+- The app built with `tauri build` has been started on that Mac: it upgraded a version-1
+  index to version 2, its catch-up re-walk at start picked up a file added and a file
+  deleted while it was closed, and the watcher indexed a new folder within seconds. Its
+  window was not inspected.
+- AC-9 benchmark, measured on the 2 M-file synthetic index on an Apple Silicon Mac with an
+  SSD, warm OS file cache: peak RSS about 123 MB. The warm p95 sits close to the 150 ms
+  limit: before the no-hit probe two of three runs passed and the worst failed by under
+  10 ms on two query classes; with it three of three passed, the slowest class at 114–133
+  ms per run, while other work kept the load average at 4.4–5.1. Treat it as marginal.
 - **Nothing has been run on Windows yet.** The Windows watcher, volume identity, background
   priority, long-path reveal and the installer are compiled only on Windows and have never
   executed. The CI and release workflows have not run on GitHub yet.
-- No figure has been measured on the target PC (slow 8 TB HDD). Phase 2 exists for that.
+- No figure has been measured on Windows, on an HDD, or on the target PC (slow 8 TB HDD).
+  Milestone Fase 2 exists for that.
 
 ## Phases
 
@@ -161,9 +185,6 @@ Work is tracked as GitHub issues grouped in milestones:
 | [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the target PC; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
 | [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4) | Text extraction from Word/PDF and Spanish full-text search. |
 | [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Updates, code signing, optional OCR and embeddings. |
-
-The spec calls document content search "phase 2" (after the v1 name search); on GitHub it
-is milestone Fase 3, because validation on the real PC comes first.
 
 ## Contributing
 

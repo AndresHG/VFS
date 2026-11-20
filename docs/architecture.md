@@ -1,6 +1,6 @@
 # VFS architecture
 
-This document describes the code as it is on the VFS-1 integration branch: how a folder on
+This document describes the code as merged for VFS-1: how a folder on
 disk becomes rows in the index, and how a query becomes a ranked list of results. File
 references are relative to the repository root; `core/` means `crates/vfs-core/src/`.
 Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
@@ -29,7 +29,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │   └─ fold.rs, kind.rs  search keys, extension → type        │
 └──────────────────────────────┬─────────────────────────────┘
                                │ SQLite, WAL mode
-                    <app data dir>/index.db
+              <local app data dir>/index.db
 ```
 
 `crates/vfs-cli` uses the same `Vfs` facade, with its own index file.
@@ -42,16 +42,20 @@ The app is one process. The core opens these SQLite connections to the same file
 | writer | indexer thread (`IndexerHandle::spawn`) | 32 MiB | the scan loop and watcher hints |
 | short-lived writer | `add_root`, `remove_root`, `mark_dirty` | 32 MiB | root changes from commands |
 | reader | `Vfs::open_with` | 64 MiB | roots, stats, paths for "mostrar en carpeta" |
-| search reader | `Vfs::open_with` | 128 MiB | queries only; interrupted by each new query |
+| search reader | `Vfs::open_with` | 64 MiB | queries only; interrupted by each new query |
 
 All connections set `journal_mode=WAL`, `synchronous=NORMAL` and `mmap_size=0`, so resident
-memory is bounded by the page caches (AC-9 budget: under 300 MB). Readers set
+memory is bounded by the page caches (AC-9 budget: under 300 MB; the 2 M-file benchmark
+peaks at about 123 MB, measured). Readers set
 `query_only=1`. A writer waits up to 30 s for the other writer; readers wait up to 5 s.
 
 ## Schema
 
-`core/schema.sql`, schema version 1 (`PRAGMA user_version`). `db::open_rw` creates it on a
-new file; an index from a newer build fails with `schema_too_new` and is never discarded.
+`core/schema.sql` is schema version 1 and `core/schema_v2.sql` version 2 (`PRAGMA
+user_version`). `db::open_rw` runs the missing migrations (`MIGRATIONS` in `core/db.rs`) in
+order, in one transaction: a new file gets both, and a version-1 index gets version 2, whose
+SQL fills `file_paths_fts` from the rows already there, so no rescan is needed. An index
+from a newer build fails with `schema_too_new` and is never discarded.
 
 | Table | Holds |
 |---|---|
@@ -59,16 +63,22 @@ new file; an index from a newer build fails with `schema_too_new` and is never d
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state` |
-| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode), `content_state` (phase 2; always 0) |
+| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode), `content_state` (document content search, milestone Fase 3; always 0) |
 | `files_fts` | FTS5 trigram index over `files.name_key`, `rowid = files.id` |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
+| `file_paths_fts` | version 2: FTS5 trigram index over each file's folded relative path and name (`<dir path_key>/<name_key>`, or `name_key` alone in the root directory), `detail=none` (rowids only, no positions), `rowid = files.id` |
 
 Design points:
 
-- **A file never repeats its folder path.** Paths are rebuilt from `roots.path` +
-  `dirs.rel_path` + `files.name` (`db::file_abs_path`, `db::dir_abs_path`). Indexing the full
-  path of every file would repeat deep paths thousands of times in the trigram index.
-- **Both FTS tables are contentless** (`content=''`, `contentless_delete=1`) with
+- **The tables store a folder path once.** Paths are rebuilt from `roots.path` +
+  `dirs.rel_path` + `files.name` (`db::file_abs_path`, `db::dir_abs_path`).
+- **The per-file path index repeats it, and pays for it.** `file_paths_fts` holds every
+  file's folded path and name, so a query whose words are split between the folders and
+  the name ("gestoria 2019 escritura") is one FTS intersection instead of a walk over every
+  matching folder. Without positions it adds 311 MB to the 2 M-file synthetic index (577 MB
+  → 889 MB, measured); position-less trigrams cannot check adjacency, so its candidates are
+  verified like all others. A directory rename (I9) rewrites the rows of the files below it.
+- **All FTS tables are contentless** (`content=''`, `contentless_delete=1`) with
   `tokenize='trigram case_sensitive 1'`. Keys are folded before they are stored, so the
   tokenizer does no case or accent work. There are no triggers: every FTS row is written by
   `db::ingest` in the same transaction as its base row.
@@ -119,10 +129,12 @@ from `lstat`. It skips:
 
 - symlinks, junctions and other name-surrogate reparse points (`FileType::is_symlink`), so a
   walk never loops;
-- excluded names: `$RECYCLE.BIN`, `System Volume Information`, `.Trashes`, `.Trash`,
-  `.Spotlight-V100`, `.fseventsd`, `.DocumentRevisions-V100`, `.TemporaryItems`,
-  `.DS_Store`, `Thumbs.db`, `desktop.ini` (ASCII case-insensitive), and names starting with
-  `._` or `~$`;
+- excluded names (`walk::is_excluded`, ASCII case-insensitive): `$RECYCLE.BIN`, `System
+  Volume Information`, `.Trashes`, `.Trash`, `.Spotlight-V100`, `.fseventsd`,
+  `.DocumentRevisions-V100`, `.TemporaryItems`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, the
+  Synology names `.SynologyWorkingDirectory`, `@eaDir`, `#recycle` and `#snapshot`, and
+  temporary names (`._*`, `~$*`, `.~lock.*#`, `~*.tmp`). The watcher uses the same function
+  (I8);
 - the app's own data directory;
 - entries that vanish or fail while being listed.
 
@@ -149,14 +161,16 @@ calls `apply::apply_listing` (`core/indexer/apply.rs`), which:
 - on a deep listing, marks existing child directories pending deep;
 - sets the listed directory clean.
 
-A rename or move is a delete plus an insert; a moved folder is walked again at its new
-place. If a directory cannot be listed because of a permission or I/O error, what is
-indexed stays, the error is counted, and the directory is set clean. If it is gone, its
-subtree is deleted — unless the root itself is unreachable, in which case the root becomes
-`unavailable` and nothing is deleted.
+Seen by a listing, a rename or move is a delete plus an insert, and a moved folder is
+walked again at its new place; the Windows watcher's rename pairs avoid that (see below).
+If a directory cannot be listed because of a permission or I/O error, what is indexed
+stays, the error is counted, and the directory stays pending: it is retried after 1
+minute, then after doubling delays, and after 6 failures it waits for the next full walk
+(I11). If it is gone, its subtree is deleted — unless the root itself is unreachable, in
+which case the root becomes `unavailable` and nothing is deleted.
 
 When no directory of a root is pending, `finalize_root` recounts files and folders, marks
-the root `ready`, and after a full scan stamps `last_full_scan_at` and asks both FTS tables
+the root `ready`, and after a full scan stamps `last_full_scan_at` and asks the FTS tables
 for a segment merge.
 
 ### Resume after interruption
@@ -164,9 +178,11 @@ for a segment merge.
 Writes happen in transactions that commit between directories every 20,000 changed rows or
 5 s (I5). Because the queue lives in the same transaction as the rows, a run killed at any
 point redoes only the directories of its last uncommitted transaction. On start
-(`Worker::init`) the indexer finishes roots left in `removing`, recounts roots that are not
-ready, queues a re-walk of every ready root whose last full scan is older than 24 h, starts
-the watcher, and then simply continues with whatever is pending (AC-6).
+(`Worker::init`) the indexer finishes roots left in `removing`, recounts the roots, owes
+every root a catch-up re-walk (changes made while the app was closed are seen by nothing
+else until a change journal is read, I4), starts the watcher, and then continues with
+whatever is pending (AC-6). The catch-up is resumable, runs at low priority, and the user
+can search meanwhile; the status bar says "Comprobando cambios…" while it runs (U6).
 
 ### The indexer thread
 
@@ -179,9 +195,17 @@ policy; Windows `THREAD_MODE_BACKGROUND_BEGIN`). The thread:
 - publishes progress (`IndexProgress`) at most every 500 ms and `index-changed` at most every
   2 s after a commit;
 - when idle, waits up to 60 s for a command;
-- every hour, queues a re-walk of roots whose last full scan is older than 7 days (I4).
+- every hour, requests a re-walk of roots whose last full scan is older than 7 days or
+  stored in the future (a clock set back) (I4);
+- every minute, retries watching roots that could not be watched (I12).
 
 There is one I/O stream: roots are scanned one after another, one directory at a time.
+Full re-walks run one at a time (`request_rewalk`, `start_owed`), and a walk in progress is
+never restarted: a request for the root being walked owes one more pass after it. Requests
+caused by lost events (an overflow, a watch that failed), and those owed by a root that was
+being walked, wait until that root's last full scan is 1 hour old; start-up and manual
+requests do not wait (I10). So a burst of sync-client churn cannot chain full walks back to
+back.
 
 ### Watcher and re-walk
 
@@ -190,7 +214,16 @@ work. A `Dirty(path)` event is coalesced for 2 s, then `mark_dirty` sets the pat
 directory (and the path itself, if it is an indexed directory) pending shallow. If the
 parent is not indexed yet, its nearest indexed ancestor is marked. A clean directory is the
 only one that changes state, so a hint never downgrades a directory pending deep (I1).
-Events under the app data directory are dropped (I3).
+Events under the app data directory are dropped (I3), and so are events for any path with
+an excluded component below the root (`walk::is_excluded`, the walker's list, I8), before
+anything is marked.
+
+On Windows an old-name record directly followed by its new-name record becomes a
+`Renamed` event. When the old directory is indexed and gone from disk, the new one exists in
+the same root, is not indexed yet, and its parent is indexed, `indexer::rename_dir` applies
+it as a path update in one transaction: the subtree's `dirs` rows get their new `rel_path`
+and keys, and their `dirs_fts` and `file_paths_fts` rows are rewritten; file rows and
+directory ids are kept. Anything else falls back to re-listing both parents (I9).
 
 | System | Backend | When events may be lost |
 |---|---|---|
@@ -199,9 +232,10 @@ Events under the app data directory are dropped (I3).
 
 A re-walk (`queue_rewalk`) sets the root directory pending deep and the root `scanning`;
 the deep listing then cascades through the whole tree. Re-walks also happen when the user
-asks (`rescan`), when an unavailable root becomes reachable, on start after 24 h and while
-running after 7 days. If the watcher cannot start, indexing still runs and these re-walks
-still catch changes. The Windows loop has never run (see "Not yet run").
+asks (`rescan`, "Buscar cambios ahora"), when an unavailable root becomes reachable, once a
+root that could not be watched is watched (I12), at every start, and while running after 7
+days. If the watcher cannot start, indexing still runs and these re-walks still catch
+changes. The Windows loop has never run (see "Not yet run").
 
 ### Session marker and recovery
 
@@ -242,48 +276,73 @@ Filters become SQL predicates (`file_clause`, `dir_clause`):
 - folder: resolved to a root and a directory (`resolve_scopes`, folded comparison) and
   applied as a `rel_path` range: descendants of `p` are exactly `[p + '/', p + '0')`.
 
-### Candidate generation (exact pass)
+### Candidate generation: tiers in ranking order
 
-Roots with the same effective terms form a group. For each group (`exact_group`):
+Roots with the same effective terms form a group. Candidates are read in the order of the
+ranking tiers, so a full list never pushes out a better tier (S2, `run_query`):
 
-1. **Choose the generator term (S2).** For each term of 3 or more characters, count its
-   matches in `files_fts` and in `dirs_fts`, exactly up to 50,000 each. The term with the
-   fewest matches (ties: the longer term) drives the query.
-2. **G1:** files whose name contains the generator term, read by rowid from the
-   `files_fts` match and joined to `files` and `dirs`.
-3. **G2:** folders whose path contains it (the FTS match drives a `CROSS JOIN` so SQLite
-   reads each directory by rowid), then the files of those folders. At most 20,000 matching
-   folders are read; more sets `truncatedBy = "cap"`.
-4. **Verify** every candidate in Rust against all terms (`verify_file`, `verify_dir`).
+1. **Name starts with the first term**, all terms in the name: one `files_fts`
+   intersection with the first term anchored (`^"term"`), and the same on folder names in
+   `dirs_fts` (`name_tier`).
+2. **All terms in the name**: the same intersection without the anchor. Tiers 1 and 2 read
+   up to 4,000 candidates, all ranked before the cut to 2,000 hits, so a better name match
+   is never lost to rowid order. Date and size filters have no index, so with them these
+   tiers stop at 2,000.
+3. **Path**: files whose relative path and name together hold every term, as one
+   intersection in `file_paths_fts` (`exact_group`). Because that table has no positions,
+   the expression is the trigrams that cover each term without overlap, ANDed; candidates
+   are verified. A single term instead reads the folders whose path holds it (`dirs_fts`,
+   at most 20,000) and their files, which is exact. Folders whose path holds every term and
+   whose own name holds one come from `dirs_fts`.
+4. **Typos** (below).
+
+Filters are SQL predicates of every stage. With a folder filter on one folder below a root,
+the trigrams of that folder's path join the `file_paths_fts` intersection, so only rows of
+that subtree are read. Every candidate is verified in Rust against all terms
+(`verify_file`, `verify_dir`).
 
 Terms shorter than 3 characters cannot use the trigram index (S5). They are checked during
 verification; when a group has only short terms, or the query has filters and no terms, the
 group is a filtered scan with `instr` in SQL (`scan_group`).
 
-At most 2,000 hits are accepted; one more sets `truncatedBy = "cap"`.
+At most 2,000 hits are kept; more sets `truncatedBy = "cap"`.
 
 ### Deadline
 
 Each query has two deadlines, checked every 1,000 SQLite VM steps and between rows:
 
-- **soft**, `SearchConfig::deadline` (default 1,000 ms): applies to scans, the fuzzy pass, and
-  generators whose term matched more than 5,000 rows;
-- **hard**, the larger of the soft deadline and 2 s: applies to everything else, so a
-  selective generator runs to completion (S3).
+- **soft**, `SearchConfig::deadline` (default 1,000 ms): applies to filtered scans and the
+  split-term typo pass;
+- **hard**, the larger of the soft deadline and 2 s: applies to the FTS-driven tiers, which
+  run to completion (S3).
 
 An expired deadline or an interruption returns what was found with `truncatedBy =
 "deadline"`. Such a list is not cached (U1).
 
-### Typo tolerance (fuzzy pass)
+### Typo tolerance
 
-Runs only when the exact pass found fewer than 20 hits and was not stopped
-(`fuzzy_pass`). For each term of 6 or more characters, `fuzzy::candidate_queries` builds FTS5
-expressions such that every string within one insertion, deletion, substitution or
-transposition contains at least one of them: for each edit position the parts before and
-after it, joined with `AND`, parts shorter than 3 characters dropped (S4). The pass reads at
-most 5,000 rows in all and verifies each candidate with `fuzzy::contains_within_one`
-(approximate substring search, optimal string alignment distance 1). Hits found this way
-are `matched = "fuzzy"`.
+Only terms of 6 or more characters tolerate a typo (`FUZZY_MIN_LEN`); shorter ones match
+exactly. Two typo stages follow the exact tiers:
+
+- **Near spellings**, when the exact tiers found fewer than 20 hits: the deletions and
+  adjacent transpositions of a term (`fuzzy::near_variants`), ORed, with the other terms
+  exact, in the name; first anchored at the start of the name for the first term, then
+  anywhere (S4).
+- **Split-term candidates**, only when nothing has matched at all: for each edit position
+  the parts of the term before and after it, joined with `AND`, parts shorter than 3
+  characters dropped (`fuzzy::candidate_queries`), so every string within one insertion,
+  deletion, substitution or transposition contains one of them. This pass reads at most
+  5,000 rows in all.
+
+Both verify with `fuzzy::contains_within_one` (approximate substring search, optimal string
+alignment distance 1); their hits are `matched = "fuzzy"`.
+
+Before the typo stages, a query with no hit at all probes `file_paths_fts` and `dirs_fts`
+once for a row holding, for every term, the term or one of its one-edit alternatives
+(`may_match`). Every hit of every tier holds those, so when the probe finds nothing the
+typo stages are skipped (S8). On the 2 M-file synthetic index this probe takes a few
+milliseconds; the `no_hit` class's warm p95 went from 146 ms (one run before the change)
+to 29–59 ms (three runs after), measured.
 
 ### Ranking
 
@@ -296,7 +355,8 @@ lower id, and files before folders:
 | 1 | every term is in the name and the name starts with the first term |
 | 2 | every term is in the name |
 | 3 | some term matched only in the path |
-| 4 | fuzzy match |
+| 4 | typo, and the name starts within one edit of the first term |
+| 5 | other typos |
 
 A query with filters and no terms lists newest first (S6).
 
@@ -343,18 +403,29 @@ runs `explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can
 the path is over 259 UTF-16 units (`apps/desktop/src-tauri/src/reveal.rs`). No file is
 opened with its application.
 
-The app opens the index at `<app data dir>/index.db` in `setup`, starts the indexer, and on
-exit calls `Vfs::shutdown`. A startup failure shows a Spanish error dialog and quits. A
+The app opens the index at `<local app data dir>/index.db` in `setup` (Tauri
+`app_local_data_dir`: `%LOCALAPPDATA%\app.vfs.desktop` on Windows, never the roaming
+folder, which can be synced to a NAS or backed up with the profile; on macOS the same
+`~/Library/Application Support/app.vfs.desktop` as before). If an earlier build left an
+index in the roaming folder and the local one has none, `move_legacy_index` moves it once,
+with its WAL, shared memory, session folder and `.bad` copy; if that rename fails, a new
+index is built (C6). It then starts the indexer, and on exit calls `Vfs::shutdown`. A
+startup failure shows a Spanish error dialog and quits. A
 second launch focuses the running window (single-instance plugin). The webview may only use
 core IPC (`capabilities/default.json`) under a strict content security policy
 (`tauri.conf.json`).
 
 ## Not yet run
 
-Nothing under `cfg(windows)` has executed, and there is no record of it compiling (the CI
-workflow has not run on GitHub yet):
-the `ReadDirectoryChangesW` loop, volume GUID lookup, drive type, background thread mode,
-long-path handling in the watcher, and the Explorer reveal. The same holds for the NSIS
-installer. Performance at 2 million files is checked only by `vfs bench` on a synthetic
-database on the development Mac, with warm OS file caches; nothing has been measured on the
-target PC's HDD.
+Nothing under `cfg(windows)` has executed; it is only type-checked on the Mac by
+`cargo xwin clippy` for `x86_64-pc-windows-msvc` (the CI workflow has not run on GitHub
+yet): the `ReadDirectoryChangesW` loop, volume GUID lookup, drive type, background thread
+mode, long-path handling in the watcher and the Explorer reveal. The move of an index out
+of the roaming folder has run only in unit tests, where both folders are temporary ones.
+The NSIS installer has never been built. Performance at 2 million
+files is checked only by `vfs bench` on a synthetic database on the development Mac (Apple
+Silicon, SSD), with warm OS file caches. There the warm p95 is close to the 150 ms limit:
+before the no-hit probe, two of three runs passed and the worst failed by under 10 ms on
+two query classes; with it, three of three runs passed, with load averages of 4.4–5.1 from
+other work and the slowest class at 114–133 ms per run; peak RSS is about 123 MB (all
+measured). Nothing has been measured on Windows or on an HDD.
