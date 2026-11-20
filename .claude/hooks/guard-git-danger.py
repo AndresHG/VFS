@@ -18,8 +18,12 @@ Verdicts:
     resolved (a variable or `$(…)` refspec, `--all`, `--mirror`)     -> "ask"
   - `git push` of a claude/* branch (except deleting it remotely)    -> "deny"
   - bare `git stash`, `git stash pop|clear|save`, untagged `push`    -> "deny"
-  - `gh pr merge`, `gh api …/pulls/N/merge`, `gh secret set|delete`,
-    `gh workflow run|enable|disable`                                 -> "ask"
+  - `gh pr merge --auto` (main has no required checks, so it merges
+    before CI finishes)                                              -> "deny"
+  - `gh pr merge`, `gh api repos/O/R/pulls/N/merge` while `gh pr checks`
+    does not show both ci.yml test jobs as `pass`                    -> "deny"
+  - `gh pr merge` (CI green or unreadable), `gh api …/pulls/N/merge`,
+    `gh secret set|delete`, `gh workflow run|enable|disable`         -> "ask"
   - `gh pr create` without a pr-critic `pass`/`waived` verdict for
     HEAD (scripts/pr_critic_verdict.py)                              -> "deny"
 
@@ -82,6 +86,34 @@ CLAUDE_BRANCH_REASON = (
     "feat/<title> (root CLAUDE.md, Git): run "
     "`git branch -m feat/<title>` and push that instead. Deleting a stale "
     "remote claude/* branch (`git push origin --delete …`) is allowed."
+)
+MERGE_REASON = (
+    "Merging a PR changes main, which every release is built from. CI is green; "
+    "merge with --squash only once the pr-critic has passed HEAD and the branch "
+    "is rebased on main (CLAUDE.md, Git)."
+)
+API_MERGE_REASON = (
+    "This GitHub API call merges a PR — the same change as `gh pr merge`, under "
+    "the same conditions (CLAUDE.md, Git)."
+)
+# The ci.yml matrix jobs that must pass before any merge (CLAUDE.md, Git).
+REQUIRED_CI_JOBS = ("test (macos-latest)", "test (windows-latest)")
+_MERGE_OPTS_WITH_VALUE = {"-b", "--body", "-F", "--body-file", "-t", "--subject",
+                          "-A", "--author-email", "--match-head-commit"}
+AUTO_MERGE_REASON = (
+    "`gh pr merge --auto` merges at once here: main has no required status "
+    "checks (branch protection needs GitHub Pro on this private repo), so "
+    "nothing makes it wait for CI. Wait until `gh pr checks <n>` shows both "
+    "test jobs as pass, then merge without --auto."
+)
+CI_RED_REASON = (
+    "CI is not green on this PR's head ({status}). CLAUDE.md lets a session "
+    "merge only once test (macos-latest) and test (windows-latest) both pass. "
+    "Wait for them (`gh pr checks <n> --watch`), fix a failure, then merge."
+)
+CI_UNKNOWN_REASON = (
+    "Couldn't read this PR's CI status (`gh pr checks` failed). Merge only "
+    "once test (macos-latest) and test (windows-latest) both pass (CLAUDE.md, Git)."
 )
 STASH_REASON = (
     "The git stash stack is shared with the main checkout and every other "
@@ -317,6 +349,53 @@ def _pr_critic_gate(cwd):
     return [("deny", reason)] if reason else []
 
 
+def _merge_target(args):
+    """`gh pr merge` args -> (PR number/URL/branch or None, --repo value or None)."""
+    pr, repo, i = None, None, 0
+    while i < len(args):
+        tok = args[i]
+        if tok in ("-R", "--repo"):
+            repo = args[i + 1] if i + 1 < len(args) else None
+            i += 2
+            continue
+        if tok.startswith("--repo="):
+            repo = tok.split("=", 1)[1]
+        elif tok in _MERGE_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        elif not tok.startswith("-") and pr is None:
+            pr = tok
+        i += 1
+    return pr, repo
+
+
+def _ci_states(pr, repo, cwd):
+    """{check name: bucket} from `gh pr checks`, or None when it can't be read."""
+    cmd = ["gh", "pr", "checks"] + ([pr] if pr else []) + ["--json", "name,bucket"]
+    if repo:
+        cmd += ["--repo", repo]
+    try:
+        out = subprocess.run(cmd, cwd=cwd or None, capture_output=True, text=True,
+                             timeout=20)
+        # gh exits 8 while checks are pending but still prints the JSON.
+        checks = json.loads(out.stdout)
+        return {c["name"]: c["bucket"] for c in checks}
+    except Exception:
+        return None
+
+
+def _ci_gate(pr, repo, cwd):
+    """Deny a merge unless every REQUIRED_CI_JOBS check is `pass` on the PR head."""
+    if pr is not None and _UNRESOLVABLE.search(pr):
+        return [("ask", CI_UNKNOWN_REASON)]  # a variable PR number: can't check
+    states = _ci_states(pr, repo, cwd)
+    if states is None:
+        return [("ask", CI_UNKNOWN_REASON)]
+    missing = [f"{job}: {states.get(job, 'not reported')}"
+               for job in REQUIRED_CI_JOBS if states.get(job) != "pass"]
+    return [("deny", CI_RED_REASON.format(status=", ".join(missing)))] if missing else []
+
+
 def _check_gh(args, cwd=""):
     if not args:
         return []
@@ -327,15 +406,19 @@ def _check_gh(args, cwd=""):
     if sub == "pr" and action == "create":
         return _pr_critic_gate(cwd)
     if sub == "pr" and action == "merge":
-        return [("ask", "Merging a PR changes main, which every release is built "
-                        "from. Merge with --squash only once the pr-critic has passed "
-                        "HEAD, CI is green on Windows and macOS, and the branch is "
-                        "rebased on main (CLAUDE.md, Git).")]
+        if "--disable-auto" in rest[1:]:
+            return []  # cancels a pending auto-merge; merges nothing
+        if any(t == "--auto" or t.startswith("--auto=") for t in rest[1:]):
+            return [("deny", AUTO_MERGE_REASON)]
+        pr, repo = _merge_target(rest[1:])
+        return _ci_gate(pr, repo, cwd) or [("ask", MERGE_REASON)]
     if sub == "api":
         joined = " ".join(rest)
+        match = re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge\b", joined)
+        if match:
+            return _ci_gate(match.group(2), match.group(1), cwd) or [("ask", API_MERGE_REASON)]
         if re.search(r"pulls/\d+/merge\b", joined) or "mergePullRequest" in joined:
-            return [("ask", "This GitHub API call merges a PR — the same change as "
-                            "`gh pr merge`, under the same conditions (CLAUDE.md, Git).")]
+            return [("ask", API_MERGE_REASON)]
     if sub == "secret" and action in ("set", "delete", "remove"):
         return [("ask", "GitHub secrets feed the CI and release workflows. Changing "
                         "one changes what every build runs with. Confirm it was requested.")]
