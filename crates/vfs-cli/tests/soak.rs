@@ -139,7 +139,7 @@ fn soak_churn_under_the_app() {
         }
     }
     app.stop();
-    check_structure(&db, 2_000, "after the soak");
+    check_structure(&db, 500, "after the soak");
     assert_nothing_pending(&db, "after the soak");
 
     // Memory: the second half's peak stays within 64 MiB of the first half's.

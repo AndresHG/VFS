@@ -232,9 +232,11 @@ There is one I/O stream: roots are scanned one after another, one directory at a
 Full re-walks run one at a time (`request_rewalk`, `start_owed`), and a walk in progress is
 never restarted: a request for the root being walked owes one more pass after it. Requests
 caused by lost events (an overflow, a watch that failed), and those owed by a root that was
-being walked, wait until that root's last full scan is 1 hour old; start-up and manual
-requests do not wait (I10). So a burst of sync-client churn cannot chain full walks back to
-back.
+being walked, wait until that root's last full scan is 1 hour old; manual requests do not
+wait, and the start-up catch-up never waits, even for a root whose walk was interrupted: a
+power cut can roll the index back to an older walk (VFS-3 AC-5). An owed walk that is due
+starts before the indexer reports idle, so the status never reads up to date while one is
+owed (I10). So a burst of sync-client churn cannot chain full walks back to back.
 
 ### Watcher and re-walk
 

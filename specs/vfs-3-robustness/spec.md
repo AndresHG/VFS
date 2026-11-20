@@ -43,7 +43,7 @@ Process-level tests live in `crates/vfs-cli/tests/` (`crash.rs`, `concurrency.rs
 - AC-3 (R1) Given a damaged index, When recovery is killed after any of its steps, Then the
   next open still holds the root list.
 - AC-4 (R1) Given a version-1 index, When the migration is killed, Then the index is wholly
-  at version 1 or wholly at version 2, and converges.
+  at version 1 or wholly at the current version, and converges.
 - AC-5 (R2) Given a stale marker and a WAL, When the database, WAL or marker is truncated,
   overwritten or has a page zeroed at a random offset, Then open succeeds and the index
   converges.

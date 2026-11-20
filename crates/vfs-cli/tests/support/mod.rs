@@ -255,45 +255,141 @@ fn count(conn: &Connection, sql: &str) -> i64 {
         .unwrap_or_else(|e| panic!("{sql}: {e}"))
 }
 
-/// The FTS5 tables and the base table whose ids are their rowids.
-const FTS_TABLES: &[(&str, &str)] = &[
-    ("files_fts", "files"),
-    ("file_paths_fts", "files"),
-    ("dirs_fts", "dirs"),
+/// Every FTS5 table, for its `integrity-check`.
+const FTS_TABLES: &[&str] = &["files_fts", "file_paths_fts", "dirs_fts"];
+
+/// Per-file FTS tables (schema v3: rowids only, not scannable) and the SQL of each row's
+/// indexed value (`db::ingest`; `files_fts` stores each name after U+0001), selecting
+/// `(id, value)` from `files f JOIN dirs d`.
+const FILE_FTS: &[(&str, &str)] = &[
+    ("files_fts", "char(1) || f.name_key"),
+    (
+        "file_paths_fts",
+        "CASE d.path_key WHEN '' THEN f.name_key ELSE d.path_key || '/' || f.name_key END",
+    ),
 ];
 
+/// FTS5 expression every row indexed with `value` matches: four of its trigrams, first,
+/// last and two between, ANDed (the per-file tables keep no positions; more trigrams only
+/// slow the lookup on long paths). `None` under 3 characters.
+fn some_trigrams(value: &str) -> Option<String> {
+    let c: Vec<char> = value.chars().collect();
+    let last = c.len().checked_sub(3)?;
+    let grams: BTreeSet<String> = [0, last / 3, 2 * last / 3, last]
+        .iter()
+        .map(|&i| {
+            let g: String = c[i..i + 3].iter().collect();
+            format!("\"{}\"", g.replace('"', "\"\""))
+        })
+        .collect();
+    Some(grams.into_iter().collect::<Vec<_>>().join(" AND "))
+}
+
+/// Every rowid holding a token in `fts`, listed through an `fts5vocab` instance table: the
+/// v3 per-file tables cannot be scanned, but their vocabulary can.
+fn fts_rowids(conn: &Connection, fts: &str) -> BTreeSet<i64> {
+    let vocab = format!("temp.{fts}_vocab");
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS {vocab}; \
+         CREATE VIRTUAL TABLE {vocab} USING fts5vocab(main, {fts}, instance)"
+    ))
+    .unwrap();
+    conn.prepare(&format!("SELECT DISTINCT doc FROM {vocab}"))
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
 /// Structural invariants of an index that has just been opened by `Vfs::open` (so any
-/// recovery already ran): SQLite and FTS5 integrity checks pass, every FTS table holds
-/// exactly one entry per base row, every file and folder is found by its exact folded name,
-/// and no row is duplicated. `sample` bounds the per-row name lookups (0 = all).
+/// recovery already ran): SQLite and FTS5 integrity checks pass; every file and folder is
+/// in each FTS table exactly once per base row (folders: by scanning `dirs_fts`; files:
+/// through each table's `fts5vocab`) and found by its indexed value; no row is duplicated
+/// or orphaned. The set comparisons cover every row;
+/// the lookups by indexed value cover `sample` random rows per table.
 pub fn check_structure(db: &Path, sample: usize, context: &str) {
     let conn = raw_conn(db);
     let verdict: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
         .unwrap();
     assert_eq!(verdict, "ok", "{context}: integrity_check");
-    for (fts, base) in FTS_TABLES {
+    for fts in FTS_TABLES {
         conn.execute(
             &format!("INSERT INTO {fts}({fts}) VALUES('integrity-check')"),
             [],
         )
         .unwrap_or_else(|e| panic!("{context}: {fts} integrity-check: {e}"));
-        let orphans = count(
-            &conn,
-            &format!("SELECT COUNT(*) FROM (SELECT rowid FROM {fts} EXCEPT SELECT id FROM {base})"),
+    }
+    let dir_orphans = count(
+        &conn,
+        "SELECT COUNT(*) FROM (SELECT rowid FROM dirs_fts EXCEPT SELECT id FROM dirs)",
+    );
+    let dir_missing = count(
+        &conn,
+        "SELECT COUNT(*) FROM (SELECT id FROM dirs EXCEPT SELECT rowid FROM dirs_fts)",
+    );
+    let dir_entries = count(&conn, "SELECT COUNT(*) FROM dirs_fts");
+    let dirs = count(&conn, "SELECT COUNT(*) FROM dirs");
+    assert_eq!(
+        (dir_orphans, dir_missing, dir_entries),
+        (0, 0, dirs),
+        "{context}: dirs_fts disagrees with dirs (orphans, missing, entries)"
+    );
+    let short_names: Vec<i64> = conn
+        .prepare("SELECT id FROM files WHERE length(name_key) < 3 ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let file_ids: BTreeSet<i64> = conn
+        .prepare("SELECT id FROM files")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let limit = sample as i64;
+    for (fts, value) in FILE_FTS {
+        let found = fts_rowids(&conn, fts);
+        let orphans: Vec<_> = found.difference(&file_ids).take(5).collect();
+        assert!(
+            orphans.is_empty(),
+            "{context}: {fts} entries for missing files {orphans:?}"
         );
-        assert_eq!(
-            orphans, 0,
-            "{context}: {fts} entries point at missing {base} rows"
+        // A name under 3 characters has no trigram, so no entry to find.
+        let missing: Vec<_> = file_ids
+            .difference(&found)
+            .filter(|id| short_names.binary_search(id).is_err())
+            .take(5)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{context}: files without a {fts} entry {missing:?}"
         );
-        let missing = count(
-            &conn,
-            &format!("SELECT COUNT(*) FROM (SELECT id FROM {base} EXCEPT SELECT rowid FROM {fts})"),
-        );
-        assert_eq!(missing, 0, "{context}: {base} rows without a {fts} entry");
-        let entries = count(&conn, &format!("SELECT COUNT(*) FROM {fts}"));
-        let rows = count(&conn, &format!("SELECT COUNT(*) FROM {base}"));
-        assert_eq!(entries, rows, "{context}: {fts} has duplicate entries");
+        let rows: Vec<(i64, String)> = conn
+            .prepare(&format!(
+                "SELECT f.id, {value} FROM files f JOIN dirs d ON d.id = f.dir_id \
+                 ORDER BY random() LIMIT ?1"
+            ))
+            .unwrap()
+            .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT 1 FROM {fts} WHERE {fts} MATCH ?1 AND rowid = ?2"
+            ))
+            .unwrap();
+        for (id, v) in rows {
+            let Some(expr) = some_trigrams(&v) else {
+                continue;
+            };
+            let hit = stmt.exists(rusqlite::params![expr, id]).unwrap();
+            assert!(hit, "{context}: {fts} does not find file {id} by {v:?}");
+        }
     }
     let dup_files = count(
         &conn,
@@ -318,43 +414,26 @@ pub fn check_structure(db: &Path, sample: usize, context: &str) {
         (0, 0),
         "{context}: rows whose folder or root is gone"
     );
-    let limit = if sample == 0 { -1 } else { sample as i64 };
-    // (FTS table, column filter for the name, rows to look up).
-    for (fts, column, sql) in [
-        (
-            "files_fts",
-            "",
-            "SELECT id, name_key FROM files ORDER BY random() LIMIT ?1",
-        ),
-        (
-            "dirs_fts",
-            "name_key : ",
-            "SELECT id, name_key FROM dirs ORDER BY random() LIMIT ?1",
-        ),
-    ] {
-        let rows: Vec<(i64, String)> = conn
-            .prepare(sql)
-            .unwrap()
-            .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT 1 FROM {fts} WHERE {fts} MATCH ?1 AND rowid = ?2"
-            ))
-            .unwrap();
-        for (id, key) in rows {
-            if key.chars().count() < 3 {
-                continue;
-            }
-            let expr = format!("{column}\"{}\"", key.replace('"', "\"\""));
-            let found = stmt.exists(rusqlite::params![expr, id]).unwrap();
-            assert!(
-                found,
-                "{context}: {fts} does not find row {id} by its name {key:?}"
-            );
+    let mut stmt = conn
+        .prepare("SELECT 1 FROM dirs_fts WHERE dirs_fts MATCH ?1 AND rowid = ?2")
+        .unwrap();
+    let rows: Vec<(i64, String)> = conn
+        .prepare("SELECT id, name_key FROM dirs ORDER BY random() LIMIT ?1")
+        .unwrap()
+        .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    for (id, key) in rows {
+        if key.chars().count() < 3 {
+            continue;
         }
+        let expr = format!("name_key : \"{}\"", key.replace('"', "\"\""));
+        let found = stmt.exists(rusqlite::params![expr, id]).unwrap();
+        assert!(
+            found,
+            "{context}: dirs_fts does not find folder {id} by {key:?}"
+        );
     }
 }
 

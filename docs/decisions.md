@@ -142,7 +142,8 @@ and are not bounded by the deadline (VFS-3, #53).
 ## A catch-up re-walk at every start
 
 Every start owes each folder a full re-walk, resumable, at low priority, searchable
-meanwhile (spec I4). While the app is closed nothing watches the disk, and the Synology
+meanwhile (spec I4), never deferred: not even behind a walk the previous session left
+unfinished, which after a power cut may be an older walk than the last one (VFS-3). While the app is closed nothing watches the disk, and the Synology
 client keeps syncing; without a change journal (which needs administrator rights) only a
 walk finds what changed. Rejected: re-walking only when the last walk is older than a day,
 the previous rule, which missed changes made the same day while the app was closed.
