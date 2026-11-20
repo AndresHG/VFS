@@ -138,6 +138,10 @@ pub fn run() {
         }
     }));
 
+    // VFS-5: e2e builds only (`--features webdriver`); listens on TAURI_WEBDRIVER_PORT.
+    #[cfg(feature = "webdriver")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(commands::handler())

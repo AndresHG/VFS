@@ -10,6 +10,11 @@ publish.workspace = true
 name = "vfs_desktop_lib"
 crate-type = ["rlib"]
 
+# VFS-5: `webdriver` embeds a W3C WebDriver server (localhost only) so the e2e workflow can
+# drive the window where no external driver exists (macOS). Never enabled in release builds.
+[features]
+webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
 embed-resource = "3"
@@ -22,6 +27,7 @@ serde_json.workspace = true
 log.workspace = true
 dunce.workspace = true
 tauri-plugin-log = "2"
+tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

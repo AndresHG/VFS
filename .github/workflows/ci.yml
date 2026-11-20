@@ -50,3 +50,5 @@ jobs:
         run: cargo test --workspace --locked
       - name: UI tests
         run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs
+      - name: E2E script tests
+        run: python3 -m unittest discover -s scripts/e2e -p "test_*.py"
