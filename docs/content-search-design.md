@@ -45,8 +45,10 @@ Constraints that follow:
   spinning disk make both slower. Extraction shares the disk with the name indexer and with
   the sync client.
 - **Memory.** The app's budget is under 300 MB with the index open (AC-9). The name-search
-  page caches alone may grow to 160 MiB (32 writer + 64 reader + 64 search, set in
-  `crates/vfs-core/src/db.rs`; measured peak RSS of the 2 M-file benchmark: about 123 MB).
+  page caches may grow to 160 MiB (32 writer + 64 reader + 64 search), 192 MiB while a
+  folder is added or removed (a short-lived second writer of 32 MiB), set in
+  `crates/vfs-core/src/db.rs`, as in [architecture](architecture.md). Measured: the 2 M-file
+  benchmark process peaks at about 123 MB RSS.
   Content search cannot add another large cache inside the app
   process; extraction must run in a separate process with its own cap.
 - **Hostile input.** A decades-old archive holds corrupt, truncated, password-protected and
@@ -237,7 +239,8 @@ At 500,000 documents these are about 8× longer **[estimate]**.
 - **Extractor fidelity** on legacy `.doc`, `.xls`, `.ppt` and damaged PDFs; unmeasured.
 - **Index growth**: the content index may be several times the name index. Show its size;
   allow switching content search off and deleting its tables.
-- **Memory**: the app process already has up to 160 MiB of page caches; the content pass
+- **Memory**: the app process already has up to 160 MiB of page caches (192 MiB during a
+  folder change); the content pass
   must reuse the search connection's cache, not add a new one.
 - **Two stores** (if Tantivy is chosen) can drift after a crash; SQLite stays authoritative.
 - **Spanish stemming over-merges** some words; keeping an unstemmed column and boosting exact

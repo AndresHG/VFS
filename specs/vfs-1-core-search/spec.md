@@ -173,7 +173,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 
 - C4. The search deadline comes from `SearchConfig` (default 1000 ms).
 - C5. An index that cannot be opened or fails `quick_check` (run only after an unclean
-  shutdown) is renamed to `index.db.bad` and rebuilt from its roots.
+  shutdown) is renamed to `index.db.bad` and rebuilt from its roots; the `.bad` file and
+  its companions are deleted once every root has finished a full scan.
 - C6. The app keeps the index in the local app data directory (Tauri `app_local_data_dir`;
   `%LOCALAPPDATA%` on Windows), never the roaming one, so a multi-GB file is not synced or
   backed up with the profile; at start it moves, once, an index an earlier build left in
@@ -202,6 +203,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   once for rows holding, for every term, the term or one of its one-edit alternatives (S4);
   when none exists the typo tiers are skipped. The path-index intersection uses the
   trigrams that cover each term without overlap, not all of them.
+- S9. At most 1 KB of query text and 128 characters per term are read; terms over 64
+  characters get no typo tolerance. The search box accepts at most 1,024 characters.
 - I1. A watcher event never downgrades a directory pending a deep re-list.
 - I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
   requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its
@@ -245,7 +248,17 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   the manual button reads "Buscar cambios ahora".
 - X1. One desktop test drives add_root, search and get_progress over IPC on Tauri's mock
   runtime, on both systems in CI.
-- X2. CI also runs the CLAUDE.md budget check and the UI status tests (`node --test`).
+- X2. CI also runs the CLAUDE.md budget check and the UI tests (`node --test`: status
+  wording, and the screen's copy and markup for AC-12). A Rust test keeps the closed sets
+  of `apps/desktop/ui/contract.js` equal to the serde values of the core's enums.
+- X3. Workflow actions are pinned by commit SHA, the Rust version by `rust-toolchain.toml`;
+  release builds use `--locked`, no build cache, and publish a SHA-256 checksum per
+  artifact.
+- C7. The app writes warnings and errors to a rotating log file in the local app data
+  directory (1 MB, two old files); nothing below warning level.
+- I13. Before a directory is re-listed, the root and every folder on its path are checked:
+  one replaced by a link since it was indexed is treated as removed, a root that became a
+  link as unavailable.
 
 ## Technical context
 

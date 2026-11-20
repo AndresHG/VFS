@@ -53,8 +53,8 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 
 ## Build, test and run
 
-You need a stable Rust toolchain (`rustup`; `rust-toolchain.toml` pins the stable channel
-with `rustfmt` and `clippy`) and Node.js for the Tauri CLI. Tauri's own platform
+You need `rustup`: `rust-toolchain.toml` pins the Rust version (with `rustfmt` and
+`clippy`), and rustup installs it on the first `cargo` command, and Node.js for the Tauri CLI. Tauri's own platform
 prerequisites apply: Xcode command-line tools on macOS; on Windows, the Microsoft C++ build
 tools and WebView2.
 
@@ -119,6 +119,10 @@ macOS runners and produces:
   first run and the user has to choose to run it anyway.
 - `vfs-macos`: a zipped, ad-hoc signed `VFS.app`.
 
+Each artifact carries a `SHA256SUMS.txt`; check a download with `sha256sum -c` (or
+`shasum -a 256 -c` on macOS). Build provenance attestation is not published: for a private
+repository GitHub offers it only on Enterprise Cloud.
+
 To run it, either push a tag that starts with `v`:
 
 ```sh
@@ -146,7 +150,8 @@ multi-GB index must not travel to the NAS. An index that an earlier build left i
 `%APPDATA%\app.vfs.desktop\` is moved to the local folder once, at start.
 
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
-that marks an open session, and, after a recovery, `index.db.bad`. Deleting the folder while
+that marks an open session, `logs/vfs.log` (warnings and errors only, at most about 3 MB),
+and, after a recovery, `index.db.bad` until the rebuild has finished. Deleting the folder while
 the app is closed resets VFS: the folders have to be added again and are scanned from
 scratch. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
@@ -168,6 +173,12 @@ newer build is refused, never overwritten.
   limit: before the no-hit probe two of three runs passed and the worst failed by under
   10 ms on two query classes; with it three of three passed, the slowest class at 114–133
   ms per run, while other work kept the load average at 4.4–5.1. Treat it as marginal.
+- `cargo audit` (RustSec database of 2026-11-20): no vulnerabilities. Six warnings, all in
+  crates that come with Tauri: `chrono` (unmaintained; locked but not compiled),
+  `proc-macro-error` and `glib` 0.18 (unmaintained and unsound, RUSTSEC-2024-0429; the Linux
+  GTK stack, not built for Windows or macOS), and `zbus_names`, `zvariant`,
+  `zvariant_derive` (unmaintained; the Linux D-Bus side of the single-instance plugin).
+  None has a fix VFS can apply short of a Tauri update.
 - **Nothing has been run on Windows yet.** The Windows watcher, volume identity, background
   priority, long-path reveal and the installer are compiled only on Windows and have never
   executed. The CI and release workflows have not run on GitHub yet.

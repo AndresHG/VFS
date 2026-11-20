@@ -128,7 +128,10 @@ never opens a file. On Windows type and metadata come from the enumeration recor
 from `lstat`. It skips:
 
 - symlinks, junctions and other name-surrogate reparse points (`FileType::is_symlink`), so a
-  walk never loops;
+  walk never loops. Before a directory is listed again, the root and every folder on its
+  path are checked with `symlink_metadata` (`walk::behind_link`): one that has been replaced
+  by a link since it was indexed is treated as gone, never followed, and a root that has
+  become a link is unavailable;
 - excluded names (`walk::is_excluded`, ASCII case-insensitive): `$RECYCLE.BIN`, `System
   Volume Information`, `.Trashes`, `.Trash`, `.Spotlight-V100`, `.fseventsd`,
   `.DocumentRevisions-V100`, `.TemporaryItems`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, the
@@ -245,7 +248,9 @@ changes. The Windows loop has never run (see "Not yet run").
 locked means the previous session ended uncleanly; only then does the core run
 `PRAGMA quick_check(1)`. An index that cannot be opened or fails the check is renamed to
 `index.db.bad` (with its `-wal` and `-shm`), a fresh index is created, and every root path
-that can still be read from the bad file is re-added pending deep (C5). Several processes
+that can still be read from the bad file is re-added pending deep (C5). Once every root
+is ready with a finished full scan, the indexer deletes the `.bad` file and its companions
+(`discard_recovered_copy`). Several processes
 (the app and the CLI) can share one index; each holds its own marker.
 
 ## From a query to results
@@ -256,8 +261,11 @@ one (S6).
 
 ### Parsing
 
-The text has `\` replaced by `/`, is folded, and is split on whitespace into at most 8
-distinct terms. With no terms and no filter, the response is empty.
+At most 1 KB of the text is read (`MAX_QUERY_BYTES`; the search box allows no more); it has
+`\` replaced by `/`, is folded, and is split on whitespace into at most 8 distinct terms,
+each cut to 128 characters (`MAX_TERM_CHARS`). Terms over 64 characters get no typo work
+(`FUZZY_MAX_LEN`), whose cost grows with the cube of the length (S9). With no terms and no
+filter, the response is empty.
 
 **Matching rule.** A file matches when every term is a substring of its `name_key` or of its
 directory's `path_key`. A folder matches when every term is in its own `path_key` (for a
@@ -398,10 +406,18 @@ Key shapes:
 - `SearchResponse { hits, total, truncated, truncatedBy, elapsedMs }`.
 
 `reveal` builds the path from the index. If it no longer exists on disk, it marks the folder
-for a re-list and rejects with `not_found`. Otherwise macOS runs `open -R <path>`; Windows
-runs `explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
-the path is over 259 UTF-16 units (`apps/desktop/src-tauri/src/reveal.rs`). No file is
+for a re-list and rejects with `not_found`. Otherwise macOS runs `open -R <path>`, and if
+that fails `open -R` on the nearest existing ancestor, which Finder shows selected rather
+than opening it (an ancestor that is an `.app` bundle is never launched). Windows runs
+`explorer.exe /select,"<path>"`, or opens the nearest ancestor Explorer can address when
+the path is over 259 UTF-16 units; a trailing backslash (a drive root) is doubled so it
+cannot escape the closing quote under the Windows command-line rules (`explorer_arg`,
+unverified on a real Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No file is
 opened with its application.
+
+Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
+log plugin), rotated at 1 MB with two old files kept; nothing below warning level is
+written.
 
 The app opens the index at `<local app data dir>/index.db` in `setup` (Tauri
 `app_local_data_dir`: `%LOCALAPPDATA%\app.vfs.desktop` on Windows, never the roaming
