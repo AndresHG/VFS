@@ -16,7 +16,7 @@ mod roots;
 mod search;
 mod types;
 
-pub use error::{Error, Result};
+pub use error::{Error, OverlapRelation, Result};
 pub use fold::fold_key;
 pub use indexer::{IndexerOptions, DIAG_TARGET};
 pub use kind::file_kind;
@@ -75,7 +75,7 @@ impl Vfs {
         Vfs::open_with(db_path, SearchConfig::default())
     }
 
-    /// Opens or creates the index and applies migrations; an unreadable index is moved to
+    /// Opens or creates the index and applies migrations; a damaged index is moved to
     /// `index.db.bad` and rebuilt from its roots, and a session starts (`db::open_session`).
     /// Starts no thread.
     pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {
@@ -413,6 +413,22 @@ mod tests {
         assert!(marker.exists());
         drop(app);
         assert!(!marker.exists());
+    }
+
+    /// VFS-3 AC-1: adding a folder that is already a root is told apart from the other
+    /// overlaps, so `vfs index` and `vfs run` resume an indexed folder instead of failing.
+    #[test]
+    fn same_root_is_told_apart_from_other_overlaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path().join("archivo");
+        std::fs::create_dir_all(tree.join("sub")).unwrap();
+        let vfs = Vfs::open(&dir.path().join("index.db")).unwrap();
+        vfs.add_root(&tree).unwrap();
+        assert!(vfs.add_root(&tree).unwrap_err().is_same_root());
+        let inside = vfs.add_root(&tree.join("sub")).unwrap_err();
+        assert_eq!(inside.code(), "overlapping_root");
+        assert!(!inside.is_same_root());
+        assert!(!vfs.add_root(dir.path()).unwrap_err().is_same_root());
     }
 
     /// The facade is shareable across threads (Tauri state, indexer callbacks).

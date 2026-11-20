@@ -51,25 +51,21 @@ pub(crate) fn is_excluded(name: &str) -> bool {
         || EXCLUDED.iter().any(|e| e.eq_ignore_ascii_case(name))
 }
 
-/// Unix seconds of a timestamp (negative before 1970); 0 when the platform has none.
+/// Unix seconds of a timestamp, floored (negative before 1970, so 1969-12-31 23:59:59.5
+/// is -1, not 0); 0 when the platform has none.
 pub(crate) fn unix_secs(t: std::io::Result<SystemTime>) -> i64 {
     match t {
         Ok(t) => match t.duration_since(UNIX_EPOCH) {
             Ok(d) => d.as_secs() as i64,
-            Err(e) => -(e.duration().as_secs() as i64),
+            Err(e) => {
+                let d = e.duration();
+                -(d.as_secs() as i64) - i64::from(d.subsec_nanos() > 0)
+            }
         },
         Err(_) => 0,
     }
 }
 
-/// Entries of `dir` from `read_dir` metadata; symlinks, junctions and reparse points are
-/// skipped, as are excluded names and `skip` (the app's data directory).
-///
-/// No file is opened: on Windows type and metadata come from the enumeration record, on
-/// Unix from `lstat`. `FileType::is_symlink` is true for symlinks and for Windows
-/// name-surrogate reparse points (junctions, mount points), so those are never followed;
-/// cloud placeholders are not name surrogates and are listed from their metadata without
-/// being downloaded. Entries that vanish or fail while listing are skipped.
 /// True when `root` or a directory of `rel` below it (`/`-separated) is now a symbolic link,
 /// junction or other name-surrogate reparse point (`FileType::is_symlink`). An indexed
 /// directory replaced by one is treated as gone: the walk never follows a link, even where a
@@ -89,6 +85,17 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
     false
 }
 
+/// Entries of `dir` from `read_dir` metadata; symlinks, junctions and reparse points are
+/// skipped, as are excluded names and `skip` (the app's data directory).
+///
+/// No file is opened: on Windows type and metadata come from the enumeration record, on
+/// Unix from `lstat`. `FileType::is_symlink` is true for symlinks and for Windows
+/// name-surrogate reparse points (junctions, mount points), so those are never followed;
+/// cloud placeholders are not name surrogates and are listed from their metadata without
+/// being downloaded. Entries that vanish or fail while listing are skipped, except that an
+/// entry whose metadata is denied (a Unix folder readable but not searchable) fails the
+/// whole listing, so the folder is retried like an unlistable one instead of being marked
+/// clean without those entries.
 pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<Entry>> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir)? {
@@ -107,7 +114,11 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
         if file_type.is_symlink() {
             continue;
         }
-        let Ok(meta) = entry.metadata() else { continue };
+        let meta = match entry.metadata() {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Err(e),
+            Err(_) => continue,
+        };
         let mtime = unix_secs(meta.modified());
         let kind = if file_type.is_dir() {
             if skip.is_some_and(|s| entry.path() == s) {

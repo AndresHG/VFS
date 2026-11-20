@@ -18,7 +18,7 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
   ignoring case and accents ("notaria" finds "Notaría"; NFC and NFD names match). Results
   are gathered best first: names that start with the first word, names holding every word,
   then files whose folders and name together hold them, then typos.
-- Tolerates one typo in words of 6 or more letters, when the exact search finds fewer than
+- Tolerates one typo in words of 6 to 64 letters, when the exact search finds fewer than
   20 results. Shorter words match exactly.
 - Shows folders as results too, marked as folders.
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
@@ -56,7 +56,7 @@ hard disk of a slow Windows PC, and is designed for 5 million files. The product
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
-| `crates/vfs-cli` | `vfs` command line: `index`, `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`. |
+| `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
 | `apps/desktop/ui` | The Spanish screen: static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
@@ -171,7 +171,8 @@ multi-GB index must not travel to the NAS. An index that an earlier build left i
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
 that marks an open session, `logs/vfs.log` (warnings, errors and the indexer's diagnostic
 records without file names, at most about 5 MB),
-and, after a recovery, `index.db.bad` until the rebuild has finished. With Firefox bookmarks
+and, after a recovery, `index.db.bad` until the rebuild has finished (and `index.db.new` while a recovery runs).
+With Firefox bookmarks
 included, `bookmarks.db` (with its `-wal` and `-shm`) holds the setting and the bookmarks
 read, and `bookmarks.db.snapshot/` exists only for the moment a copy of Firefox's database
 is being read. Deleting the folder while the app is closed resets VFS: the folders have to

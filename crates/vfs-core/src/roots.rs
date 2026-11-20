@@ -6,7 +6,7 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior};
 
 use crate::db::ingest;
-use crate::error::{Error, Result};
+use crate::error::{Error, OverlapRelation, Result};
 use crate::fold::fold_key;
 use crate::platform;
 use crate::types::{Root, RootStatus};
@@ -51,10 +51,10 @@ fn is_below(path: &str, ancestor: &str) -> bool {
 /// them. Re-adding the same folder while it is being removed supersedes the removal: the
 /// old root's remaining rows are deleted in this transaction and the folder is added anew.
 ///
-/// The `OverlappingRoot` payload is `"<relation> <existing root path>"`, the relation being
-/// `same`, `inside` (the new folder is inside that root) or `contains` (the new folder
-/// contains that root), so the UI can word each case (U4). Paths are compared on folded
-/// keys, so case, accents and NFC/NFD differences still count as the same folder.
+/// The `OverlappingRoot` error carries the [`OverlapRelation`] and the existing root path;
+/// its message reads `"<relation> <existing root path>"`, so the UI can word each case
+/// (U4). Paths are compared on folded keys, so case, accents and NFC/NFD differences still
+/// count as the same folder.
 pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
     let canon = dunce::canonicalize(path).map_err(|e| match e.kind() {
         ErrorKind::NotFound => Error::NotFound(path.display().to_string()),
@@ -87,15 +87,15 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
                 continue;
             }
             let relation = if same {
-                "same"
+                OverlapRelation::Same
             } else if is_below(&key, &existing_key) {
-                "inside"
+                OverlapRelation::Inside
             } else if is_below(&existing_key, &key) {
-                "contains"
+                OverlapRelation::Contains
             } else {
                 continue;
             };
-            return Err(Error::OverlappingRoot(format!("{relation} {existing}")));
+            return Err(Error::OverlappingRoot { relation, existing });
         }
         drop(rows);
         for id in superseded {

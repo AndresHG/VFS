@@ -570,7 +570,8 @@ type Owed = BTreeMap<i64, bool>;
 /// Records a full re-walk request for each of `ids`, started by `start_owed` as soon as no
 /// root is being walked. It is deferred when it comes from `lost_events` (an overflow, a
 /// watch that failed) or when the root is being walked now (one more pass after this one),
-/// so churn never chains full walks back to back; manual and start-up requests are not.
+/// so churn never chains full walks back to back; manual requests otherwise are not, and
+/// the start-up catch-up never is (`Worker::owe_catchup`).
 /// Requests for the same root merge, the undeferred one winning.
 fn request_rewalk(
     conn: &Connection,
@@ -960,7 +961,7 @@ impl Worker {
             self.flush_dirty();
             if !self.catchup.is_empty() && Instant::now() >= self.catchup_at {
                 let ids = std::mem::take(&mut self.catchup);
-                self.request(&ids, false);
+                self.owe_catchup(&ids);
             }
             self.memory_record();
             if self.last_periodic.elapsed() >= PERIODIC_CHECK {
@@ -1046,6 +1047,13 @@ impl Worker {
                         &s.checkpoints,
                     );
                     self.pass = Pass::default();
+                    // An owed walk that is due starts before idle is reported, so "up to
+                    // date" never shows while a catch-up is still owed (VFS-3 AC-5).
+                    let r = start_owed(&self.conn, &mut self.owed);
+                    self.log_err(r);
+                    if walking(&self.conn).is_ok_and(|w| !w.is_empty()) {
+                        continue;
+                    }
                     self.publish(IndexerState::Idle);
                     let mut timeout = match self.dirty_since {
                         Some(t) => DIRTY_COALESCE.saturating_sub(t.elapsed()),
@@ -1097,13 +1105,22 @@ impl Worker {
         refresh_counts(&self.conn, None)?;
         let ids = live_root_ids(&self.conn)?;
         if Instant::now() >= self.catchup_at {
-            request_rewalk(&self.conn, &mut self.owed, &ids, false)?;
+            self.owe_catchup(&ids);
         } else {
             self.catchup = ids;
         }
         self.watcher = start_watcher(self.watch_tx.clone(), self.ignore.clone());
         self.sync_watches();
         Ok(())
+    }
+
+    /// Owes the start-up catch-up walk of `ids`, never deferred, not even for a root whose
+    /// walk was interrupted: that walk may be an older one (a power cut drops the last
+    /// commits), and folders it already listed may have changed since (VFS-3 AC-5).
+    fn owe_catchup(&mut self, ids: &[i64]) {
+        for &id in ids {
+            self.owed.insert(id, false);
+        }
     }
 
     fn request(&mut self, ids: &[i64], lost_events: bool) {

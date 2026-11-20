@@ -7,6 +7,7 @@
 //! `path_key` (the root directory: its name) and at least one term is in its name. Terms
 //! already contained in a root's `path_key` are ignored for that root, unless that would
 //! leave no term (S1). Folders are results; empty folders included.
+//! NUL is read as whitespace; typo tolerance covers terms of 6 to 64 folded characters.
 //!
 //! Evaluation is candidate generation in SQL plus verification in Rust, in ranking-tier
 //! order (S2) so that a full list never pushes out a better tier: names starting with the
@@ -469,7 +470,11 @@ fn file_clause(f: &SearchFilters, scopes: Option<&[Scope]>) -> Option<Clause> {
         c.push(" AND f.mtime < ?", v);
     }
     if let Some(v) = f.size_min {
-        c.push(" AND f.size >= ?", i64::try_from(v).unwrap_or(i64::MAX));
+        match i64::try_from(v) {
+            Ok(v) => c.push(" AND f.size >= ?", v),
+            // Above any stored size (`files.size` is an i64).
+            Err(_) => c.sql.push_str(" AND 0"),
+        }
     }
     if let Some(v) = f.size_max {
         c.push(" AND f.size <= ?", i64::try_from(v).unwrap_or(i64::MAX));

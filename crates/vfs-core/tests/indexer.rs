@@ -571,6 +571,76 @@ fn startup_catches_up_changes_made_while_closed() {
     fx.vfs.shutdown();
 }
 
+/// Reports, once, whether the files on disk were all indexed when the indexer first said
+/// every root is up to date.
+struct UpToDateProbe {
+    db_path: std::path::PathBuf,
+    expected: Vec<String>,
+    first: Mutex<Option<mpsc::Sender<bool>>>,
+}
+
+impl ProgressSink for UpToDateProbe {
+    fn on_progress(&self, p: &IndexProgress) {
+        let up = p.state == IndexerState::Idle
+            && !p.roots.is_empty()
+            && p.roots
+                .iter()
+                .all(|r| r.status == RootStatus::Ready && r.dirs_pending == 0);
+        if up {
+            if let Some(tx) = self.first.lock().unwrap().take() {
+                let _ = tx.send(all_files(&db::open_ro(&self.db_path).unwrap()) == self.expected);
+            }
+        }
+    }
+}
+
+/// VFS-3 AC-5, VFS-1 I4: a power cut can drop the last commits and roll the index back to
+/// the middle of an older full walk, with folders that walk already listed changed since.
+/// The next start finishes that walk and still runs its catch-up walk at once (it is not
+/// deferred as "one more pass" of the walk in progress), and only then reports up to date.
+/// Before this, the catch-up waited for the hour-long cool-down while the status read up
+/// to date and the changed folder stayed stale.
+#[test]
+fn startup_catch_up_runs_after_an_interrupted_walk() {
+    let fx = Fixture::new();
+    fx.file("A/antes.txt", 1);
+    fx.file("B/otro.txt", 1);
+    fx.scan();
+    // Rolled back to mid-walk: root scanning, B still pending, A listed before it changed.
+    fx.file("A/nuevo.txt", 1);
+    fx.set_dir_state("B", ScanState::PendingDeep);
+    let conn = db::open_rw(&fx.db_path).unwrap();
+    conn.execute(
+        "UPDATE roots SET status = ?1",
+        [RootStatus::Scanning.code()],
+    )
+    .unwrap();
+    drop(conn);
+
+    let (tx, rx) = mpsc::channel();
+    let expected = vec!["A/antes.txt", "A/nuevo.txt", "B/otro.txt"];
+    let probe = UpToDateProbe {
+        db_path: fx.db_path.clone(),
+        expected: expected.iter().map(|s| s.to_string()).collect(),
+        first: Mutex::new(Some(tx)),
+    };
+    let no_grace = IndexerOptions {
+        boot_grace: Duration::ZERO,
+    };
+    fx.vfs
+        .start_indexer_with(Arc::new(probe), no_grace)
+        .unwrap();
+    let complete = rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("never up to date");
+    assert!(
+        complete,
+        "reported up to date before catching up A/nuevo.txt"
+    );
+    assert_eq!(fx.all_files(), expected);
+    fx.vfs.shutdown();
+}
+
 /// VFS-1 AC-5, AC-7, I12: a directory marked dirty through the facade (a missing file at
 /// "mostrar en carpeta") is re-listed at once by the running indexer, not at its next idle
 /// wake-up, and the progress then reads idle again.

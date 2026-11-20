@@ -157,7 +157,9 @@ from `lstat`. It skips:
   temporary names (`._*`, `~$*`, `.~lock.*#`, `~*.tmp`). The watcher uses the same function
   (I8);
 - the app's own data directory;
-- entries that vanish or fail while being listed.
+- entries that vanish, or fail with an error other than permission denied, while being
+  listed. An entry whose metadata is denied fails the whole listing, so the folder is
+  retried like one that cannot be listed (VFS-3, #56).
 
 A name that is not valid Unicode is stored in its lossy form with `flags` bit 0 set.
 
@@ -230,9 +232,11 @@ There is one I/O stream: roots are scanned one after another, one directory at a
 Full re-walks run one at a time (`request_rewalk`, `start_owed`), and a walk in progress is
 never restarted: a request for the root being walked owes one more pass after it. Requests
 caused by lost events (an overflow, a watch that failed), and those owed by a root that was
-being walked, wait until that root's last full scan is 1 hour old; start-up and manual
-requests do not wait (I10). So a burst of sync-client churn cannot chain full walks back to
-back.
+being walked, wait until that root's last full scan is 1 hour old; manual requests do not
+wait, and the start-up catch-up never waits, even for a root whose walk was interrupted: a
+power cut can roll the index back to an older walk (VFS-3 AC-5). An owed walk that is due
+starts before the indexer reports idle, so the status never reads up to date while one is
+owed (I10). So a burst of sync-client churn cannot chain full walks back to back.
 
 ### Watcher and re-walk
 
@@ -270,12 +274,16 @@ changes. The Windows loop has never run (see "Not yet run").
 `<index>.session/<pid>-<n>.lock`. A clean shutdown (`Vfs::shutdown`, or dropping the last
 `Vfs` clone) unlocks and removes it. On the next open, a marker that no live process holds
 locked means the previous session ended uncleanly; only then does the core run
-`PRAGMA quick_check(1)`. An index that cannot be opened or fails the check is renamed to
-`index.db.bad` (with its `-wal` and `-shm`), a fresh index is created, and every root path
-that can still be read from the bad file is re-added pending deep (C5). Once every root
-is ready with a finished full scan, the indexer deletes the `.bad` file and its companions
-(`discard_recovered_copy`). Several processes
-(the app and the CLI) can share one index; each holds its own marker.
+`PRAGMA quick_check(1)`. An index that SQLite reports as corrupt or not a database, or that
+fails the check, is replaced: a fresh index holding every root path still readable from it
+(pending deep, C5) is built at `index.db.new`, the damaged one is renamed to `index.db.bad`
+(with its `-wal` and `-shm`), and `index.db.new` takes its place. A kill between the last two
+steps is finished by the next open, so the root list survives a crash during recovery
+(VFS-3 AC-3). Once every root is ready with a finished full scan, the indexer deletes the
+`.bad` file and its companions (`discard_recovered_copy`). Any other open error (busy,
+locked, I/O) is returned, never recovered. Several processes (the app and the CLI) can share
+one index; each holds its own marker, and the migration takes the write lock before reading
+the schema version (VFS-3 AC-9).
 
 ## From a query to results
 
@@ -355,8 +363,10 @@ An expired deadline or an interruption returns what was found with `truncatedBy 
 
 ### Typo tolerance
 
-Only terms of 6 or more characters tolerate a typo (`FUZZY_MIN_LEN`); shorter ones match
-exactly. Two typo stages follow the exact tiers:
+Only terms of 6 to 64 characters tolerate a typo (`FUZZY_MIN_LEN`, `FUZZY_MAX_LEN`); others
+match exactly. The upper bound keeps a pasted path or URL from generating typo alternatives
+that grow faster than quadratically outside the deadline (VFS-3, #53). Two typo stages
+follow the exact tiers:
 
 - **Near spellings**, when the exact tiers found fewer than 20 hits: the deletions and
   adjacent transpositions of a term (`fuzzy::near_variants`), ORed, with the other terms
