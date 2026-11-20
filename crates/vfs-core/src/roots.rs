@@ -6,7 +6,7 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior};
 
 use crate::db::ingest;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, OVERLAP_CONTAINS, OVERLAP_INSIDE, OVERLAP_SAME};
 use crate::fold::fold_key;
 use crate::platform;
 use crate::types::{Root, RootStatus};
@@ -87,11 +87,11 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
                 continue;
             }
             let relation = if same {
-                "same"
+                OVERLAP_SAME
             } else if is_below(&key, &existing_key) {
-                "inside"
+                OVERLAP_INSIDE
             } else if is_below(&existing_key, &key) {
-                "contains"
+                OVERLAP_CONTAINS
             } else {
                 continue;
             };

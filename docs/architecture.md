@@ -358,8 +358,9 @@ An expired deadline or an interruption returns what was found with `truncatedBy 
 
 ### Typo tolerance
 
-Only terms of 6 or more characters tolerate a typo (`FUZZY_MIN_LEN`); shorter ones match
-exactly. Two typo stages follow the exact tiers:
+Only terms of 6 to 64 characters tolerate a typo (`FUZZY_MIN_LEN`, `FUZZY_MAX_LEN`); others
+match exactly. The upper bound keeps a pasted path or URL from generating typo alternatives
+that grow faster than quadratically outside the deadline (VFS-3, #53). Two typo stages follow the exact tiers:
 
 - **Near spellings**, when the exact tiers found fewer than 20 hits: the deletions and
   adjacent transpositions of a term (`fuzzy::near_variants`), ORed, with the other terms

@@ -209,7 +209,7 @@ fn cmd_index(db: &Path, roots: &[PathBuf]) -> AnyResult<()> {
         match vfs.add_root(&abs) {
             Ok(root) => println!("added root {} ({})", root.id, root.path),
             // Already indexed: an interrupted run resumes its pending folders.
-            Err(vfs_core::Error::OverlappingRoot(why)) if why.starts_with("same ") => {}
+            Err(e) if e.is_same_root() => {}
             Err(e) => return Err(e.into()),
         }
     }
@@ -279,7 +279,7 @@ fn cmd_run(db: &Path, roots: &[PathBuf], until_idle: bool) -> AnyResult<()> {
     for r in roots {
         match vfs.add_root(&std::path::absolute(r)?) {
             Ok(_) => {}
-            Err(vfs_core::Error::OverlappingRoot(why)) if why.starts_with("same ") => {}
+            Err(e) if e.is_same_root() => {}
             Err(e) => return Err(e.into()),
         }
     }
