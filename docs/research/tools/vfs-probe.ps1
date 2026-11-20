@@ -17,8 +17,9 @@
   Every step writes its results to <OutDir>\<timestamp>\*.json / *.csv and appends to log.txt.
   Compatible with Windows PowerShell 5.1 (the embedded C# keeps to C# 5).
 
-  Status: written and syntax-checked on macOS; never executed on Windows. A failure in one
-  step is logged and the next step still runs.
+  Status: rehearsed with -Step all on a Windows Server 2025 GitHub runner as a standard user
+  (VFS-8, docs/research/windows-e2e-results.md); every step runs. A failure in one step is
+  logged and the next step still runs.
 #>
 [CmdletBinding()]
 param(
@@ -476,16 +477,23 @@ public static class VfsProbe
         File.WriteAllText(Path.Combine(t, "existing.txt"), "x");
         Directory.CreateDirectory(Path.Combine(t, "sub"));
         long sz;
+        // "listed" is T's mtime as its parent's listing reports it (the copy NTFS keeps in the
+        // parent's index, which it may update lazily); "own" is T's own mtime, read through the
+        // directory itself. The runner rehearsal (VFS-8) found the two can differ.
         Action<string, Action> probe = (label, act) =>
         {
             long before = ListedWriteTime(scratch, "T", out sz);
+            long ownBefore = Directory.GetLastWriteTimeUtc(t).ToFileTimeUtc();
             Thread.Sleep(1500);
             act();
             long after0 = ListedWriteTime(scratch, "T", out sz);
+            long own0 = Directory.GetLastWriteTimeUtc(t).ToFileTimeUtc();
             Thread.Sleep(3000);
             long after3 = ListedWriteTime(scratch, "T", out sz);
-            o.Add(string.Format("{0}: dir mtime changed immediately={1}, after 3 s={2}",
-                label, after0 != before, after3 != before));
+            long own3 = Directory.GetLastWriteTimeUtc(t).ToFileTimeUtc();
+            o.Add(string.Format("{0}: listed dir mtime changed immediately={1}, after 3 s={2}; " +
+                "own dir mtime changed immediately={3}, after 3 s={4}",
+                label, after0 != before, after3 != before, own0 != ownBefore, own3 != ownBefore));
         };
         probe("create file in T", () => File.WriteAllText(Path.Combine(t, "new.txt"), "x"));
         probe("append to existing file in T", () => File.AppendAllText(Path.Combine(t, "existing.txt"), "more"));
@@ -659,7 +667,8 @@ if ($all -or $Step -eq 'info') {
     $info.other_av = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction SilentlyContinue | Select-Object displayName, productState)
     $info.sync_processes = @(Get-Process | Where-Object { $_.Path -match 'Synology|Drive|OneDrive|Dropbox|Google' -or $_.ProcessName -match 'cloud-drive|synology|onedrive' } |
       Select-Object ProcessName, Path, @{n = 'WorkingSetMB'; e = { [math]::Round($_.WorkingSet64 / 1MB) } }, @{n = 'PrivateMB'; e = { [math]::Round($_.PrivateMemorySize64 / 1MB) } })
-    $info.sync_services = @(Get-Service | Where-Object { $_.DisplayName -match 'Synology|Active Backup|OneDrive' } | Select-Object Name, DisplayName, Status, StartType)
+    # A standard user may be refused the Service Control Manager (seen on Windows Server 2025).
+    try { $info.sync_services = @(Get-Service -ErrorAction Stop | Where-Object { $_.DisplayName -match 'Synology|Active Backup|OneDrive' } | Select-Object Name, DisplayName, Status, StartType) } catch { $info.sync_services = "error: $($_.Exception.Message)" }
     $info.top_memory = @(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 ProcessName, @{n = 'WorkingSetMB'; e = { [math]::Round($_.WorkingSet64 / 1MB) } }, @{n = 'PrivateMB'; e = { [math]::Round($_.PrivateMemorySize64 / 1MB) } })
     $info.fsutil_8dot3 = (fsutil 8dot3name query ([IO.Path]::GetPathRoot($DataRoot).TrimEnd('\')) 2>&1) -join ' | '
     $info.fsutil_lastaccess = (fsutil behavior query disablelastaccess 2>&1) -join ' | '
@@ -737,7 +746,10 @@ if ($all -or $Step -eq 'watch' -or $Step -eq 'perf') {
       # Latency from the raw class: the formatted AvgDisksecPerRead is an integer in seconds.
       $raw = @{}
       foreach ($r in (Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) { $raw[$r.Name] = $r }
-      foreach ($d in (Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')) {
+      $disks = @(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total')
+      # The runner rehearsal (VFS-8) got no rows here as a standard user: say so in the log.
+      if (-not $disks.Count -and -not $script:noDisksLogged) { Log 'perf: no PhysicalDisk counter instances visible to this user'; $script:noDisksLogged = $true }
+      foreach ($d in $disks) {
         $readMs = ''; $writeMs = ''
         $r = $raw[$d.Name]; $p = $prevRaw[$d.Name]
         if ($r -and $p) {
