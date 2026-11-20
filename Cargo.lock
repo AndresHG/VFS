@@ -4738,6 +4738,8 @@ dependencies = [
  "tempfile",
  "vfs-bookmarks",
  "vfs-core",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.61.2",
 ]
 

@@ -44,6 +44,7 @@ not waste the visit.
 | N13 | First full index: duration, index size, disk use while it runs | step 8 | Issues 17, 33 |
 | N14 | Which Synology product and which folders it syncs or backs up; is `%APPDATA%` included? | step 7 (by hand) | R2 (index location); issue 36 |
 | N15 | Defender state, other antivirus, WebView2 runtime version, long-path setting | `info.json` (1) | R8 (memory API needs runtime 114+); issue 21 |
+| N16 | Does VFS's own walk behave as VFS-5 assumes: walk rate, time backed off, commit and checkpoint cost, catch-up delay after boot? | `vfs.log` (8, 9, and weeks later) | VFS-5 thresholds (`specs/vfs-5-windows-tuning/spec.md`, Configuration) |
 
 ## Step by step
 
@@ -119,7 +120,8 @@ directories to compare the three listing calls (N5). Cold-versus-cold comparison
 possible without admin rights, because the standby cache cannot be flushed.
 
 Key fields: `cold_basic_background.background_dirs_per_sec` against `normal_dirs_per_sec`
-(if background is several times slower while Synology is active, R1 applies in full),
+(VFS-5 already walks at normal priority: if background is several times slower while Synology
+is active, that choice stands; if it is about as fast, background mode could return for walks),
 `dirs_per_sec`, `ms_per_dir_p95`, `finished`, `files`,
 `paths_over_259`, `placeholders`, `reparse_dirs_skipped`. If `finished` is false, extrapolate
 the full walk as total dirs ÷ `dirs_per_sec`. The total comes from step 8.
@@ -163,8 +165,17 @@ watchers run on `D:\` meanwhile: one with VFS's current filter (names + size + l
 creation), one with names only. `watch.json` reports the events and overflows of each. The
 counters are read through WMI classes (`Win32_PerfFormattedData_*`, plus `Win32_PerfRawData_*`
 for read and write latency) because PDH counter paths are localised on a Spanish Windows
-(`\Disco físico(...)`). The per-process I/O query is itself not free on a slow PC: expect the
-probe to add some CPU load, and do not read small differences into it.
+(`\Disco físico(...)`). VFS itself reads the same counter through PDH by its English name.
+The per-process I/O query is itself not free on a slow PC: expect the probe to add some CPU
+load, and do not read small differences into it.
+
+What VFS-5 assumes from this step (its back-off, R3): the indexer pauses when the **average
+queue length** of the physical disk holding the roots is **2 or more in 3 of 5 one-second
+samples**, pauses at most 8 s and then works at least 2 s. From `perf.csv` (column
+`AvgDiskQueueLength`), write down for the data disk: the share of samples with queue ≥ 2,
+the longest run of such samples, and `% Idle Time` at the same moments. If queue ≥ 2 is the
+normal state (more than half the samples), the threshold is too low and VFS would crawl at its
+20 % floor all day; if it never happens while Firefox feels slow, it is too high.
 
 ### 7. Synology configuration by hand (10 min) → N14
 
@@ -186,8 +197,28 @@ From the photographs in step 0 and the client UI, answer:
    `... -Step perf -Minutes 240`.
 3. Note the start time. VFS's status bar shows progress. Record when the first scan finishes,
    or how far it got when the visit ends: the scan resumes at the next start.
-4. Index size: `Get-ChildItem "$env:APPDATA\app.vfs.desktop" | Select Name, Length`. Use
-   `$env:LOCALAPPDATA` instead if R2 has landed.
+4. Index size: `Get-ChildItem "$env:LOCALAPPDATA\app.vfs.desktop" | Select Name, Length`
+   (the index is in Local since VFS-1; never in `%APPDATA%`).
+5. Index folder attributes (VFS-5 R9): `attrib "$env:LOCALAPPDATA\app.vfs.desktop"` must
+   show `I` (not content-indexed). The log's `start` line says `data_dir_in_sync_root=false`;
+   if it says `true`, step 7 missed a sync task covering the profile.
+6. Priority of the walk (VFS-5 R1): open Resource Monitor (`resmon`, no admin) → Disk tab →
+   Disk Activity, and look at the **I/O Priority** column for `vfs.exe` while the first index
+   runs. Expected: *Normal*. After the index finishes, rename a file inside a root: the short
+   re-listing that follows should show *Very Low* (background mode). *(admin, optional)*:
+   Process Monitor's *Priority* column shows the same per request.
+7. Read the diagnostic log, `$env:LOCALAPPDATA\app.vfs.desktop\logs\vfs.log`. Every minute of
+   indexing writes a `pass` line: `mode=walk`, `dirs_per_min`, `files_per_min`, `backoff_s`
+   (seconds paused for a busy disk), `commit_ms_max`, `checkpoint_ms_max`, `errors`. Note
+   for the first hour: typical `dirs_per_min`, total `backoff_s` against 3,600 s, and the
+   largest `commit_ms_max` and `checkpoint_ms_max` (a checkpoint over a few seconds on this
+   disk means the WAL size should be revisited). `dirs_per_min` should never be 0 for a whole
+   minute (the 20 % floor). Compare the minutes with high `backoff_s` with the queue lengths
+   in the `perf` window: they should coincide.
+8. Boot grace (VFS-5 R5): after the first index has finished, reboot, log in and open VFS at
+   once. Its `start` line shows `uptime_s` and `catchup_deferred_s`; the catch-up `pass` lines
+   must begin about 10 minutes after boot, not at once. Note whether Synology still showed
+   "Scanning" at that moment (step 7.4): if it did, the grace is too short.
 
 ### 9. VFS memory, open and minimised (10 min) → N12
 
@@ -198,7 +229,11 @@ Get-Process vfs*, msedgewebview2 | Select ProcessName, Id, @{n='WS_MB';e={[math]
 ```
 
 Run it three times: open and idle; 5 min after minimising; 5 min after restoring and making a
-search. `msedgewebview2` processes belonging to other apps (Teams, Widgets) appear too.
+search. Since VFS-5 a minimised VFS hides its WebView2 and asks it to suspend (R8): the
+`msedgewebview2` working sets should drop clearly in the second reading and recover in the
+third. If they do not drop, the suspend call is not working on this runtime: note the WebView2
+version from step 1. The log's `memory` lines (every 10 min: `working_set_mb`, `wal_mb`,
+`index_mb`) give the same figure for `vfs.exe` over weeks. `msedgewebview2` processes belonging to other apps (Teams, Widgets) appear too.
 Process Explorer or Task Manager's "Command line" column tells them apart: VFS's processes
 carry `app.vfs.desktop` in their `--user-data-dir`.
 
@@ -217,14 +252,19 @@ fallback.
 
 ### 11. Bring back
 
-Zip `%LOCALAPPDATA%\VFS-probe` and the Synology photographs. The probe output holds no file
+Zip `%LOCALAPPDATA%\VFS-probe`, `%LOCALAPPDATA%\app.vfs.desktop\logs` and the Synology
+photographs. The log's info lines (`start`, `pass`, `pass_end`, `memory`, `watch_overflow`)
+hold only counts, durations, sizes and root numbers; its **warning** lines can name a folder
+that could not be listed, so read them before sharing outside the family. Weeks later, bring
+the log folder back again: it keeps about 5 MB. The probe output holds no file
 contents, only counts, timings, five sample names from the journal (`sample_names` in
 `usn.json`), and process names. Check `usn.json` before sharing it outside the family.
 
 ## What stays unknowable even after the visit
 
 - Behaviour after weeks of use: index fragmentation on the HDD, WAL growth patterns, how often
-  overflow re-walks happen. That needs telemetry from VFS itself (issue 19, R4 diagnostic log).
+  overflow re-walks happen. VFS's diagnostic log (VFS-5, R4) records the WAL size, overflows
+  and walk rates; fragmentation itself stays unmeasured (`defrag /A` needs admin).
 - Cold-cache comparisons between enumeration calls (needs admin to flush the standby list).
 - Defender's per-file cost on the index: Defender's internal decisions are not observable
   without admin (Performance Analyzer for Defender, `New-MpPerformanceRecording`, needs

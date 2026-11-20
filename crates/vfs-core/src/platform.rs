@@ -1,8 +1,10 @@
-//! Platform specifics: volume identity, drive kind, long paths and background priority.
+//! Platform specifics: volume identity, drive kind, long paths, indexer thread priority, disk
+//! load, uptime and memory (VFS-5).
 //! Owned by task T3b; only this file, `indexer/walk.rs`, `indexer/watch.rs` and the desktop
 //! `reveal.rs` contain `cfg(windows)` code.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::types::DriveKind;
 
@@ -65,10 +67,129 @@ pub(crate) fn long_path(path: &Path) -> PathBuf {
     out
 }
 
-/// Puts the calling thread in background CPU and I/O priority; failures are logged and
-/// ignored.
-pub(crate) fn enter_background_priority() {
-    imp::enter_background_priority();
+/// Scheduling attributes of the indexer thread (VFS-5 R1, R2). The walk profile is the
+/// thread's base state; background mode (very-low I/O) is entered only around a directory
+/// listing, so no index write can ever run in it (VFS-5 R3).
+pub(crate) trait ThreadPriority: Send {
+    /// Normal I/O priority, lowest CPU priority, low memory priority.
+    fn walk_profile(&mut self);
+    /// Very-low I/O priority until `end_background`.
+    fn begin_background(&mut self);
+    /// Leaves background mode and restores the walk profile.
+    fn end_background(&mut self);
+}
+
+/// The calling thread's real attributes. Each kind of failure is logged once and ignored:
+/// a thread at the wrong priority still indexes correctly.
+#[derive(Default)]
+pub(crate) struct OsThreadPriority {
+    warned: [bool; 3],
+}
+
+impl OsThreadPriority {
+    fn check(&mut self, what: usize, r: std::io::Result<()>) {
+        if let Err(e) = r {
+            if !std::mem::replace(&mut self.warned[what], true) {
+                let name = ["walk profile", "background begin", "background end"][what];
+                log::warn!("indexer thread priority ({name}): {e}");
+            }
+        }
+    }
+}
+
+impl ThreadPriority for OsThreadPriority {
+    fn walk_profile(&mut self) {
+        self.check(0, imp::walk_profile());
+    }
+
+    fn begin_background(&mut self) {
+        self.check(1, imp::begin_background());
+    }
+
+    fn end_background(&mut self) {
+        self.check(2, imp::end_background());
+    }
+}
+
+/// Average disk queue length per physical disk (VFS-5 R4).
+pub(crate) trait DiskLoad: Send {
+    /// One sample: (instance name, average queue length since the previous sample), or `None`
+    /// when this sample failed.
+    fn sample(&mut self) -> Option<Vec<(String, f64)>>;
+}
+
+/// The system's disk-load probe: on Windows a PDH query on
+/// `\PhysicalDisk(*)\Avg. Disk Queue Length`, added by its English name because counter names
+/// are localised on a Spanish Windows. `None` where there is no probe (macOS, Linux) or when the
+/// query cannot be opened.
+pub(crate) fn disk_load() -> Option<Box<dyn DiskLoad>> {
+    imp::disk_load()
+}
+
+/// Drive of an absolute Windows path, upper case with its colon ("D:"); `None` for UNC paths,
+/// relative paths and every path on other systems.
+pub(crate) fn drive_of(path: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match path.components().next()? {
+        Component::Prefix(p) => match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => {
+                Some(format!("{}:", (d as char).to_ascii_uppercase()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// PDH name of the instance summing every physical disk.
+const TOTAL_INSTANCE: &str = "_Total";
+
+/// Queue length of the disks holding `drives`: the largest among the instances whose name
+/// lists one of them (PDH names physical disks "0 C:", "1 D: E:"), else the `_Total`
+/// instance, which over-counts rather than missing a busy disk.
+pub(crate) fn queue_for(samples: &[(String, f64)], drives: &[String]) -> Option<f64> {
+    let matching = samples
+        .iter()
+        .filter(|(name, _)| {
+            name.split_whitespace()
+                .any(|t| drives.iter().any(|d| t.eq_ignore_ascii_case(d)))
+        })
+        .map(|(_, q)| *q)
+        .fold(None, |acc: Option<f64>, q| {
+            Some(acc.map_or(q, |a| a.max(q)))
+        });
+    matching.or_else(|| {
+        samples
+            .iter()
+            .find(|(name, _)| name == TOTAL_INSTANCE)
+            .map(|(_, q)| *q)
+    })
+}
+
+/// Time since the system booted (Windows `GetTickCount64`, macOS `CLOCK_MONOTONIC`, which
+/// counts from boot and includes sleep); `None` where unknown.
+pub(crate) fn uptime() -> Option<Duration> {
+    imp::uptime()
+}
+
+/// Resident memory of this process (Windows working set, macOS resident size).
+pub(crate) fn working_set_bytes() -> Option<u64> {
+    imp::working_set_bytes()
+}
+
+/// Windows: sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `dir`, so Windows Search does not
+/// re-index the index's WAL churn (VFS-5 R9). Elsewhere nothing.
+pub(crate) fn exclude_from_content_index(dir: &Path) -> std::io::Result<()> {
+    imp::exclude_from_content_index(dir)
+}
+
+/// File Synology Drive Client keeps at the top of every folder it syncs. Its presence in
+/// every client version is unverified (`windows-recommendations.md` R2).
+const SYNOLOGY_MARKER: &str = ".SynologyWorkingDirectory";
+
+/// Whether `dir` or one of its ancestors is the top of a Synology sync task (VFS-5 R9).
+pub(crate) fn inside_sync_root(dir: &Path) -> bool {
+    dir.ancestors().any(|a| a.join(SYNOLOGY_MARKER).exists())
 }
 
 #[cfg(target_os = "macos")]
@@ -79,11 +200,12 @@ mod imp {
     use std::path::Path;
 
     /// `sys/qos.h`; not exported by the `libc` crate.
-    const QOS_CLASS_BACKGROUND: libc::c_uint = 0x09;
+    const QOS_CLASS_UTILITY: libc::c_uint = 0x11;
     /// `sys/resource.h`.
     const IOPOL_TYPE_DISK: libc::c_int = 0;
     const IOPOL_SCOPE_THREAD: libc::c_int = 1;
-    const IOPOL_THROTTLE: libc::c_int = 3;
+    pub(super) const IOPOL_DEFAULT: libc::c_int = 0;
+    pub(super) const IOPOL_THROTTLE: libc::c_int = 3;
     /// `sys/mount.h`: mounted on removable media.
     const MNT_REMOVABLE: u32 = 0x0000_0200;
 
@@ -97,6 +219,8 @@ mod imp {
             scope: libc::c_int,
             policy: libc::c_int,
         ) -> libc::c_int;
+        #[cfg(test)]
+        fn getiopolicy_np(iotype: libc::c_int, scope: libc::c_int) -> libc::c_int;
     }
 
     fn statfs(path: &Path) -> Option<libc::statfs> {
@@ -126,19 +250,71 @@ mod imp {
         }
     }
 
-    pub(super) fn enter_background_priority() {
-        // SAFETY: both calls only change scheduling attributes of the calling thread.
-        unsafe {
-            if pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0) != 0 {
-                log::warn!("could not set background QoS on the indexer thread");
-            }
-            if setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD, IOPOL_THROTTLE) != 0 {
-                log::warn!(
-                    "could not throttle indexer I/O: {}",
-                    std::io::Error::last_os_error()
-                );
-            }
+    fn set_io_policy(policy: libc::c_int) -> std::io::Result<()> {
+        // SAFETY: only changes the disk I/O policy of the calling thread.
+        if unsafe { setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD, policy) } != 0 {
+            return Err(std::io::Error::last_os_error());
         }
+        Ok(())
+    }
+
+    /// Utility QoS lowers CPU priority without the I/O throttling that background QoS adds;
+    /// the thread's disk policy goes back to the process default (normal).
+    pub(super) fn walk_profile() -> std::io::Result<()> {
+        // SAFETY: only changes the QoS class of the calling thread.
+        let rc = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0) };
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc));
+        }
+        set_io_policy(IOPOL_DEFAULT)
+    }
+
+    pub(super) fn begin_background() -> std::io::Result<()> {
+        set_io_policy(IOPOL_THROTTLE)
+    }
+
+    pub(super) fn end_background() -> std::io::Result<()> {
+        set_io_policy(IOPOL_DEFAULT)
+    }
+
+    /// Disk I/O policy of the calling thread, for tests.
+    #[cfg(test)]
+    pub(super) fn io_policy() -> libc::c_int {
+        // SAFETY: reads a scheduling attribute of the calling thread.
+        unsafe { getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD) }
+    }
+
+    pub(super) fn disk_load() -> Option<Box<dyn super::DiskLoad>> {
+        None
+    }
+
+    pub(super) fn uptime() -> Option<std::time::Duration> {
+        // SAFETY: `ts` is a plain C struct that `clock_gettime` fills on success.
+        unsafe {
+            let mut ts: libc::timespec = std::mem::zeroed();
+            (libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) == 0)
+                .then(|| std::time::Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
+        }
+    }
+
+    pub(super) fn working_set_bytes() -> Option<u64> {
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+        // SAFETY: `info` is a plain C struct of `size` bytes that `proc_pidinfo` fills.
+        unsafe {
+            let mut info: libc::proc_taskinfo = std::mem::zeroed();
+            let n = libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDTASKINFO,
+                0,
+                (&mut info as *mut libc::proc_taskinfo).cast(),
+                size,
+            );
+            (n == size).then_some(info.pti_resident_size)
+        }
+    }
+
+    pub(super) fn exclude_from_content_index(_dir: &Path) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -149,10 +325,22 @@ mod imp {
     use std::path::Path;
 
     use windows_sys::Win32::Storage::FileSystem::{
-        GetDriveTypeW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        GetDriveTypeW, GetFileAttributesW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        SetFileAttributesW, FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, INVALID_FILE_ATTRIBUTES,
     };
+    use windows_sys::Win32::System::Performance::{
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
+        PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
+        PDH_MORE_DATA,
+    };
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
     use windows_sys::Win32::System::Threading::{
-        GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        GetCurrentProcess, GetCurrentThread, SetThreadInformation, SetThreadPriority,
+        ThreadMemoryPriority, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
+        THREAD_MODE_BACKGROUND_BEGIN, THREAD_MODE_BACKGROUND_END, THREAD_PRIORITY_LOWEST,
     };
 
     /// `GetDriveTypeW` results (`WindowsProgramming`, a feature this crate does not enable).
@@ -214,16 +402,182 @@ mod imp {
         }
     }
 
-    pub(super) fn enter_background_priority() {
-        // SAFETY: the pseudo-handle of the current thread needs no closing. Background mode
-        // lowers both CPU and I/O priority of this thread only.
-        let ok = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
-        if ok == 0 {
-            log::warn!(
-                "could not enter background mode on the indexer thread: {}",
-                std::io::Error::last_os_error()
-            );
+    fn set_priority(priority: i32) -> std::io::Result<()> {
+        // SAFETY: the pseudo-handle of the current thread needs no closing.
+        if unsafe { SetThreadPriority(GetCurrentThread(), priority) } == 0 {
+            return Err(std::io::Error::last_os_error());
         }
+        Ok(())
+    }
+
+    /// `THREAD_PRIORITY_LOWEST` plus `MEMORY_PRIORITY_LOW`; I/O stays normal because
+    /// background mode is off. On Windows 8+ background mode does not lower CPU priority
+    /// (`windows-io.md` §1.1), so the CPU priority also applies while it is on.
+    pub(super) fn walk_profile() -> std::io::Result<()> {
+        set_priority(THREAD_PRIORITY_LOWEST)?;
+        let info = MEMORY_PRIORITY_INFORMATION {
+            MemoryPriority: MEMORY_PRIORITY_LOW,
+        };
+        // SAFETY: `info` is a valid MEMORY_PRIORITY_INFORMATION of the size passed.
+        let ok = unsafe {
+            SetThreadInformation(
+                GetCurrentThread(),
+                ThreadMemoryPriority,
+                (&info as *const MEMORY_PRIORITY_INFORMATION).cast(),
+                std::mem::size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn begin_background() -> std::io::Result<()> {
+        set_priority(THREAD_MODE_BACKGROUND_BEGIN)
+    }
+
+    /// Leaving background mode resets memory priority to normal, so the walk profile is
+    /// applied again.
+    pub(super) fn end_background() -> std::io::Result<()> {
+        set_priority(THREAD_MODE_BACKGROUND_END)?;
+        walk_profile()
+    }
+
+    /// PDH query on the average queue length of every physical disk.
+    struct Pdh {
+        query: PDH_HQUERY,
+        counter: PDH_HCOUNTER,
+    }
+
+    // SAFETY: PDH query and counter handles are process-wide and used by one thread at a time.
+    unsafe impl Send for Pdh {}
+
+    impl Drop for Pdh {
+        fn drop(&mut self) {
+            // SAFETY: `query` was opened by `PdhOpenQueryW` and is closed once.
+            unsafe { PdhCloseQuery(self.query) };
+        }
+    }
+
+    /// `PDH_CSTATUS_NEW_DATA`: the highest status of a usable value (0 is valid data).
+    const PDH_CSTATUS_NEW_DATA: u32 = 1;
+
+    impl super::DiskLoad for Pdh {
+        fn sample(&mut self) -> Option<Vec<(String, f64)>> {
+            let (mut size, mut count) = (0u32, 0u32);
+            // SAFETY: the query and counter are open; the first call only asks for the size
+            // and the second writes at most `size` bytes into a buffer of at least that size,
+            // aligned for the item struct (u64).
+            unsafe {
+                if PdhCollectQueryData(self.query) != 0 {
+                    return None;
+                }
+                let rc = PdhGetFormattedCounterArrayW(
+                    self.counter,
+                    PDH_FMT_DOUBLE,
+                    &mut size,
+                    &mut count,
+                    std::ptr::null_mut(),
+                );
+                if rc != PDH_MORE_DATA {
+                    return None;
+                }
+                let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+                let items = buf.as_mut_ptr().cast::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+                if PdhGetFormattedCounterArrayW(
+                    self.counter,
+                    PDH_FMT_DOUBLE,
+                    &mut size,
+                    &mut count,
+                    items,
+                ) != 0
+                {
+                    return None;
+                }
+                let items = std::slice::from_raw_parts(items, count as usize);
+                Some(
+                    items
+                        .iter()
+                        .filter(|i| i.FmtValue.CStatus <= PDH_CSTATUS_NEW_DATA)
+                        .map(|i| (pwstr(i.szName), i.FmtValue.Anonymous.doubleValue))
+                        .collect(),
+                )
+            }
+        }
+    }
+
+    /// # Safety
+    /// `p` is null or a NUL-terminated UTF-16 string.
+    unsafe fn pwstr(p: *const u16) -> String {
+        if p.is_null() {
+            return String::new();
+        }
+        let mut n = 0;
+        // SAFETY: the caller guarantees a terminating NUL.
+        unsafe {
+            while *p.add(n) != 0 {
+                n += 1;
+            }
+            String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
+        }
+    }
+
+    pub(super) fn disk_load() -> Option<Box<dyn super::DiskLoad>> {
+        let path: Vec<u16> = r"\PhysicalDisk(*)\Avg. Disk Queue Length"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let mut query: PDH_HQUERY = std::ptr::null_mut();
+        let mut counter: PDH_HCOUNTER = std::ptr::null_mut();
+        // SAFETY: out-pointers are valid; `path` is NUL-terminated. On failure after the
+        // query opened, `Pdh::drop` closes it.
+        unsafe {
+            if PdhOpenQueryW(std::ptr::null(), 0, &mut query) != 0 {
+                return None;
+            }
+            let pdh = Pdh { query, counter };
+            if PdhAddEnglishCounterW(pdh.query, path.as_ptr(), 0, &mut counter) != 0 {
+                return None;
+            }
+            let pdh = Pdh { counter, ..pdh };
+            // A rate counter needs a first raw sample to compare against.
+            PdhCollectQueryData(pdh.query);
+            Some(Box::new(pdh))
+        }
+    }
+
+    pub(super) fn uptime() -> Option<std::time::Duration> {
+        // SAFETY: no arguments, no side effects.
+        Some(std::time::Duration::from_millis(unsafe {
+            GetTickCount64()
+        }))
+    }
+
+    pub(super) fn working_set_bytes() -> Option<u64> {
+        let mut pmc: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        // SAFETY: `pmc` is a valid struct of `cb` bytes; the process pseudo-handle needs no
+        // closing.
+        let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) };
+        (ok != 0).then_some(pmc.WorkingSetSize as u64)
+    }
+
+    pub(super) fn exclude_from_content_index(dir: &Path) -> std::io::Result<()> {
+        let p = wide(dir);
+        // SAFETY: `p` is NUL-terminated.
+        unsafe {
+            let attrs = GetFileAttributesW(p.as_ptr());
+            if attrs == INVALID_FILE_ATTRIBUTES {
+                return Err(std::io::Error::last_os_error());
+            }
+            if attrs & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED == 0
+                && SetFileAttributesW(p.as_ptr(), attrs | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED) == 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -240,7 +594,33 @@ mod imp {
         DriveKind::Unknown
     }
 
-    pub(super) fn enter_background_priority() {}
+    pub(super) fn walk_profile() -> std::io::Result<()> {
+        Ok(())
+    }
+
+    pub(super) fn begin_background() -> std::io::Result<()> {
+        Ok(())
+    }
+
+    pub(super) fn end_background() -> std::io::Result<()> {
+        Ok(())
+    }
+
+    pub(super) fn disk_load() -> Option<Box<dyn super::DiskLoad>> {
+        None
+    }
+
+    pub(super) fn uptime() -> Option<std::time::Duration> {
+        None
+    }
+
+    pub(super) fn working_set_bytes() -> Option<u64> {
+        None
+    }
+
+    pub(super) fn exclude_from_content_index(_dir: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -261,7 +641,6 @@ mod tests {
         if cfg!(any(windows, target_os = "macos")) {
             assert_eq!(drive_kind(&root), DriveKind::Local);
         }
-        enter_background_priority();
     }
 
     /// VFS-1 AC-8: long paths get the verbatim prefix on Windows and are untouched elsewhere.
@@ -284,5 +663,178 @@ mod tests {
             assert_eq!(long_path(Path::new("/datos/x")), Path::new("/datos/x"));
         }
         assert_eq!(long_path(Path::new("relative")), Path::new("relative"));
+    }
+
+    /// VFS-5 AC-4 (macOS): background mode throttles the thread's disk I/O and leaving it
+    /// restores the default policy; the walk profile itself does not throttle.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn background_mode_toggles_io_policy() {
+        std::thread::spawn(|| {
+            let mut p = OsThreadPriority::default();
+            p.walk_profile();
+            assert_eq!(imp::io_policy(), imp::IOPOL_DEFAULT);
+            p.begin_background();
+            assert_eq!(imp::io_policy(), imp::IOPOL_THROTTLE);
+            p.end_background();
+            assert_eq!(imp::io_policy(), imp::IOPOL_DEFAULT);
+            assert!(!p.warned.iter().any(|w| *w), "a priority call failed");
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// VFS-5 AC-4 (Windows CI): the walk profile sets lowest CPU and low memory priority;
+    /// background mode really toggles (a second begin or end fails with the documented
+    /// error), and leaving it restores the walk profile.
+    #[cfg(windows)]
+    #[test]
+    fn background_mode_toggles_thread_priority() {
+        use windows_sys::Win32::Foundation::{
+            GetLastError, ERROR_THREAD_MODE_ALREADY_BACKGROUND, ERROR_THREAD_MODE_NOT_BACKGROUND,
+        };
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, GetThreadInformation, GetThreadPriority, SetThreadPriority,
+            ThreadMemoryPriority, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_LOW,
+            THREAD_MODE_BACKGROUND_BEGIN, THREAD_MODE_BACKGROUND_END, THREAD_PRIORITY_LOWEST,
+        };
+        fn memory_priority() -> u32 {
+            let mut info = MEMORY_PRIORITY_INFORMATION { MemoryPriority: 0 };
+            // SAFETY: `info` is a valid struct of the size passed.
+            let ok = unsafe {
+                GetThreadInformation(
+                    GetCurrentThread(),
+                    ThreadMemoryPriority,
+                    (&mut info as *mut MEMORY_PRIORITY_INFORMATION).cast(),
+                    std::mem::size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
+                )
+            };
+            assert_ne!(ok, 0, "{}", std::io::Error::last_os_error());
+            info.MemoryPriority
+        }
+        fn set_fails_with(mode: i32, code: u32) {
+            // SAFETY: changes the current thread only.
+            unsafe {
+                assert_eq!(SetThreadPriority(GetCurrentThread(), mode), 0);
+                assert_eq!(GetLastError(), code);
+            }
+        }
+        std::thread::spawn(|| {
+            let mut p = OsThreadPriority::default();
+            p.walk_profile();
+            // SAFETY: reads the current thread's priority.
+            assert_eq!(
+                unsafe { GetThreadPriority(GetCurrentThread()) },
+                THREAD_PRIORITY_LOWEST
+            );
+            assert_eq!(memory_priority(), MEMORY_PRIORITY_LOW);
+            p.begin_background();
+            set_fails_with(
+                THREAD_MODE_BACKGROUND_BEGIN,
+                ERROR_THREAD_MODE_ALREADY_BACKGROUND,
+            );
+            p.end_background();
+            set_fails_with(THREAD_MODE_BACKGROUND_END, ERROR_THREAD_MODE_NOT_BACKGROUND);
+            // SAFETY: reads the current thread's priority.
+            assert_eq!(
+                unsafe { GetThreadPriority(GetCurrentThread()) },
+                THREAD_PRIORITY_LOWEST
+            );
+            assert_eq!(memory_priority(), MEMORY_PRIORITY_LOW);
+            assert!(!p.warned.iter().any(|w| *w), "a priority call failed");
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// VFS-5 AC-5 (Windows CI): the PDH probe opens for a standard user and a second sample
+    /// reports the `_Total` instance. Elsewhere there is no probe.
+    #[test]
+    fn disk_load_probe() {
+        let probe = disk_load();
+        if cfg!(windows) {
+            let mut probe = probe.expect("PDH query opens");
+            std::thread::sleep(Duration::from_millis(1100));
+            let s = probe.sample().expect("a sample");
+            assert!(
+                s.iter().any(|(n, q)| n == TOTAL_INSTANCE && *q >= 0.0),
+                "{s:?}"
+            );
+            assert!(queue_for(&s, &["C:".to_owned()]).is_some());
+        } else {
+            assert!(probe.is_none());
+        }
+    }
+
+    /// VFS-5 AC-5: the queue of the disks holding the roots is the largest among PDH
+    /// instances naming one of their drives, else `_Total`.
+    #[test]
+    fn queue_for_picks_the_roots_disk() {
+        let s: Vec<(String, f64)> = vec![
+            ("0 C:".into(), 0.5),
+            ("1 D: E:".into(), 3.0),
+            ("2 F:".into(), 1.0),
+            (TOTAL_INSTANCE.into(), 4.5),
+        ];
+        let d = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(queue_for(&s, &d(&["e:"])), Some(3.0));
+        assert_eq!(queue_for(&s, &d(&["C:", "F:"])), Some(1.0));
+        assert_eq!(queue_for(&s, &d(&["Z:"])), Some(4.5));
+        assert_eq!(queue_for(&s, &[]), Some(4.5));
+        assert_eq!(queue_for(&[], &d(&["C:"])), None);
+    }
+
+    /// VFS-5 AC-5: drive letters come from Windows paths only.
+    #[test]
+    fn drive_of_windows_paths() {
+        if cfg!(windows) {
+            assert_eq!(drive_of(Path::new(r"d:\fotos")).as_deref(), Some("D:"));
+            assert_eq!(drive_of(Path::new(r"\\?\E:\x")).as_deref(), Some("E:"));
+            assert_eq!(drive_of(Path::new(r"\\nas\share\x")), None);
+        } else {
+            assert_eq!(drive_of(Path::new("/Volumes/datos")), None);
+        }
+        assert_eq!(drive_of(Path::new("relativo")), None);
+    }
+
+    /// VFS-5 AC-10: a folder below a `.SynologyWorkingDirectory` marker is inside a sync
+    /// root; a sibling tree is not.
+    #[test]
+    fn sync_root_detection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let synced = tmp.path().join("Drive");
+        let deep = synced.join("AppData").join("Local").join("app.vfs.desktop");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::create_dir_all(tmp.path().join("otra")).unwrap();
+        assert!(!inside_sync_root(&deep));
+        std::fs::create_dir(synced.join(SYNOLOGY_MARKER)).unwrap();
+        assert!(inside_sync_root(&deep));
+        assert!(inside_sync_root(&synced));
+        assert!(!inside_sync_root(&tmp.path().join("otra")));
+    }
+
+    /// VFS-5 AC-10: on Windows the index folder becomes not content-indexed, and setting it
+    /// twice is harmless; elsewhere the call does nothing.
+    #[test]
+    fn index_folder_not_content_indexed() {
+        let tmp = tempfile::tempdir().unwrap();
+        exclude_from_content_index(tmp.path()).unwrap();
+        exclude_from_content_index(tmp.path()).unwrap();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+            let attrs = std::fs::metadata(tmp.path()).unwrap().file_attributes();
+            assert_ne!(attrs & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, 0);
+        }
+    }
+
+    /// VFS-5 AC-7, AC-8: uptime and working set are known on both target systems.
+    #[test]
+    fn uptime_and_working_set() {
+        if cfg!(any(windows, target_os = "macos")) {
+            assert!(uptime().unwrap() > Duration::ZERO);
+            assert!(working_set_bytes().unwrap() > 1 << 20);
+        }
     }
 }

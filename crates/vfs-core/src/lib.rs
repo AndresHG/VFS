@@ -18,6 +18,7 @@ mod types;
 
 pub use error::{Error, Result};
 pub use fold::fold_key;
+pub use indexer::DIAG_TARGET;
 pub use kind::file_kind;
 pub use types::*;
 

@@ -35,9 +35,15 @@ const WRITER_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const WRITER_CACHE_KIB: i64 = 32 * 1024;
 const READER_CACHE_KIB: i64 = 64 * 1024;
 /// WAL pages before an automatic checkpoint.
-const WAL_AUTOCHECKPOINT_PAGES: i64 = 4000;
+pub(crate) const WAL_AUTOCHECKPOINT_PAGES: i64 = 4000;
 /// The WAL is truncated to this size after a checkpoint.
 const JOURNAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+/// Windows: a writer grows the index file in steps of this size, so a file that reaches
+/// 1–2 GB while Synology writes to the same disk ends up in fewer, larger extents
+/// (`SQLITE_FCNTL_CHUNK_SIZE`, VFS-5 R10). SQLite extends with `SetEndOfFile` there, which
+/// allocates without writing; on macOS it would write a byte per block, so it stays off.
+#[cfg(windows)]
+const WRITER_CHUNK_BYTES: i32 = 32 * 1024 * 1024;
 /// Prepared statements kept per writer connection: every `prepare_cached` statement of the
 /// ingest helpers and the indexer loop stays cached.
 const WRITER_STATEMENT_CACHE: usize = 32;
@@ -82,6 +88,8 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
         [],
         |r| r.get(0),
     )?;
+    #[cfg(windows)]
+    set_chunk_size(&conn, WRITER_CHUNK_BYTES)?;
     let version = schema_version(&conn)?;
     if version > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew);
@@ -116,6 +124,26 @@ fn compact(conn: &Connection) -> Result<()> {
     let vacuum = conn.execute_batch(&format!("PRAGMA page_size={PAGE_SIZE}; VACUUM;"));
     let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
     Ok(vacuum?)
+}
+
+/// Makes the main database file of `conn` grow and shrink in multiples of `bytes`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn set_chunk_size(conn: &Connection, bytes: i32) -> Result<()> {
+    let mut size: std::ffi::c_int = bytes;
+    // SAFETY: `conn.handle()` is the open connection's handle; `size` outlives the call, and
+    // SQLITE_FCNTL_CHUNK_SIZE reads one int through the pointer.
+    let rc = unsafe {
+        rusqlite::ffi::sqlite3_file_control(
+            conn.handle(),
+            c"main".as_ptr(),
+            rusqlite::ffi::SQLITE_FCNTL_CHUNK_SIZE,
+            (&mut size as *mut std::ffi::c_int).cast(),
+        )
+    };
+    if rc != rusqlite::ffi::SQLITE_OK {
+        return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rc), None).into());
+    }
+    Ok(())
 }
 
 /// Opens an existing index for reading only (`query_only=1`).
@@ -1281,6 +1309,39 @@ mod tests {
         assert!(b_path.exists());
         drop(b);
         assert!(!session_dir(&path).exists());
+    }
+
+    /// File size of the index after a full checkpoint.
+    fn checkpointed_size(conn: &Connection, path: &Path) -> u64 {
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        std::fs::metadata(path).unwrap().len()
+    }
+
+    /// VFS-5 AC-11: with a chunk size the index file grows in whole chunks; on Windows every
+    /// writer opened by `open_rw` uses one.
+    #[test]
+    fn writer_file_grows_in_chunks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let conn = open_rw(&path).unwrap();
+        #[cfg(windows)]
+        let chunk = WRITER_CHUNK_BYTES as u64;
+        #[cfg(not(windows))]
+        let chunk = {
+            let c: u64 = 1 << 20;
+            set_chunk_size(&conn, c as i32).unwrap();
+            c
+        };
+        conn.execute_batch(
+            "CREATE TABLE t(x); \
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000) \
+             INSERT INTO t SELECT randomblob(300) FROM n;",
+        )
+        .unwrap();
+        let size = checkpointed_size(&conn, &path);
+        assert!(size >= chunk, "{size}");
+        assert_eq!(size % chunk, 0, "{size} is not a whole number of chunks");
     }
 
     fn pragma(conn: &Connection, name: &str) -> i64 {
