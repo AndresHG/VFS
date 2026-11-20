@@ -23,6 +23,21 @@ mod watch;
 
 pub use sched::DIAG_TARGET;
 
+/// Options of the background indexer.
+#[derive(Clone, Debug)]
+pub struct IndexerOptions {
+    /// The start-up catch-up waits until the system has been up this long (VFS-5 R5).
+    pub boot_grace: Duration,
+}
+
+impl Default for IndexerOptions {
+    fn default() -> Self {
+        IndexerOptions {
+            boot_grace: SchedConfig::default().boot_grace,
+        }
+    }
+}
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -735,9 +750,17 @@ impl IndexerHandle {
     /// Starts the thread (priority and back-off via `sched`, watcher via `watch`), which
     /// first finishes roots left in `removing`, then resumes pending directories. The
     /// watcher ignores the directory holding `db_path`.
-    pub(crate) fn spawn(db_path: PathBuf, sink: Arc<dyn ProgressSink>) -> Result<IndexerHandle> {
+    pub(crate) fn spawn(
+        db_path: PathBuf,
+        sink: Arc<dyn ProgressSink>,
+        options: IndexerOptions,
+    ) -> Result<IndexerHandle> {
+        let cfg = SchedConfig {
+            boot_grace: options.boot_grace,
+            ..SchedConfig::default()
+        };
         let sched = Sched::new(
-            SchedConfig::default(),
+            cfg,
             Box::new(platform::OsThreadPriority::default()),
             platform::disk_load(),
             sched::log_sink(),

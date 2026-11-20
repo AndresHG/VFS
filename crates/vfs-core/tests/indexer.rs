@@ -13,8 +13,8 @@ use rusqlite::Connection;
 use vfs_core::db::ingest::ScanState;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    fold_key, FileKind, IndexProgress, IndexerState, MatchKind, ProgressSink, RootStatus,
-    SearchFilters, SearchQuery, SearchResponse, Vfs,
+    fold_key, FileKind, IndexProgress, IndexerOptions, IndexerState, MatchKind, ProgressSink,
+    RootStatus, SearchFilters, SearchQuery, SearchResponse, Vfs,
 };
 
 struct Fixture {
@@ -545,7 +545,8 @@ fn last_full_scan(fx: &Fixture) -> Option<i64> {
 }
 
 /// VFS-1 AC-6, AC-7, I4: changes made while the app was closed are found at the next start,
-/// however recent the last finished check, and the check's time is recorded.
+/// however recent the last finished check, and the check's time is recorded. Without a boot
+/// grace: a CI runner has often been up for less than the default (VFS-5 AC-7).
 #[test]
 fn startup_catches_up_changes_made_while_closed() {
     let fx = Fixture::new();
@@ -556,7 +557,12 @@ fn startup_catches_up_changes_made_while_closed() {
     fs::remove_file(fx.root().join("A/antes.txt")).unwrap();
     std::thread::sleep(Duration::from_millis(1100));
 
-    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    let no_grace = IndexerOptions {
+        boot_grace: Duration::ZERO,
+    };
+    fx.vfs
+        .start_indexer_with(Arc::new(NullSink), no_grace)
+        .unwrap();
     wait_until("catch-up", || {
         fx.all_files() == vec!["A/mientras cerrado.txt"]
             && fx.status() == RootStatus::Ready

@@ -530,21 +530,20 @@ mod imp {
             .collect();
         let mut query: PDH_HQUERY = std::ptr::null_mut();
         let mut counter: PDH_HCOUNTER = std::ptr::null_mut();
-        // SAFETY: out-pointers are valid; `path` is NUL-terminated. On failure after the
-        // query opened, `Pdh::drop` closes it.
+        // SAFETY: out-pointers are valid; `path` is NUL-terminated; the query is closed once,
+        // here on failure or by `Pdh::drop`.
         unsafe {
             if PdhOpenQueryW(std::ptr::null(), 0, &mut query) != 0 {
                 return None;
             }
-            let pdh = Pdh { query, counter };
-            if PdhAddEnglishCounterW(pdh.query, path.as_ptr(), 0, &mut counter) != 0 {
+            if PdhAddEnglishCounterW(query, path.as_ptr(), 0, &mut counter) != 0 {
+                PdhCloseQuery(query);
                 return None;
             }
-            let pdh = Pdh { counter, ..pdh };
             // A rate counter needs a first raw sample to compare against.
-            PdhCollectQueryData(pdh.query);
-            Some(Box::new(pdh))
+            PdhCollectQueryData(query);
         }
+        Some(Box::new(Pdh { query, counter }))
     }
 
     pub(super) fn uptime() -> Option<std::time::Duration> {

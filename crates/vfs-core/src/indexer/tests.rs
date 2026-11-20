@@ -173,7 +173,12 @@ fn overflow_storm_does_not_keep_a_root_walking() {
     let mut fx = fixture(&dirs);
     fx.scan();
     fx.set_last_scan(1000);
-    let h = IndexerHandle::spawn(fx.db_path.clone(), Arc::new(NullSink)).unwrap();
+    let h = IndexerHandle::spawn(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        IndexerOptions::default(),
+    )
+    .unwrap();
     let reader = db::open_ro(&fx.db_path).unwrap();
     let read = || -> (RootStatus, Option<i64>) {
         reader

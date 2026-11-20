@@ -1252,10 +1252,16 @@ mod tests {
         tx.commit().unwrap();
         drop(conn); // the last connection checkpoints the WAL into the main file
         let mut bytes = std::fs::read(path).unwrap();
-        let page = 4096;
-        assert!(bytes.len() > 4 * page);
-        let len = bytes.len();
-        bytes[len - page..].fill(0xA5);
+        // The last page in use, from the header (page size at 16, page count at 28): with a
+        // chunk size (Windows, VFS-5 R10) the file ends in unused padding.
+        let page = match u16::from_be_bytes([bytes[16], bytes[17]]) {
+            1 => 65536,
+            n => usize::from(n),
+        };
+        let pages = u32::from_be_bytes(bytes[28..32].try_into().unwrap()) as usize;
+        let len = pages * page;
+        assert!(pages > 4 && len <= bytes.len());
+        bytes[len - page..len].fill(0xA5);
         std::fs::write(path, bytes).unwrap();
     }
 

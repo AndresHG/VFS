@@ -57,7 +57,8 @@ step of the measurement plan that will replace the guess.
 ## Configuration (named, with documented defaults)
 
 All values live in `vfs_core::indexer::sched::SchedConfig::default()` (R1–R6) or as named
-constants in `db.rs` (R10) and the desktop shell (R7). Every default is an estimate until the
+constants in `db.rs` (R10) and the desktop shell (R7). Only `boot_grace` is public, through
+`vfs_core::IndexerOptions`, because tests on a freshly booted CI runner need it at zero. Every default is an estimate until the
 measurement named next to it exists.
 
 | Name | Default | Why this value | Replaced by |
@@ -73,7 +74,7 @@ measurement named next to it exists.
 | `DIAG_MEMORY_EVERY` | 10 min | Working set and WAL size over weeks, ~15 KB per day | — |
 | `LOG_KEEP` | 4 old files of 1 MB | At most 5 MB on disk; about two weeks of mostly idle use, three days of continuous indexing | — |
 | `WRITER_CHUNK_BYTES` | 32 MiB, Windows only | `SQLITE_FCNTL_CHUNK_SIZE` "may reduce" fragmentation of a file that grows while Synology writes to the same disk (`windows-recommendations.md` R7). On Windows SQLite extends with `SetEndOfFile`, which allocates without writing; on macOS it writes a byte per block, so it is off there | N12 |
-| Reader page caches | decided by the benchmark (Decisions 6) | Bounded RSS on a PC that already swaps | N12 |
+| Reader page caches | unchanged, 64 MiB per reader (Decisions 6) | Bounded RSS on a PC that already swaps; a cut to 32 MiB waits for a measurement that can resolve its cost | N12 |
 
 ## Acceptance scenarios
 
@@ -174,7 +175,7 @@ first visit checks; the plan's step numbers are in `target-pc-measurement-plan.m
 | 3 | Busy signal | Average disk queue length of the roots' physical disk via PDH with English counter names (localised Spanish names otherwise). Not `% Idle Time`, which the walk itself drives to zero | Claude | 2026-11-20 |
 | 4 | Back-off in incremental mode | None: background mode already yields to every other I/O | Claude | 2026-11-20 |
 | 5 | Checkpoint timing | A WAL hook on the indexer connection runs the same passive checkpoint at the same page count as `wal_autocheckpoint`, timed for the log | Claude | 2026-11-20 |
-| 6 | Reader page caches | Decided by three benchmark runs before and after on a 2-million-file index; the numbers are in the PR body | Claude | 2026-11-20 |
+| 6 | Reader page caches | Kept at 64 MiB. Seven interleaved runs on a 2-million-file index: 32 MiB cut peak RSS from ~120 to ~81 MB, but p95 moved −8 % to +45 % per class while two identical builds differed by up to 2× (the Mac was shared, load 20–30). The cost is not resolvable there; decide with N12 or on a quiet machine. Numbers in the PR body | Claude | 2026-11-20 |
 
 ## Open questions
 

@@ -18,7 +18,7 @@ mod types;
 
 pub use error::{Error, Result};
 pub use fold::fold_key;
-pub use indexer::DIAG_TARGET;
+pub use indexer::{IndexerOptions, DIAG_TARGET};
 pub use kind::file_kind;
 pub use types::*;
 
@@ -161,11 +161,24 @@ impl Vfs {
         })
     }
 
-    /// Starts the background indexer and watcher. Idempotent.
+    /// Starts the background indexer and watcher with the default options. Idempotent.
     pub fn start_indexer(&self, sink: Arc<dyn ProgressSink>) -> Result<()> {
+        self.start_indexer_with(sink, IndexerOptions::default())
+    }
+
+    /// Starts the background indexer and watcher. Idempotent.
+    pub fn start_indexer_with(
+        &self,
+        sink: Arc<dyn ProgressSink>,
+        options: IndexerOptions,
+    ) -> Result<()> {
         let mut slot = lock(&self.inner.indexer);
         if slot.is_none() {
-            *slot = Some(IndexerHandle::spawn(self.inner.db_path.clone(), sink)?);
+            *slot = Some(IndexerHandle::spawn(
+                self.inner.db_path.clone(),
+                sink,
+                options,
+            )?);
         }
         Ok(())
     }
