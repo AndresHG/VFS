@@ -194,9 +194,17 @@ class HeredocTest(unittest.TestCase):
             self.assertIsNone(decision, delim)
 
     def test_arithmetic_shift_and_comment_are_not_heredocs(self):
-        for first in ("echo $((1<<2))", "x=$(( y<<1 ))", "(( z <<= 1 ))", "echo hi # a<<b"):
+        for first in ("echo $((1<<2))", "x=$(( y<<1 ))", "(( z <<= 1 ))", "echo $[1<<2]",
+                      "echo hi # a<<b"):
             decision, _ = self.decision(f"{first}\ngit stash pop")
             self.assertEqual(decision, "deny", first)
+
+    def test_shell_heredoc_inside_a_substitution_is_analyzed(self):
+        for command in ("out=$(bash <<'EOF'\ngit stash pop\nEOF\n)",
+                        "out=$(bash <<EOF\ngit stash pop\nEOF\n)",
+                        "x=`bash <<EOF\ngit stash pop\nEOF\n`"):
+            decision, _ = self.decision(command)
+            self.assertEqual(decision, "deny", command)
 
     def test_repeated_substitution_text_does_not_hide_the_shell(self):
         decision, _ = self.decision(": $(bash); cat <<EOF | bash $(bash)\ngit stash pop\nEOF")

@@ -28,8 +28,8 @@ Verdicts:
     HEAD (scripts/pr_critic_verdict.py)                              -> "deny"
 
 Before matching, the command is: stripped of heredoc bodies (data, unless
-the command outside bodies and substitutions names a shell, `eval`, `source`
-or `.`, which makes them commands; `$(…)` in an unquoted-delimiter body is
+the command outside bodies, or one of its substitutions, names a shell,
+`eval`, `source` or `.`, which makes them commands; `$(…)` in an unquoted-delimiter body is
 always analyzed), split on shell operators outside quotes,
 expanded through `$(…)`/backtick substitutions, stripped of wrappers
 (`bash -c`, `eval`, `command`, `env`, `timeout`, `xargs`, `sudo -u x`,
@@ -469,6 +469,10 @@ def _heredoc_delimiters(line, quote):
             end = line.find("))", i)  # arithmetic: `1<<2` is a shift
             i = n if end == -1 else end + 2
             continue
+        elif line.startswith("$[", i):
+            end = line.find("]", i)  # deprecated arithmetic `$[1<<2]`
+            i = n if end == -1 else end + 1
+            continue
         elif line.startswith("<<<", i):
             i += 3
             continue
@@ -542,7 +546,8 @@ def analyze(command, cwd, depth=0, runs=False):
     """Return a list of (decision, reason) for one command string.
 
     Heredoc bodies are data (a commit message, a Python script) unless the
-    command, outside its bodies and substitutions, names a shell (or `runs`:
+    command, outside its bodies, names a shell — at the top level or inside
+    one of its substitutions (or `runs`:
     it sits in a substitution whose output a shell runs); then they are
     analyzed as commands. An unquoted delimiter still expands `$(…)` and
     backticks in its body, so those are analyzed either way.
@@ -560,7 +565,11 @@ def analyze(command, cwd, depth=0, runs=False):
             if wrapped in outside:  # this occurrence only, not every copy of the text
                 outside = outside.replace(wrapped, "", 1)
                 break
-    runs = runs or _feeds_shell(outside)
+    # A shell inside a substitution (`out=$(bash <<EOF …)`) runs bodies too;
+    # each substitution is checked with its own heredoc bodies removed, so a
+    # commit message that mentions bash stays data.
+    runs = runs or _feeds_shell(outside) or any(
+        _feeds_shell(_heredocs(inner)[0]) for inner in _substitutions(command))
     for body, quoted in bodies:
         for executed in [body] if runs else [] if quoted else _substitutions(body):
             verdicts += analyze(executed, cwd, depth + 1)
