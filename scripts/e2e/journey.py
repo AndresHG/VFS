@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""VFS-8: drives the real VFS window through the user's journey and records a screenshot of the
+"""VFS-8 AC-2, AC-3, AC-4, AC-5: drives the real VFS window through the user's journey and
+records a screenshot of the
 window and of the whole desktop at every step, plus timings and memory, into --out.
 
 The app is a `--features webdriver` build (on Windows, installed from its NSIS installer): this
@@ -30,6 +31,23 @@ import gen_tree  # noqa: E402
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
+
+# Serde values of `IndexerState` and `RootStatus` (crates/vfs-core/src/types.rs), as
+# `get_progress` reports them.
+STATE_IDLE = "idle"
+STATE_SCANNING = "scanning"
+ROOT_READY = "ready"
+
+# What "Mostrar en carpeta" must show: the item selected, or (path over 260 chars) an ancestor.
+EXPECT_SELECT = "select"
+EXPECT_PARENT = "parent"
+
+
+def scan_done(p):
+    """True when a `get_progress` answer says every root is scanned and the indexer is idle."""
+    roots = p.get("roots") or []
+    return p["state"] == STATE_IDLE and bool(roots) and all(
+        r["status"] == ROOT_READY for r in roots)
 
 
 def nfc(s):
@@ -342,7 +360,7 @@ class Journey:
     def s_scan_progress(self):
         def scanning():
             p = self.progress()
-            return p if p["filesIndexed"] > 0 or p["state"] == "scanning" else None
+            return p if p["filesIndexed"] > 0 or p["state"] == STATE_SCANNING else None
         p, _ = wait_for(scanning, 60, 0.2, "scan to start")
         # close the drawer so the main window shows the progress
         self.wd.js("document.querySelector('#folders').close()")
@@ -352,7 +370,7 @@ class Journey:
 
     def s_search_during_scan(self):
         p = self.progress()
-        if p["state"] != "scanning":
+        if p["state"] != STATE_SCANNING:
             return {"note": "scan already finished; searched after it instead"}
         self.type_query("factura")
         rows, secs = wait_for(lambda: self.rows(), 30, 0.1, "any hit during the scan")
@@ -374,8 +392,7 @@ class Journey:
                     mem_peak.update(mem)
             except Exception:
                 pass
-            roots = p.get("roots") or []
-            return p["state"] == "idle" and roots and all(r["status"] == "ready" for r in roots)
+            return scan_done(p)
         _, _ = wait_for(done, self.args.scan_timeout, 1.0, "first scan to finish")
         secs = now() - self.metrics["scan_t0"]
         files = self.wd.invoke("list_roots")[0]["files"]
@@ -522,8 +539,7 @@ class Journey:
         self.shoot("catch-up-found")
 
         def idle():
-            p = self.progress()
-            return p["state"] == "idle" and all(r["status"] == "ready" for r in p["roots"])
+            return scan_done(self.progress())
         wait_for(idle, self.args.scan_timeout, 0.5, "catch-up to finish")
         idle_s = now() - t0
         gone = self.engine_ms("cancion de cuna maria")[1]
@@ -568,10 +584,10 @@ class Journey:
             self.step("filter-folder", self.filter_case(
                 "folder", lambda: self.set_select("#f-folder", self.wd.invoke("list_roots")[0]["path"]), "extracto",
                 "middle"))
-        self.step("reveal-file", self.s_reveal("name", "select"))
+        self.step("reveal-file", self.s_reveal("name", EXPECT_SELECT))
         if not short:
-            self.step("reveal-folder", self.s_reveal("folder", "select"))
-            self.step("reveal-long-path", self.s_reveal("long", "parent"))
+            self.step("reveal-folder", self.s_reveal("folder", EXPECT_SELECT))
+            self.step("reveal-long-path", self.s_reveal("long", EXPECT_PARENT))
             self.step("live-create", self.s_live_create)
             self.step("live-rename", self.s_live_rename)
             self.step("live-delete", self.s_live_delete)
@@ -662,9 +678,9 @@ def check_file_manager(target, expect, timeout):
             for w in windows:
                 wf = os.path.normcase(w.get("folder") or "")
                 sel = [nfc(s) for s in (w.get("selected") or [])]
-                if expect == "select" and wf == folder and name in sel:
+                if expect == EXPECT_SELECT and wf == folder and name in sel:
                     return w
-                if expect == "parent" and wf and folder.startswith(wf) and wf != folder:
+                if expect == EXPECT_PARENT and wf and folder.startswith(wf) and wf != folder:
                     return w
             return None
         try:
@@ -702,7 +718,7 @@ def check_file_manager(target, expect, timeout):
             res["ok"] = True
             res["note"] = "Finder state not readable here; judged from the desktop screenshot"
         else:
-            res["ok"] = nfc(sel) == name or expect == "parent"
+            res["ok"] = nfc(sel) == name or expect == EXPECT_PARENT
         return res
     return {"ok": True, "note": "no file manager check on this platform"}
 

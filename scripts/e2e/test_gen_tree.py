@@ -85,6 +85,17 @@ class GenTreeTest(unittest.TestCase):
             self.assertIn(f'"{k}"', s)
 
 
+class ScanDoneTest(unittest.TestCase):
+    def test_scan_done_needs_idle_and_every_root_ready(self):
+        """VFS-8 AC-2: the journey waits until the indexer is idle and every root is ready."""
+        from journey import scan_done
+        ready = {"status": "ready"}
+        self.assertTrue(scan_done({"state": "idle", "roots": [ready, ready]}))
+        self.assertFalse(scan_done({"state": "scanning", "roots": [ready]}))
+        self.assertFalse(scan_done({"state": "idle", "roots": [ready, {"status": "scanning"}]}))
+        self.assertFalse(scan_done({"state": "idle", "roots": []}))
+
+
 class WebDriverTest(unittest.TestCase):
     def test_element_reference_by_prefix(self):
         """VFS-8 AC-5: element references are read by the W3C key prefix, so the embedded
