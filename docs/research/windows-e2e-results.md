@@ -49,15 +49,17 @@ memory after a search 274 MB RSS (app 122 + all WebKit processes 152).
 ## Defects seen in the screenshots and runs
 
 1. Window (1100×720 + title bar = 1044×759 on a 1024×768 screen) is taller than a 768-px
-   screen: the status line and "Carpetas" sit behind the taskbar.
-2. "Mostrar en carpeta" on Windows does not select the item (VFS-1 AC-13).
-3. First launch on a fresh Windows: ~50 s of blank white window with no sign of life.
+   screen: the status line and "Carpetas" sit behind the taskbar. Issue 106.
+2. "Mostrar en carpeta" on Windows does not select the item (VFS-1 AC-13). Issue 107. The
+   journey's reveal steps fail until it is fixed.
+3. First launch on a fresh Windows: ~50 s of blank white window with no sign of life. Issue 108.
 4. First scan on Windows stalls: bursts of ~15,000 files in ~4 s, then 20–40 s with no progress
    (547 files/s overall vs 11,553 on macOS); the first search during the scan took 16 s.
-5. macOS menu bar is in English (VFS, File, Edit, View, Window, Help).
+   Issue 109.
+5. macOS menu bar is in English (VFS, File, Edit, View, Window, Help). Issue 110.
 6. Digits use a slashed zero ("2Ø19", "Ø bytes"), which an older user may read as a letter
-   (font design; owner's call).
-7. Windows "Apps" list shows the publisher as "vfs".
+   (font design; owner's call). Issue 111.
+7. Windows "Apps" list shows the publisher as "vfs". Issue 112.
 
 ## Probe rehearsal (docs/research/tools/vfs-probe.ps1)
 
@@ -74,7 +76,8 @@ NTFS change journal as a **standard user** (issue 32), C: of the runner:
 - `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL`: **works** — 383,798 records covering 3.5 days read in
   0.83 s; **no file names** (`records_with_name=0`); `OpenFileById` resolved 200/200 parent
   references (0.25 ms each).
-- Caveat: Windows Server 2025, not Windows 10/11 client; repeat on the target PC.
+- Caveat: Windows Server 2025, not Windows 10/11 client; repeat on the target PC. Recorded on
+  issue 32.
 
 Other probe numbers (runner SSD, not the target): 4 KiB random read p50 0.17 ms at normal and
 very-low priority; `FlushFileBuffers` 4 KiB p50 3.1 ms; directory listing 6,200 dirs/s cold.

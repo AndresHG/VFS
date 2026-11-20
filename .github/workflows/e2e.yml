@@ -6,8 +6,6 @@
 name: e2e
 
 on:
-  push: # TEMPORARY while the workflow is developed on its branch; removed before merge
-    branches: [feat/vfs-8-windows-e2e]
   workflow_dispatch:
     inputs:
       measurements:
@@ -139,7 +137,7 @@ jobs:
 
   windows-slow-disk:
     needs: build-windows
-    if: github.event_name == 'push' || inputs.measurements || github.event.schedule == '30 3 * * 0'
+    if: inputs.measurements || github.event.schedule == '30 3 * * 0'
     runs-on: windows-latest
     timeout-minutes: 120
     defaults:
@@ -168,7 +166,7 @@ jobs:
           retention-days: 30
 
   windows-probe:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e-probe]')) || inputs.measurements || github.event.schedule == '30 3 * * 0'
+    if: inputs.measurements || github.event.schedule == '30 3 * * 0'
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -188,7 +186,7 @@ jobs:
           retention-days: 30
 
   macos-journey:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e-all]')) || inputs.macos || github.event.schedule == '30 3 * * 0'
+    if: inputs.macos || github.event.schedule == '30 3 * * 0'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
