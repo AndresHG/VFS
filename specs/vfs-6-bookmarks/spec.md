@@ -1,6 +1,6 @@
 # VFS-6 — Firefox bookmarks as an optional source
 
-- **Status**: approved
+- **Status**: implemented (PR #92)
 - **Size**: L. It reads files outside the chosen folders (the Firefox profile), adds a second
   database file and a new crate, behaves differently on Windows and macOS (Firefox locks
   `places.sqlite` only on macOS), and adds a result action that is not "Mostrar en carpeta".
