@@ -139,6 +139,28 @@ fn found_by_target_with_one_typo() {
     assert!(f.hit("vaije", lnk).is_none());
 }
 
+/// VFS-18 R4 with VFS-19: two shortcuts of one name and size in different folders lead to
+/// different places, so each stays a result of its own, never a copy of the other.
+#[test]
+fn links_are_never_grouped_as_copies() {
+    let mut f = fixture();
+    let (root, top) = f.root("/archivo");
+    let a = f.dir(root, top, "Casa");
+    let b = f.dir(root, top, "Trabajo");
+    let one = f.file(a, "Fotos.lnk");
+    let two = f.file(b, "Fotos.lnk");
+    f.target(one, Some(r"D:\Boda"));
+    f.target(two, Some(r"E:\Viaje"));
+    let hits = f.search("fotos", SearchFilters::default()).hits;
+    for id in [one, two] {
+        let h = hits
+            .iter()
+            .find(|h| h.id == id)
+            .expect("each shortcut is a result");
+        assert!(h.copies.is_empty());
+    }
+}
+
 /// VFS-18 AC-5: a shortcut is left out when the same search returns its target (an indexed
 /// file or folder), and kept when the search finds only the shortcut.
 #[test]

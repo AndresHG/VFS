@@ -220,8 +220,9 @@ fn search_snapshot(
 }
 
 /// VFS-19: the ranked candidates as hits, each file folded into the first (best-ranked)
-/// file with the same folded name and size as one of its `copies`; folders are never
-/// grouped. Returns the hits with, per hit, its pending directory and its copies' ones.
+/// file with the same folded name and size as one of its `copies`; folders and links are
+/// never grouped (two links of one name may lead to different places, VFS-18). Returns the
+/// hits with, per hit, its pending directory and its copies' ones.
 #[allow(clippy::type_complexity)]
 fn group_copies(
     candidates: Vec<Candidate>,
@@ -231,7 +232,7 @@ fn group_copies(
     let mut copy_pending: Vec<Vec<Option<i64>>> = Vec::with_capacity(candidates.len());
     let mut first: HashMap<(String, u64), usize> = HashMap::new();
     for c in candidates {
-        if !c.hit.is_dir {
+        if !c.hit.is_dir && c.hit.link.is_none() {
             if let Some(&i) = first.get(&(c.name_key.clone(), c.hit.size)) {
                 hits[i].copies.push(FileCopy {
                     id: c.hit.id,

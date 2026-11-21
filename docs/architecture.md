@@ -149,10 +149,10 @@ same folder while it is still being removed deletes the old rows at once and add
 never opens a file. On Windows type and metadata come from the enumeration record; on Unix
 from `lstat`. Symlinks, junctions and other name-surrogate reparse points
 (`FileType::is_symlink`) are listed as file rows with `flags` bit 1 and a pending `links` row,
-never entered, so a walk never loops (VFS-18 R1). Before a directory is listed again, the root and every folder on its
-  path are checked with `symlink_metadata` (`walk::behind_link`): one that has been replaced
-  by a link since it was indexed is treated as gone, never followed, and a root that has
-  become a link is unavailable. It skips:
+never entered, so a walk never loops (VFS-18 R1). Before a directory is listed again, the
+root and every folder on its path are checked with `symlink_metadata` (`walk::behind_link`):
+one that has been replaced by a link since it was indexed is treated as gone, never
+followed, and a root that has become a link is unavailable. It skips:
 
 - excluded names (`walk::is_excluded`, ASCII case-insensitive): `$RECYCLE.BIN`, `System
   Volume Information`, `.Trashes`, `.Trash`, `.Spotlight-V100`, `.fseventsd`,
