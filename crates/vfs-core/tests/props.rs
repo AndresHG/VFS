@@ -864,8 +864,8 @@ fn size_min_above_i64_max_matches_no_file() {
 
 /// VFS-23 AC-3, VFS-1 AC-9, AC-10 regression (found by `arbitrary_queries_never_fail`
 /// hanging): the typo alternatives of one long term grew faster than quadratically outside
-/// the deadline, so a pasted 10k-character term without spaces took minutes. A term too long for typo
-/// tolerance now matches exactly and the query returns in well under the bound here.
+/// the deadline, so a pasted 10k-character term without spaces took minutes. A term too long
+/// for typo tolerance now matches exactly and the query returns in well under the bound here.
 #[test]
 fn a_10k_character_term_returns_promptly() {
     let ix = junk_index();
