@@ -1,7 +1,7 @@
 // The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
 // words, no "index" jargon. Functions take already-formatted values.
 
-import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
 import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 const files = (n) => `${n} files`;
@@ -162,6 +162,13 @@ export const en = {
     [ReadState.FROM_BACKUP]: 'Firefox did not allow reading its latest bookmarks; its last backup is used instead.',
     [ReadState.NO_FIREFOX]: 'No Firefox bookmarks were found on this computer.',
     [ReadState.FAILED]: 'The Firefox bookmarks could not be read. It will be tried again later.',
+  },
+  settingsButton: 'Settings',
+  settingsTitle: 'Settings',
+  languageLabel: 'Language',
+  languageOptions: {
+    [LanguageChoice.SYSTEM]: 'Same as the system', [LanguageChoice.ES]: 'Español',
+    [LanguageChoice.EN]: 'English',
   },
   removeTitle: 'Remove this folder?',
   removeBody: 'It will no longer appear in searches. Its files are not deleted from the disk.',

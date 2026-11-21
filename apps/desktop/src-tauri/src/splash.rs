@@ -1,13 +1,10 @@
 //! First-launch splash (issue 108). On a fresh Windows machine WebView2 needs tens of seconds
 //! before it paints the first page. The main window therefore starts hidden (`tauri.conf.json`,
-//! shown once its page has loaded) and a small native window saying [`SPLASH_TEXT`] shows at
+//! shown once its page has loaded) and a small native window saying "Preparando VFS…" (in the OS language) shows at
 //! once instead; [`Splash::close`] removes it when the main window is shown. It is plain
 //! Win32 (no web view, no extra dependency) on its own thread with its own message loop, so
 //! it paints while the main thread waits on WebView2. On macOS the page
 //! paints in under a second and there is no splash.
-
-/// The splash's only text.
-pub const SPLASH_TEXT: &str = "Preparando VFS…";
 
 /// Window class of the splash, by which tests find it.
 pub const SPLASH_CLASS: &str = "VfsSplash";
@@ -66,7 +63,7 @@ mod imp {
         WNDCLASSW, WS_BORDER, WS_EX_APPWINDOW, WS_POPUP, WS_VISIBLE,
     };
 
-    use super::{centered, SPLASH_CLASS, SPLASH_DELAY, SPLASH_SIZE, SPLASH_TEXT};
+    use super::{centered, SPLASH_CLASS, SPLASH_DELAY, SPLASH_SIZE};
 
     /// Papel's `--paper` and `--ink` (`ui/styles.css`), as COLORREF (0x00BBGGRR).
     const PAPER: COLORREF = 0x00f3_f8fa;
@@ -219,7 +216,9 @@ mod imp {
         let old = SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT as i32);
         SetTextColor(hdc, INK);
-        let mut text: Vec<u16> = SPLASH_TEXT.encode_utf16().collect();
+        // VFS-22 R5: drawn before the UI runs, so in the OS language.
+        let splash = crate::i18n::Lang::system().strings().splash;
+        let mut text: Vec<u16> = splash.encode_utf16().collect();
         DrawTextW(
             hdc,
             text.as_mut_ptr(),

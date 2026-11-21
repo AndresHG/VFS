@@ -228,7 +228,8 @@ power cut in place.
 
 ## Unsigned installer with the WebView2 bootstrapper
 
-The Windows build is an unsigned NSIS installer, per user, in Spanish, with the WebView2
+The Windows build is an unsigned NSIS installer, per user, in Spanish or English (picked from the system
+language, VFS-22), with the WebView2
 bootstrapper embedded and run silently (spec decisions 8 and 14, `tauri.conf.json`). For a
 small, known audience the SmartScreen warning on first run is accepted; the reference machine has
 internet at install time, so the small bootstrapper can fetch WebView2 if it is missing.

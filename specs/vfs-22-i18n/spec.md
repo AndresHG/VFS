@@ -20,7 +20,7 @@ error, folder picker title, Windows splash) and in `index.html`.
   copy.
 - R2. WHEN the app starts and the user has not chosen a language, THE UI SHALL use Spanish if
   the system locale is `es` or `es-*`, and English otherwise.
-- R3. WHEN the user chooses Español, English or "Idioma del sistema" in the Ajustes panel, THE
+- R3. WHEN the user chooses Español, English or "El del sistema" in the Ajustes panel, THE
   UI SHALL switch at once, without restarting, and SHALL keep that choice across restarts.
 - R4. THE UI SHALL format dates and numbers for the active language (es: `1.234`, `12 mar
   2021`; en: `1,234`, the system's English date order, or `Mar 12, 2021`).
@@ -76,10 +76,11 @@ Tests cite these ids (`VFS-22 AC-<m>`) in their doc comments.
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
 | 1 | Languages and default | es and en; system locale `es*` → es, otherwise en; switchable | owner | 2026-11-21 |
-| 2 | Where the selector lives | A new "Ajustes" panel (gear in the status bar); VFS-20/21 settings join it | owner | 2026-11-21 |
+| 2 | Where the selector lives | A new "Ajustes" panel (an "Ajustes" button in the status bar, words over an icon for a non-technical user); VFS-20/21 settings join it | owner | 2026-11-21 |
 | 3 | English product name | Not decided; owner plans a rebrand. Name kept in one key, `VFS — File Finder` meanwhile | owner | 2026-11-21 |
 | 4 | Where the choice is stored | WebView `localStorage`; the UI tells the shell the active language at start and on change | agent | 2026-11-21 |
 | 5 | System locale source | Rust `sys-locale` (WKWebView's `navigator.language` follows the bundle's localizations, not the system) | agent | 2026-11-21 |
+| 6 | How a switch applies | The page reloads in the new language (search box and filters start over); the shell retitles and rebuilds the menu | agent | 2026-11-21 |
 
 ## Open questions
 

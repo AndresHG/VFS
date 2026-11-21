@@ -14,7 +14,7 @@
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS, fully offline, in Spanish and English (the
-system language by default).
+system language by default, changeable in Settings).
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -120,8 +120,8 @@ npx --yes @tauri-apps/cli@2.12.6 dev                    # run with live reload
 npx --yes @tauri-apps/cli@2.12.6 build --bundles app    # macOS: build VFS.app
 ```
 
-The app window is titled "VFS — Buscador de archivos". Use "Añadir carpeta…" to choose a
-folder; the scan starts at once and you can search while it runs.
+The app window is titled "VFS — Buscador de archivos" ("VFS — File Finder" in English). Use
+"Añadir carpeta…" ("Add folder…") to choose a folder; the scan starts at once and you can search while it runs.
 
 ### Command line
 
@@ -160,8 +160,8 @@ The installer is built by the `release` GitHub Actions workflow
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)). It runs on Windows and
 macOS runners and produces:
 
-- `vfs-windows-installer`: an NSIS `*-setup.exe`, Spanish, per-user install (no
-  administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
+- `vfs-windows-installer`: an NSIS `*-setup.exe` in Spanish or English (from the system
+  language), per-user install (no administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
   while installing if WebView2 is missing). It is unsigned, so Windows SmartScreen warns on
   first run and the user has to choose to run it anyway.
 - `vfs-macos`: a zipped, ad-hoc signed `VFS.app`.

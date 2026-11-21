@@ -7,7 +7,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CATALOGS, Lang, intlLocale, languageFor, localeFor } from '../ui/strings.js';
+import { CATALOGS, Lang, choiceFor, intlLocale, languageFor, localeFor } from '../ui/strings.js';
+import { LanguageChoice } from '../ui/choices.js';
 import * as F from '../ui/format.js';
 
 const UI = fileURLToPath(new URL('../ui/', import.meta.url));
@@ -111,4 +112,23 @@ test('numbers and dates follow the language', () => {
  *  the same in both; search folding lives in vfs-core and is untouched. */
 test('accent folding does not depend on the language', () => {
   assert.deepEqual(F.matchRanges('Información.pdf', F.terms('informacion')), [[0, 11]]);
+});
+
+/** VFS-22 AC-4 (R3): the Ajustes panel offers every language and "system", labelled in both
+ *  catalogs, each language named in itself. */
+test('the Ajustes panel offers every language and the system one', () => {
+  const html = readFileSync(join(UI, 'index.html'), 'utf8');
+  assert.match(html, /<button id="open-settings"[^>]*data-s="settingsButton"/);
+  assert.match(html, /<dialog id="settings"[\s\S]*<select id="language">/);
+  for (const lang of Object.values(Lang)) {
+    const opts = CATALOGS[lang].languageOptions;
+    assert.deepEqual(Object.keys(opts).sort(), Object.values(LanguageChoice).sort(), lang);
+    assert.equal(opts[LanguageChoice.ES], 'Español');
+    assert.equal(opts[LanguageChoice.EN], 'English');
+  }
+  // The open panel shows the saved choice; anything else saved shows "system", which is
+  // also what languageFor applies for it.
+  assert.equal(choiceFor('en'), LanguageChoice.EN);
+  assert.equal(choiceFor('es'), LanguageChoice.ES);
+  for (const saved of [null, '', 'system', 'fr', 'toString']) assert.equal(choiceFor(saved), LanguageChoice.SYSTEM);
 });

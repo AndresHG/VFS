@@ -4,6 +4,7 @@
 
 pub mod bookmarks;
 pub mod commands;
+pub mod i18n;
 pub mod reveal;
 pub mod splash;
 
@@ -319,12 +320,9 @@ fn fail_startup<R: Runtime>(app: &AppHandle<R>, detail: &str) {
         splash.close();
     }
     let handle = app.clone();
+    let text = i18n::current(app).strings().startup_failed;
     app.dialog()
-        .message(format!(
-            "No se ha podido iniciar VFS.\n\nDetalle: {detail}\n\n\
-             Cierre el programa y vuelva a abrirlo. Si el problema continúa, \
-             comuníquelo junto con este mensaje."
-        ))
+        .message(text.replace("{detail}", detail))
         .title("VFS")
         .kind(MessageDialogKind::Error)
         .show(move |_| handle.exit(1));
@@ -361,6 +359,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(WebviewSuspended::default());
             let handle = app.handle().clone();
+            // VFS-22 R5: the OS language until the UI sends its own through `set_language`.
+            let lang = i18n::Lang::system();
+            app.manage(i18n::ShellLang(std::sync::Mutex::new(lang)));
+            if let Err(e) = i18n::apply(&handle, lang) {
+                log::warn!("shell language: {e}");
+            }
             if let Err(e) = fit_main_window(&handle) {
                 log::warn!("fit main window: {e}");
             }

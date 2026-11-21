@@ -1,7 +1,7 @@
 // The one screen (VFS-1 R9): search box, filters, virtualised results, folder panel, status.
 
 import { api } from './api.js';
-import { languageFor, localeFor } from './strings.js';
+import { choiceFor, languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
@@ -11,7 +11,7 @@ import {
   Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
-  DateChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
+  DateChoice, LanguageChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
 } from './choices.js';
 import {
   PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
@@ -52,6 +52,16 @@ function savedLanguage() {
     return localStorage.getItem(LANGUAGE_KEY);
   } catch {
     return null; // storage blocked: the system language applies
+  }
+}
+
+/** Keeps `choice` (a LanguageChoice); SYSTEM forgets any saved language. */
+function saveLanguage(choice) {
+  try {
+    if (choice === LanguageChoice.SYSTEM) localStorage.removeItem(LANGUAGE_KEY);
+    else localStorage.setItem(LANGUAGE_KEY, choice);
+  } catch {
+    // storage blocked: the choice is lost and the system language applies
   }
 }
 
@@ -903,6 +913,23 @@ function main(L) {
       if (state.progress) state.progress.state = paused ? IndexerState.PAUSED : IndexerState.SCANNING;
       renderStatus();
     } catch (err) { showError(errorText(err)); }
+  });
+
+  /* ---------------------------------------------------------------- settings panel */
+
+  // VFS-22 R3, R5: the shell (window title, macOS menu, folder picker) follows the UI.
+  api.setLanguage(L.lang).catch(() => {});
+
+  const settingsDialog = $('settings');
+  fillSelect($('language'), S.languageOptions);
+  $('open-settings').addEventListener('click', () => {
+    $('language').value = choiceFor(savedLanguage());
+    settingsDialog.showModal();
+  });
+  // A new language redraws the whole screen in it: the page reloads with the new choice.
+  $('language').addEventListener('change', (e) => {
+    saveLanguage(e.target.value);
+    location.reload();
   });
 
   /* ---------------------------------------------------------------- folder panel */

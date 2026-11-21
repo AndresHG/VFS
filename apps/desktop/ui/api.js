@@ -36,6 +36,7 @@ function tauriBackend(t) {
     isFake: false,
     // VFS-22 R2: the OS locale (e.g. "es-ES"); WKWebView's navigator.language is not it.
     systemLocale: () => invoke('system_locale'),
+    setLanguage: (lang) => invoke('set_language', { lang }),
     listRoots: () => invoke('list_roots'),
     pickFolder: () => invoke('pick_folder'),
     addRoot: (path) => invoke('add_root', { path }),
@@ -69,6 +70,7 @@ function missingBackend() {
     isFake: false,
     missing: true,
     systemLocale: async () => navigator.language,
+    setLanguage: async () => {},
     listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
     reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
