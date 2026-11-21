@@ -123,3 +123,49 @@ fn splash_appears_and_closes() {
         "a splash closed before its delay appeared"
     );
 }
+
+/// VFS-24 AC-1 (issue 21): a file whose path is over 260 characters is selected in Explorer
+/// too, not just its nearest folder opened. Explorer may report the selection with 8.3 short
+/// names, so it is compared with both spellings.
+#[test]
+fn reveal_selects_a_long_path() {
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+    let root = tempfile::Builder::new()
+        .prefix("vfs-long-")
+        .tempdir()
+        .unwrap();
+    let mut dir = std::path::PathBuf::from(format!(r"\\?\{}", root.path().display()));
+    for i in 0..6 {
+        dir.push(format!(
+            "Carpeta con un nombre bastante largo número {i:02}"
+        ));
+    }
+    std::fs::create_dir_all(&dir).unwrap();
+    let name = "Notaría escritura final.pdf";
+    let file = dir.join(name);
+    std::fs::write(&file, b"x").unwrap();
+    let plain = reveal::shell_form(&file).to_string_lossy().into_owned();
+    assert!(plain.encode_utf16().count() > 260, "{plain}");
+
+    let wide: Vec<u16> = file.to_string_lossy().encode_utf16().chain([0]).collect();
+    let mut buf = vec![0u16; 2048];
+    // SAFETY: `wide` is NUL-terminated and `buf` holds the length passed.
+    let n = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+    let short = String::from_utf16_lossy(&buf[..n as usize]);
+    let short = reveal::shell_form(Path::new(&short))
+        .to_string_lossy()
+        .into_owned();
+    let short_name = short.rsplit('\\').next().unwrap().to_owned();
+
+    assert_eq!(reveal::reveal(&file).unwrap(), RevealOutcome::Revealed);
+    let selected = selected_in_explorer(&short_name, &dir);
+    let same = |p: &str| {
+        let p = p.trim_start_matches(r"\\?\");
+        p.eq_ignore_ascii_case(&plain) || p.eq_ignore_ascii_case(&short)
+    };
+    assert!(
+        selected.iter().any(|p| same(p)),
+        "{name} not selected in Explorer; selected: {selected:?}"
+    );
+}
