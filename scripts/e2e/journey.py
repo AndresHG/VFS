@@ -574,15 +574,29 @@ class Journey:
             " results: document.querySelector('#results').getAttribute('aria-label'),"
             " row: document.querySelector('#results [role=option]').getAttribute('aria-label')}")
         win = Desktop(backend="uia").window(handle=main_window(self.app.proc.pid))
-        names = {}
-        for el in win.descendants():
-            try:
-                names.setdefault(el.element_info.control_type, []).append(el.window_text())
-            except Exception:
-                pass
-        exposed = {k: v in sum(names.values(), []) for k, v in want.items()}
+
+        def uia_names():
+            found = {}
+            for el in win.descendants():
+                try:
+                    info = el.element_info
+                    found.setdefault(info.control_type, []).append(info.name)
+                except Exception:
+                    pass
+            return found
+        # WebView2 builds its UI Automation tree on the first request: ask until it is there.
+        names, exposed = {}, {}
+        for _ in range(10):
+            names = uia_names()
+            seen = set(sum(names.values(), []))
+            exposed = {k: v in seen for k, v in want.items()}
+            if all(exposed.values()):
+                break
+            time.sleep(1)
         out = {"expected": want, "exposed": exposed,
-               "uia_counts": {k: len(v) for k, v in names.items()}}
+               "uia_counts": {k: len(v) for k, v in names.items()},
+               "uia_sample": {k: [n for n in v if n][:5] for k, v in names.items()}}
+        self.metrics["accessibility"] = out
         out["high_contrast"] = self.with_setting(
             set_high_contrast, "(forced-colors: active)", "high-contrast")
         out["reduced_motion"] = self.with_setting(
