@@ -375,7 +375,7 @@ At most 2,000 hits are kept; more sets `truncatedBy = "cap"`.
 
 ### Sort orders (VFS-12)
 
-`SearchQuery.sort` is relevance (the default, the tiers below), newest, oldest, name or size.
+`SearchQuery.sort` is relevance (the default, the tiers above), newest, oldest, name or size.
 Any order but relevance reads up to 6,000 verified candidates (`SORT_READ_CAP`, 3× the
 cap: 20,000 broke the AC-9 budget on 2 M files), ranks them, re-sorts them stably by the order
 (`rank::sort_by_order`: an unknown date last in both date orders, folders last by size,
