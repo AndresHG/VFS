@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection, ErrorCode, OptionalExtension, Row};
 
-use crate::db::join_rel;
+use crate::db::{ingest, join_rel};
 use crate::error::{Error, Result};
 use crate::fold::fold_key;
 use crate::fuzzy;
@@ -66,11 +66,12 @@ const PROGRESS_OPS: i32 = 1000;
 /// find the names starting with the term without positions.
 pub(crate) const NAME_START: char = '\u{1}';
 
-const FILE_COLS: &str =
-    "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, d.root_id, d.rel_path, d.path_key";
+/// `f.flags` comes with the row already read, for the cloud-only bit (VFS-25 R4).
+const FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, d.root_id, \
+     d.rel_path, d.path_key, f.flags";
 const DIR_COLS: &str = "d.id, d.root_id, d.rel_path, d.path_key, d.name_key, d.mtime";
 /// File columns without the directory row (`Ctx::lazy_dirs`).
-const LAZY_FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, f.dir_id";
+const LAZY_FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, f.dir_id, f.flags";
 
 /// State kept between searches on the search connection: the last ranked list keyed by
 /// (query, filters, `PRAGMA data_version`), so paging is consistent (S7).
@@ -328,7 +329,7 @@ fn group_copies(
                     id: c.hit.id,
                     dir: c.hit.dir,
                     modified: c.hit.modified,
-                    cloud_only: false,
+                    cloud_only: c.hit.cloud_only,
                 });
                 copy_pending[i].push(c.dir_id);
                 continue;
@@ -353,10 +354,7 @@ fn resolve_page(
     resolve_dirs(conn, &mut hits[page.clone()], &mut pending[page.clone()])?;
     // Copies often share a folder (a backup folder holds many): each is read once per page.
     let mut folders: HashMap<i64, String> = HashMap::new();
-    for (hit, waiting) in hits[page.clone()]
-        .iter_mut()
-        .zip(&mut copy_pending[page.clone()])
-    {
+    for (hit, waiting) in hits[page.clone()].iter_mut().zip(&mut copy_pending[page]) {
         for (copy, dir) in hit.copies.iter_mut().zip(waiting.iter_mut()) {
             let Some(id) = *dir else { continue };
             copy.dir = match folders.get(&id) {
@@ -368,19 +366,6 @@ fn resolve_page(
                 }
             };
             *dir = None;
-        }
-    }
-    // VFS-25 R4: the cloud-only bit of each file shown on this page and of its copies, read
-    // here rather than in every candidate scan; one primary-key lookup each.
-    let mut flags = conn.prepare_cached("SELECT flags FROM files WHERE id = ?1")?;
-    let mut cloud = |id: i64| -> Result<bool> {
-        let f: Option<i64> = flags.query_row([id], |r| r.get(0)).optional()?;
-        Ok(f.is_some_and(|f| f & crate::db::ingest::FLAG_CLOUD_ONLY != 0))
-    };
-    for hit in hits[page].iter_mut().filter(|h| !h.is_dir) {
-        hit.cloud_only = cloud(hit.id)?;
-        for copy in hit.copies.iter_mut() {
-            copy.cloud_only = cloud(copy.id)?;
         }
     }
     Ok(())
@@ -898,6 +883,7 @@ struct FileRow {
     root_id: i64,
     rel_path: String,
     path_key: String,
+    flags: i64,
 }
 
 impl FileRow {
@@ -912,6 +898,7 @@ impl FileRow {
             root_id: r.get(6)?,
             rel_path: r.get(7)?,
             path_key: r.get(8)?,
+            flags: r.get(9)?,
         })
     }
 }
@@ -955,7 +942,7 @@ impl Ctx {
                 is_dir: false,
                 copies: Vec::new(),
                 link: None,
-                cloud_only: false,
+                cloud_only: r.flags & ingest::FLAG_CLOUD_ONLY != 0,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -1492,7 +1479,7 @@ fn name_matches(
                     is_dir: false,
                     copies: Vec::new(),
                     link: None,
-                    cloud_only: false,
+                    cloud_only: row.get::<_, i64>(7)? & ingest::FLAG_CLOUD_ONLY != 0,
                 },
                 name_key,
                 dir_id: Some(dir_id),
@@ -1677,7 +1664,7 @@ fn link_pass(
     let params = with_params(None, clause);
     let deadline = run.soft;
     each_row(conn, run, &sql, &params, deadline, |run, _, row| {
-        let target: String = row.get(9)?;
+        let target: String = row.get(10)?;
         let r = FileRow::read(row)?;
         let matched = verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy)
             .or_else(|| {

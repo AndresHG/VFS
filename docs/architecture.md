@@ -549,8 +549,8 @@ Key shapes:
   is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
   both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
   `fuzzy`. `copies` (VFS-19) is left out when empty and never set on folders. `cloudOnly`
-  (VFS-25, on the hit and on each copy) is left out when false; it is read for the page
-  returned, one lookup per file, not in the candidate scans.
+  (VFS-25, on the hit and on each copy) is left out when false; it comes from `f.flags`,
+  read with the `files` row every candidate query already reads (no extra query).
 - `link { kind: shortcut | internet | symlink, target: string | null, openable }`: set on a
   file hit that is a shortcut, Internet Shortcut or link (VFS-18); `openable` only for an
   `http`/`https` Internet Shortcut.
