@@ -2,6 +2,7 @@
 // button reads. Tested in ui-dev/suggest.test.mjs.
 
 import { Source, SuggestionKind, TruncatedBy } from './contract.js';
+import { bookmarkFolderOf } from './sources.js';
 
 /** R1: ask only after a finished search with no hits, not cut by the deadline, that covered
  *  files (a search of bookmarks alone gets no suggestion). */
@@ -18,4 +19,10 @@ export function suggestionLabel(S, N, s) {
     case SuggestionKind.DROP_TERM: return S.suggestDropTerm(s.term, n);
     default: return '';
   }
+}
+
+/** The folder choice after clearing filters: a suggestion keeps a bookmark folder (the
+ *  Contract: sources and bookmark folder stay); "Quitar filtros" clears any folder. */
+export function folderAfterClear(folder, keepBookmarkFolder) {
+  return keepBookmarkFolder && bookmarkFolderOf(folder) != null ? folder : '';
 }

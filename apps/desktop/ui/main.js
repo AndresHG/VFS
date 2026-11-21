@@ -7,7 +7,7 @@ import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
 import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
-import { wantsSuggestion, suggestionLabel } from './suggest.js';
+import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -336,9 +336,8 @@ function main(L) {
     $('date-range').hidden = true; $('f-from').value = ''; $('f-to').value = '';
     $('range-error').textContent = '';
     state.size = SizeChoice.ANY; $('f-size').value = SizeChoice.ANY;
-    if (!(keepBookmarkFolder && bookmarkFolderOf(state.folder) != null)) {
-      state.folder = ''; $('f-folder').value = '';
-    }
+    state.folder = folderAfterClear(state.folder, keepBookmarkFolder);
+    $('f-folder').value = state.folder;
     filtersChanged();
     $('q').focus();
   }

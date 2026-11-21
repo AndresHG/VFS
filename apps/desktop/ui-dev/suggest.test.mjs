@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { wantsSuggestion, suggestionLabel } from '../ui/suggest.js';
+import { wantsSuggestion, suggestionLabel, folderAfterClear } from '../ui/suggest.js';
+import { bookmarkFolderValue } from '../ui/sources.js';
 import { localeFor, Lang } from '../ui/strings.js';
 import { Source, SuggestionKind, TruncatedBy } from '../ui/contract.js';
 
@@ -27,4 +28,14 @@ test('the button reads as the spec says', () => {
   assert.equal(suggestionLabel(es.S, es.N, s()), '¿Quería decir «boda»? (3)');
   assert.equal(suggestionLabel(es.S, es.N, s({ kind: SuggestionKind.DROP_TERM, term: '2019', count: 2000, capped: true })),
     '¿Buscar sin «2019»? (más de 2.000)');
+});
+
+/** VFS-13 Contract: a drop-filters suggestion keeps a bookmark folder and clears a folder on
+ *  disk; "Quitar filtros" clears both. */
+test('clearing filters keeps a bookmark folder only for a suggestion', () => {
+  const mark = bookmarkFolderValue(7);
+  assert.equal(folderAfterClear(mark, true), mark);
+  assert.equal(folderAfterClear('/datos/Fotos', true), '');
+  assert.equal(folderAfterClear(mark, false), '');
+  assert.equal(folderAfterClear('', true), '');
 });
