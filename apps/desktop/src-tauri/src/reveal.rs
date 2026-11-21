@@ -390,8 +390,10 @@ mod tests {
             long_shell_path(Path::new(r"\\?\C:\Datos\punto.\f.pdf")),
             None
         );
-        let dotted = format!(r"\\?\C:\Datos\{}\fin. \f.pdf", "x".repeat(300));
-        assert_eq!(long_shell_path(Path::new(&dotted)), None);
+        for odd in ["fin.", "fin "] {
+            let p = format!(r"\\?\C:\Datos\{}\{odd}\f.pdf", "x".repeat(300));
+            assert_eq!(long_shell_path(Path::new(&p)), None, "{odd:?}");
+        }
     }
 
     /// VFS-1 AC-13: the Explorer length limit counts UTF-16 units and rejects `\\?\` paths.
