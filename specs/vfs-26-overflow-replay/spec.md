@@ -1,6 +1,6 @@
 # VFS-26 — Watcher overflow: replay the change history instead of a full re-walk
 
-- **Status**: approved (independent architect review: sound)
+- **Status**: implemented (PR #145); approved after an independent architect review
 - **Size**: M (indexer and watcher only; no schema change; uses VFS-9's change history)
 - **Links**: issue 47; R6 in `docs/research/windows-recommendations.md`; VFS-9 (change
   cursor, `indexer/cursor.rs`); VFS-1 I10 (lost-events walks wait for a one-hour cooldown)
