@@ -32,6 +32,8 @@ import gen_tree  # noqa: E402
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
+# Seconds after minimising at which memory is sampled (measurement plan step 9: 5 minutes).
+MINIMISED_SAMPLES_S = (15, 60, 300)
 
 # Serde values of `IndexerState` and `RootStatus` (crates/vfs-core/src/types.rs), as
 # `get_progress` reports them.
@@ -541,6 +543,74 @@ class Journey:
         self.metrics["memory_idle_after_search"] = mem
         return mem
 
+    def s_memory_minimised(self):
+        """VFS-8 AC-10, VFS-5 AC-12 (issue 48): memory with the window open, minimised
+        (WebView2 suspended) and restored."""
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = main_window(self.app.proc.pid)
+        samples = {"open": self.app.memory()}
+        user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+        t0 = now()
+        for at in MINIMISED_SAMPLES_S:
+            time.sleep(max(0.0, at - (now() - t0)))
+            samples[f"minimised_{at}s"] = self.app.memory()
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        time.sleep(10)
+        samples["restored_10s"] = self.app.memory()
+        # The resumed page must still search and render (raises if it does not).
+        samples["restored_search"] = self.search_ui("notaria valdepenas",
+                                                    self.t[gen_tree.T_NAME]["name"])
+        self.metrics["memory_minimised"] = samples
+        return samples
+
+    def s_accessibility(self):
+        """VFS-8 AC-11 (issue 22): names Narrator reads through UI Automation, and the page
+        following Windows high contrast and "show animations" off."""
+        from pywinauto import Desktop
+        self.search_ui("notaria valdepenas", self.t[gen_tree.T_NAME]["name"])
+        want = self.wd.js(
+            "return {search: document.querySelector('label[for=q]').textContent,"
+            " results: document.querySelector('#results').getAttribute('aria-label'),"
+            " row: document.querySelector('#results [role=option]').getAttribute('aria-label')}")
+        win = Desktop(backend="uia").window(handle=main_window(self.app.proc.pid))
+        names = {}
+        for el in win.descendants():
+            try:
+                names.setdefault(el.element_info.control_type, []).append(el.window_text())
+            except Exception:
+                pass
+        exposed = {k: v in sum(names.values(), []) for k, v in want.items()}
+        out = {"expected": want, "exposed": exposed,
+               "uia_counts": {k: len(v) for k, v in names.items()}}
+        out["high_contrast"] = self.with_setting(
+            set_high_contrast, "(forced-colors: active)", "high-contrast")
+        out["reduced_motion"] = self.with_setting(
+            set_animations_off, "(prefers-reduced-motion: reduce)", "reduced-motion")
+        self.metrics["accessibility"] = out
+        missing = [k for k, ok in exposed.items() if not ok]
+        unfollowed = [k for k in ("high_contrast", "reduced_motion") if not out[k]["follows"]]
+        if missing or unfollowed:
+            raise AssertionError(f"not exposed: {missing}; settings not followed: {unfollowed}")
+        return out
+
+    def with_setting(self, toggle, media, label):
+        """Turns a Windows setting on, waits for the page to match `media`, takes a
+        screenshot and turns it off again."""
+        before = self.wd.js(f"return matchMedia('{media}').matches")
+        toggle(True)
+        try:
+            try:
+                wait_for(lambda: self.wd.js(f"return matchMedia('{media}').matches"), 15, 0.5,
+                         media)
+                follows = True
+            except TimeoutError:
+                follows = False
+            self.shoot(label)
+        finally:
+            toggle(False)
+        return {"before": before, "follows": follows}
+
     def s_close_and_change(self):
         self.app.stop()
         d = os.path.join(self.root, "Escritorio", "Cambios mientras cerrado")
@@ -624,6 +694,9 @@ class Journey:
             self.step("live-rename", self.s_live_rename)
             self.step("live-delete", self.s_live_delete)
         self.step("memory-idle", self.s_memory_idle)
+        if IS_WIN:
+            self.step("memory-minimised", self.s_memory_minimised)
+            self.step("accessibility", self.s_accessibility)
         if not short:
             self.step("closed-and-changed", self.s_close_and_change)
             self.step("reopen-catch-up", self.s_reopen_catch_up)
@@ -636,6 +709,52 @@ class Journey:
 
 # ---------------------------------------------------------------------------------------------
 # Native UI outside the webview: the folder dialog and the file manager
+
+
+def main_window(pid):
+    """The visible top-level window of process `pid` whose title starts with "VFS"."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        title = ctypes.create_unicode_buffer(64)
+        user32.GetWindowTextW(hwnd, title, 64)
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and title.value.startswith("VFS"):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if not found:
+        raise AssertionError(f"no visible VFS window of process {pid}")
+    return found[0]
+
+
+def set_high_contrast(on):
+    """Windows high contrast for this user (SPI_SETHIGHCONTRAST; no administrator needed)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class HIGHCONTRASTW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.UINT), ("dwFlags", wintypes.DWORD),
+                    ("lpszDefaultScheme", wintypes.LPWSTR)]
+    hc = HIGHCONTRASTW(ctypes.sizeof(HIGHCONTRASTW), 1 if on else 0, None)  # HCF_HIGHCONTRASTON
+    # SPI_SETHIGHCONTRAST, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+    if not ctypes.windll.user32.SystemParametersInfoW(0x0043, ctypes.sizeof(hc),
+                                                      ctypes.byref(hc), 0x3):
+        raise ctypes.WinError()
+
+
+def set_animations_off(off):
+    """Windows "show animations in Windows" (SPI_SETCLIENTAREAANIMATION), per user."""
+    import ctypes
+    if not ctypes.windll.user32.SystemParametersInfoW(0x1043, 0, ctypes.c_void_p(0 if off else 1),
+                                                      0x3):
+        raise ctypes.WinError()
 
 
 def drive_windows_folder_dialog(path, journey):

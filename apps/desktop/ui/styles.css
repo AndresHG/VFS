@@ -776,6 +776,16 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .filter.is-on, .filter-select.is-on { outline: 2px solid Highlight; }
   .filter-select::after { background: ButtonText; }
   .row mark { forced-color-adjust: none; background: Mark; color: MarkText; }
+  /* Issue 22: forced colours drop backgrounds, which would erase the folder state dots and
+     the progress bars; draw them in system colours instead. */
+  .root-state::before { forced-color-adjust: none; background: CanvasText; }
+  .root-state[data-status="unavailable"]::before { background: Canvas; border-color: CanvasText; }
+  progress { forced-color-adjust: none; background: Canvas; border: 1px solid CanvasText; }
+  progress::-webkit-progress-bar { background: Canvas; }
+  progress::-webkit-progress-value { background: Highlight; }
+  progress:not([value]) {
+    background: linear-gradient(90deg, Canvas 0 30%, Highlight 45% 55%, Canvas 70% 100%) 0 0 / 300% 100%;
+  }
 }
 
 /* VFS-6: bookmarks as a source (docs/design/system.md "Sources"). */

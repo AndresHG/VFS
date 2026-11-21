@@ -172,8 +172,9 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 }
 
 /// `ICoreWebView2Controller::put_IsVisible` and `ICoreWebView2_3::TrySuspend`, as in
-/// Microsoft's own sample on `SIZE_MINIMIZED`. Never run on real hardware; failures are
-/// logged and harmless (TrySuspend fails while the WebView is visible).
+/// Microsoft's own sample on `SIZE_MINIMIZED`. Failures are logged and harmless
+/// (TrySuspend fails while the WebView is visible); the Windows e2e journey measures the
+/// memory it frees (issue 48).
 #[cfg(windows)]
 fn apply_webview_power<R: Runtime>(webview: &tauri::WebviewWindow<R>, action: WebviewPower) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_3;
@@ -188,7 +189,12 @@ fn apply_webview_power<R: Runtime>(webview: &tauri::WebviewWindow<R>, action: We
             match action {
                 WebviewPower::Suspend => controller.SetIsVisible(false).and_then(|()| {
                     let core = controller.CoreWebView2()?.cast::<ICoreWebView2_3>()?;
-                    let done = TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                    // The outcome goes to the diagnostic log, where the Windows e2e journey
+                    // reads it next to its memory samples (issue 48).
+                    let done = TrySuspendCompletedHandler::create(Box::new(|r, suspended| {
+                        log::info!(target: vfs_core::DIAG_TARGET, "webview suspended: {suspended} ({r:?})");
+                        Ok(())
+                    }));
                     core.TrySuspend(&done)
                 }),
                 WebviewPower::Resume => controller.SetIsVisible(true),
