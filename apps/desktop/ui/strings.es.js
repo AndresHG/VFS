@@ -174,6 +174,19 @@ export const es = {
   bookmarksTitle: 'Marcadores de Firefox',
   bookmarksToggle: 'Incluir marcadores de Firefox',
   bookmarksIntro: 'Busca también entre los marcadores guardados en Firefox. Solo se leen los marcadores, nunca el historial ni las contraseñas, y nada sale de este equipo.',
+
+  // VFS-21: updates. The check is the app's only connection to the internet; say so.
+  updatesTitle: 'Actualizaciones',
+  updatesToggle: 'Buscar actualizaciones al abrir',
+  updatesIntro: 'Al abrirse, VFS comprueba en GitHub si hay una versión nueva. Es la única conexión a internet que hace VFS: no envía nada sobre sus archivos y, si desactiva esta opción, no se conecta nunca.',
+  updateAvailable: (version) => `Hay una versión nueva de VFS (${version}).`,
+  updateInstall: 'Actualizar',
+  updateLater: 'Ahora no',
+  updateDownloading: (pct) => (pct == null ? 'Descargando la actualización…' : `Descargando la actualización… ${pct} %`),
+  updateInstalling: 'Instalando la actualización. VFS se volverá a abrir solo en unos segundos.',
+  updateFailed: 'No se ha podido descargar la actualización. Puede reintentarlo ahora o la próxima vez que abra VFS.',
+  updateInstallFailed: 'No se ha podido instalar la actualización. VFS sigue funcionando con la versión actual; puede reintentarlo ahora o la próxima vez que lo abra.',
+  updateRetry: 'Reintentar',
   bookmarksCount: (n, when) => `${n} marcadores · leídos ${when}`,
   bookmarksState: {
     [ReadState.NEVER]: 'Todavía no se han leído los marcadores.',

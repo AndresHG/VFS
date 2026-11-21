@@ -37,6 +37,10 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::bookmarks::get_bookmarks_status,
         crate::bookmarks::set_bookmarks_enabled,
         crate::bookmarks::open_bookmark,
+        crate::updates::get_update_settings,
+        crate::updates::set_update_check,
+        crate::updates::check_for_update,
+        crate::updates::install_update,
     ]
 }
 

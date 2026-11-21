@@ -7,6 +7,7 @@ pub mod commands;
 pub mod i18n;
 pub mod reveal;
 pub mod splash;
+pub mod updates;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -349,6 +350,8 @@ pub fn run() {
 
     let app = builder
         .plugin(tauri_plugin_dialog::init())
+        // VFS-21: endpoint, public key and Windows install mode come from tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(commands::handler())
         .on_window_event(on_window_event)
         .on_page_load(|webview, payload| {
@@ -380,6 +383,7 @@ pub fn run() {
                 .app_local_data_dir()
                 .map_err(|e| e.to_string())
                 .and_then(|dir| {
+                    app.manage(updates::UpdateState::new(&dir));
                     if let Err(e) = install_logger(&handle, &dir) {
                         eprintln!("VFS: log file unavailable: {e}");
                     }

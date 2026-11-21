@@ -172,6 +172,19 @@ export const en = {
   bookmarksTitle: 'Firefox bookmarks',
   bookmarksToggle: 'Include Firefox bookmarks',
   bookmarksIntro: 'Also searches the bookmarks saved in Firefox. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
+
+  // VFS-21: updates. The check is the app's only connection to the internet; say so.
+  updatesTitle: 'Updates',
+  updatesToggle: 'Check for updates when opening',
+  updatesIntro: 'When it opens, VFS checks GitHub for a new version. This is the only internet connection VFS makes: it sends nothing about your files, and if you turn this off it never connects.',
+  updateAvailable: (version) => `A new version of VFS is available (${version}).`,
+  updateInstall: 'Update',
+  updateLater: 'Not now',
+  updateDownloading: (pct) => (pct == null ? 'Downloading the update…' : `Downloading the update… ${pct}%`),
+  updateInstalling: 'Installing the update. VFS will reopen by itself in a few seconds.',
+  updateFailed: 'The update could not be downloaded. You can try again now or the next time you open VFS.',
+  updateInstallFailed: 'The update could not be installed. VFS keeps working with the current version; you can try again now or the next time you open it.',
+  updateRetry: 'Try again',
   bookmarksCount: (n, when) => `${n} bookmarks · read ${when}`,
   bookmarksState: {
     [ReadState.NEVER]: 'The bookmarks have not been read yet.',

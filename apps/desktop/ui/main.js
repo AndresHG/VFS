@@ -6,6 +6,7 @@ import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
 import { SecondAction, secondActionOf } from './links.js';
+import { createUpdates } from './updates.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -1199,6 +1200,44 @@ function main(L) {
     if (hasQuery() && state.searchState === SearchState.DONE && list.atTop()) runSearch({ quiet: true });
   }
 
+  /* ---------------------------------------------------------------- updates (VFS-21) */
+
+  const updatesToggle = $('updates-on');
+  const updates = createUpdates({ api, S, render: renderUpdate });
+
+  function renderUpdate(view) {
+    $('banner-update').hidden = !view;
+    if (!view) return;
+    $('banner-update-text').textContent = view.text;
+    const bar = $('update-progress');
+    bar.hidden = view.progress == null;
+    if (view.progress != null) bar.value = view.progress;
+    const action = $('update-action');
+    action.hidden = !view.action;
+    action.textContent = view.action || '';
+    $('update-later').hidden = !view.later;
+  }
+
+  $('update-action').addEventListener('click', () => updates.install());
+  $('update-later').addEventListener('click', () => updates.dismiss());
+
+  updatesToggle.addEventListener('change', async () => {
+    try {
+      updatesToggle.checked = (await api.setUpdateCheck(updatesToggle.checked)).checkOnOpen;
+    } catch (err) {
+      updatesToggle.checked = !updatesToggle.checked;
+      showError(errorText(err));
+    }
+  });
+
+  async function startUpdates() {
+    try {
+      updatesToggle.checked = (await api.getUpdateSettings()).checkOnOpen;
+    } catch { /* the toggle stays as rendered */ }
+    try { await api.onUpdateProgress((p) => updates.onProgress(p)); } catch { /* no progress bar */ }
+    updates.start();
+  }
+
   /* ---------------------------------------------------------------- live data */
 
   async function refreshRoots() {
@@ -1252,6 +1291,7 @@ function main(L) {
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
+    startUpdates();
   }
 
   start();
