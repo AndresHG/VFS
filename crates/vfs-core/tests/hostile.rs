@@ -411,9 +411,10 @@ fn directory_with_300k_entries() {
     assert_eq!(disk.files.len(), n);
 }
 
-/// VFS-1 AC-4: symlink loops (to `.`, to `..`, to the root, a two-link cycle), dangling
-/// links, links to files and to folders outside the root, and on Windows junction loops,
-/// are never followed: the scan terminates and nothing outside the root is indexed.
+/// VFS-1 AC-4, VFS-18 AC-8: symlink loops (to `.`, to `..`, to the root, a two-link cycle),
+/// dangling links, links to files and to folders outside the root, and on Windows junction
+/// loops, are never followed: the scan terminates, nothing outside the root is indexed, the
+/// one real file is listed once and each link is a row of its own.
 #[test]
 fn symlink_and_junction_loops() {
     let env = Env::new();
@@ -474,7 +475,14 @@ fn symlink_and_junction_loops() {
     let summary = env.scan_ok();
     assert_eq!(summary.errors, 0);
     let disk = assert_index_matches_disk(&env, root_id, &root, Check::default());
-    assert_eq!(disk.files.keys().collect::<Vec<_>>(), vec!["a/b/real.txt"]);
+    let real: Vec<_> = disk
+        .files
+        .iter()
+        .filter(|(_, &(size, _))| size > 0)
+        .map(|(k, _)| k.as_str())
+        .collect();
+    assert_eq!(real, vec!["a/b/real.txt"]);
+    assert_eq!(disk.files.len(), 1 + links);
 }
 
 /// VFS-1 AC-4, AC-7: hard links are separate names of one file and are all indexed; when

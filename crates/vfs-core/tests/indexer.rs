@@ -3,7 +3,7 @@
 //! tree through `Vfs::search`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -212,7 +212,7 @@ impl ProgressSink for NullSink {
 
 /// VFS-1 AC-4, AC-5, AC-8, decision D1: a first scan indexes every file with its metadata
 /// and every directory (empty ones included) so a read connection finds them by folded
-/// name; junk names are excluded and symlinks are not followed.
+/// name; junk names are excluded and symlinks are link rows, never followed (VFS-18 R1).
 #[test]
 fn full_scan_indexes_tree() {
     let fx = Fixture::new();
@@ -233,18 +233,23 @@ fn full_scan_indexes_tree() {
     }
 
     let summary = fx.scan();
-    assert_eq!(summary.files_added, 4);
+    let links: &[&str] = if cfg!(unix) {
+        &["Fotos/bucle", "enlace"]
+    } else {
+        &[]
+    };
+    assert_eq!(summary.files_added, 4 + links.len() as u64);
     assert_eq!(summary.dirs_listed, 5);
     assert_eq!(summary.errors, 0);
-    assert_eq!(
-        fx.all_files(),
-        vec![
-            "Fotos/IMG_0001.JPG",
-            "Gestoría/Año 2019/Notaría escritura.pdf",
-            "Gestoría/factura.txt",
-            "raiz.txt"
-        ]
-    );
+    let mut files = vec![
+        "Fotos/IMG_0001.JPG",
+        "Gestoría/Año 2019/Notaría escritura.pdf",
+        "Gestoría/factura.txt",
+        "raiz.txt",
+    ];
+    files.extend(links);
+    files.sort();
+    assert_eq!(fx.all_files(), files);
     assert_eq!(
         fx.all_dirs(),
         vec!["", "Fotos", "Gestoría", "Gestoría/Año 2019", "Vacía"]
@@ -280,7 +285,7 @@ fn full_scan_indexes_tree() {
         .unwrap();
     assert_eq!(
         (RootStatus::from_code(status), files, dirs),
-        (RootStatus::Ready, 4, 5)
+        (RootStatus::Ready, 4 + links.len() as i64, 5)
     );
     assert!(last.is_some());
 
@@ -946,4 +951,138 @@ fn indexed_tree_is_searchable_end_to_end() {
         vec!["Vacía", "Viaje Cádiz", "playa.jpg", "playa.mp4"]
     );
     assert_eq!(names(&fx.search("jpg", in_fotos)), vec!["playa.jpg"]);
+}
+
+/// VFS-18 AC-1, AC-11: after the walk, the indexer's deferred pass reads the target of a
+/// `.lnk` and the address of a `.url` (opening only the link files, which stay unchanged),
+/// and both become findable by their target; an ordinary file gets no link row.
+#[test]
+fn link_pass_reads_targets_after_the_walk() {
+    let fx = Fixture::new();
+    // A minimal Shell Link: header with HasRelativePath | IsUnicode, then the relative path.
+    let rel: Vec<u16> = r"..\Boda Sevilla\album.jpg".encode_utf16().collect();
+    let mut lnk = vec![0u8; 0x4C];
+    lnk[0] = 0x4C;
+    lnk[4..20].copy_from_slice(&[
+        0x01, 0x14, 0x02, 0x00, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46,
+    ]);
+    lnk[0x14] = 0x08 | 0x80;
+    lnk.extend((rel.len() as u16).to_le_bytes());
+    lnk.extend(rel.iter().flat_map(|u| u.to_le_bytes()));
+    lnk.extend([0, 0, 0, 0]);
+    let lnk_path = fx.root().join("Accesos/fotos.lnk");
+    fs::create_dir_all(lnk_path.parent().unwrap()).unwrap();
+    fs::write(&lnk_path, &lnk).unwrap();
+    fs::write(
+        fx.root().join("Accesos/Banco.url"),
+        b"[InternetShortcut]\r\nURL=https://www.mibanco.es/\r\n",
+    )
+    .unwrap();
+    fx.file("Accesos/nota.txt", 1);
+    let before = fs::metadata(&lnk_path).unwrap().modified().unwrap();
+
+    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    let search = |text: &str| {
+        fx.vfs
+            .search(&vfs_core::SearchQuery {
+                text: text.into(),
+                filters: Default::default(),
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap()
+    };
+    wait_until("shortcut found by its target", || {
+        search("sevilla").hits.iter().any(|h| h.name == "fotos.lnk")
+    });
+    let hit = search("sevilla")
+        .hits
+        .into_iter()
+        .find(|h| h.name == "fotos.lnk")
+        .unwrap();
+    let link = hit.link.unwrap();
+    assert!(link.target.unwrap().ends_with("album.jpg"));
+    wait_until("internet shortcut found by its address", || {
+        search("mibanco")
+            .hits
+            .iter()
+            .any(|h| h.link.as_ref().is_some_and(|l| l.openable))
+    });
+    let nota = search("nota").hits;
+    assert!(nota.iter().all(|h| h.link.is_none()));
+    assert_eq!(fs::read(&lnk_path).unwrap(), lnk);
+    assert_eq!(fs::metadata(&lnk_path).unwrap().modified().unwrap(), before);
+}
+
+/// A directory symbolic link (Unix) or junction-like directory link (Windows; CI runs with
+/// the right to make one).
+fn symlink_dir(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(target, link).unwrap();
+}
+
+/// VFS-18 AC-1, AC-8: symbolic links to a folder inside the root, to its own parent (a
+/// loop) and to a folder outside the root are link rows with their targets once the
+/// deferred pass has run; none is entered, so every real file is listed exactly once, the
+/// walk ends, and nothing outside the root is indexed.
+#[test]
+fn symlinks_are_link_rows_never_entered() {
+    let fx = Fixture::new();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_dir = dunce::canonicalize(outside.path()).unwrap();
+    fs::write(outside_dir.join("ajeno.txt"), b"x").unwrap();
+    fx.file("Real/boda.jpg", 1);
+    fx.file("a/nota.txt", 1);
+    fs::create_dir_all(fx.root().join("Accesos")).unwrap();
+    symlink_dir(
+        &fx.root().join("Real"),
+        &fx.root().join("Accesos/Recuerdos"),
+    );
+    symlink_dir(&fx.root().join("a"), &fx.root().join("a/bucle"));
+    symlink_dir(&outside_dir, &fx.root().join("Fuera"));
+
+    fx.vfs.start_indexer(Arc::new(NullSink)).unwrap();
+    let search = |text: &str| {
+        fx.vfs
+            .search(&vfs_core::SearchQuery {
+                text: text.into(),
+                filters: Default::default(),
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap()
+            .hits
+    };
+    let target_of = |name: &str| -> Option<String> {
+        search(name)
+            .into_iter()
+            .find(|h| h.name == name)
+            .and_then(|h| h.link)
+            .filter(|l| l.kind == vfs_core::LinkKind::Symlink)
+            .and_then(|l| l.target)
+    };
+    wait_until("the three links read", || {
+        ["Recuerdos", "bucle", "Fuera"]
+            .iter()
+            .all(|n| target_of(n).is_some())
+    });
+    let p = |path: PathBuf| path.to_str().unwrap().to_owned();
+    assert_eq!(target_of("Recuerdos"), Some(p(fx.root().join("Real"))));
+    assert_eq!(target_of("bucle"), Some(p(fx.root().join("a"))));
+    assert_eq!(target_of("Fuera"), Some(p(outside_dir.clone())));
+
+    assert_eq!(
+        fx.all_files(),
+        vec![
+            "Accesos/Recuerdos",
+            "Fuera",
+            "Real/boda.jpg",
+            "a/bucle",
+            "a/nota.txt"
+        ]
+    );
+    assert!(fx.find_files("ajeno").is_empty());
+    assert!(find_dirs_by_name(&fx.reader(), "recuerdos").is_empty());
 }

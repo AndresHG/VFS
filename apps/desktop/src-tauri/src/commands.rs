@@ -7,7 +7,7 @@ use tauri::ipc::Invoke;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 use vfs_core::api::{ApiError, RevealOutcome};
-use vfs_core::{IndexProgress, Root, SearchQuery, SearchResponse};
+use vfs_core::{IndexProgress, LinkKind, LinkTarget, Root, SearchQuery, SearchResponse};
 
 use crate::{reveal, AppState};
 
@@ -26,6 +26,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         remove_root,
         search,
         reveal,
+        reveal_target,
+        open_link_url,
         get_progress,
         rescan,
         set_paused,
@@ -93,6 +95,45 @@ pub fn reveal(state: State<'_, AppState>, id: i64, is_dir: bool) -> CmdResult<Re
     reveal::reveal(&path).map_err(io_error)
 }
 
+/// "Mostrar el destino" (VFS-18 R6): Explorer/Finder with the target of a shortcut or link
+/// selected. The target is the one the index holds, never resolved or searched for; a
+/// missing target (moved, deleted, its disk not connected) is `not_found` and nothing is
+/// opened. The first and only access to the target happens here, at the user's request; a
+/// UNC target may wait for the network, off the UI thread (the command is async).
+#[tauri::command(async)]
+pub fn reveal_target(state: State<'_, AppState>, id: i64) -> CmdResult<RevealOutcome> {
+    let path = target_to_reveal(id, state.vfs.link_target(id)?)?;
+    reveal::reveal(&path).map_err(io_error)
+}
+
+/// The path "Mostrar el destino" reveals for link `id`: its recorded target when that is an
+/// absolute path that exists now (checked without following it), else `not_found`; a link
+/// with no path target (an Internet Shortcut, or none recorded) is `unavailable`.
+fn target_to_reveal(id: i64, link: LinkTarget) -> Result<PathBuf, vfs_core::Error> {
+    let target = match (link.kind, link.target) {
+        (LinkKind::Shortcut | LinkKind::Symlink, Some(t)) => t,
+        _ => return Err(vfs_core::Error::Unavailable(format!("link {id}"))),
+    };
+    let path = PathBuf::from(&target);
+    if !path.is_absolute() || std::fs::symlink_metadata(&path).is_err() {
+        return Err(vfs_core::Error::NotFound(target));
+    }
+    Ok(path)
+}
+
+/// "Abrir en Firefox" on an Internet Shortcut (VFS-18 R7): its address, `http`/`https` only,
+/// through the same path as a bookmark (VFS-6 R10).
+#[tauri::command(async)]
+pub fn open_link_url(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
+    let link = state.vfs.link_target(id)?;
+    match link.target {
+        Some(url) if link.openable => {
+            crate::bookmarks::open_in_firefox(&url).map_err(|e| vfs_core::Error::Io(e).into())
+        }
+        _ => Err(vfs_core::Error::Unavailable(format!("link {id}")).into()),
+    }
+}
+
 #[tauri::command(async)]
 pub fn get_progress(state: State<'_, AppState>) -> CmdResult<IndexProgress> {
     Ok(state.vfs.progress())
@@ -117,4 +158,60 @@ pub fn rescan<R: Runtime>(
 pub fn set_paused(state: State<'_, AppState>, paused: bool) -> CmdResult<()> {
     state.vfs.set_paused(paused);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn link(kind: LinkKind, target: Option<&str>) -> LinkTarget {
+        LinkTarget {
+            kind,
+            target: target.map(str::to_owned),
+            openable: false,
+        }
+    }
+
+    /// VFS-18 AC-6: a shortcut or link whose target exists reveals that target; a missing
+    /// target or a drive that is not connected is `not_found` (the UI shows the
+    /// missing-target message); a link with no path target is never revealed.
+    #[test]
+    fn reveal_target_checks_the_recorded_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Boda 2003.jpg");
+        std::fs::write(&file, b"x").unwrap();
+        let t = file.to_str().unwrap();
+        assert_eq!(
+            target_to_reveal(1, link(LinkKind::Shortcut, Some(t))).unwrap(),
+            file
+        );
+        assert_eq!(
+            target_to_reveal(
+                1,
+                link(LinkKind::Symlink, Some(dir.path().to_str().unwrap()))
+            )
+            .unwrap(),
+            dir.path()
+        );
+
+        let missing = dir.path().join("borrado.jpg");
+        let absent_drive = if cfg!(windows) {
+            // A volume id that no disk has: the drive is not connected.
+            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\Fotos".to_owned()
+        } else {
+            "/Volumes/vfs-no-such-disk/Fotos".to_owned()
+        };
+        for gone in [missing.to_str().unwrap().to_owned(), absent_drive] {
+            let err = target_to_reveal(1, link(LinkKind::Shortcut, Some(&gone))).unwrap_err();
+            assert_eq!(ApiError::from(err).code, "not_found", "{gone}");
+        }
+
+        for no_path in [
+            link(LinkKind::Shortcut, None),
+            link(LinkKind::Internet, Some("https://example.com")),
+            link(LinkKind::Shortcut, Some("Fotos\\relativo.jpg")),
+        ] {
+            assert!(target_to_reveal(1, no_path).is_err());
+        }
+    }
 }

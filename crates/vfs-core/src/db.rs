@@ -8,17 +8,19 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::error::{Error, Result};
+use crate::types::{LinkKind, LinkTarget};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Migrations: entry `i` takes an index from version `i` to `i + 1`.
-const MIGRATIONS: [&str; 4] = [
+const MIGRATIONS: [&str; 5] = [
     include_str!("schema.sql"),
     include_str!("schema_v2.sql"),
     include_str!("schema_v3.sql"),
     include_str!("schema_v4.sql"),
+    include_str!("schema_v5.sql"),
 ];
 
 /// Page size of a new index, and of an existing index compacted after a migration.
@@ -487,6 +489,27 @@ pub fn file_abs_path(conn: &Connection, file_id: i64) -> Result<PathBuf> {
     Ok(join_rel(&root, &rel).join(name))
 }
 
+/// What the index holds for the link `file_id` (VFS-18): its kind and target, as read from
+/// the link itself. `NotFound` when the file is not a link.
+pub fn link_of(conn: &Connection, file_id: i64) -> Result<LinkTarget> {
+    let (kind, target): (i64, Option<String>) = conn
+        .query_row(
+            "SELECT kind, target FROM links WHERE file_id = ?1",
+            [file_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("link {file_id}")))?;
+    let kind = LinkKind::from_code(kind);
+    let openable =
+        kind == LinkKind::Internet && target.as_deref().is_some_and(crate::link::is_openable_url);
+    Ok(LinkTarget {
+        kind,
+        target,
+        openable,
+    })
+}
+
 /// `root` (absolute, native separators) joined with the '/'-separated `rel_path`.
 pub fn join_rel(root: &str, rel_path: &str) -> PathBuf {
     let mut path = PathBuf::from(root);
@@ -504,8 +527,9 @@ pub mod ingest {
     use crate::error::{Error, Result};
     use crate::fold::fold_key;
     use crate::kind::file_kind;
+    use crate::link::{link_file_kind, LinkFileKind};
     use crate::search::NAME_START;
-    use crate::types::RootStatus;
+    use crate::types::{FileKind, LinkKind, RootStatus};
 
     /// A file's `file_paths_fts` value from its row `f` and its directory `d`: the folder's
     /// folded path and the folded name, or the name alone in the root directory.
@@ -518,6 +542,18 @@ pub mod ingest {
         Clean = 0,
         PendingDeep = 1,
         PendingShallow = 2,
+    }
+
+    /// `files.flags` bit 1: the entry is a symbolic link or junction (VFS-18).
+    pub const FLAG_LINK: i64 = 2;
+
+    /// Value of `links.state` (VFS-18). Written into SQL as a literal so the partial index
+    /// `links_pending` (`WHERE state = 0`) serves the pending query.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum LinkState {
+        Pending = 0,
+        Read = 1,
+        Unreadable = 2,
     }
 
     pub struct NewFile<'a> {
@@ -534,6 +570,8 @@ pub mod ingest {
         pub name: String,
         pub size: u64,
         pub mtime: i64,
+        /// A symbolic link or junction entry (`flags` bit 1, VFS-18).
+        pub link: bool,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -651,12 +689,86 @@ pub mod ingest {
              FROM files f JOIN dirs d ON d.id = f.dir_id WHERE f.id = ?1"
         ))?
         .execute([id])?;
+        let link = match link_file_kind(file.name) {
+            Some(LinkFileKind::Lnk) => Some(LinkKind::Shortcut),
+            Some(LinkFileKind::Url) => Some(LinkKind::Internet),
+            None => None,
+        };
+        if let Some(kind) = link {
+            tx.prepare_cached("INSERT INTO links(file_id, kind) VALUES (?1, ?2)")?
+                .execute(params![id, kind.code()])?;
+        }
         Ok(id)
     }
 
+    /// Inserts a symbolic link or junction entry as a file row (`flags` bit 1) with a pending
+    /// link row of kind symlink, whatever its name (VFS-18 R1, D5).
+    pub fn insert_link_entry(tx: &Transaction, dir_id: i64, file: &NewFile) -> Result<i64> {
+        let id = insert_file(tx, dir_id, file)?;
+        // Its kind is "other" whatever its name: a type filter keeps links only under "Otros"
+        // (D10).
+        tx.prepare_cached("UPDATE files SET flags = flags | ?2, kind = ?3 WHERE id = ?1")?
+            .execute(params![id, FLAG_LINK, FileKind::Other.code()])?;
+        tx.prepare_cached("INSERT OR REPLACE INTO links(file_id, kind) VALUES (?1, ?2)")?
+            .execute(params![id, LinkKind::Symlink.code()])?;
+        Ok(id)
+    }
+
+    /// Updates a file's size and modification time; a link whose file changed is read again
+    /// by the deferred link pass (VFS-18 R2).
     pub fn update_file(tx: &Transaction, file_id: i64, size: u64, mtime: i64) -> Result<()> {
         tx.prepare_cached("UPDATE files SET size = ?2, mtime = ?3 WHERE id = ?1")?
             .execute(params![file_id, size as i64, mtime])?;
+        tx.prepare_cached(&format!(
+            "UPDATE links SET state = {}, target = NULL, target_key = NULL WHERE file_id = ?1",
+            LinkState::Pending as i64
+        ))?
+        .execute([file_id])?;
+        Ok(())
+    }
+
+    /// Up to `limit` links waiting for the deferred pass, in id order: (file id, kind).
+    pub fn pending_links(conn: &Connection, limit: usize) -> Result<Vec<(i64, LinkKind)>> {
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT file_id, kind FROM links WHERE state = {} ORDER BY file_id LIMIT ?1",
+            LinkState::Pending as i64
+        ))?;
+        let rows = stmt
+            .query_map([limit as i64], |r| {
+                Ok((r.get(0)?, LinkKind::from_code(r.get(1)?)))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Stores what the deferred pass read for a link: its target (state read), no target
+    /// (state read, `None`), or that the link file could not be read (state unreadable).
+    pub fn set_link_target(
+        tx: &Transaction,
+        file_id: i64,
+        read: std::result::Result<Option<&str>, ()>,
+    ) -> Result<()> {
+        let (state, target) = match read {
+            Ok(t) => (LinkState::Read, t),
+            Err(()) => (LinkState::Unreadable, None),
+        };
+        let key = target.map(|t| fold_key(&t.replace('\\', "/")));
+        tx.prepare_cached(
+            "UPDATE links SET state = ?2, target = ?3, target_key = ?4 WHERE file_id = ?1",
+        )?
+        .execute(params![file_id, state as i64, target, key])?;
+        Ok(())
+    }
+
+    /// Queues every unreadable link of a root for another read (after a full walk).
+    pub fn retry_unreadable_links(tx: &Transaction, root_id: i64) -> Result<()> {
+        tx.prepare_cached(&format!(
+            "UPDATE links SET state = {} WHERE state = {} AND file_id IN \
+             (SELECT f.id FROM files f JOIN dirs d ON d.id = f.dir_id WHERE d.root_id = ?1)",
+            LinkState::Pending as i64,
+            LinkState::Unreadable as i64
+        ))?
+        .execute([root_id])?;
         Ok(())
     }
 
@@ -701,6 +813,8 @@ pub mod ingest {
     /// Deletes a file and its FTS rows.
     pub fn delete_file(tx: &Transaction, file_id: i64) -> Result<()> {
         delete_files_fts(tx, "f.id = ?1", [file_id])?;
+        tx.prepare_cached("DELETE FROM links WHERE file_id = ?1")?
+            .execute([file_id])?;
         tx.prepare_cached("DELETE FROM files WHERE id = ?1")?
             .execute([file_id])?;
         Ok(())
@@ -732,6 +846,13 @@ pub mod ingest {
             |r| r.get(0),
         )?;
         delete_files_fts(tx, &format!("f.dir_id IN ({subtree})"), p)?;
+        tx.execute(
+            &format!(
+                "DELETE FROM links WHERE file_id IN \
+                 (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+            ),
+            p,
+        )?;
         tx.execute(&format!("DELETE FROM files WHERE dir_id IN ({subtree})"), p)?;
         tx.execute(
             &format!("DELETE FROM dirs_fts WHERE rowid IN ({subtree})"),
@@ -745,6 +866,13 @@ pub mod ingest {
     pub fn delete_root(tx: &Transaction, root_id: i64) -> Result<()> {
         let subtree = "SELECT id FROM dirs WHERE root_id = ?1";
         delete_files_fts(tx, &format!("f.dir_id IN ({subtree})"), [root_id])?;
+        tx.execute(
+            &format!(
+                "DELETE FROM links WHERE file_id IN \
+                 (SELECT id FROM files WHERE dir_id IN ({subtree}))"
+            ),
+            [root_id],
+        )?;
         tx.execute(
             &format!("DELETE FROM files WHERE dir_id IN ({subtree})"),
             [root_id],
@@ -769,8 +897,8 @@ pub mod ingest {
         conn: &Connection,
         dir_id: i64,
     ) -> Result<(Vec<ChildFile>, Vec<ChildDir>)> {
-        let mut stmt =
-            conn.prepare_cached("SELECT id, name, size, mtime FROM files WHERE dir_id = ?1")?;
+        let mut stmt = conn
+            .prepare_cached("SELECT id, name, size, mtime, flags FROM files WHERE dir_id = ?1")?;
         let files = stmt
             .query_map([dir_id], |r| {
                 Ok(ChildFile {
@@ -778,6 +906,7 @@ pub mod ingest {
                     name: r.get(1)?,
                     size: r.get::<_, i64>(2)? as u64,
                     mtime: r.get(3)?,
+                    link: r.get::<_, i64>(4)? & FLAG_LINK != 0,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1207,7 +1336,8 @@ mod tests {
                 id: mid,
                 name: "IMG_0001.JPG".into(),
                 size: 20,
-                mtime: 200
+                mtime: 200,
+                link: false
             }]
         );
         assert_eq!(

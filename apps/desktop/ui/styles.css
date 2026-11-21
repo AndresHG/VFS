@@ -493,6 +493,14 @@ input[type="date"] {
   cursor: pointer;
 }
 .row .badge-copies:hover { border-color: var(--accent); color: var(--accent); }
+/* VFS-18: a shortcut, Internet Shortcut or link; its second line says where it leads. */
+.badge-link { background: var(--sunk); color: var(--ink-2); font-weight: 600; }
+.row .p-lead { flex: none; padding-inline-end: 0.25em; }
+.row.has-second {
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "ico main date reveal second" "ico main size reveal second";
+}
+.row .reveal-second { grid-area: second; }
 .row:has(.badge-unavailable) .name-text { color: var(--ink-2); }
 .row .path {
   display: flex;
@@ -540,6 +548,10 @@ input[type="date"] {
   font-size: var(--t-small);
 }
 .row[aria-selected="true"] .reveal .kbd { display: inline; }
+/* The second action stays an outlined button next to the filled first one (VFS-18 D9). */
+.row[aria-selected="true"] .reveal-second { background: var(--surface); color: var(--accent); }
+.row[aria-selected="true"] .reveal-second:hover { background: var(--accent-soft); border-color: var(--accent); }
+.row[aria-selected="true"] .reveal-second .kbd { background: var(--accent-soft); }
 
 .row.loading .name-text, .row.loading .path {
   color: transparent;
@@ -551,8 +563,15 @@ input[type="date"] {
 /* Narrow lists: date and size go first, then the button keeps only its icon. */
 @container (width < 46rem) {
   .row { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "ico main reveal"; }
+  .row.has-second { grid-template-columns: 2rem minmax(0, 1fr) auto auto; grid-template-areas: "ico main reveal second"; }
   .row .date, .row .size { display: none; }
   .reveal .kbd, .row[aria-selected="true"] .reveal .kbd { display: none; }
+}
+/* Two actions leave the name room: the second shows its icon only (its name is its tooltip). */
+@container (width < 72rem) {
+  .row.has-second .reveal .kbd, .row.has-second[aria-selected="true"] .reveal .kbd { display: none; }
+  .row.has-second .reveal-second .reveal-text { display: none; }
+  .row.has-second .reveal-second { padding-inline: var(--s3); }
 }
 @container (width < 34rem) {
   .reveal .reveal-text { display: none; }

@@ -1141,3 +1141,44 @@ fn os_cursor_advances_while_running() {
     }
     drop(h);
 }
+
+/// VFS-18 R9: a link file that could not be read is read again after the next full walk,
+/// not before.
+#[test]
+fn unreadable_link_is_retried_after_a_full_walk() {
+    let mut fx = fixture(&["A"]);
+    fs::write(
+        fx.root().join("A").join("Banco.url"),
+        "[InternetShortcut]\r\nURL=https://example.com/\r\n",
+    )
+    .unwrap();
+    fx.scan();
+    let id: i64 = fx
+        .conn
+        .query_row("SELECT file_id FROM links", [], |r| r.get(0))
+        .unwrap();
+    let state = |conn: &Connection| -> i64 {
+        conn.query_row("SELECT state FROM links WHERE file_id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    // The deferred pass found it locked.
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_link_target(&tx, id, Err(())).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        0
+    );
+    assert_eq!(state(&fx.conn), ingest::LinkState::Unreadable as i64);
+
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(state(&fx.conn), ingest::LinkState::Pending as i64);
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        1
+    );
+    assert_eq!(state(&fx.conn), ingest::LinkState::Read as i64);
+}

@@ -126,8 +126,8 @@ pub struct Snapshot {
     pub files: BTreeMap<String, u64>,
 }
 
-/// What is on disk under `root`, as the indexer should see it: symlinks skipped, names that
-/// are not valid Unicode skipped (the generators never make them).
+/// What is on disk under `root`, as the indexer should see it: symlinks as files of size 0
+/// (VFS-18), names that are not valid Unicode skipped (the generators never make them).
 pub fn disk_truth(root: &Path) -> Snapshot {
     fn walk(dir: &Path, rel: &str, out: &mut Snapshot) {
         let Ok(entries) = fs::read_dir(dir) else {
@@ -145,7 +145,9 @@ pub fn disk_truth(root: &Path) -> Snapshot {
             } else {
                 format!("{rel}/{name}")
             };
-            if meta.is_dir() {
+            if meta.file_type().is_symlink() {
+                out.files.insert(child, 0);
+            } else if meta.is_dir() {
                 out.dirs.insert(child.clone());
                 walk(&e.path(), &child, out);
             } else if meta.is_file() {

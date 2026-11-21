@@ -6,8 +6,17 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) enum EntryKind {
-    File { size: u64, mtime: i64 },
-    Dir { mtime: i64 },
+    File {
+        size: u64,
+        mtime: i64,
+    },
+    Dir {
+        mtime: i64,
+    },
+    /// A symbolic link or junction: recorded as a link row, never entered (VFS-18 R1, D5).
+    Link {
+        mtime: i64,
+    },
 }
 
 pub(crate) struct Entry {
@@ -85,8 +94,9 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
     false
 }
 
-/// Entries of `dir` from `read_dir` metadata; symlinks, junctions and reparse points are
-/// skipped, as are excluded names and `skip` (the app's data directory).
+/// Entries of `dir` from `read_dir` metadata; symlinks, junctions and other name-surrogate
+/// reparse points are listed as links and never followed (VFS-18 R1); excluded names and
+/// `skip` (the app's data directory) are skipped.
 ///
 /// No file is opened: on Windows type and metadata come from the enumeration record, on
 /// Unix from `lstat`. `FileType::is_symlink` is true for symlinks and for Windows
@@ -111,16 +121,17 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        if file_type.is_symlink() {
-            continue;
-        }
         let meta = match entry.metadata() {
             Ok(meta) => meta,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Err(e),
             Err(_) => continue,
         };
         let mtime = unix_secs(meta.modified());
-        let kind = if file_type.is_dir() {
+        // `DirEntry::metadata` does not follow links (lstat on Unix, the enumeration record
+        // on Windows), so this is the link's own time.
+        let kind = if file_type.is_symlink() {
+            EntryKind::Link { mtime }
+        } else if file_type.is_dir() {
             if skip.is_some_and(|s| entry.path() == s) {
                 continue;
             }

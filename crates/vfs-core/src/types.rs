@@ -84,6 +84,52 @@ pub enum MatchKind {
     Name,
     Path,
     Fuzzy,
+    /// A link found only with the help of its target (VFS-18 R4).
+    Target,
+}
+
+/// What kind of link a file result is (VFS-18): its `links.kind` code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkKind {
+    /// A Windows shortcut (`.lnk`).
+    Shortcut,
+    /// An Internet Shortcut (`.url`) holding a web address.
+    Internet,
+    /// A symbolic link or junction listed in its folder, never followed.
+    Symlink,
+}
+
+impl LinkKind {
+    /// Value stored in `links.kind`.
+    pub fn code(self) -> i64 {
+        match self {
+            LinkKind::Shortcut => 0,
+            LinkKind::Internet => 1,
+            LinkKind::Symlink => 2,
+        }
+    }
+
+    /// Inverse of [`LinkKind::code`]; unknown values read as `Shortcut`.
+    pub fn from_code(code: i64) -> LinkKind {
+        match code {
+            1 => LinkKind::Internet,
+            2 => LinkKind::Symlink,
+            _ => LinkKind::Shortcut,
+        }
+    }
+}
+
+/// Where a link result points (VFS-18 D2), as read from the link itself; nothing about the
+/// target is checked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkTarget {
+    pub kind: LinkKind,
+    /// The target path or web address; `None` while unread or when the link records none.
+    pub target: Option<String>,
+    /// An Internet Shortcut whose address may be opened in Firefox (VFS-18 R7).
+    pub openable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +153,9 @@ pub struct SearchHit {
     /// same file kept in other places (VFS-19). Empty for folders.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub copies: Vec<FileCopy>,
+    /// Set when the file is a shortcut or link (VFS-18).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<LinkTarget>,
 }
 
 /// Another place of a file hit (VFS-19).
@@ -321,6 +370,7 @@ mod tests {
                     dir: "/c".into(),
                     modified: 5,
                 }],
+                link: None,
             }],
             total: 1,
             truncated: true,

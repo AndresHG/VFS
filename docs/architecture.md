@@ -57,7 +57,8 @@ peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Reade
 ## Schema
 
 `core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2,
-`core/schema_v3.sql` version 3 and `core/schema_v4.sql` version 4 (`PRAGMA user_version`). `db::open_rw` runs the missing
+`core/schema_v3.sql` version 3, `core/schema_v4.sql` version 4 and `core/schema_v5.sql`
+version 5 (`PRAGMA user_version`). `db::open_rw` runs the missing
 migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
 of them, and an older index is migrated from the rows already there, so no rescan is
 needed. After migrating an existing index it compacts the file once (`VACUUM`, at
@@ -71,10 +72,11 @@ index, it stays valid and uncompacted. An index from a newer build fails with
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state` |
-| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode), `content_state` (document content search, milestone Fase 3; always 0) |
+| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18), `content_state` (document content search, milestone Fase 3; always 0) |
 | `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
 | `file_paths_fts` | version 2: FTS5 trigram index over each file's folded relative path and name (`<dir path_key>/<name_key>`, or `name_key` alone in the root directory), `detail=none` (rowids only, no positions), `rowid = files.id` |
+| `links` | version 5 (VFS-18): one row per shortcut (`.lnk`), Internet Shortcut (`.url`) or symbolic link / junction: `file_id`, `kind` (0 shortcut, 1 internet, 2 symlink), `state` (0 pending, 1 read, 2 unreadable), `target` (path or address as recorded in the link), `target_key` (folded target). No FTS: searches scan it (`search::link_pass`) |
 
 Design points:
 
@@ -144,13 +146,13 @@ same folder while it is still being removed deletes the old rows at once and add
 
 `walk::list_dir` (`core/indexer/walk.rs`) reads one directory with `std::fs::read_dir` and
 never opens a file. On Windows type and metadata come from the enumeration record; on Unix
-from `lstat`. It skips:
-
-- symlinks, junctions and other name-surrogate reparse points (`FileType::is_symlink`), so a
-  walk never loops. Before a directory is listed again, the root and every folder on its
+from `lstat`. Symlinks, junctions and other name-surrogate reparse points
+(`FileType::is_symlink`) are listed as file rows with `flags` bit 1 and a pending `links` row,
+never entered, so a walk never loops (VFS-18 R1). Before a directory is listed again, the root and every folder on its
   path are checked with `symlink_metadata` (`walk::behind_link`): one that has been replaced
   by a link since it was indexed is treated as gone, never followed, and a root that has
-  become a link is unavailable;
+  become a link is unavailable. It skips:
+
 - excluded names (`walk::is_excluded`, ASCII case-insensitive): `$RECYCLE.BIN`, `System
   Volume Information`, `.Trashes`, `.Trash`, `.Spotlight-V100`, `.fseventsd`,
   `.DocumentRevisions-V100`, `.TemporaryItems`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, the
@@ -163,6 +165,19 @@ from `lstat`. It skips:
   retried like one that cannot be listed (VFS-3, #56).
 
 A name that is not valid Unicode is stored in its lossy form with `flags` bit 0 set.
+
+### Shortcuts and links (VFS-18)
+
+A file named `*.lnk` or `*.url`, or a listed symlink or junction, gets a pending `links` row
+when inserted; a changed one goes back to pending. Once the walks are done and before idle
+is reported, the indexer's deferred pass (`link::read_pending`, 200 per transaction, yields
+to stop, pause and wake) reads each pending link: at most 64 KiB of the link file itself
+(the bounded `.lnk` / `.url` parser in `core/link.rs`), or the link's own reparse data
+(`read_link`; a relative target is resolved as text against the link's folder). The target
+is never opened. A link that cannot be read is marked unreadable and queued again when its
+root's next full walk ends. A search matches links by their own folder, name and target
+together, attaches `link` (kind, target, `openable`) to every link hit, and drops a link
+whose target is an indexed item the same search returns (`search::attach_links`).
 
 ### Scan states: the persistent work queue
 
@@ -452,6 +467,8 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `get_bookmarks_status` | — | `BookmarkStatus` |
 | `set_bookmarks_enabled` | `enabled` | `BookmarkStatus`; off deletes every stored bookmark |
 | `open_bookmark` | `id` | `null`; `not_found` for an unknown id, `unavailable` for a non-web address |
+| `reveal_target` | `id` (a link's `files.id`) | `"revealed"` or `"opened_parent"`; `not_found` when the recorded target does not exist (VFS-18 "Mostrar el destino") |
+| `open_link_url` | `id` | `null`; `unavailable` unless the Internet Shortcut has an `http`/`https` address (VFS-18 "Abrir en Firefox") |
 
 `rescan` with `id: null` ("Buscar cambios ahora") also wakes the bookmark reader.
 
