@@ -298,6 +298,8 @@ export function createFakeBackend(params) {
 
   return {
     isFake: true,
+    // VFS-22: `?locale=en-US` stands in for the OS locale.
+    async systemLocale() { return params.get('locale') || navigator.language; },
 
     async listRoots() { await sleep(30); return roots.map(rootView); },
 

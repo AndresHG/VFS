@@ -68,6 +68,15 @@ fn progress_and_errors_over_ipc() {
     assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
 }
 
+/// VFS-22 R2: the UI reads the OS locale through `system_locale`, a string (empty when the
+/// OS does not say), with no index needed.
+#[test]
+fn system_locale_over_ipc() {
+    let (_app, webview) = mock_app();
+    let locale = invoke(&webview, "system_locale", json!({})).unwrap();
+    assert!(locale.is_string(), "{locale}");
+}
+
 fn write_file(path: &Path) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, b"x").unwrap();
