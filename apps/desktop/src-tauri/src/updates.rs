@@ -261,7 +261,8 @@ pub async fn install_update<R: Runtime>(
             move |chunk, total| {
                 let downloaded =
                     downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
-                // One event per percent at most: a 10 MB download comes in ~1000 chunks.
+                // With a known size, one event per percent at most (a 10 MB download comes in
+                // ~1000 chunks); without one, every chunk.
                 let percent = total.map(|t| downloaded * 100 / t.max(1));
                 if percent.is_none() || percent != last_percent {
                     last_percent = percent;
