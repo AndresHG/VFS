@@ -167,7 +167,12 @@ impl Vfs {
         let mut guard = lock(&self.inner.searcher);
         let (conn, _) = &mut *guard;
         let stale = || self.inner.searches.load(Ordering::SeqCst) != generation;
-        suggest::suggest(conn, &self.inner.config, query, &stale)
+        match suggest::suggest(conn, &self.inner.config, query, &stale) {
+            // A try cut while an FTS table opened (a newer search, or its budget) counts as
+            // finding nothing (R4), as `search` reads the same cut as an interruption.
+            Err(e) if search::is_table_open_cut(&e) => Ok(None),
+            r => r,
+        }
     }
 
     /// Absolute path of an indexed file, built from the original names.
