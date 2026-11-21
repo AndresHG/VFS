@@ -231,7 +231,13 @@ fn ac10_matches_a_middle_path_segment() {
     let r = a.fx.text("año extr");
     assert_eq!(only(&r).id, a.extracto);
     assert_eq!(r.hits[0].matched, MatchKind::Path);
-    assert_eq!(only(&a.fx.search("9\\ban", docs.clone())).id, a.extracto);
+    // VFS-3 AC-12: a backslash separates folders on Windows only; on macOS it is literal.
+    let backslash = a.fx.search("9\\ban", docs.clone());
+    if cfg!(windows) {
+        assert_eq!(only(&backslash).id, a.extracto);
+    } else {
+        assert!(backslash.hits.iter().all(|h| h.matched == MatchKind::Fuzzy));
+    }
     assert_eq!(only(&a.fx.search("9/ban", docs)).id, a.extracto);
 }
 
