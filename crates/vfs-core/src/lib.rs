@@ -24,7 +24,7 @@ pub use kind::file_kind;
 pub use types::*;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, InterruptHandle};
@@ -60,6 +60,8 @@ struct Inner {
     /// Dedicated search reader, interrupted by each new query.
     searcher: Mutex<(Connection, SearchState)>,
     search_interrupt: InterruptHandle,
+    /// Searches started so far: a query sees whether a newer one interrupted it.
+    searches: AtomicU64,
     indexer: Mutex<Option<IndexerHandle>>,
     /// Open session marker; dropped by `shutdown` or with the last clone (clean shutdown).
     session: Mutex<Option<db::Session>>,
@@ -92,6 +94,7 @@ impl Vfs {
                 reader: Mutex::new(reader),
                 searcher: Mutex::new((search_conn, SearchState::default())),
                 search_interrupt,
+                searches: AtomicU64::new(0),
                 indexer: Mutex::new(None),
                 session: Mutex::new(Some(session)),
             }),
@@ -134,10 +137,23 @@ impl Vfs {
 
     /// Runs a query; a query still running on another thread is interrupted first.
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
+        let started = std::time::Instant::now();
+        let this = self.inner.searches.fetch_add(1, Ordering::SeqCst) + 1;
         self.inner.search_interrupt.interrupt();
         let mut guard = lock(&self.inner.searcher);
         let (conn, state) = &mut *guard;
-        search::search(conn, state, &self.inner.config, query)
+        match search::search(conn, state, &self.inner.config, query) {
+            // An FTS table cut short while opening is an interruption only when a newer
+            // query or the deadline caused one (VFS-3 AC-7); otherwise it is an error.
+            Err(e)
+                if search::is_table_open_cut(&e)
+                    && (self.inner.searches.load(Ordering::SeqCst) != this
+                        || started.elapsed() >= self.inner.config.deadline) =>
+            {
+                Ok(search::interrupted_response(query, started))
+            }
+            r => r,
+        }
     }
 
     /// Absolute path of an indexed file, built from the original names.

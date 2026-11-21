@@ -566,17 +566,26 @@ where
     }
 }
 
-/// An interruption by a newer query or the deadline. One that lands while SQLite opens an
-/// FTS5 table surfaces as a generic "vtable constructor failed" error rather than
-/// `SQLITE_INTERRUPT` (seen on the Windows CI runner); it is an interruption too, so racing
-/// queries still return `Ok` (VFS-3 AC-7).
 fn is_interrupt(e: &rusqlite::Error) -> bool {
-    match e {
-        rusqlite::Error::SqliteFailure(f, Some(msg)) if f.code == ErrorCode::Unknown => {
-            msg.starts_with("vtable constructor failed")
-        }
-        _ => e.sqlite_error_code() == Some(ErrorCode::OperationInterrupted),
-    }
+    e.sqlite_error_code() == Some(ErrorCode::OperationInterrupted)
+}
+
+/// An FTS5 table that failed to open without its own reason. An interruption that lands
+/// while SQLite opens the table surfaces this way rather than as `SQLITE_INTERRUPT` (seen on
+/// the Windows CI runner), but so can a real failure: the facade counts it as an
+/// interruption only when one happened (VFS-3 AC-7).
+pub(crate) fn is_table_open_cut(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Db(rusqlite::Error::SqliteFailure(f, Some(msg)))
+            if f.code == ErrorCode::Unknown && msg.starts_with("vtable constructor failed")
+    )
+}
+
+/// The answer of a query cut short before it found anything.
+pub(crate) fn interrupted_response(query: &SearchQuery, start: Instant) -> SearchResponse {
+    let limit = query.limit.clamp(1, MAX_LIMIT) as usize;
+    interrupted(query.offset as usize, limit, start)
 }
 
 struct RootRow {
@@ -1750,24 +1759,26 @@ mod tests {
     use super::*;
     use crate::db::{self, ingest};
 
-    /// VFS-3 AC-7: an interruption that lands while an FTS5 table is opened counts as one,
-    /// like `SQLITE_INTERRUPT`; other errors do not.
+    /// VFS-3 AC-7: a failed FTS5 table open is recognised; interruptions and other errors
+    /// are not taken for one.
     #[test]
-    fn vtable_open_cut_short_is_an_interruption() {
+    fn table_open_cut_is_recognised() {
         let failure = |code: i32, msg: &str| {
-            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), Some(msg.into()))
+            Error::Db(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some(msg.into()),
+            ))
         };
         let ffi = rusqlite::ffi::SQLITE_ERROR;
-        assert!(is_interrupt(&failure(
+        assert!(is_table_open_cut(&failure(
             ffi,
             "vtable constructor failed: files_fts"
         )));
-        assert!(is_interrupt(&failure(
-            rusqlite::ffi::SQLITE_INTERRUPT,
-            "interrupted"
+        assert!(!is_table_open_cut(&failure(
+            ffi,
+            "no such table: files_fts"
         )));
-        assert!(!is_interrupt(&failure(ffi, "no such table: files_fts")));
-        assert!(!is_interrupt(&failure(
+        assert!(!is_table_open_cut(&failure(
             rusqlite::ffi::SQLITE_CORRUPT,
             "vtable constructor failed: files_fts"
         )));
