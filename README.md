@@ -160,8 +160,8 @@ The installer is built by the `release` GitHub Actions workflow
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)). It runs on Windows and
 macOS runners and produces:
 
-- `vfs-windows-installer`: an NSIS `*-setup.exe` in Spanish or English (from the system language), per-user install (no
-  administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
+- `vfs-windows-installer`: an NSIS `*-setup.exe` in Spanish or English (from the system
+  language), per-user install (no administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
   while installing if WebView2 is missing). It is unsigned, so Windows SmartScreen warns on
   first run and the user has to choose to run it anyway.
 - `vfs-macos`: a zipped, ad-hoc signed `VFS.app`.
