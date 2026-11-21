@@ -15,6 +15,10 @@ export const CATALOGS = Object.freeze({ [Lang.ES]: es, [Lang.EN]: en });
 /** The `Intl` locale of a language when the system locale is in another one. */
 const DEFAULT_INTL = Object.freeze({ [Lang.ES]: 'es-ES', [Lang.EN]: 'en-US' });
 
+/** Thousands separator: "1.234" in Spanish, "1,234" in English. Manual, as es-ES `Intl`
+ *  leaves 4-digit numbers ungrouped. */
+const GROUP = Object.freeze({ [Lang.ES]: '.', [Lang.EN]: ',' });
+
 /** BCP 47 form of a system locale: `es_ES.UTF-8` -> `es-ES`. */
 function bcp47(locale) {
   return String(locale || '').split('.')[0].replace(/_/g, '-');
@@ -44,5 +48,5 @@ export function intlLocale(lang, systemLocale) {
  *  and date formatters `N`. An unknown `lang` is Spanish. */
 export function localeFor(lang, systemLocale) {
   const l = Object.hasOwn(CATALOGS, lang) ? lang : Lang.ES;
-  return Object.freeze({ lang: l, S: CATALOGS[l], N: formatsFor(l, intlLocale(l, systemLocale)) });
+  return Object.freeze({ lang: l, S: CATALOGS[l], N: formatsFor(GROUP[l], intlLocale(l, systemLocale)) });
 }

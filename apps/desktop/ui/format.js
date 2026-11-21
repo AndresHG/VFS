@@ -2,15 +2,13 @@
 // needs. `formatsFor` builds one language's formatters; the screen holds them, so the module
 // keeps no state.
 
-const GROUP = { es: '.', en: ',' };
 const UNITS = ['KB', 'MB', 'GB', 'TB'];
 
 /** Spanish short months carry a dot ("mar."); the UI drops it. */
 const noDot = (s) => s.replace('.', '');
 
-/** The number and date formatters of `lang` ('es' | 'en') with `Intl` locale `intl`. */
-export function formatsFor(lang, intl) {
-  const group = GROUP[lang] ?? GROUP.es;
+/** Number and date formatters for `Intl` locale `intl`, grouping thousands with `group`. */
+export function formatsFor(group, intl) {
   const dec1 = new Intl.NumberFormat(intl, { maximumFractionDigits: 1 });
   const dateFmt = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short', year: 'numeric' });
   const timeFmt = new Intl.DateTimeFormat(intl, { hour: 'numeric', minute: '2-digit' });

@@ -2,7 +2,7 @@
 // words, no "index" jargon. Functions take already-formatted values.
 
 import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, ReadState, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -142,8 +142,8 @@ export const en = {
   remove: 'Remove',
   close: 'Close',
   rootStatus: {
-    pending: 'Waiting', scanning: 'Checking…', ready: 'Ready',
-    unavailable: 'Unavailable', removing: 'Removing…',
+    [RootStatus.PENDING]: 'Waiting', [RootStatus.SCANNING]: 'Checking…', [RootStatus.READY]: 'Ready',
+    [RootStatus.UNAVAILABLE]: 'Unavailable', [RootStatus.REMOVING]: 'Removing…',
   },
   rootFiles: files,
   rootChecked: (d) => `Checked on ${d}`,

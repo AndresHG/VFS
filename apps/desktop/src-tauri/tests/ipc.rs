@@ -68,7 +68,7 @@ fn progress_and_errors_over_ipc() {
     assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
 }
 
-/// VFS-22 AC-3: the UI reads the OS locale through `system_locale`, a string (empty when the
+/// VFS-22 R2: the UI reads the OS locale through `system_locale`, a string (empty when the
 /// OS does not say), with no index needed.
 #[test]
 fn system_locale_over_ipc() {

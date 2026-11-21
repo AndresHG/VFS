@@ -3,7 +3,7 @@
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
 import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, ReadState, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 export const es = {
   appName: 'Buscador de archivos',
@@ -144,8 +144,8 @@ export const es = {
   remove: 'Quitar',
   close: 'Cerrar',
   rootStatus: {
-    pending: 'En espera', scanning: 'Revisando…', ready: 'Lista',
-    unavailable: 'No disponible', removing: 'Quitando…',
+    [RootStatus.PENDING]: 'En espera', [RootStatus.SCANNING]: 'Revisando…', [RootStatus.READY]: 'Lista',
+    [RootStatus.UNAVAILABLE]: 'No disponible', [RootStatus.REMOVING]: 'Quitando…',
   },
   rootFiles: (n) => `${n} archivos`,
   rootChecked: (d) => `Revisada el ${d}`,
