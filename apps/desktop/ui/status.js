@@ -7,8 +7,6 @@ import { SearchState, View } from './choices.js';
 import { S } from './strings.js';
 import * as F from './format.js';
 
-const timeFmt = new Intl.DateTimeFormat('es-ES', { hour: 'numeric', minute: '2-digit' });
-const dayFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' });
 const DAY_MS = 86_400_000;
 
 function startOfDay(d) {
@@ -19,12 +17,12 @@ function startOfDay(d) {
 export function checkedAt(secs, now) {
   const d = new Date(secs * 1000);
   const today = new Date(now * 1000);
-  const time = timeFmt.format(d);
+  const time = F.time(d);
   const days = Math.round((startOfDay(today) - startOfDay(d)) / DAY_MS);
   if (days === 0) return S.today(time);
   if (days === 1) return S.yesterday(time);
   if (d.getFullYear() !== today.getFullYear()) return F.date(secs);
-  return S.dayAndTime(dayFmt.format(d).replace('.', ''), time);
+  return S.dayAndTime(F.dayMonth(d), time);
 }
 
 /** True while no root has finished its first scan. */

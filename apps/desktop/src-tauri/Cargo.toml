@@ -28,6 +28,8 @@ vfs-bookmarks.workspace = true
 serde_json.workspace = true
 log.workspace = true
 dunce.workspace = true
+# VFS-22 R2: the OS locale picks the UI language.
+sys-locale = "0.3"
 tauri-plugin-log = "2"
 tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 

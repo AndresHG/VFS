@@ -6,7 +6,8 @@ A desktop app for Windows and macOS that finds any file in a multi-TB personal a
 for 5 M files) by file name and folder path, with filters, typo and accent tolerance, and a
 "mostrar en carpeta" link that reveals the file in Explorer/Finder. Fully offline. Meant for
 anyone, including non-technical users, and tuned to run well even on a slow PC with a spinning
-disk and a busy sync client; the UI is Spanish. Product spec: `specs/vfs-1-core-search/spec.md`.
+disk and a busy sync client; the UI is Spanish and English (VFS-22). Product spec:
+`specs/vfs-1-core-search/spec.md`.
 
 ## Tech stack
 
@@ -116,6 +117,7 @@ is silent on success or when Rust is not installed. Hooks fail open.
 - Check whether a function exists before writing one (`grep` first); check signatures before
   calling.
 - Simple over clever; no abstractions for one caller; nothing for hypothetical requirements.
-- Code, identifiers, comments and specs are English; user-facing copy is Spanish.
+- Code, identifiers, comments and specs are English; user-facing copy goes in both catalogs,
+  `apps/desktop/ui/strings.es.js` and `strings.en.js`, same keys (VFS-22).
 - Comments state behavior and constraint and cite the spec, never who asked.
 - Never reference `.omc/` or any other untracked path from committed files.

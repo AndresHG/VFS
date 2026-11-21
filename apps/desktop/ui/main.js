@@ -1,7 +1,7 @@
 // The one screen (VFS-1 R9): search box, filters, virtualised results, folder panel, status.
 
 import { api } from './api.js';
-import { S } from './strings.js';
+import { S, languageFor, setLanguage } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
@@ -43,6 +43,29 @@ const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
 const BOOKMARK_ICON = 'bookmark';
 const OPEN_ICON = 'open';
 const REVEAL_ICON = 'reveal';
+
+/** Where the user's language choice is kept (VFS-22 R3); absent means the system language. */
+const LANGUAGE_KEY = 'vfs.language';
+
+function savedLanguage() {
+  try {
+    return localStorage.getItem(LANGUAGE_KEY);
+  } catch {
+    return null; // storage blocked: the system language applies
+  }
+}
+
+/** VFS-22 R2, R3: the language before anything is drawn. */
+async function applyLanguage() {
+  let system = '';
+  try {
+    system = await api.systemLocale();
+  } catch {
+    system = navigator.language;
+  }
+  const lang = setLanguage(languageFor(system, savedLanguage()), system);
+  document.documentElement.lang = lang;
+}
 
 // Everything that changes while the screen is open lives in this call's scope, owned by the
 // screen; the module itself holds only constants, never mutable state.
@@ -831,7 +854,7 @@ function main() {
     if (!missing.length || key === state.unavailableDismissed) { banner.hidden = true; return; }
     $('banner-unavailable-text').textContent = missing.length === 1
       ? S.unavailableOne(missing[0])
-      : S.unavailableMany(missing.map((p) => `«${p}»`).join(', '));
+      : S.unavailableMany(missing.map(S.quoted).join(', '));
     banner.hidden = false;
   }
   $('banner-unavailable-close').addEventListener('click', () => {
@@ -1129,4 +1152,5 @@ function main() {
   start();
 }
 
+await applyLanguage();
 main();

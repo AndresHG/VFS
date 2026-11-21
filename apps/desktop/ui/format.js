@@ -1,14 +1,34 @@
-// Formatting for Spanish (es-ES) and the matching helpers the row renderer needs.
+// Dates and numbers in the active language (VFS-22 R4), and the matching helpers the row
+// renderer needs. `setFormatLocale` (called by strings.js `setLanguage`) picks the language;
+// Spanish until then.
 
-/** 1234567 -> "1.234.567". Manual so 4-digit numbers group too (es-ES Intl prints "1234"). */
+const GROUP = { es: '.', en: ',' };
+let group = GROUP.es;
+let dec1;
+let dateFmt;
+let timeFmt;
+let dayFmt;
+
+/** Makes `lang` ('es' | 'en') and its `Intl` locale `intl` the formatting language. */
+export function setFormatLocale(lang, intl) {
+  group = GROUP[lang] ?? GROUP.es;
+  dec1 = new Intl.NumberFormat(intl, { maximumFractionDigits: 1 });
+  dateFmt = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short', year: 'numeric' });
+  timeFmt = new Intl.DateTimeFormat(intl, { hour: 'numeric', minute: '2-digit' });
+  dayFmt = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short' });
+}
+setFormatLocale('es', 'es-ES');
+
+/** 1234567 -> "1.234.567" (es) or "1,234,567" (en). Manual so 4-digit numbers group too
+ *  (es-ES Intl prints "1234"). */
 export function count(n) {
-  return String(Math.trunc(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return String(Math.trunc(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, group);
 }
 
-const dec1 = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
 const UNITS = ['KB', 'MB', 'GB', 'TB'];
 
-/** Bytes -> "1,2 MB" in binary units, the ones Windows Explorer shows. */
+/** Bytes -> "1,2 MB" (es) or "1.2 MB" (en) in binary units, the ones Windows Explorer shows.
+ *  "byte" is the same word in both languages. */
 export function size(bytes) {
   if (bytes < 1024) return bytes === 1 ? '1 byte' : `${count(bytes)} bytes`;
   let v = bytes / 1024;
@@ -17,11 +37,22 @@ export function size(bytes) {
   return `${v < 10 ? dec1.format(v) : count(Math.round(v))} ${UNITS[u]}`;
 }
 
-const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+/** Spanish short months carry a dot ("mar."); the UI drops it. */
+const noDot = (s) => s.replace('.', '');
 
-/** Unix seconds -> "12 mar 2021". */
+/** Unix seconds -> "12 mar 2021" (es) or "Mar 12, 2021" (en-US). */
 export function date(secs) {
-  return secs ? dateFmt.format(new Date(secs * 1000)).replace('.', '') : '';
+  return secs ? noDot(dateFmt.format(new Date(secs * 1000))) : '';
+}
+
+/** Date -> "9:14" (es) or "9:14 AM" (en-US). */
+export function time(d) {
+  return timeFmt.format(d);
+}
+
+/** Date -> "12 mar" (es) or "Mar 12" (en-US). */
+export function dayMonth(d) {
+  return noDot(dayFmt.format(d));
 }
 
 /**

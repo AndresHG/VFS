@@ -1,0 +1,196 @@
+// The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
+// words, no "index" jargon. Functions take already-formatted values.
+
+import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
+import { BookmarkRoot, ErrorCode, FileKind, ReadState, SortOrder } from './contract.js';
+
+const files = (n) => `${n} files`;
+
+export const en = {
+  appName: 'File Finder',
+  windowTitle: 'VFS — File Finder',
+  searchLabel: 'Search by file or folder name',
+  searchPlaceholder: 'For example: tax return 2023',
+  searchHint: 'Use the up and down arrows to move through the results, Enter to show the chosen one in its folder and Escape to clear the search.',
+  clearSearch: 'Clear the search',
+  devBadge: 'Test data',
+
+  filtersTitle: 'Filters',
+  fType: 'Type',
+  fDate: 'Date',
+  fSize: 'Size',
+  fFolder: 'Folder',
+  fFrom: 'From',
+  fTo: 'To',
+  typeButton: (...names) => (!names.length ? 'All types'
+    : names.length <= 2 ? names.join(', ') : `${names[0]} and ${names.length - 1} more`),
+  clearFilters: 'Clear filters',
+  clearFiltersN: (n) => `Clear filters (${n})`,
+  rangeInverted: 'The “From” date is after the “To” date.',
+
+  kindsPlural: {
+    [FileKind.DOCUMENT]: 'Documents', [FileKind.PHOTO]: 'Photos', [FileKind.VIDEO]: 'Videos',
+    [FileKind.AUDIO]: 'Audio', [FileKind.FOLDER]: 'Folders', [FileKind.OTHER]: 'Other',
+  },
+  kindSingular: {
+    [FileKind.DOCUMENT]: 'Document', [FileKind.PHOTO]: 'Photo', [FileKind.VIDEO]: 'Video',
+    [FileKind.AUDIO]: 'Audio', [FileKind.FOLDER]: 'Folder', [FileKind.OTHER]: 'Other',
+  },
+
+  dateOptions: {
+    [DateChoice.ANY]: 'Any date', [DateChoice.WEEK]: 'Last 7 days',
+    [DateChoice.MONTH]: 'Last 30 days', [DateChoice.YEAR]: 'Last year',
+    [DateChoice.CUSTOM]: 'Choose dates…',
+  },
+  sizeOptions: {
+    [SizeChoice.ANY]: 'Any size', [SizeChoice.SMALL]: 'Under 1 MB',
+    [SizeChoice.MEDIUM]: '1 MB to 100 MB', [SizeChoice.LARGE]: '100 MB to 1 GB',
+    [SizeChoice.HUGE]: 'Over 1 GB',
+  },
+  fSource: 'Search in',
+  sourceOptions: {
+    [SourceChoice.BOTH]: 'Files and bookmarks', [SourceChoice.FILES]: 'Files',
+    [SourceChoice.BOOKMARKS]: 'Bookmarks',
+  },
+  fSort: 'Order',
+  sortOptions: {
+    [SortOrder.RELEVANCE]: 'Best match first', [SortOrder.NEWEST]: 'Most recent first',
+    [SortOrder.SOURCE]: 'Files first, then bookmarks',
+  },
+  folderGroupBookmarks: 'Firefox bookmarks',
+  folderAll: 'All folders',
+  folderPick: 'Choose another folder…',
+  folderInside: (name) => `In: ${name}`,
+
+  resultsTitle: 'Results',
+  results: (n, one) => (one ? '1 result' : `${n} results`),
+  resultsCapped: (n) => `More than ${n} results. Type a little more to narrow them down.`,
+  resultsPartial: (n) => `${n} results. The search did not quite finish; some may be missing.`,
+  searching: 'Searching…',
+  fuzzyNote: 'No exact matches; showing similar results.',
+  loadingRow: 'Loading…',
+  revealButton: 'Show in folder',
+  revealKey: 'Enter',
+  unavailableBadge: 'Unavailable',
+  openButton: 'Open in Firefox',
+  folderContentsButton: 'See what is inside',
+  bookmarkKind: 'Bookmark',
+  bookmarkFolderKind: 'Bookmark folder',
+  bookmarkRoots: {
+    [BookmarkRoot.MENU]: 'Bookmarks Menu', [BookmarkRoot.TOOLBAR]: 'Bookmarks Toolbar',
+    [BookmarkRoot.UNFILED]: 'Other Bookmarks', [BookmarkRoot.MOBILE]: 'Mobile Bookmarks',
+  },
+  bookmarkRowLabel: (title, kind, path, site, date) =>
+    [title, kind, `in ${path}`, site, date && `saved on ${date}`].filter(Boolean).join(', '),
+  detailsBookmark: 'Address:',
+  detailsBookmarkFolder: 'Saved in:',
+  rowLabel: (name, kind, dir, date, size, unavailable, places = 1) =>
+    [name, kind, `in ${dir}`, date && `modified on ${date}`, size, unavailable && 'unavailable',
+      places > 1 && `in ${places} places, Shift plus Enter to see them`]
+      .filter(Boolean).join(', '),
+  copiesBadge: (n) => `in ${n} places`,
+  copiesBadgeLabel: (n) => `See the ${n} places where it is`,
+  copiesTitle: (name, n) => `“${name}” is in ${n} places`,
+  copiesIntro: 'These files have the same name and the same size: almost certainly copies of the same file. Choose the one you want to see.',
+  copiesModified: (date) => `Modified on ${date}`,
+  detailsLabel: 'Location:',
+
+  emptyNoRootsTitle: 'Add a folder to get started',
+  emptyNoRootsBody: 'Choose the folder where you keep your files. The app will go through it and then you can search it. Your files are never moved or changed.',
+  emptyFirstScanTitle: 'Getting the search ready…',
+  emptyFirstScanBody: (n) => `${n} files checked so far. You can search in the meantime; if you close the app, it carries on when you open it again.`,
+  emptyIdleTitle: (n) => `Type to search ${n} files`,
+  emptyIdleBody: 'You can type part of the name or of the folder. Capitals, accents and a wrong letter do not matter.',
+  emptyNoHitsTitle: (q) => (q ? `Nothing found for “${q}”` : 'No files match these filters'),
+  emptyNoHitsBody: 'Check what you typed or try fewer words.',
+  emptyNoHitsFilters: 'Some filters are on and may be hiding results.',
+  emptyDeadlineTitle: 'The search did not finish; please try again.',
+  emptyDeadlineBody: 'The computer is very busy right now. If it happens again, type another word.',
+  emptyErrorTitle: 'The search could not be done',
+  emptyErrorBody: 'Please try again in a moment.',
+  retry: 'Try again',
+  addFolderEllipsis: 'Add folder…',
+
+  firstScanNote: 'The search is getting ready. You can search in the meantime; if you close the app, it carries on when you open it again.',
+  unavailableOne: (p) => `The folder “${p}” cannot be found. Is the drive connected? Its files stay in the list, marked “Unavailable”.`,
+  quoted: (s) => `“${s}”`,
+  unavailableMany: (list) => `These folders cannot be found: ${list}. Are the drives connected? Their files stay in the list, marked “Unavailable”.`,
+  understood: 'Got it',
+  dismiss: 'Close notice',
+
+  statusScanning: (n, dirs) => `Checking folders… ${files(n)} found · ${dirs} folders to go`,
+  statusChecking: (n) => `Looking for changes… · ${files(n)}`,
+  statusPaused: (n) => `Check paused · ${files(n)} found`,
+  statusChecked: (when, n) => `Last checked: ${when} · ${files(n)}`,
+  statusFiles: files,
+  today: (time) => `today ${time}`,
+  yesterday: (time) => `yesterday ${time}`,
+  dayAndTime: (day, time) => `${day}, ${time}`,
+  statusReadyUnavailable: (n, k) => `${files(n)} · ${k === 1 ? '1 folder unavailable' : `${k} folders unavailable`}`,
+  statusNoRoots: 'No folders yet',
+  statusConnecting: 'Connecting…',
+  pause: 'Pause',
+  resume: 'Resume',
+  foldersButton: (n) => (n ? `Folders (${n})` : 'Folders'),
+
+  foldersTitle: 'Folders to search',
+  foldersIntro: 'The app only searches these folders and everything inside them. It never moves, changes or deletes your files.',
+  foldersEmpty: 'You have not added any folders yet.',
+  addFolder: 'Add folder…',
+  rescanAll: 'Look for changes now',
+  rescan: 'Check again',
+  remove: 'Remove',
+  close: 'Close',
+  rootStatus: {
+    pending: 'Waiting', scanning: 'Checking…', ready: 'Ready',
+    unavailable: 'Unavailable', removing: 'Removing…',
+  },
+  rootFiles: files,
+  rootChecked: (d) => `Checked on ${d}`,
+  rootNeverChecked: 'Not fully checked yet',
+  rescanStarted: 'Changes will be looked for in the background. You can keep searching meanwhile.',
+  rootAdded: (p) => `“${p}” was added. It is being checked; you can search in the meantime.`,
+  remoteWarning: 'This folder is on a network or removable drive. If it is disconnected, its files will be marked “Unavailable”.',
+  bookmarksTitle: 'Firefox bookmarks',
+  bookmarksToggle: 'Include Firefox bookmarks',
+  bookmarksIntro: 'Also searches the bookmarks saved in Firefox. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
+  bookmarksCount: (n, when) => `${n} bookmarks · read ${when}`,
+  bookmarksState: {
+    [ReadState.NEVER]: 'The bookmarks have not been read yet.',
+    [ReadState.READING]: 'Reading Firefox bookmarks…',
+    [ReadState.OK]: '',
+    [ReadState.FROM_BACKUP]: 'Firefox did not allow reading its latest bookmarks; its last backup is used instead.',
+    [ReadState.NO_FIREFOX]: 'No Firefox bookmarks were found on this computer.',
+    [ReadState.FAILED]: 'The Firefox bookmarks could not be read. It will be tried again later.',
+  },
+  removeTitle: 'Remove this folder?',
+  removeBody: 'It will no longer appear in searches. Its files are not deleted from the disk.',
+  cancel: 'Cancel',
+  removeConfirm: 'Remove folder',
+
+  revealedParent: 'The folder opened, but the file could not be selected.',
+  overlapInside: (p) => `That folder is already included, because it is inside “${p}”.`,
+  overlapParent: (p) => `That folder contains “${p}”, which is already in the list. Remove “${p}” first and then add the larger folder again.`,
+  overlapGeneric: 'That folder is already in the list or inside another folder in the list.',
+
+  errors: {
+    generic: 'Something went wrong. Please try again.',
+    reveal: {
+      [ErrorCode.NOT_FOUND]: 'The file is no longer in that location.',
+      [ErrorCode.UNAVAILABLE]: 'That folder is not available right now. Check that the drive is connected.',
+    },
+    openBookmark: {
+      [ErrorCode.NOT_FOUND]: 'That bookmark no longer exists in Firefox.',
+      [ErrorCode.UNAVAILABLE]: 'This bookmark is not a web page and cannot be opened.',
+    },
+    addRoot: {
+      [ErrorCode.NOT_FOUND]: 'That folder cannot be found.',
+      [ErrorCode.NOT_A_DIRECTORY]: 'That is not a folder. Please choose a folder.',
+      [ErrorCode.UNAVAILABLE]: 'That folder cannot be opened. Check that the drive is connected.',
+    },
+    any: {
+      [ErrorCode.SCHEMA_TOO_NEW]: 'The search data was made by a newer version of the app. Please install the latest version.',
+    },
+  },
+  backendMissing: 'Could not connect to the app. Close it and open it again.',
+};
