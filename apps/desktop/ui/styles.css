@@ -1,17 +1,17 @@
 /* VFS search screen, direction "Papel" (docs/design/system.md). Calm and legible for an older
    reader on a slow PC: one typeface designed for low vision (Atkinson Hyperlegible, OFL,
-   bundled), sizes in rem so the system text size applies, warm paper and ink with one accent,
-   light and dark from the system, no blur and no large shadows. */
+   bundled, with a plain zero), sizes in rem so the system text size applies, warm paper and
+   ink with one accent, light and dark from the system, no blur and no large shadows. */
 
 @font-face {
   font-family: "Atkinson Hyperlegible";
-  src: url("fonts/atkinson-400.woff2") format("woff2");
+  src: url("fonts/atkinson-400.ttf") format("truetype");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "Atkinson Hyperlegible";
-  src: url("fonts/atkinson-700.woff2") format("woff2");
+  src: url("fonts/atkinson-700.ttf") format("truetype");
   font-weight: 700;
   font-display: swap;
 }
