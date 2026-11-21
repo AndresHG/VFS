@@ -328,17 +328,21 @@ function main(L) {
       if (p) { state.pickedFolder = p; state.folder = p; renderFolderSelect(); filtersChanged(); }
     } catch (err) { showError(errorText(err)); }
   });
-  $('f-clear').addEventListener('click', () => {
+  /** Clears type, date, size and folder; a suggestion (VFS-13) keeps a bookmark folder. */
+  function clearFilters({ keepBookmarkFolder = false } = {}) {
     state.kinds.clear();
     for (const c of chips.querySelectorAll('input')) c.checked = false;
     state.date = DateChoice.ANY; $('f-date').value = DateChoice.ANY;
     $('date-range').hidden = true; $('f-from').value = ''; $('f-to').value = '';
     $('range-error').textContent = '';
     state.size = SizeChoice.ANY; $('f-size').value = SizeChoice.ANY;
-    state.folder = ''; $('f-folder').value = '';
+    if (!(keepBookmarkFolder && bookmarkFolderOf(state.folder) != null)) {
+      state.folder = ''; $('f-folder').value = '';
+    }
     filtersChanged();
     $('q').focus();
-  });
+  }
+  $('f-clear').addEventListener('click', () => clearFilters());
   $('filters').addEventListener('submit', (e) => e.preventDefault());
 
   function filtersChanged() {
@@ -436,7 +440,7 @@ function main(L) {
     q.value = s.text;
     state.text = s.text;
     $('q-clear').hidden = !s.text;
-    if (s.clearFilters) $('f-clear').click(); else runSearch();
+    if (s.clearFilters) clearFilters({ keepBookmarkFolder: true }); else runSearch();
     q.focus();
   }
 
