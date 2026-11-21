@@ -161,8 +161,9 @@ the last walk is older than a day, which missed changes made the same day while 
 Full re-walks run one at a time and a walk in progress is never restarted; a request for a
 folder being walked owes one more pass after it. Requests caused by lost events (a watch
 that failed, or an overflow whose history replay could not run, VFS-26) wait until the
-folder's last full walk is an hour old (spec I10). A sync client can produce event storms that overflow the watcher buffer repeatedly;
-restarting or chaining full walks would keep the HDD busy all day and never finish one.
+folder's last full walk is an hour old (spec I10). A sync client can produce event storms
+that overflow the watcher buffer repeatedly; restarting or chaining full walks would keep
+the HDD busy all day and never finish one.
 Rejected: restarting the walk on every overflow, and walking several folders in parallel on
 one disk.
 

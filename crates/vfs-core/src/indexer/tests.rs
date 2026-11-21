@@ -1537,6 +1537,9 @@ fn overflow_burst_gives_one_replay() {
     for (d, f) in [("A", "a.txt"), ("B", "b.txt"), ("C", "c.txt")] {
         fs::write(fx.root().join(d).join(f), b"x").unwrap();
     }
+    // FSEvents assigns ids late: events of these writes could reach the live watcher after
+    // it is armed and list C again.
+    std::thread::sleep(Duration::from_millis(1100));
     let (h, history) = overflow_indexer(&fx);
     let checked = fx.last_scan();
     wait_for("the cursor advanced", || {
@@ -1670,9 +1673,11 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     let away = fx.root().with_file_name("lejos");
     fs::rename(fx.root(), &away).unwrap();
     let before = history.replays.load(Ordering::SeqCst);
-    let held = stored_cursor(&fx.db_path, fx.root_id);
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
-    std::thread::sleep(Duration::from_millis(600));
+    // Read once the overflow froze the cursor: a check before it may still store one.
+    std::thread::sleep(Duration::from_millis(100));
+    let held = stored_cursor(&fx.db_path, fx.root_id);
+    std::thread::sleep(Duration::from_millis(500));
     fs::rename(&away, fx.tree.path()).unwrap();
     assert_eq!(history.replays.load(Ordering::SeqCst), before);
     assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held);
