@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use serde::Serialize;
-use vfs_core::{FileKind, SearchFilters, SearchQuery, TruncatedBy, Vfs};
+use vfs_core::{FileKind, SearchFilters, SearchQuery, SortOrder, TruncatedBy, Vfs};
 
 use crate::gen::{days_from_civil, AnyResult, ROOT_PATH};
 
@@ -78,8 +78,9 @@ fn year(y: i32) -> i64 {
 
 /// The fixed query set: every class of AC-9's "each query" that behaves differently in the
 /// engine (selective, multi-term, path-only, accent and typo variants, 1–2 characters,
-/// filters alone and with text, huge hit counts, nothing found).
-pub fn query_set() -> Vec<BenchQuery> {
+/// filters alone and with text, huge hit counts, nothing found), with every query in `order`
+/// (VFS-12: each order is held to the same budget).
+pub fn query_set(order: SortOrder) -> Vec<BenchQuery> {
     let mut out = Vec::new();
     let mut add = |class, text: &str, filters: SearchFilters, canary| {
         let mut label = text.to_string();
@@ -104,7 +105,7 @@ pub fn query_set() -> Vec<BenchQuery> {
                 filters,
                 limit: 100,
                 offset: 0,
-                sort: Default::default(),
+                sort: order,
             },
             canary,
         });
@@ -337,6 +338,8 @@ pub struct BenchReport {
     pub files: u64,
     pub dirs: u64,
     pub runs_per_query: u32,
+    /// Order of every query (VFS-12).
+    pub sort: SortOrder,
     /// First `Vfs::open` of the run (includes the integrity check).
     pub open_ms: f64,
     pub classes: Vec<ClassReport>,
@@ -421,7 +424,7 @@ pub fn canary_rank(
 /// Page size used to walk a ranked list (the search's maximum).
 const PAGE: u32 = 500;
 
-pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
+pub fn run(db: &Path, runs: u32, order: SortOrder) -> AnyResult<BenchReport> {
     if !db.is_file() {
         return Err(format!(
             "{} does not exist (create it with `vfs gen-db`)",
@@ -429,7 +432,7 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
         )
         .into());
     }
-    let queries = query_set();
+    let queries = query_set(order);
     let t = Instant::now();
     let vfs = Vfs::open(db)?;
     let open_ms = ms(t);
@@ -525,6 +528,7 @@ pub fn run(db: &Path, runs: u32) -> AnyResult<BenchReport> {
         files: stats.files,
         dirs: stats.dirs,
         runs_per_query: runs,
+        sort: order,
         open_ms,
         classes,
         overall,
@@ -547,13 +551,14 @@ fn mb(bytes: u64) -> f64 {
 /// Human-readable report.
 pub fn print_text(r: &BenchReport) {
     println!(
-        "db {} — {} files, {} dirs, {:.1} MB on disk; first open {:.0} ms; {} runs/query",
+        "db {} — {} files, {} dirs, {:.1} MB on disk; first open {:.0} ms; {} runs/query; sort {:?}",
         r.db,
         r.files,
         r.dirs,
         mb(r.db_bytes),
         r.open_ms,
-        r.runs_per_query
+        r.runs_per_query,
+        r.sort
     );
     println!(
         "{:<12} {:>3} | {:>8} {:>8} {:>8} | {:>8} {:>8} {:>8} | {:>5}",
@@ -604,7 +609,7 @@ mod tests {
     /// with several queries, and every canary query names a planted file.
     #[test]
     fn query_set_covers_classes() {
-        let qs = query_set();
+        let qs = query_set(SortOrder::Relevance);
         for class in QueryClass::ALL {
             let n = qs.iter().filter(|q| q.class == class).count();
             assert!(n >= 4, "class {} has {n} queries", class.name());
@@ -627,11 +632,35 @@ mod tests {
             .all(|q| q.query.text.is_empty()));
     }
 
+    /// VFS-12 AC-1: `vfs bench --sort` measures the same query set with every query in the
+    /// chosen order, so each order is held to the same latency budget.
+    #[test]
+    fn sorted_query_set_orders_every_query() {
+        let plain = query_set(SortOrder::Relevance);
+        for order in [
+            SortOrder::Newest,
+            SortOrder::Oldest,
+            SortOrder::Name,
+            SortOrder::Size,
+        ] {
+            let sorted = query_set(order);
+            assert_eq!(sorted.len(), plain.len());
+            for (s, p) in sorted.iter().zip(&plain) {
+                assert_eq!(s.query.sort, order);
+                assert_eq!(
+                    (s.label.as_str(), s.query.text.as_str()),
+                    (p.label.as_str(), p.query.text.as_str())
+                );
+            }
+        }
+        assert!(plain.iter().all(|q| q.query.sort == SortOrder::Relevance));
+    }
+
     /// VFS-1 AC-9: warm runs go round-robin, so consecutive measured searches always differ
     /// (a repeated query would be served from the cached ranked list, not measured).
     #[test]
     fn warm_runs_never_repeat_a_query_back_to_back() {
-        let n = query_set().len();
+        let n = query_set(SortOrder::Relevance).len();
         let order = warm_order(n, 5);
         assert_eq!(order.len(), n * 5);
         assert!(order.windows(2).all(|w| w[0] != w[1]));
