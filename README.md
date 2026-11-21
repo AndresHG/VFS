@@ -120,8 +120,8 @@ npx --yes @tauri-apps/cli@2.12.6 dev                    # run with live reload
 npx --yes @tauri-apps/cli@2.12.6 build --bundles app    # macOS: build VFS.app
 ```
 
-The app window is titled "VFS — Buscador de archivos". Use "Añadir carpeta…" to choose a
-folder; the scan starts at once and you can search while it runs.
+The app window is titled "VFS — Buscador de archivos" ("VFS — File Finder" in English). Use
+"Añadir carpeta…" ("Add folder…") to choose a folder; the scan starts at once and you can search while it runs.
 
 ### Command line
 

@@ -11,6 +11,7 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow, WebviewWindowBuilder};
 use vfs_core::Error;
+use vfs_desktop_lib::i18n::{self, Lang};
 use vfs_desktop_lib::{commands, init_core, AppState, INDEX_FILE};
 
 fn mock_app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
@@ -92,6 +93,48 @@ fn set_language_over_ipc() {
         let reply = invoke(&webview, "set_language", json!({ "lang": lang })).unwrap();
         assert!(reply.is_null(), "{lang}: {reply}");
     }
+}
+
+/// Every non-empty label of the app menu built in `lang`: submenus and their items.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn menu_labels(app: &App<MockRuntime>, lang: Lang) -> Vec<String> {
+    let menu = i18n::menu(app.handle(), lang).expect("menu");
+    let mut out = Vec::new();
+    for kind in menu.items().unwrap() {
+        let sub = kind.as_submenu().expect("top level is submenus");
+        out.push(sub.text().unwrap());
+        for item in sub.items().unwrap() {
+            if let Some(p) = item.as_predefined_menuitem() {
+                out.push(p.text().unwrap());
+            }
+        }
+    }
+    out.retain(|l| !l.is_empty());
+    out
+}
+
+/// VFS-22 AC-6: the app menu is built in the language asked for: its submenus and items carry
+/// that language's words, with the product name filled in. Off macOS only: AppKit builds menus
+/// only on the main thread, which the mock runtime lacks.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn menu_is_built_in_the_language() {
+    let (app, _webview) = mock_app();
+    let name = app.package_info().name.clone();
+    for lang in [Lang::Es, Lang::En] {
+        let m = &lang.strings().menu;
+        let labels = menu_labels(&app, lang);
+        for want in [m.edit, m.view, m.window, m.copy, m.paste, m.close_window] {
+            assert!(
+                labels.iter().any(|l| l == want),
+                "{lang:?}: {want} in {labels:?}"
+            );
+        }
+        let quit = m.quit.replace("{app}", &name);
+        assert!(labels.contains(&quit), "{lang:?}: {quit} in {labels:?}");
+        assert!(labels.iter().all(|l| !l.contains("{app}")), "{labels:?}");
+    }
+    assert_ne!(menu_labels(&app, Lang::Es), menu_labels(&app, Lang::En));
 }
 
 fn write_file(path: &Path) {

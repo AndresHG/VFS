@@ -27,7 +27,9 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from journey import App, now  # noqa: E402
 
-TITLE = "VFS — Buscador de archivos"
+# The main window title in either language (VFS-22: it follows the system language);
+# `window_title` in apps/desktop/src-tauri/src/i18n.rs.
+TITLES = ("VFS — Buscador de archivos", "VFS — File Finder")
 # Window class of the native splash (`SPLASH_CLASS`, apps/desktop/src-tauri/src/splash.rs).
 SPLASH_CLASS = "VfsSplash"
 
@@ -50,7 +52,7 @@ def watch_splash(t0, out, run, timeout):
          "time_to_main_visible_s": None}
     while now() - t0 < timeout:
         h = visible(SPLASH_CLASS, None)
-        main = visible(None, TITLE)
+        main = next((m for m in (visible(None, t) for t in TITLES) if m), None)
         t = round(now() - t0, 2)
         if main and r["time_to_main_visible_s"] is None:
             r["time_to_main_visible_s"] = t
@@ -80,12 +82,12 @@ def find_window(timeout):
     while now() - t0 < timeout:
         for w in Desktop(backend="uia").windows():
             try:
-                if w.window_text() == TITLE:
+                if w.window_text() in TITLES:
                     return w, now() - t0
             except Exception:
                 pass
         time.sleep(0.25)
-    raise TimeoutError(f"no window titled {TITLE!r} after {timeout}s")
+    raise TimeoutError(f"no window titled one of {TITLES!r} after {timeout}s")
 
 
 def painted(w):
