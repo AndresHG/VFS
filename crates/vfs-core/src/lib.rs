@@ -119,6 +119,12 @@ impl Vfs {
         roots::list_roots(&lock(&self.inner.reader))
     }
 
+    /// The folders of a root that could not be listed, in path order, at most 500; the
+    /// root's `unreadable` holds the full count (VFS-10 R4).
+    pub fn unreadable_dirs(&self, root_id: i64) -> Result<Vec<UnreadableDir>> {
+        roots::unreadable_dirs(&lock(&self.inner.reader), root_id)
+    }
+
     /// `path` must be an existing directory that neither contains nor is inside another root.
     pub fn add_root(&self, path: &Path) -> Result<Root> {
         let mut conn = db::open_rw(&self.inner.db_path)?;

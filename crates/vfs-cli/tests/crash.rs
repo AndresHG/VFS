@@ -320,7 +320,8 @@ fn make_v1(src: &Path, dst: &Path) {
         "INSERT INTO meta SELECT * FROM cur.meta;
          INSERT INTO volumes SELECT * FROM cur.volumes;
          INSERT INTO roots SELECT * FROM cur.roots;
-         INSERT INTO dirs SELECT * FROM cur.dirs;
+         INSERT INTO dirs SELECT id, root_id, parent_id, rel_path, path_key, name_key, mtime,
+           scan_state FROM cur.dirs;
          INSERT INTO files SELECT * FROM cur.files;
          INSERT INTO files_fts(rowid, name_key) SELECT id, name_key FROM files;
          INSERT INTO dirs_fts(rowid, path_key, name_key) SELECT id, path_key, name_key FROM dirs;

@@ -3,7 +3,7 @@
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
 
 export const es = {
   appName: 'Buscador de archivos',
@@ -171,6 +171,18 @@ export const es = {
     [RootStatus.UNAVAILABLE]: 'No disponible', [RootStatus.REMOVING]: 'Quitando…',
   },
   rootFiles: (n) => `${n} archivos`,
+  // Folders that could not be read (VFS-10 R5): empty for none; `n` is `count` formatted.
+  unreadableLine: (count, n) => (!count ? '' : count === 1 ? '1 carpeta no se pudo revisar'
+    : `${n} carpetas no se pudieron revisar`),
+  unreadableSee: 'Ver',
+  unreadableTitle: 'Carpetas que no se pudieron revisar',
+  unreadableIntro: 'Estas carpetas no se pudieron abrir. Lo que contienen no aparece en las búsquedas.',
+  unreadableReason: {
+    [UnreadableReason.NO_PERMISSION]: 'Sin permiso', [UnreadableReason.UNAVAILABLE]: 'No disponible',
+    [UnreadableReason.CLOUD_ONLY]: 'Solo en la nube', [UnreadableReason.DISK_ERROR]: 'Error de disco',
+  },
+  unreadableMore: (n) => `y ${n} más`,
+  unreadableHint: 'Cuando la carpeta vuelva a estar disponible, pulse «Buscar cambios ahora» para revisarla otra vez.',
   rootChecked: (d) => `Revisada el ${d}`,
   rootNeverChecked: 'Aún no se ha terminado de revisar',
   rescanStarted: 'Se buscarán cambios en segundo plano. Puede seguir buscando mientras tanto.',

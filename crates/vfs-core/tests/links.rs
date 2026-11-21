@@ -267,8 +267,12 @@ fn migration_queues_existing_shortcuts() {
             )
             .unwrap();
         }
-        tx.execute_batch("DROP TABLE links; UPDATE dirs SET scan_state = 0;")
-            .unwrap();
+        // Back to version 4: without the `links` table and version 6's `dirs.error`.
+        tx.execute_batch(
+            "DROP TABLE links; DROP INDEX dirs_unreadable; ALTER TABLE dirs DROP COLUMN error; \
+             UPDATE dirs SET scan_state = 0;",
+        )
+        .unwrap();
         tx.pragma_update(None, "user_version", 4).unwrap();
         tx.commit().unwrap();
     }

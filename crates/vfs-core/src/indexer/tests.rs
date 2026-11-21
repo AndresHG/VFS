@@ -98,7 +98,6 @@ impl Fx {
     }
 
     /// One `run` with nothing to stop it, keeping `retries` across calls.
-    #[cfg(unix)]
     fn run_once(&mut self, retries: &mut Retries) -> ScanSummary {
         let mut pass = Pass::default();
         run(
@@ -1214,4 +1213,131 @@ fn a_broken_link_row_does_not_stall_the_link_pass() {
         .unwrap();
     assert_eq!(states[0], (0, ingest::LinkState::Unreadable as i64));
     assert_eq!(states[1].1, ingest::LinkState::Read as i64);
+}
+
+/// The unreadable reason stored on the directory `rel`, if any (VFS-10).
+fn reason_of(conn: &Connection, rel: &str) -> Option<UnreadableReason> {
+    conn.query_row("SELECT error FROM dirs WHERE rel_path = ?1", [rel], |r| {
+        r.get::<_, Option<i64>>(0)
+    })
+    .unwrap()
+    .map(UnreadableReason::from_code)
+}
+
+/// The root's unreadable count as the folders panel reads it (VFS-10 R4).
+fn unreadable_count(conn: &Connection) -> u64 {
+    crate::roots::list_roots(conn).unwrap()[0].unreadable
+}
+
+/// VFS-10 AC-1, AC-2: a folder the user cannot read is recorded "no permission" at its first
+/// failure and counts at once, while it is still retried; a re-walk that fails again keeps
+/// it; once readable and listed, it is forgotten; a deleted folder takes its reason along.
+#[cfg(unix)]
+#[test]
+fn unreadable_folder_is_recorded_kept_and_forgotten() {
+    let mut fx = fixture(&["Abierta", "Cerrada", "Borrada"]);
+    fx.scan();
+    let locked = Locked::new(fx.root().join("Cerrada"));
+    if fs::read_dir(&locked.0).is_ok() {
+        return; // running as root: permissions do not apply
+    }
+    let (cerrada, _) = fx.dir("Cerrada").unwrap();
+    let mut retries = Retries::new();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.run_once(&mut retries);
+    assert_eq!(
+        reason_of(&fx.conn, "Cerrada"),
+        Some(UnreadableReason::NoPermission)
+    );
+    assert_eq!(unreadable_count(&fx.conn), 1);
+    assert_ne!(fx.dir("Cerrada").unwrap().1, CLEAN, "still retried");
+    assert_eq!(retries[&cerrada].attempts, 1);
+    let list = crate::roots::unreadable_dirs(&fx.conn, fx.root_id).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, cerrada);
+    assert_eq!(Path::new(&list[0].path), fx.root().join("Cerrada"));
+    assert_eq!(list[0].reason, UnreadableReason::NoPermission);
+    assert_eq!(reason_of(&fx.conn, "Abierta"), None);
+
+    // A later full walk queues it again; failing again keeps it counted.
+    retries.clear();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.run_once(&mut retries);
+    assert_eq!(unreadable_count(&fx.conn), 1);
+
+    // Readable again: the next listing forgets it.
+    drop(locked);
+    retries.get_mut(&cerrada).unwrap().next_at = Instant::now();
+    fx.run_once(&mut retries);
+    assert_eq!(reason_of(&fx.conn, "Cerrada"), None);
+    assert_eq!(unreadable_count(&fx.conn), 0);
+
+    // A recorded folder deleted from disk goes with its reason.
+    let (borrada, _) = fx.dir("Borrada").unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    ingest::record_unreadable(&tx, borrada, UnreadableReason::DiskError, true).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(unreadable_count(&fx.conn), 1);
+    fs::remove_dir_all(fx.root().join("Borrada")).unwrap();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(unreadable_count(&fx.conn), 0);
+}
+
+/// VFS-10 AC-6: a folder whose listing fails with an error other than "no permission" (here
+/// a file now stands where the folder was) gets no reason while it is retried, and "disk
+/// error" once its retries are exhausted; a re-walk that fails again keeps it.
+#[test]
+fn other_failures_count_only_after_the_retries() {
+    let mut fx = fixture(&["Abierta", "Rota"]);
+    fx.scan();
+    fs::remove_dir_all(fx.root().join("Rota")).unwrap();
+    fs::write(fx.root().join("Rota"), b"x").unwrap();
+    let (rota, _) = fx.dir("Rota").unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_dir_state(&tx, rota, ingest::ScanState::PendingShallow).unwrap();
+    tx.commit().unwrap();
+    let mut retries = Retries::new();
+    for attempt in 1..=RETRY_ATTEMPTS {
+        assert_eq!(fx.run_once(&mut retries).errors, 1, "attempt {attempt}");
+        if attempt < RETRY_ATTEMPTS {
+            assert_eq!(reason_of(&fx.conn, "Rota"), None, "attempt {attempt}");
+            assert_eq!(unreadable_count(&fx.conn), 0);
+            retries.get_mut(&rota).unwrap().next_at = Instant::now();
+        }
+    }
+    assert_eq!(
+        reason_of(&fx.conn, "Rota"),
+        Some(UnreadableReason::DiskError)
+    );
+    assert_eq!(unreadable_count(&fx.conn), 1);
+
+    // Queued again and failing once more: still counted (VFS-10 AC-2).
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_dir_state(&tx, rota, ingest::ScanState::PendingShallow).unwrap();
+    tx.commit().unwrap();
+    fx.run_once(&mut retries);
+    assert_eq!(unreadable_count(&fx.conn), 1);
+}
+
+/// VFS-10 AC-2: removing a root takes the reasons of its folders along.
+#[test]
+fn removing_a_root_forgets_its_unreadable_folders() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    let (a, _) = fx.dir("A").unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    ingest::record_unreadable(&tx, a, UnreadableReason::CloudOnly, true).unwrap();
+    tx.commit().unwrap();
+    crate::roots::remove_root(&mut fx.conn, fx.root_id).unwrap();
+    assert!(finish_removing(&fx.conn, &|| false).unwrap());
+    let left: i64 = fx
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM dirs WHERE error IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(left, 0);
 }

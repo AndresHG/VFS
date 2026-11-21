@@ -118,7 +118,7 @@ pub(crate) fn apply_listing(
         summary.files_removed += removed;
         changed += 1 + removed;
     }
-    ingest::set_dir_state(tx, dir_id, ScanState::Clean)?;
+    ingest::mark_listed(tx, dir_id)?;
     summary.dirs_listed += 1;
     Ok(changed + 1)
 }

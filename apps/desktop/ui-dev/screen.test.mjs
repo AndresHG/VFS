@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { CATALOGS, Lang } from '../ui/strings.js';
-import { FileKind, LinkKind, Source } from '../ui/contract.js';
+import { FileKind, LinkKind, Source, UnreadableReason } from '../ui/contract.js';
 import { DateChoice, SizeChoice } from '../ui/choices.js';
 import { placesOf } from '../ui/copies.js';
 import { SecondAction, secondActionOf } from '../ui/links.js';
@@ -186,4 +186,24 @@ test('reduced motion and high contrast are honoured', () => {
     const body = forced.slice(at, forced.indexOf('}', at));
     assert.match(body, /Highlight|CanvasText|outline/, `${sel} drawn with system colours or an outline`);
   }
+});
+
+/** VFS-10 AC-4: the unreadable-folders line has a singular and a plural form and no text for
+ *  none (the panel hides it), every reason
+ *  has its plain text, and the "y N más" line names the rest; in both catalogs. */
+test('folders that could not be read have their wording', () => {
+  const { es, en } = { es: CATALOGS[Lang.ES], en: CATALOGS[Lang.EN] };
+  assert.equal(es.unreadableLine(1, '1'), '1 carpeta no se pudo revisar');
+  assert.equal(es.unreadableLine(1234, '1.234'), '1.234 carpetas no se pudieron revisar');
+  assert.equal(en.unreadableLine(1, '1'), '1 folder could not be checked');
+  assert.equal(en.unreadableLine(3, '3'), '3 folders could not be checked');
+  // None: no text, so the line stays hidden.
+  assert.equal(es.unreadableLine(0, '0'), '');
+  assert.equal(en.unreadableLine(0, '0'), '');
+  for (const cat of [es, en]) {
+    for (const reason of Object.values(UnreadableReason)) assert.ok(cat.unreadableReason[reason], reason);
+    assert.ok(cat.unreadableMore('7').includes('7'));
+    assert.ok(cat.unreadableSee && cat.unreadableTitle && cat.unreadableHint);
+  }
+  assert.deepEqual(Object.values(es.unreadableReason).sort(), ['Error de disco', 'No disponible', 'Sin permiso', 'Solo en la nube']);
 });

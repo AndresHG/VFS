@@ -22,7 +22,7 @@
 
 import {
   BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
-  RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy,
+  RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -237,9 +237,18 @@ export function createFakeBackend(params) {
     return r && r.status !== RootStatus.REMOVING && e.seq < done.get(r.id);
   };
 
+  /** Folders of a root that could not be listed (VFS-10): two in the first root, for the panel. */
+  function unreadableOf(r) {
+    if (r.id !== roots[0]?.id) return [];
+    return [
+      { id: 9001, path: `${r.path}\\Privado`, reason: UnreadableReason.NO_PERMISSION },
+      { id: 9002, path: `${r.path}\\Nube\\Viajes`, reason: UnreadableReason.CLOUD_ONLY },
+    ];
+  }
+
   function rootView(r) {
     const n = done.get(r.id) || 0;
-    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? DriveKind.LOCAL };
+    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? DriveKind.LOCAL, unreadable: unreadableOf(r).length };
   }
 
   function progress() {
@@ -333,6 +342,12 @@ export function createFakeBackend(params) {
     async setLanguage() {},
 
     async listRoots() { await sleep(30); return roots.map(rootView); },
+
+    async listUnreadable(rootId) {
+      await sleep(30);
+      const r = roots.find((x) => x.id === rootId);
+      return r ? unreadableOf(r) : [];
+    },
 
     async pickFolder() {
       await sleep(250);

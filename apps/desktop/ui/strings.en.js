@@ -2,7 +2,7 @@
 // words, no "index" jargon. Functions take already-formatted values.
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -169,6 +169,18 @@ export const en = {
     [RootStatus.UNAVAILABLE]: 'Unavailable', [RootStatus.REMOVING]: 'Removing…',
   },
   rootFiles: files,
+  // Folders that could not be read (VFS-10 R5): empty for none; `n` is `count` formatted.
+  unreadableLine: (count, n) => (!count ? '' : count === 1 ? '1 folder could not be checked'
+    : `${n} folders could not be checked`),
+  unreadableSee: 'View',
+  unreadableTitle: 'Folders that could not be checked',
+  unreadableIntro: 'These folders could not be opened. What they contain does not appear in searches.',
+  unreadableReason: {
+    [UnreadableReason.NO_PERMISSION]: 'No permission', [UnreadableReason.UNAVAILABLE]: 'Not available',
+    [UnreadableReason.CLOUD_ONLY]: 'Cloud only', [UnreadableReason.DISK_ERROR]: 'Disk error',
+  },
+  unreadableMore: (n) => `and ${n} more`,
+  unreadableHint: 'When the folder is available again, press “Look for changes now” to check it again.',
   rootChecked: (d) => `Checked on ${d}`,
   rootNeverChecked: 'Not fully checked yet',
   rescanStarted: 'Changes will be looked for in the background. You can keep searching meanwhile.',

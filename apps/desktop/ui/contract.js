@@ -29,6 +29,11 @@ export const MatchKind = Object.freeze({ NAME: 'name', PATH: 'path', FUZZY: 'fuz
 /** What kind of link a file result is (VFS-18): `SearchHit.link.kind`. */
 export const LinkKind = Object.freeze({ SHORTCUT: 'shortcut', INTERNET: 'internet', SYMLINK: 'symlink' });
 
+// Why a folder could not be listed (VFS-10).
+export const UnreadableReason = Object.freeze({
+  NO_PERMISSION: 'no_permission', UNAVAILABLE: 'unavailable', CLOUD_ONLY: 'cloud_only', DISK_ERROR: 'disk_error',
+});
+
 export const DriveKind = Object.freeze({
   LOCAL: 'local',
   NETWORK: 'network',

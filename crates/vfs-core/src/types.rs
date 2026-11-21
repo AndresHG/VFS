@@ -141,6 +141,49 @@ impl LinkKind {
     }
 }
 
+/// Why a folder could not be listed (VFS-10 R3); stored in `dirs.error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnreadableReason {
+    NoPermission,
+    Unavailable,
+    CloudOnly,
+    DiskError,
+}
+
+impl UnreadableReason {
+    /// Value stored in `dirs.error`.
+    pub fn code(self) -> i64 {
+        match self {
+            UnreadableReason::NoPermission => 0,
+            UnreadableReason::Unavailable => 1,
+            UnreadableReason::CloudOnly => 2,
+            UnreadableReason::DiskError => 3,
+        }
+    }
+
+    /// Inverse of [`UnreadableReason::code`]; unknown values read as `DiskError`.
+    pub fn from_code(code: i64) -> UnreadableReason {
+        match code {
+            0 => UnreadableReason::NoPermission,
+            1 => UnreadableReason::Unavailable,
+            2 => UnreadableReason::CloudOnly,
+            _ => UnreadableReason::DiskError,
+        }
+    }
+}
+
+/// A folder that could not be listed (VFS-10 R4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadableDir {
+    /// `dirs.id`, what `reveal` takes with `isDir`.
+    pub id: i64,
+    /// Absolute path, native separators.
+    pub path: String,
+    pub reason: UnreadableReason,
+}
+
 /// Where a link result points (VFS-18 D2), as read from the link itself; nothing about the
 /// target is checked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -330,6 +373,8 @@ pub struct Root {
     pub last_full_scan: Option<i64>,
     /// Asked of the system each time roots are read.
     pub drive: DriveKind,
+    /// Folders of this root that could not be listed (VFS-10 R4).
+    pub unreadable: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,10 +526,12 @@ mod tests {
             dirs: 1,
             last_full_scan: Some(9),
             drive: DriveKind::Removable,
+            unreadable: 2,
         };
         let v = serde_json::to_value(&root).unwrap();
         assert_eq!(v["lastFullScan"], json!(9));
         assert_eq!(v["drive"], json!("removable"));
+        assert_eq!(v["unreadable"], json!(2));
         let s = IndexStats {
             files: 1,
             dirs: 2,

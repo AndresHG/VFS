@@ -719,6 +719,18 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .root-path { font-weight: 700; overflow-wrap: anywhere; display: flex; gap: var(--s2); align-items: flex-start; }
 .root-path svg { color: var(--folder); margin-top: 0.1em; }
 .root-meta { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); color: var(--ink-2); font-size: var(--t-meta); }
+/* VFS-10: "N carpetas no se pudieron revisar · Ver" under a chosen folder. */
+.root-unreadable { color: var(--warn-ink); font-size: var(--t-meta); }
+.root-unreadable[hidden] { display: none; }
+.link-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .root-state { display: inline-flex; align-items: center; gap: var(--s2); font-weight: 700; color: var(--ink); }
 .root-state::before {
   content: "";

@@ -5,6 +5,8 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::types::UnreadableReason;
+
 pub(crate) enum EntryKind {
     File {
         size: u64,
@@ -149,9 +151,171 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
     Ok(out)
 }
 
+/// Every `ERROR_CLOUD_FILE_*` code of `winerror.h` (Windows SDK, windows-sys 0.61): a listing
+/// that fails with one of them is a cloud-only folder (VFS-10 R3). Checked against
+/// windows-sys on Windows by `tests::cloud_codes_match_windows_sys`.
+const CLOUD_FILE_ERRORS: [i32; 32] = [
+    358, 362, 363, 364, 365, 366, 374, 375, 377, 378, 379, 380, 381, 382, 383, 386, 387, 388, 389,
+    390, 391, 392, 393, 394, 395, 396, 397, 398, 404, 426, 434, 475,
+];
+
+/// Windows codes of a device or network that is absent or not answering (VFS-10 R3):
+/// `ERROR_NOT_READY`, `ERROR_BAD_NETPATH`, `ERROR_DEV_NOT_EXIST`, `ERROR_UNEXP_NET_ERR`,
+/// `ERROR_NETNAME_DELETED`, `ERROR_BAD_NET_NAME`, `ERROR_SEM_TIMEOUT`,
+/// `ERROR_NETWORK_UNREACHABLE`.
+const WINDOWS_UNAVAILABLE: [i32; 8] = [21, 53, 55, 59, 64, 67, 121, 1231];
+
+/// Why a listing failed, from the error alone (VFS-10 R3). `windows` says whether
+/// `raw_os_error` is a Win32 code or an `errno`, so both tables are tested everywhere.
+pub(crate) fn unreadable_reason(e: &std::io::Error, windows: bool) -> UnreadableReason {
+    use std::io::ErrorKind as K;
+    match e.kind() {
+        K::PermissionDenied => return UnreadableReason::NoPermission,
+        K::TimedOut
+        | K::HostUnreachable
+        | K::NetworkUnreachable
+        | K::NetworkDown
+        | K::StaleNetworkFileHandle => return UnreadableReason::Unavailable,
+        _ => {}
+    }
+    let Some(code) = e.raw_os_error() else {
+        return UnreadableReason::DiskError;
+    };
+    if windows {
+        if CLOUD_FILE_ERRORS.contains(&code) {
+            return UnreadableReason::CloudOnly;
+        }
+        if WINDOWS_UNAVAILABLE.contains(&code) {
+            return UnreadableReason::Unavailable;
+        }
+    } else if unix_unavailable(code) {
+        return UnreadableReason::Unavailable;
+    }
+    UnreadableReason::DiskError
+}
+
+/// `ENXIO`, `ENODEV`, `EHOSTDOWN` (VFS-10 R3).
+#[cfg(unix)]
+fn unix_unavailable(code: i32) -> bool {
+    [libc::ENXIO, libc::ENODEV, libc::EHOSTDOWN].contains(&code)
+}
+
+#[cfg(not(unix))]
+fn unix_unavailable(_: i32) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-10 AC-3: each row of the reason table maps to its reason.
+    #[test]
+    fn listing_errors_map_to_reasons() {
+        use std::io::{Error, ErrorKind as K};
+        use UnreadableReason as R;
+        let kind = |k| Error::from(k);
+        for windows in [true, false] {
+            assert_eq!(
+                unreadable_reason(&kind(K::PermissionDenied), windows),
+                R::NoPermission
+            );
+            for k in [
+                K::TimedOut,
+                K::HostUnreachable,
+                K::NetworkUnreachable,
+                K::NetworkDown,
+            ] {
+                assert_eq!(
+                    unreadable_reason(&kind(k), windows),
+                    R::Unavailable,
+                    "{k:?}"
+                );
+            }
+            assert_eq!(unreadable_reason(&kind(K::Other), windows), R::DiskError);
+        }
+        let raw = Error::from_raw_os_error;
+        for code in WINDOWS_UNAVAILABLE {
+            assert_eq!(
+                unreadable_reason(&raw(code), true),
+                R::Unavailable,
+                "{code}"
+            );
+        }
+        // The first and last cloud codes, and one between.
+        for code in [358, 395, 475] {
+            assert_eq!(unreadable_reason(&raw(code), true), R::CloudOnly, "{code}");
+        }
+        // 367 (ERROR_CHILD_PROCESS_BLOCKED) lies inside the range but is no cloud error;
+        // 1117 is ERROR_IO_DEVICE.
+        for code in [367, 1117] {
+            assert_eq!(unreadable_reason(&raw(code), true), R::DiskError, "{code}");
+        }
+        #[cfg(unix)]
+        {
+            for code in [libc::ENXIO, libc::ENODEV, libc::EHOSTDOWN] {
+                assert_eq!(
+                    unreadable_reason(&raw(code), false),
+                    R::Unavailable,
+                    "{code}"
+                );
+            }
+            assert_eq!(unreadable_reason(&raw(libc::EIO), false), R::DiskError);
+        }
+    }
+
+    /// VFS-10 R3: the cloud-file codes are exactly windows-sys's `ERROR_CLOUD_FILE_*`.
+    #[cfg(windows)]
+    #[test]
+    fn cloud_codes_match_windows_sys() {
+        use windows_sys::Win32::Foundation::*;
+        let named = [
+            ERROR_CLOUD_FILE_SYNC_ROOT_METADATA_CORRUPT,
+            ERROR_CLOUD_FILE_PROVIDER_NOT_RUNNING,
+            ERROR_CLOUD_FILE_METADATA_CORRUPT,
+            ERROR_CLOUD_FILE_METADATA_TOO_LARGE,
+            ERROR_CLOUD_FILE_PROPERTY_BLOB_TOO_LARGE,
+            ERROR_CLOUD_FILE_PROPERTY_BLOB_CHECKSUM_MISMATCH,
+            ERROR_CLOUD_FILE_TOO_MANY_PROPERTY_BLOBS,
+            ERROR_CLOUD_FILE_PROPERTY_VERSION_NOT_SUPPORTED,
+            ERROR_CLOUD_FILE_NOT_IN_SYNC,
+            ERROR_CLOUD_FILE_ALREADY_CONNECTED,
+            ERROR_CLOUD_FILE_NOT_SUPPORTED,
+            ERROR_CLOUD_FILE_INVALID_REQUEST,
+            ERROR_CLOUD_FILE_READ_ONLY_VOLUME,
+            ERROR_CLOUD_FILE_CONNECTED_PROVIDER_ONLY,
+            ERROR_CLOUD_FILE_VALIDATION_FAILED,
+            ERROR_CLOUD_FILE_AUTHENTICATION_FAILED,
+            ERROR_CLOUD_FILE_INSUFFICIENT_RESOURCES,
+            ERROR_CLOUD_FILE_NETWORK_UNAVAILABLE,
+            ERROR_CLOUD_FILE_UNSUCCESSFUL,
+            ERROR_CLOUD_FILE_NOT_UNDER_SYNC_ROOT,
+            ERROR_CLOUD_FILE_IN_USE,
+            ERROR_CLOUD_FILE_PINNED,
+            ERROR_CLOUD_FILE_REQUEST_ABORTED,
+            ERROR_CLOUD_FILE_PROPERTY_CORRUPT,
+            ERROR_CLOUD_FILE_ACCESS_DENIED,
+            ERROR_CLOUD_FILE_INCOMPATIBLE_HARDLINKS,
+            ERROR_CLOUD_FILE_PROPERTY_LOCK_CONFLICT,
+            ERROR_CLOUD_FILE_REQUEST_CANCELED,
+            ERROR_CLOUD_FILE_PROVIDER_TERMINATED,
+            ERROR_CLOUD_FILE_REQUEST_TIMEOUT,
+            ERROR_CLOUD_FILE_DEHYDRATION_DISALLOWED,
+            ERROR_CLOUD_FILE_US_MESSAGE_TIMEOUT,
+        ];
+        assert_eq!(named.map(|c| c as i32), CLOUD_FILE_ERRORS);
+        let unavailable = [
+            ERROR_NOT_READY,
+            ERROR_BAD_NETPATH,
+            ERROR_DEV_NOT_EXIST,
+            ERROR_UNEXP_NET_ERR,
+            ERROR_NETNAME_DELETED,
+            ERROR_BAD_NET_NAME,
+            ERROR_SEM_TIMEOUT,
+            ERROR_NETWORK_UNREACHABLE,
+        ];
+        assert_eq!(unavailable.map(|c| c as i32), WINDOWS_UNAVAILABLE);
+    }
 
     /// VFS-1 AC-4, I8: system, sync-client and temporary names are excluded, ordinary names
     /// are not.
