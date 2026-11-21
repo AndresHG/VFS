@@ -440,6 +440,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | Command | Arguments | Returns |
 |---|---|---|
 | `system_locale` | — | `string`: the OS locale as BCP 47, `""` when unknown; the UI picks its language from it (VFS-22) |
+| `set_language` | `lang` (`"es"` or `"en"`; anything else is ignored) | `null`; window title, macOS menu and folder picker follow it (VFS-22) |
 | `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`) |
 | `pick_folder` | — | `string \| null` (native folder dialog) |
 | `add_root` | `path` | `Root` |
