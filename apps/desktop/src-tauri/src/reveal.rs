@@ -2,9 +2,10 @@
 //! macOS: `open -R <path>`. Windows: the Shell's `SHOpenFolderAndSelectItems`, which selects
 //! the item and reuses an Explorer window already showing its folder, repeated into the new
 //! Explorer window when it had to open one; `explorer.exe /select,"<path>"` only when that
-//! call fails (issue 107). Explorer cannot select
-//! items through a `\\?\` path or a path over `MAX_PATH`, so those open the nearest usable
-//! ancestor folder instead and report [`RevealOutcome::OpenedParent`]. On macOS a failed
+//! call fails (issue 107). A path over `MAX_PATH` is selected the same way through its plain
+//! (non-`\\?\`) form, which the Shell's ID-list calls accept (VFS-24 AC-1); only if that
+//! fails does the nearest folder Explorer can address open, reporting
+//! [`RevealOutcome::OpenedParent`]. On macOS a failed
 //! `open -R` reveals the nearest existing ancestor with `open -R` too. Nothing is opened
 //! with its default application, and no ancestor is ever launched (an `.app` bundle would
 //! be).
@@ -58,6 +59,49 @@ pub fn plan_windows(path: &Path, exists: impl Fn(&Path) -> bool) -> Option<Actio
     .map(|a| Action::OpenDir(dunce::simplified(&a).to_path_buf()))
 }
 
+/// The plain form of `path` that the Shell's ID-list calls accept past `MAX_PATH`:
+/// `\\?\C:\…` becomes `C:\…` and `\\?\UNC\server\share\…` becomes `\\server\share\…`
+/// (VFS-24 D1, measured on the Windows runner: `ILCreateFromPathW` returns no ID list for the
+/// verbatim form of a 362-character path and a usable one for its plain form).
+pub fn shell_form(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+/// The plain form of `path` for the Shell when only its length keeps Explorer from it: over
+/// `MAX_PATH`, with no component ending in a dot or a space and no reserved device name
+/// (`CON`, `NUL.txt`, `COM1`…). Without the prefix such names name another item, as would a
+/// short path that still needs `\\?\`, so they get `None` and the nearest folder opens
+/// instead (VFS-24 AC-1).
+pub fn long_shell_path(path: &Path) -> Option<PathBuf> {
+    let plain = shell_form(path);
+    let s = plain.to_string_lossy();
+    let long = s.encode_utf16().count() > EXPLORER_MAX_PATH;
+    let lossless = s
+        .split('\\')
+        .skip(1)
+        .all(|c| !c.ends_with('.') && !c.ends_with(' ') && !is_device_name(c));
+    (long && lossless).then_some(plain)
+}
+
+/// Whether a path component is a Win32 reserved device name, with or without an extension
+/// (`COM0`/`LPT0` included: newer Windows reserves them too, and a false match only opens the
+/// folder instead).
+fn is_device_name(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or_default().trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.as_bytes()[3].is_ascii_digit())
+}
+
 /// Explorer's argument for `action`: `/select,"<path>"` or `"<path>"`. A trailing backslash
 /// (a drive root, `C:\`) is doubled, because under the Windows command-line rules
 /// (`CommandLineToArgvW`) a backslash before the closing quote escapes it, so `"C:\"` would
@@ -96,9 +140,21 @@ pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
             }
             Ok(RevealOutcome::Revealed)
         }
-        Some(dir @ Action::OpenDir(_)) => {
-            spawn_explorer(&dir)?;
-            Ok(RevealOutcome::OpenedParent)
+        Some(Action::OpenDir(p)) => {
+            // Past MAX_PATH Explorer's command line fails, but the Shell's ID-list call can
+            // still select the item through its plain path (VFS-24 AC-1); only if it cannot
+            // is the nearest folder opened instead.
+            match long_shell_path(path).map_or_else(
+                || Err(io::Error::other("needs its \\\\?\\ form")),
+                |plain| shell_select(&plain),
+            ) {
+                Ok(()) => Ok(RevealOutcome::Revealed),
+                Err(e) => {
+                    log::warn!("long path not selectable ({e}); opening {}", p.display());
+                    spawn_explorer(&Action::OpenDir(p))?;
+                    Ok(RevealOutcome::OpenedParent)
+                }
+            }
         }
         None => Err(io::Error::other(format!(
             "no folder of {} can be shown in Explorer",
@@ -322,6 +378,41 @@ mod tests {
         }
     }
 
+    /// VFS-24 AC-1: the Shell gets long paths without the verbatim prefix.
+    #[test]
+    fn shell_form_drops_the_verbatim_prefix() {
+        let cases = [
+            (r"\\?\C:\Datos\Año 2019\f.pdf", r"C:\Datos\Año 2019\f.pdf"),
+            (r"\\?\UNC\nas\fotos\f.jpg", r"\\nas\fotos\f.jpg"),
+            (r"C:\Datos\f.pdf", r"C:\Datos\f.pdf"),
+        ];
+        for (from, to) in cases {
+            assert_eq!(shell_form(Path::new(from)), PathBuf::from(to));
+        }
+    }
+
+    /// VFS-24 AC-1: only a path too long for Explorer, whose plain form names the same item,
+    /// goes to the Shell without its prefix.
+    #[test]
+    fn long_shell_path_only_for_length() {
+        let deep = format!(r"C:\Datos\{}\{}\f.pdf", "x".repeat(200), "y".repeat(100));
+        let want = Some(PathBuf::from(&deep));
+        assert_eq!(long_shell_path(Path::new(&format!(r"\\?\{deep}"))), want);
+        assert_eq!(long_shell_path(Path::new(&deep)), want);
+        assert_eq!(
+            long_shell_path(Path::new(r"\\?\C:\Datos\punto.\f.pdf")),
+            None
+        );
+        for odd in ["fin.", "fin ", "nul.txt", "CON", "com1.log", "Lpt9"] {
+            let p = format!(r"\\?\C:\Datos\{}\{odd}\f.pdf", "x".repeat(300));
+            assert_eq!(long_shell_path(Path::new(&p)), None, "{odd:?}");
+        }
+        for fine in ["console.txt", "com10", "nulo.pdf"] {
+            let p = format!(r"\\?\C:\Datos\{}\{fine}", "x".repeat(300));
+            assert!(long_shell_path(Path::new(&p)).is_some(), "{fine:?}");
+        }
+    }
+
     /// VFS-1 AC-13: the Explorer length limit counts UTF-16 units and rejects `\\?\` paths.
     #[test]
     fn explorer_limit() {
@@ -332,8 +423,9 @@ mod tests {
         assert!(!explorer_usable(Path::new(r"\\?\C:\x")));
     }
 
-    /// VFS-1 AC-8 + AC-13: short paths are selected (verbatim prefix dropped); paths over
-    /// MAX_PATH open the nearest existing ancestor Explorer can address.
+    /// VFS-1 AC-8 + AC-13: short paths are selected (verbatim prefix dropped); for paths over
+    /// MAX_PATH the fallback plan is the nearest existing ancestor Explorer can address
+    /// (used only when the Shell cannot select the item, VFS-24 AC-1).
     #[cfg(windows)]
     #[test]
     fn plan_windows_long_paths() {

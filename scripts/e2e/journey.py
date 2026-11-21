@@ -50,7 +50,8 @@ NO_FILTERS = {"kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": 
 DATE_WEEK = "week"
 SIZE_MEDIUM, SIZE_LARGE, SIZE_HUGE = "medium", "large", "huge"
 
-# What "Mostrar en carpeta" must show: the item selected, or (path over 260 chars) an ancestor.
+# What "Mostrar en carpeta" must show: the item selected (also past 260 chars, VFS-24 AC-1),
+# or an ancestor (the fallback when the Shell cannot select the item).
 EXPECT_SELECT = "select"
 EXPECT_PARENT = "parent"
 
@@ -617,7 +618,8 @@ class Journey:
         self.step("reveal-file", self.s_reveal(gen_tree.T_NAME, EXPECT_SELECT))
         if not short:
             self.step("reveal-folder", self.s_reveal(gen_tree.T_FOLDER, EXPECT_SELECT))
-            self.step("reveal-long-path", self.s_reveal(gen_tree.T_LONG, EXPECT_PARENT))
+            # VFS-24 AC-1: a path over 260 characters is selected too.
+            self.step("reveal-long-path", self.s_reveal(gen_tree.T_LONG, EXPECT_SELECT))
             self.step("live-create", self.s_live_create)
             self.step("live-rename", self.s_live_rename)
             self.step("live-delete", self.s_live_delete)
@@ -693,9 +695,26 @@ def close_file_manager_windows():
 
 
 def win_path_key(p):
-    """A Windows path in the form two spellings of the same path share: NFC, normalised
-    separators, case-folded."""
-    return ntpath.normcase(ntpath.normpath(nfc(p))) if p else ""
+    """A Windows path in the form two spellings of the same path share: no `\\\\?\\`
+    prefix, 8.3 short names expanded (Explorer reports long paths with them, VFS-24 AC-1),
+    NFC, normalised separators, case-folded."""
+    if not p:
+        return ""
+    p = long_name(p)
+    if p.startswith("\\\\?\\"):
+        p = p[4:]
+    return ntpath.normcase(ntpath.normpath(nfc(p)))
+
+
+def long_name(p):
+    """`p` with any 8.3 short names expanded (GetLongPathNameW), when it exists."""
+    if not IS_WIN:
+        return p
+    import ctypes
+    q = p if p.startswith("\\\\?\\") else "\\\\?\\" + p
+    buf = ctypes.create_unicode_buffer(32768)
+    n = ctypes.windll.kernel32.GetLongPathNameW(q, buf, len(buf))
+    return buf.value if 0 < n < len(buf) else p
 
 
 def explorer_match(windows, target_path, expect):

@@ -13,8 +13,9 @@
 //   slow                 add 0.4–1.2 s of latency to every search
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
-// opened_parent. Shortcuts (VFS-18): "boda" finds "Fotos de la boda.lnk" by its target on a
-// disk that is not connected (Mostrar el destino fails), "banco" an Internet Shortcut and
+// opened_parent, standing in for the rare case the Shell cannot select a long path
+// (VFS-24). Shortcuts (VFS-18): "boda" finds "Fotos de la boda.lnk" by its target on a disk
+// that is not connected (Mostrar el destino fails), "banco" an Internet Shortcut and
 // "musica" a linked folder. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
 // gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
