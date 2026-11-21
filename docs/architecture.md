@@ -503,6 +503,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `add_root` | `path` | `Root` |
 | `remove_root` | `id` | `null` |
 | `search` | `query: SearchQuery` | `SearchResponse` |
+| `suggest` | `query: SearchQuery` | `Suggestion \| null` (VFS-13) |
 | `reveal` | `id`, `isDir` | `"revealed"` or `"opened_parent"` |
 | `get_progress` | — | `IndexProgress` |
 | `rescan` | `id \| null` | `null` (`unavailable` if the indexer is not running) |
@@ -529,7 +530,10 @@ and once when it finishes, from `src-tauri/src/updates.rs`.
 Key shapes:
 
 - `SearchQuery { text, filters: { kinds, modifiedFrom, modifiedTo, sizeMin, sizeMax, folder },
-  limit, offset }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes.
+  limit, offset, sort }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes; `sort`
+  is a `SortOrder` (VFS-12).
+- `Suggestion { kind: dropFilters | spelling | dropTerm, text, clearFilters, term,
+  replacement, count, capped }` (VFS-13): the box text to run and the grouped, capped count.
 - `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link? }`. `id`
   is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
   both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
