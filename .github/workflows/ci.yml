@@ -55,4 +55,4 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
       - name: UI tests
-        run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs apps/desktop/ui-dev/sources.test.mjs
+        run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs apps/desktop/ui-dev/sources.test.mjs apps/desktop/ui-dev/feedback.test.mjs
