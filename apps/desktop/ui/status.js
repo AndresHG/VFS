@@ -1,5 +1,5 @@
-// The status-bar sentence (VFS-1 U6): the first scan, a check for changes (the catch-up at
-// every start included), or the time of the last completed check. Pure, so it is tested
+// The status-bar sentence (VFS-1 U6): the first scan, a check for changes (a catch-up walk at
+// start included), or the time of the last completed check. Pure, so it is tested
 // outside the browser (`apps/desktop/ui-dev/status.test.mjs`).
 
 import { IndexerState, RootStatus } from './contract.js';

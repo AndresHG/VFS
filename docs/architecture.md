@@ -26,6 +26,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │   │    ├─ mod.rs       scheduler, scan loop, resume         │
 │   │    ├─ walk.rs      list one directory                   │
 │   │    ├─ apply.rs     diff a listing against the index     │
+│   │    ├─ cursor.rs    change cursor: USN / FSEvents replay │
 │   │    └─ watch.rs     FSEvents (notify) / own Windows loop │
 │   ├─ platform.rs       volume key, drive kind, priority     │
 │   ├─ db.rs             connections, schema, ingest, session │

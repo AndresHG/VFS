@@ -1113,7 +1113,7 @@ impl Worker {
                     self.pass = Pass::default();
                     // An owed walk that is due starts before idle is reported, so "up to
                     // date" never shows while a catch-up is still owed (VFS-3 AC-5).
-                    let r = start_owed(&self.conn, &mut self.owed);
+                    let r = start_owed(&self.conn, &*self.history, &mut self.owed);
                     self.log_err(r);
                     if walking(&self.conn).is_ok_and(|w| !w.is_empty()) {
                         continue;
