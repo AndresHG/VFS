@@ -912,7 +912,6 @@ impl IndexerHandle {
             catchup: Vec::new(),
             db_path,
             history,
-            cursor_every: timing.cursor_every,
             timing,
             last_cursor: Instant::now(),
             candidates: HashMap::new(),
@@ -1007,7 +1006,6 @@ struct Worker {
     catchup: Vec<i64>,
     db_path: PathBuf,
     history: Box<dyn History + Send>,
-    cursor_every: Duration,
     last_cursor: Instant,
     /// Per watched root, the cursor taken at the last check, stored at the next one if the
     /// root was watched without lost events meanwhile (VFS-9 R6).
@@ -1070,7 +1068,7 @@ impl Worker {
                 return;
             }
             self.flush_dirty();
-            if self.last_cursor.elapsed() >= self.cursor_every {
+            if self.last_cursor.elapsed() >= self.timing.cursor_every {
                 self.last_cursor = Instant::now();
                 self.advance_cursors();
             }
@@ -1198,8 +1196,11 @@ impl Worker {
                         let due = self.catchup_at.saturating_duration_since(Instant::now());
                         timeout = timeout.min(due);
                     }
-                    timeout =
-                        timeout.min(self.cursor_every.saturating_sub(self.last_cursor.elapsed()));
+                    timeout = timeout.min(
+                        self.timing
+                            .cursor_every
+                            .saturating_sub(self.last_cursor.elapsed()),
+                    );
                     if let Some(due) = self.replay_due.values().map(|d| d.at).min() {
                         timeout = timeout.min(due.saturating_duration_since(Instant::now()));
                     }

@@ -1735,6 +1735,7 @@ fn overflow_replays_the_real_history() {
         eprintln!("no usable change history on this volume: checking the walk fallback");
         std::thread::sleep(Duration::from_millis(600));
         assert_eq!(stored_cursor(&fx.db_path, fx.root_id), None);
+        assert_walk_owed(&fx);
         drop(h);
         return;
     }
