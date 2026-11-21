@@ -148,7 +148,8 @@ impl Vfs {
             Err(e)
                 if search::is_table_open_cut(&e)
                     && (self.inner.searches.load(Ordering::SeqCst) != this
-                        || started.elapsed() >= search::cut_after(&self.inner.config)) =>
+                        // The earliest bound a progress handler cuts at.
+                        || started.elapsed() >= self.inner.config.deadline) =>
             {
                 Ok(search::interrupted_response(query, started))
             }

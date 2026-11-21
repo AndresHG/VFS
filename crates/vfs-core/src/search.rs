@@ -174,7 +174,7 @@ fn search_snapshot(
 
     let mut run = Run {
         soft: start + config.deadline,
-        hard: start + cut_after(config),
+        hard: start + config.deadline.max(UNDER_CAP_BUDGET),
         hits: Vec::new(),
         seen_files: HashSet::new(),
         seen_dirs: HashSet::new(),
@@ -580,12 +580,6 @@ pub(crate) fn is_table_open_cut(e: &Error) -> bool {
         Error::Db(rusqlite::Error::SqliteFailure(f, Some(msg)))
             if f.code == ErrorCode::Unknown && msg.starts_with("vtable constructor failed")
     )
-}
-
-/// How long a query may run before the progress handler cuts it: an error after this is
-/// one the deadline may have caused.
-pub(crate) fn cut_after(config: &SearchConfig) -> Duration {
-    config.deadline.max(UNDER_CAP_BUDGET)
 }
 
 /// The answer of a query cut short before it found anything.
