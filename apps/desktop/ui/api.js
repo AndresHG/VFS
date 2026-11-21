@@ -6,7 +6,8 @@
 //   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
 //   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs}
 //   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir,
-//                   copies?: FileCopy[]}  (VFS-19; left out when empty, never on folders)
+//                   copies?: FileCopy[],  (VFS-19; left out when empty, never on folders)
+//                   link?: {kind: LinkKind, target: string|null, openable}}  (VFS-18)
 //   FileCopy       {id, dir, modified}    (another place of the same file; id is a files.id)
 //   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
 //   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
@@ -44,6 +45,8 @@ function tauriBackend(t) {
     search: (query) => invoke('search', { query }),
     // File and folder ids are separate id spaces, so the shell needs `isDir` (-> is_dir).
     reveal: (id, isDir) => invoke('reveal', { id, isDir }),
+    revealTarget: (id) => invoke('reveal_target', { id }),
+    openLinkUrl: (id) => invoke('open_link_url', { id }),
     getProgress: () => invoke('get_progress'),
     rescan: (id) => invoke('rescan', { id }),
     setPaused: (paused) => invoke('set_paused', { paused }),
@@ -72,7 +75,7 @@ function missingBackend() {
     systemLocale: async () => navigator.language,
     setLanguage: async () => {},
     listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
-    reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
+    reveal: fail, revealTarget: fail, openLinkUrl: fail, getProgress: fail, rescan: fail, setPaused: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
     onBookmarksChanged: async () => () => {},

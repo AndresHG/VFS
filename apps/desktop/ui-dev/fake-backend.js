@@ -13,13 +13,15 @@
 //   slow                 add 0.4–1.2 s of latency to every search
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
-// opened_parent. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
+// opened_parent. Shortcuts (VFS-18): "boda" finds "Fotos de la boda.lnk" by its target on a
+// disk that is not connected (Mostrar el destino fails), "banco" an Internet Shortcut and
+// "musica" a linked folder. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
 // gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
 import {
-  BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus,
-  Source, TruncatedBy,
+  BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
+  RootStatus, Source, TruncatedBy,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -192,6 +194,20 @@ export function createFakeBackend(params) {
   let roots = scenario === Scenario.EMPTY ? [] : makeRoots(scenario);
   const R = makeRandom(20261120);
   const corpus = buildCorpus(makeRoots(Scenario.DEFAULT), R);
+  // A few links (VFS-18): matched by name, folder or target, like the real search.
+  const linkRoot = corpus.files[0];
+  for (const [name, link] of [
+    ['Fotos de la boda.lnk', { kind: LinkKind.SHORTCUT, target: 'Z:\\Fotos\\Boda de Carmen y Luis 2003', openable: false }],
+    ['Banco.url', { kind: LinkKind.INTERNET, target: 'https://www.mibanco.es/acceso', openable: true }],
+    ['Música de casa', { kind: LinkKind.SYMLINK, target: 'D:\\Música', openable: false }],
+  ]) {
+    const dir = `${linkRoot.dir.split('\\').slice(0, 3).join('\\')}\\Accesos directos`;
+    corpus.files.push({
+      id: corpus.files.length + 1, rootId: linkRoot.rootId, seq: 0, isDir: false, matched: null, dir, name,
+      kind: FileKind.OTHER, size: 1_200, modified: NOW - 40 * DAY, link,
+      fName: fold(name), fDir: fold(`${dir} ${link.target}`),
+    });
+  }
   const all = [...corpus.files, ...corpus.dirs];
   const totalOf = (id) => corpus.counts.get(id) || 0;
 
@@ -348,6 +364,7 @@ export function createFakeBackend(params) {
       const hits = list.slice(offset, Math.min(total, offset + limit)).map(({ e, m, copies }) => ({
         id: e.id, name: e.name, dir: e.dir, kind: e.kind, size: e.size, modified: e.modified, matched: m, isDir: e.isDir,
         ...(copies.length ? { copies: copies.map((c) => ({ id: c.id, dir: c.dir, modified: c.modified })) } : {}),
+        ...(e.link ? { link: e.link } : {}),
       }));
       return { hits, total, truncated: capped, truncatedBy: capped ? TruncatedBy.CAP : null, elapsedMs: R.int(8, 90) };
     },
@@ -360,6 +377,18 @@ export function createFakeBackend(params) {
       if (r?.status === RootStatus.UNAVAILABLE) throw { code: ErrorCode.UNAVAILABLE, message: `folder unavailable: ${r.path}` };
       if (e.name.includes('borrado')) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${e.name}` };
       return (e.dir.length + e.name.length + 1 > 259) ? RevealOutcome.OPENED_PARENT : RevealOutcome.REVEALED;
+    },
+
+    async revealTarget(id) {
+      await sleep(80);
+      const e = corpus.files.find((x) => x.id === id);
+      if (!e?.link?.target || e.link.kind === LinkKind.INTERNET) throw { code: ErrorCode.UNAVAILABLE, message: `link ${id}` };
+      if (e.link.target.startsWith('Z:')) throw { code: ErrorCode.NOT_FOUND, message: e.link.target };
+      return RevealOutcome.REVEALED;
+    },
+    async openLinkUrl(id) {
+      const e = corpus.files.find((x) => x.id === id);
+      if (!e?.link?.openable) throw { code: ErrorCode.UNAVAILABLE, message: `link ${id}` };
     },
 
     async searchSources(q, options = {}) {

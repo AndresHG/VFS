@@ -24,7 +24,10 @@ export const IndexerState = Object.freeze({ IDLE: 'idle', SCANNING: 'scanning', 
 
 export const TruncatedBy = Object.freeze({ CAP: 'cap', DEADLINE: 'deadline' });
 
-export const MatchKind = Object.freeze({ NAME: 'name', PATH: 'path', FUZZY: 'fuzzy' });
+export const MatchKind = Object.freeze({ NAME: 'name', PATH: 'path', FUZZY: 'fuzzy', TARGET: 'target' });
+
+/** What kind of link a file result is (VFS-18): `SearchHit.link.kind`. */
+export const LinkKind = Object.freeze({ SHORTCUT: 'shortcut', INTERNET: 'internet', SYMLINK: 'symlink' });
 
 export const DriveKind = Object.freeze({
   LOCAL: 'local',

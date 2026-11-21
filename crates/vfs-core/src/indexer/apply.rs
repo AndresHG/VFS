@@ -38,26 +38,42 @@ pub(crate) fn apply_listing(
 
     for entry in entries {
         match entry.kind {
-            EntryKind::File { size, mtime } => {
+            EntryKind::File { .. } | EntryKind::Link { .. } => {
+                let (size, mtime, link) = match entry.kind {
+                    EntryKind::File { size, mtime } => (size, mtime, false),
+                    EntryKind::Link { mtime } => (0, mtime, true),
+                    EntryKind::Dir { .. } => unreachable!(),
+                };
                 if !seen_files.insert(entry.name.as_str()) {
                     continue;
                 }
-                match files.remove(&entry.name) {
-                    Some(old) => {
+                let old = files.remove(&entry.name);
+                match old {
+                    // Same kind of entry: a changed link is read again (`update_file`).
+                    Some(old) if old.link == link => {
                         if old.size != size || old.mtime != mtime {
                             ingest::update_file(tx, old.id, size, mtime)?;
                             summary.files_updated += 1;
                             changed += 1;
                         }
                     }
-                    None => {
+                    _ => {
+                        // A file replaced by a link of the same name, or the reverse.
+                        if let Some(old) = old {
+                            ingest::delete_file(tx, old.id)?;
+                            summary.files_removed += 1;
+                        }
                         let file = NewFile {
                             name: &entry.name,
                             size,
                             mtime,
                             lossy: entry.lossy,
                         };
-                        ingest::insert_file(tx, dir_id, &file)?;
+                        if link {
+                            ingest::insert_link_entry(tx, dir_id, &file)?;
+                        } else {
+                            ingest::insert_file(tx, dir_id, &file)?;
+                        }
                         summary.files_added += 1;
                         changed += 1;
                     }

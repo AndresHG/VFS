@@ -2,7 +2,7 @@
 // words, no "index" jargon. Functions take already-formatted values.
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -11,7 +11,7 @@ export const en = {
   windowTitle: 'VFS — File Finder',
   searchLabel: 'Search by file or folder name',
   searchPlaceholder: 'For example: tax return 2023',
-  searchHint: 'Use the up and down arrows to move through the results, Enter to show the chosen one in its folder and Escape to clear the search.',
+  searchHint: 'Use the up and down arrows to move through the results, Enter to show the chosen one in its folder, Shift and Enter to show where a shortcut leads and Escape to clear the search.',
   clearSearch: 'Clear the search',
   devBadge: 'Test data',
 
@@ -94,6 +94,21 @@ export const en = {
   copiesIntro: 'These files have the same name and the same size: almost certainly copies of the same file. Choose the one you want to see.',
   copiesModified: (date) => `Modified on ${date}`,
   detailsLabel: 'Location:',
+
+  // Shortcuts and links (VFS-18 D2, D3, D6).
+  linkBadge: {
+    [LinkKind.SHORTCUT]: 'Shortcut', [LinkKind.INTERNET]: 'Web page', [LinkKind.SYMLINK]: 'Link',
+  },
+  linkTargetPrefix: 'Leads to: ',
+  targetButton: 'Show the destination',
+  secondKey: 'Shift+Enter',
+  linkRowLabel: (badge, target) => [badge, target && `leads to ${target}`].filter(Boolean).join(', '),
+  detailsLinkAt: {
+    [LinkKind.SHORTCUT]: 'Shortcut in:', [LinkKind.INTERNET]: 'Web page saved in:',
+    [LinkKind.SYMLINK]: 'Link in:',
+  },
+  detailsLinkTarget: 'Leads to:',
+  targetMissing: (t) => `The destination “${t}” cannot be found. It may have been moved or deleted, or its disk may not be connected.`,
 
   emptyNoRootsTitle: 'Add a folder to get started',
   emptyNoRootsBody: 'Choose the folder where you keep your files. The app will go through it and then you can search it. Your files are never moved or changed.',
@@ -185,6 +200,13 @@ export const en = {
     reveal: {
       [ErrorCode.NOT_FOUND]: 'The file is no longer in that location.',
       [ErrorCode.UNAVAILABLE]: 'That folder is not available right now. Check that the drive is connected.',
+    },
+    revealTarget: {
+      [ErrorCode.UNAVAILABLE]: 'This shortcut does not say where it leads.',
+    },
+    openLinkUrl: {
+      [ErrorCode.NOT_FOUND]: 'The file is no longer in that location.',
+      [ErrorCode.UNAVAILABLE]: 'This address is not a web page and cannot be opened.',
     },
     openBookmark: {
       [ErrorCode.NOT_FOUND]: 'That bookmark no longer exists in Firefox.',
