@@ -5,11 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { CATALOGS, Lang, intlLocale, languageFor, localeFor } from '../ui/strings.js';
 import * as F from '../ui/format.js';
 
-const UI = new URL('../ui/', import.meta.url).pathname;
+const UI = fileURLToPath(new URL('../ui/', import.meta.url));
 const CATALOG_FILE = /^strings(\.\w+)?\.js$/;
 
 /** Every leaf of a catalog as [dotted key, value]. */
