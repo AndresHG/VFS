@@ -48,5 +48,12 @@
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ0RjMzQzYwODlGQ0JEMUEKUldRYXZmeUpZRHp6MU9DVVpxYm05ZWV3S3p5N1A3VzZmL0xqT04xNWhScmwxQXU0T2dteHFxQzgK",
+      "endpoints": ["https://github.com/AndresHG/VFS/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

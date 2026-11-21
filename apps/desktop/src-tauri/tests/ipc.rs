@@ -225,3 +225,30 @@ fn bookmark_commands_over_ipc() {
     .unwrap();
     assert_eq!(st["count"], json!(0));
 }
+
+/// VFS-21 AC-3 + AC-4: the update setting round-trips over IPC, and with it off the check
+/// answers "no update" without building an updater (the mock app has no updater plugin, so
+/// building one would fail the call).
+#[test]
+fn update_check_off_makes_no_connection() {
+    use vfs_desktop_lib::updates::UpdateState;
+    let data = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    app.manage(UpdateState::new(data.path()));
+
+    let settings = invoke(&webview, "get_update_settings", json!({})).unwrap();
+    assert_eq!(settings, json!({ "checkOnOpen": true }));
+
+    let settings = invoke(&webview, "set_update_check", json!({ "enabled": false })).unwrap();
+    assert_eq!(settings, json!({ "checkOnOpen": false }));
+    let settings = invoke(&webview, "get_update_settings", json!({})).unwrap();
+    assert_eq!(settings, json!({ "checkOnOpen": false }));
+
+    assert_eq!(
+        invoke(&webview, "check_for_update", json!({})).unwrap(),
+        Value::Null
+    );
+
+    let err = invoke(&webview, "install_update", json!({})).unwrap_err();
+    assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
+}

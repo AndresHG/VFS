@@ -1,7 +1,10 @@
 # VFS-1 AC-14: a downloadable Windows installer and a macOS build, each with a SHA-256
-# checksum file. Actions are pinned by commit SHA (tag in the comment); no build cache, so
-# a release is built only from the locked sources. Build provenance attestation is left
-# out: for a private repository it needs GitHub Enterprise Cloud.
+# checksum file. VFS-21 R9: both builds are signed with the updater key (Actions secrets
+# TAURI_SIGNING_PRIVATE_KEY and _PASSWORD) and the `manifest` job writes `latest.json`, which
+# installed apps fetch from the latest published release. A `workflow_dispatch` run is a dry
+# run (artifacts only); a `v*` tag also creates a draft release with every asset, published
+# by hand. Actions are pinned by commit SHA (tag in the comment); no build cache, so a release
+# is built only from the locked sources.
 name: release
 
 on:
@@ -42,9 +45,18 @@ jobs:
         with:
           node-version: lts/*
 
-      - name: Build (unsigned)
+      # Not OS code signing: the minisign signature the updater checks before installing.
+      # createUpdaterArtifacts is set only here, so local builds need no key.
+      - name: Build (updater-signed)
         working-directory: apps/desktop/src-tauri
-        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles ${{ matrix.bundles }} -- --locked
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
+          npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles ${{ matrix.bundles }} \
+            --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
       - name: Collect Windows installer
         if: runner.os == 'Windows'
@@ -53,7 +65,8 @@ jobs:
           shopt -s nullglob
           files=(target/release/bundle/nsis/*-setup.exe)
           [ ${#files[@]} -eq 1 ] || { echo "expected one installer, found: ${files[*]}"; exit 1; }
-          mkdir -p out && cp "${files[0]}" out/
+          [ -s "${files[0]}.sig" ] || { echo "missing updater signature ${files[0]}.sig"; exit 1; }
+          mkdir -p out && cp "${files[0]}" "${files[0]}.sig" out/
           cd out && sha256sum -- *-setup.exe > SHA256SUMS.txt
       - name: Upload Windows installer
         if: runner.os == 'Windows'
@@ -62,6 +75,7 @@ jobs:
           name: vfs-windows-installer
           path: |
             out/*-setup.exe
+            out/*-setup.exe.sig
             out/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -70,6 +84,11 @@ jobs:
         run: |
           ditto -c -k --keepParent target/release/bundle/macos/VFS.app "VFS-macos-$(uname -m).zip"
           shasum -a 256 VFS-macos-*.zip > SHA256SUMS.txt
+          # The updater's macOS payload: the .app as a tar.gz, with its signature.
+          for f in VFS.app.tar.gz VFS.app.tar.gz.sig; do
+            [ -s "target/release/bundle/macos/$f" ] || { echo "missing updater artifact $f"; exit 1; }
+            cp "target/release/bundle/macos/$f" .
+          done
       - name: Upload macOS app
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -77,5 +96,49 @@ jobs:
           name: vfs-macos
           path: |
             VFS-macos-*.zip
+            VFS.app.tar.gz
+            VFS.app.tar.gz.sig
             SHA256SUMS.txt
           if-no-files-found: error
+
+  manifest:
+    name: manifest (latest.json)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # only to create the draft release on a tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+      - name: Write latest.json and the combined checksums
+        id: manifest
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the app version $version"; exit 1
+          fi
+          mkdir -p release
+          cp dist/vfs-windows-installer/*-setup.exe dist/vfs-windows-installer/*-setup.exe.sig release/
+          cp dist/vfs-macos/VFS-macos-*.zip dist/vfs-macos/VFS.app.tar.gz dist/vfs-macos/VFS.app.tar.gz.sig release/
+          win=$(ls release/*-setup.exe)
+          python3 scripts/release_manifest.py --version "$version" \
+            --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag" \
+            --platform "windows-x86_64=$win" --platform "darwin-aarch64=release/VFS.app.tar.gz" \
+            --out release/latest.json
+          (cd release && sha256sum -- *-setup.exe VFS-macos-*.zip VFS.app.tar.gz > SHA256SUMS.txt)
+          cat release/latest.json
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vfs-release
+          path: release/
+          if-no-files-found: error
+      - name: Draft release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.manifest.outputs.tag }}" --draft --verify-tag --title "VFS ${{ steps.manifest.outputs.tag }}" --generate-notes release/*

@@ -206,6 +206,8 @@ export function createFakeBackend(params) {
   let paused = false;
   const progressCbs = new Set();
   const changedCbs = new Set();
+  const updateSettings = { checkOnOpen: true };
+  const updateCbs = new Set();
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   let lastChanged = 0;
@@ -406,6 +408,24 @@ export function createFakeBackend(params) {
       if (!b.openable) throw { code: ErrorCode.UNAVAILABLE, message: 'not a web address' };
     },
     async onBookmarksChanged(cb) { bookmarkCbs.add(cb); return () => bookmarkCbs.delete(cb); },
+
+    // VFS-21: `?update` offers 0.9.0; `?update=fail` makes the download fail halfway.
+    async getUpdateSettings() { return { ...updateSettings }; },
+    async setUpdateCheck(enabled) { updateSettings.checkOnOpen = enabled; return { ...updateSettings }; },
+    async checkForUpdate() {
+      await sleep(50);
+      return updateSettings.checkOnOpen && params.has('update') ? { version: '0.9.0' } : null;
+    },
+    async installUpdate() {
+      const total = 8_000_000;
+      for (let downloaded = 0; downloaded <= total; downloaded += 400_000) {
+        await sleep(60);
+        if (params.get('update') === 'fail' && downloaded > total / 2) throw { code: ErrorCode.IO, message: 'connection reset' };
+        for (const cb of updateCbs) cb({ downloaded, total });
+      }
+      await new Promise(() => {}); // the real app relaunches here
+    },
+    async onUpdateProgress(cb) { updateCbs.add(cb); return () => updateCbs.delete(cb); },
 
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {
