@@ -324,7 +324,12 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
         // A recovery was killed after moving the damaged index aside.
         finish_recovery(db_path)?;
     }
-    let opened = open_rw(db_path).and_then(|c| {
+    let opened = if emptied(db_path) {
+        Err(corrupt("index file truncated to nothing".into()))
+    } else {
+        open_rw(db_path)
+    };
+    let opened = opened.and_then(|c| {
         if unclean {
             quick_check(&c)?;
         }
@@ -340,6 +345,9 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
             (recover(db_path)?, true)
         }
     };
+    if let Err(e) = sync_roots_backup(db_path, &conn) {
+        log::warn!("root list backup not written: {e}");
+    }
     Ok((conn, recovered, session))
 }
 
@@ -367,22 +375,92 @@ fn quick_check(conn: &Connection) -> Result<()> {
     if verdict == "ok" {
         Ok(())
     } else {
-        Err(Error::Db(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
-            Some(verdict),
-        )))
+        Err(corrupt(verdict))
     }
 }
 
-/// Root paths readable from a possibly damaged index; empty when nothing can be read.
+fn corrupt(detail: String) -> Error {
+    Error::Db(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+        Some(detail),
+    ))
+}
+
+/// True when the index file exists but is empty with no WAL content to replay, while the
+/// backup lists roots: SQLite would open it as a new, empty index and drop those roots,
+/// so it is treated as damaged and rebuilt from the backup (VFS-3 AC-11). A new index in
+/// WAL mode can have an empty main file, but then its WAL holds its pages.
+fn emptied(db_path: &Path) -> bool {
+    let len = |p: &Path| std::fs::metadata(p).map(|m| m.len()).ok();
+    len(db_path) == Some(0)
+        && len(&with_suffix(db_path, WAL_SUFFIX)).unwrap_or(0) == 0
+        && read_roots_backup(db_path).is_some_and(|r| !r.is_empty())
+}
+
+/// Root paths readable from a possibly damaged index. When the `roots` table cannot be read
+/// (its page destroyed, the header overwritten, the file truncated), the backup list
+/// (VFS-3 AC-11); empty when neither can be read.
 fn salvage_root_paths(db_path: &Path) -> Vec<String> {
     let read = || -> rusqlite::Result<Vec<String>> {
         let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        let mut stmt = conn.prepare("SELECT path FROM roots ORDER BY id")?;
-        let paths = stmt.query_map([], |r| r.get(0))?.collect();
-        paths
+        root_paths(&conn)
     };
-    read().unwrap_or_default()
+    match read() {
+        Ok(paths) => paths,
+        Err(e) => {
+            let backup = read_roots_backup(db_path).unwrap_or_default();
+            log::warn!(
+                "roots unreadable ({e}); {} taken from the backup",
+                backup.len()
+            );
+            backup
+        }
+    }
+}
+
+/// Paths of the roots the user keeps: one being removed is not brought back by a recovery.
+fn root_paths(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT path FROM roots WHERE status != ?1 ORDER BY id")?;
+    let paths = stmt
+        .query_map([crate::types::RootStatus::Removing.code()], |r| r.get(0))?
+        .collect();
+    paths
+}
+
+/// `<db_path>.roots`: a copy of the root list outside the database, so a recovery that
+/// cannot read `roots` still keeps the user's folders (VFS-3 AC-11, D4). Each path is UTF-8
+/// ended by a NUL, which no path holds (a newline it may).
+fn roots_backup_path(db_path: &Path) -> PathBuf {
+    with_suffix(db_path, ".roots")
+}
+
+/// The backup root list, or `None` when it is missing or unreadable.
+pub(crate) fn read_roots_backup(db_path: &Path) -> Option<Vec<String>> {
+    let bytes = std::fs::read(roots_backup_path(db_path)).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    Some(text.split_terminator('\0').map(str::to_string).collect())
+}
+
+/// Makes the backup equal `conn`'s root list. Written to a per-process temporary file and
+/// renamed over the old one, so a kill or a second process never leaves half a list; left
+/// alone when already equal, so a normal open writes nothing.
+pub(crate) fn sync_roots_backup(db_path: &Path, conn: &Connection) -> Result<()> {
+    let paths = root_paths(conn)?;
+    if read_roots_backup(db_path).as_ref() == Some(&paths) {
+        return Ok(());
+    }
+    let mut bytes = Vec::new();
+    for p in &paths {
+        bytes.extend_from_slice(p.as_bytes());
+        bytes.push(0);
+    }
+    let target = roots_backup_path(db_path);
+    let tmp = with_suffix(&target, &format!(".tmp{}", std::process::id()));
+    std::fs::write(&tmp, &bytes)?;
+    std::fs::rename(&tmp, &target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(())
 }
 
 /// `<db_path>.new`, where [`recover`] builds the replacement index before swapping it in.
@@ -393,7 +471,7 @@ fn fresh_path(db_path: &Path) -> PathBuf {
 }
 
 /// `path` with a SQLite companion suffix appended.
-fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut p = path.as_os_str().to_owned();
     p.push(suffix);
     PathBuf::from(p)
