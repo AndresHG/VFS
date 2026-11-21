@@ -146,7 +146,11 @@ test('every button and field has an accessible name', () => {
   // Buttons whose whole text main.js sets from the copy table (`$('id').textContent = S.…`,
   // or the pattern listed here).
   const mainJs = readFileSync(new URL('../ui/main.js', import.meta.url), 'utf8');
-  const scripted = { pause: /pause\.textContent = actions\.paused \? S\.resume : S\.pause/ };
+  const scripted = {
+    pause: /pause\.textContent = actions\.paused \? S\.resume : S\.pause/,
+    // VFS-21: shown only with an action, whose text it carries.
+    'update-action': /action\.hidden = !view\.action;\s*action\.textContent = view\.action/,
+  };
   for (const m of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
     const [, attrs, inner] = m;
     const id = /\bid="([^"]+)"/.exec(attrs)?.[1];
