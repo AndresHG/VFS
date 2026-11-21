@@ -22,6 +22,8 @@ Spec: [VFS-21](../specs/vfs-21-updates/spec.md). Code: `apps/desktop/src-tauri/s
    - **macOS**: `VFS.app.tar.gz` replaces the running `VFS.app` in place; the app stops the
      indexer and relaunches.
    A failed download or a bad signature installs nothing; the notice offers "Reintentar".
+   If the Windows installer cannot start after the indexer was stopped, the app relaunches
+   on the current version instead.
 
 ## The signing key
 
