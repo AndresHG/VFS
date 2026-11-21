@@ -609,7 +609,7 @@ before the no-hit probe, two of three runs passed and the worst failed by under 
 two query classes; with it, three of three runs passed, with load averages of 4.4–5.1 from
 other work and the slowest class at 114–133 ms per run; peak RSS is about 123 MB (all
 measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). Each VFS-12 order
-(`vfs bench --sort`) passes there too, at 58–91 ms overall warm p95 and at most about 115 ms
-in its slowest class; runs that coincided with bursts of other work on the machine failed by
+(`vfs bench --sort`) passes there too, at 58–91 ms overall warm p95 and at most about 140 ms
+in its slowest class (size); runs that coincided with bursts of other work on the machine failed by
 tripling every class at once, cold runs included. On Windows only the
 runner figures of VFS-8 exist; nothing has been measured on an HDD.

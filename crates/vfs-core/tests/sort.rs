@@ -166,6 +166,30 @@ fn ac2_sorting_happens_before_the_cap() {
     assert_eq!(largest.hits[0].name, "recibo.pdf");
 }
 
+/// VFS-12 AC-2: a shortcut found by its target (VFS-18) is read before the cut too, so the
+/// newest match is first even when it is a link behind 2,000 name matches.
+#[test]
+fn ac2_links_are_sorted_before_the_cap() {
+    let mut files: Vec<_> = (0..2_500)
+        .map(|i| file(&format!("factura {i:04}.pdf"), 1, 1_000 + i))
+        .collect();
+    files.push(file("Acceso.lnk", 1, 9_000));
+    let fx = index(&[], &files);
+    let mut conn = db::open_rw(&fx._dir.path().join("index.db")).unwrap();
+    let id: i64 = conn
+        .query_row("SELECT id FROM files WHERE name = 'Acceso.lnk'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let tx = conn.transaction().unwrap();
+    ingest::set_link_target(&tx, id, Ok(Some(r"D:\Factura antigua"))).unwrap();
+    tx.commit().unwrap();
+
+    let newest = search(&fx, "factura", SortOrder::Newest, 0, 5);
+    assert_eq!(newest.hits[0].name, "Acceso.lnk");
+    assert!(!newest.approximate_order);
+}
+
 /// VFS-12 AC-3: past the sorted read cap the order is flagged approximate; relevance never is.
 #[test]
 fn ac3_too_many_matches_make_the_order_approximate() {

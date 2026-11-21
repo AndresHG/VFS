@@ -1089,7 +1089,7 @@ fn run_query(
         }
     }
     // VFS-18 R4: links found with the help of their target, ranked with path matches.
-    if !terms.is_empty() && run.hits.len() < MAX_HITS {
+    if !terms.is_empty() && run.hits.len() < run.limit {
         for g in &groups {
             link_pass(conn, run, &ctx, g, false)?;
         }
