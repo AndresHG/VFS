@@ -1,6 +1,6 @@
 # VFS-25 — Cloud-only files: record them, never open them
 
-- **Status**: implemented; approved after an independent architect review
+- **Status**: implemented (PR #144); approved after an independent architect review
 - **Size**: M (one subsystem, Windows-only behavior, no schema change: a bit of the existing
   `files.flags`)
 - **Links**: issue 49; R11 in `docs/research/windows-recommendations.md`; §3.4 of
