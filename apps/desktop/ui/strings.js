@@ -7,7 +7,7 @@ import { es } from './strings.es.js';
 import { en } from './strings.en.js';
 import { formatsFor } from './format.js';
 
-import { Lang } from './choices.js';
+import { Lang, LanguageChoice } from './choices.js';
 
 export { Lang };
 
@@ -43,6 +43,12 @@ export function intlLocale(lang, systemLocale) {
     }
   }
   return DEFAULT_INTL[lang];
+}
+
+/** The Ajustes select's value for a saved choice: the language, or SYSTEM for anything else
+ *  (VFS-22 R3). */
+export function choiceFor(saved) {
+  return Object.hasOwn(CATALOGS, saved) ? saved : LanguageChoice.SYSTEM;
 }
 
 /** Everything language-dependent the screen needs: `lang`, the catalog `S` and the number

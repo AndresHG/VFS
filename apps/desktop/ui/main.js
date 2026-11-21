@@ -1,7 +1,7 @@
 // The one screen (VFS-1 R9): search box, filters, virtualised results, folder panel, status.
 
 import { api } from './api.js';
-import { Lang, languageFor, localeFor } from './strings.js';
+import { choiceFor, languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
@@ -61,7 +61,7 @@ function saveLanguage(choice) {
     if (choice === LanguageChoice.SYSTEM) localStorage.removeItem(LANGUAGE_KEY);
     else localStorage.setItem(LANGUAGE_KEY, choice);
   } catch {
-    // storage blocked: the choice lasts until the page reloads
+    // storage blocked: the choice is lost and the system language applies
   }
 }
 
@@ -923,8 +923,7 @@ function main(L) {
   const settingsDialog = $('settings');
   fillSelect($('language'), S.languageOptions);
   $('open-settings').addEventListener('click', () => {
-    const saved = savedLanguage();
-    $('language').value = Object.values(Lang).includes(saved) ? saved : LanguageChoice.SYSTEM;
+    $('language').value = choiceFor(savedLanguage());
     settingsDialog.showModal();
   });
   // A new language redraws the whole screen in it: the page reloads with the new choice.
