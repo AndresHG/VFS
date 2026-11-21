@@ -145,6 +145,7 @@ fn ac4_remove_root_hides_its_files() {
             filters: SearchFilters::default(),
             limit: 100,
             offset: 0,
+            sort: Default::default(),
         })
         .unwrap()
     };

@@ -30,11 +30,14 @@ impl SourceArg {
     }
 }
 
-/// `--sort` of `vfs search`.
+/// `--sort` of `vfs search` and `vfs bench` (VFS-12).
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SortArg {
     Relevance,
     Newest,
+    Oldest,
+    Name,
+    Size,
     Source,
 }
 
@@ -43,6 +46,9 @@ impl From<SortArg> for SortOrder {
         match s {
             SortArg::Relevance => SortOrder::Relevance,
             SortArg::Newest => SortOrder::Newest,
+            SortArg::Oldest => SortOrder::Oldest,
+            SortArg::Name => SortOrder::Name,
+            SortArg::Size => SortOrder::Size,
             SortArg::Source => SortOrder::Source,
         }
     }

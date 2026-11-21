@@ -300,6 +300,7 @@ mod tests {
                 filters: Default::default(),
                 limit: 10,
                 offset: 0,
+                sort: Default::default(),
             })
             .unwrap()
             .hits

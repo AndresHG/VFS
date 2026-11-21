@@ -117,6 +117,7 @@ fn converge_searchable(s: &Setup, context: &str) {
             filters: Default::default(),
             limit: 50,
             offset: 0,
+            sort: Default::default(),
         };
         vfs.search(&q)
             .unwrap_or_else(|e| panic!("{context}: search {text:?}: {e}"));

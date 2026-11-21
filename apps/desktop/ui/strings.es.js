@@ -54,9 +54,11 @@ export const es = {
     [SourceChoice.BOOKMARKS]: 'Marcadores',
   },
   fSort: 'Orden',
+  // Option order is display order (VFS-12).
   sortOptions: {
     [SortOrder.RELEVANCE]: 'Lo más parecido primero', [SortOrder.NEWEST]: 'Lo más reciente primero',
-    [SortOrder.SOURCE]: 'Archivos primero, luego marcadores',
+    [SortOrder.OLDEST]: 'Lo más antiguo primero', [SortOrder.NAME]: 'Por nombre (A-Z)',
+    [SortOrder.SIZE]: 'Lo más grande primero', [SortOrder.SOURCE]: 'Archivos primero, luego marcadores',
   },
   folderGroupBookmarks: 'Marcadores de Firefox',
   folderAll: 'Todas las carpetas',
@@ -66,6 +68,7 @@ export const es = {
   resultsTitle: 'Resultados',
   results: (n, one) => (one ? '1 resultado' : `${n} resultados`),
   resultsCapped: (n) => `Más de ${n} resultados. Escriba algo más para afinar.`,
+  resultsApproximate: (n) => `Más de ${n} resultados: hay demasiados para ordenarlos todos. Escriba algo más para afinar.`,
   resultsPartial: (n) => `${n} resultados. La búsqueda no terminó del todo; puede que falte alguno.`,
   searching: 'Buscando…',
   fuzzyNote: 'No hay coincidencias exactas; se muestran resultados parecidos.',

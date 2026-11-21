@@ -2,7 +2,7 @@
 // folders in the "Carpeta" select, and the folder path of a bookmark row. Pure functions,
 // tested in ui-dev/sources.test.mjs.
 
-import { Source } from './contract.js';
+import { SortOrder, Source } from './contract.js';
 import { SourceChoice } from './choices.js';
 
 /** The `sources` of `search_sources`; files only while bookmarks are off (R1). */
@@ -10,6 +10,17 @@ export function sourcesFor(choice, bookmarksOn) {
   if (!bookmarksOn || choice === SourceChoice.FILES) return [Source.FILES];
   if (choice === SourceChoice.BOOKMARKS) return [Source.BOOKMARKS];
   return [];
+}
+
+/** The orders the "Orden" select offers (VFS-12 AC-5): "by source" only while bookmarks are
+ *  included. */
+export function sortChoices(bookmarksOn) {
+  return Object.values(SortOrder).filter((o) => bookmarksOn || o !== SortOrder.SOURCE);
+}
+
+/** The order sent with a search: a choice no longer offered falls back to relevance. */
+export function sortFor(sort, bookmarksOn) {
+  return sortChoices(bookmarksOn).includes(sort) ? sort : SortOrder.RELEVANCE;
 }
 
 /** The size filter only applies to files (R7). */

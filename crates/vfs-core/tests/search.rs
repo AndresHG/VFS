@@ -53,6 +53,7 @@ impl Fixture {
                 filters,
                 limit: 500,
                 offset: 0,
+                sort: Default::default(),
             })
             .unwrap()
     }
@@ -484,6 +485,7 @@ fn ac9_truncation_by_cap_is_reported() {
                 filters: docs.clone(),
                 limit,
                 offset,
+                sort: Default::default(),
             })
             .unwrap()
     };
@@ -638,6 +640,7 @@ fn vfs7_capped_path_hits_are_read_by_file_id() {
                 filters: SearchFilters::default(),
                 limit: 500,
                 offset,
+                sort: Default::default(),
             })
             .unwrap();
         for h in page.hits.iter().filter(|h| !h.is_dir) {
@@ -833,6 +836,7 @@ fn huge_term_returns_within_the_deadline() {
             filters: SearchFilters::default(),
             limit: 100,
             offset: 0,
+            sort: Default::default(),
         });
         let _ = tx.send(r.map(|r| r.total));
     });
@@ -881,6 +885,7 @@ fn vfs4_every_page_names_the_folder_of_its_hits() {
                     filters: SearchFilters::default(),
                     limit: 1,
                     offset,
+                    sort: Default::default(),
                 })
                 .unwrap();
             for h in &r.hits {
@@ -1000,6 +1005,7 @@ fn vfs19_pages_count_results_and_copies_name_their_folder() {
                 filters: SearchFilters::default(),
                 limit: 7,
                 offset,
+                sort: Default::default(),
             })
             .unwrap();
         assert_eq!(r.total, 30, "thirty results for sixty files");

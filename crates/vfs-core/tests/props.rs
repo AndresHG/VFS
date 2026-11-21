@@ -116,6 +116,7 @@ impl Ix {
             filters,
             limit,
             offset,
+            sort: Default::default(),
         })?;
         assert_ne!(
             r.truncated_by,
@@ -431,7 +432,7 @@ proptest! {
         prop_assert_eq!(keys(&ix.text(&query).hits), keys(&all.hits));
         let other = open_patient(&ix._dir.path().join("index.db"));
         let again = other
-            .search(&SearchQuery { text: query.clone(), filters: SearchFilters::default(), limit: 500, offset: 0 })
+            .search(&SearchQuery { text: query.clone(), filters: SearchFilters::default(), limit: 500, offset: 0, sort: Default::default() })
             .unwrap();
         prop_assert_eq!(keys(&again.hits), keys(&all.hits));
 

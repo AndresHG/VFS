@@ -120,6 +120,9 @@ enum Cmd {
         /// Print the report as JSON.
         #[arg(long)]
         json: bool,
+        /// Order applied to every query of the set (VFS-12); `source` measures as relevance.
+        #[arg(long, value_enum, default_value_t = sources::SortArg::Relevance)]
+        sort: sources::SortArg,
     },
 }
 
@@ -379,11 +382,13 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 filters,
                 limit,
                 offset,
+                sort: vfs_bookmarks::SortOrder::from(sort).files(),
             };
             // Without a bookmark store (`vfs bookmarks on` never ran), plain file output.
             let files_only = source == sources::SourceArg::Files
                 || !vfs_bookmarks::bookmarks_db_path(&db).exists();
-            if files_only && sort == sources::SortArg::Relevance {
+            // The core applies every order but `source`, which only orders across sources.
+            if files_only {
                 cmd_search(&Vfs::open(&db)?, &q, json)?;
             } else {
                 sources::cmd_search(&db, &q, source, sort, json)?;
@@ -417,8 +422,14 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 human_size(r.db_bytes)
             );
         }
-        Cmd::Bench { db, runs, json } => {
-            let report = bench::run(&db, runs.max(1))?;
+        Cmd::Bench {
+            db,
+            runs,
+            json,
+            sort,
+        } => {
+            let order = vfs_bookmarks::SortOrder::from(sort).files();
+            let report = bench::run(&db, runs.max(1), order)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {

@@ -352,7 +352,8 @@ ranking tiers, so a full list never pushes out a better tier (S2, `run_query`):
 2. **All terms in the name**: the same without the anchor. Tiers 1 and 2 read
    up to 4,000 candidates, all ranked before the cut to 2,000 hits, so a better name match
    is never lost to rowid order. Date and size filters have no index, so with them these
-   tiers stop at 2,000.
+   tiers stop at 2,000. Under an order other than relevance every tier reads up to 6,000
+   candidates instead (VFS-12, below).
 3. **Path**: files whose relative path and name together hold every term, as one
    intersection in `file_paths_fts` (`exact_group`). Because that table has no positions,
    the expression is the trigrams that cover each term without overlap, ANDed; candidates
@@ -371,6 +372,19 @@ verification; when a group has only short terms, or the query has filters and no
 group is a filtered scan with `instr` in SQL (`scan_group`).
 
 At most 2,000 hits are kept; more sets `truncatedBy = "cap"`.
+
+### Sort orders (VFS-12)
+
+`SearchQuery.sort` is relevance (the default, the tiers above), newest, oldest, name or size.
+Any order but relevance reads up to 6,000 verified candidates (`SORT_READ_CAP`, 3× the
+cap: 20,000 broke the AC-9 budget on 2 M files), ranks them, re-sorts them stably by the order
+(`rank::sort_by_order`: an unknown date last in both date orders, folders last by size,
+ties in relevance order) and only then cuts to 2,000, so the newest file is first even when
+2,000 better-ranked files exist. A filter-only query under relevance still reads up to the
+2,000-hit cap (newest first among those). When a cap or the deadline cut the read of a sorted
+or filter-only query, the response sets `approximateOrder` and the screen says so.
+`search_sources` passes the order to the core and merges bookmarks into the sorted file list
+(dates saved, titles; no size, so after files).
 
 ### Deadline
 
@@ -568,8 +582,8 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
   fewer than 20. A folder also needs one term in its own name (VFS-1 D1). The title takes
   the file name's place in the tiers. `search_sources` reads the file list from the core in
   500-hit pages and merges both lists by (tier, folded name or title length, newer first),
-  files first on a tie; `sort: newest` sorts everything by date and `source` puts files
-  first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
+  files first on a tie; any other order is applied by the core first and the bookmarks are
+  merged into it (see "Sort orders (VFS-12)"), and `source` puts files first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
   their ancestors and no files; with no words they come in tree order, Firefox's own. Type
   filters drop bookmarks but keep bookmark folders under "Carpetas"; size and file folder
   filters drop both; a date filter applies to the date an item was saved.
@@ -594,5 +608,8 @@ Silicon, SSD), with warm OS file caches. There the warm p95 is close to the 150 
 before the no-hit probe, two of three runs passed and the worst failed by under 10 ms on
 two query classes; with it, three of three runs passed, with load averages of 4.4–5.1 from
 other work and the slowest class at 114–133 ms per run; peak RSS is about 123 MB (all
-measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). On Windows only the
+measured, schema version 2; version 3 peaks at about 138 MB, VFS-4). Each VFS-12 order
+(`vfs bench --sort`) passes there too, at 58–91 ms overall warm p95 and at most about 140 ms
+in its slowest class (size); runs that coincided with bursts of other work on the machine failed by
+tripling every class at once, cold runs included. On Windows only the
 runner figures of VFS-8 exist; nothing has been measured on an HDD.
