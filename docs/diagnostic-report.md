@@ -7,7 +7,7 @@ informe" shows. This page says what is in it and how to analyse it in a session 
 ## Getting a report
 
 - **From a user**: they press "Enviar comentarios", write what happened and press "Enviar
-  por GitHub" (a prefilled issue with the `comentarios` label; they drag the `.zip` in) or
+  por GitHub" (a prefilled issue from the `comentarios` form, labelled `feedback-usuario`; they drag the `.zip` in) or
   "Exportar diagnóstico (.zip)" and hand the file over.
 - **For your own analysis of a PC after weeks of use**: on that PC open "Enviar comentarios",
   leave the text empty, and press "Exportar diagnóstico (.zip)". Tick "Incluir en el informe

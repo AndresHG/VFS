@@ -3,7 +3,7 @@
 name: Comentarios
 description: Cuente qué ha pasado o qué le gustaría, con el informe de VFS.
 title: "Comentarios: "
-labels: ["comentarios"]
+labels: ["feedback-usuario"]
 body:
   - type: markdown
     attributes:

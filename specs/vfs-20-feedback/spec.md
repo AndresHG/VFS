@@ -120,8 +120,10 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
 - User files: never opened, never written; only the log and the index stats are read.
 - Antivirus, killed mid-write: a half-written zip is a temporary file renamed at the end.
 - A huge log flood: capped by rotation (R7); the URL never holds log lines.
-- Privacy leak through a new log format: the generic path rule is conservative (it
-  over-redacts to the end of the clause), and a test feeds it every format in the code.
+- Privacy leak through a new log format or an unusual name: a path runs to the next `": "`
+  (never inside a Windows name; every log format puts it before the error text), its closing
+  quote, or the line end, so parentheses and apostrophes in names never end it; a known root
+  is always consumed whole; a test feeds every log format in the code plus such names.
 
 ## Decisions
 

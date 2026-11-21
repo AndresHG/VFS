@@ -180,27 +180,35 @@ fn path_starts_at(s: &str, i: usize, private: &[String]) -> bool {
     drive || rest.starts_with("\\\\") || rest.starts_with('/') || rest.starts_with("~/")
 }
 
-/// Where a path that started at the beginning of `rest` ends: before the first `": "`, `"; "`,
-/// `" ("`, quote or line end. A path may hold spaces and commas, so this over-redacts rather
-/// than leaks (R3): `root C:\a b became unreachable` loses everything after `root`.
-fn path_len(rest: &str) -> usize {
-    [": ", "; ", " (", "\"", "'"]
-        .iter()
-        .filter_map(|d| rest.find(d))
-        .min()
-        .unwrap_or(rest.len())
+/// How many bytes of `rest`, where a path starts, belong to it: up to the first `": "` (a
+/// colon cannot be in a Windows name, and every log format puts `": "` before its error text),
+/// the closing `"` when the path was opened by one (`quoted`), or the line end. Names hold
+/// spaces, parentheses, commas and apostrophes, so nothing else ends a path: this over-redacts
+/// rather than leaks (R3), e.g. `root C:\a b became unreachable` keeps only `root`.
+fn path_len(rest: &str, quoted: bool) -> usize {
+    let colon = rest.find(": ");
+    let quote = if quoted { rest.find('"') } else { None };
+    colon.into_iter().chain(quote).min().unwrap_or(rest.len())
 }
 
-/// Replaces every path in `message` with [`REDACTED`] (R3).
+/// Replaces every path in `message` with [`REDACTED`] (R3). A `private` string that matches is
+/// always consumed whole, even if it holds a delimiter.
 pub fn redact_message(message: &str, private: &[String]) -> String {
     let mut out = String::with_capacity(message.len());
     let mut i = 0;
     while i < message.len() {
         if path_starts_at(message, i, private) {
-            let n = path_len(&message[i..]).max(1);
+            let rest = &message[i..];
+            let known = private
+                .iter()
+                .filter(|p| rest.starts_with(p.as_str()))
+                .map(|p| p.len())
+                .max()
+                .unwrap_or(0);
+            let quoted = i > 0 && message.as_bytes()[i - 1] == b'"';
+            let tail = path_len(&rest[known..], quoted);
             out.push_str(REDACTED);
-            i += n;
-            // A drive letter's own ':' must not end the path at "C: ".
+            i += (known + tail).max(1);
             continue;
         }
         let c = message[i..].chars().next().unwrap_or(' ');
@@ -390,24 +398,15 @@ fn encode(s: &str) -> String {
     out
 }
 
-/// The prefilled new-issue address (R6): the `comentarios` form with the user's text and the
-/// report summary, never a log line. The text is shortened (ending in "…") until the whole
-/// address fits in [`MAX_URL_CHARS`].
-pub fn github_url(description: &str, summary: &str) -> String {
-    let head = format!(
-        "{ISSUE_URL}?template={}&{FIELD_SUMMARY}={}&{FIELD_TEXT}=",
-        encode(ISSUE_TEMPLATE),
-        encode(summary)
-    );
-    let budget = MAX_URL_CHARS.saturating_sub(head.len());
-    let description = description.trim();
-    let full = encode(description);
+/// `s` percent-encoded in at most `budget` bytes: shortened, ending in "…", when longer.
+fn encode_within(s: &str, budget: usize) -> String {
+    let full = encode(s);
     if full.len() <= budget {
-        return head + &full;
+        return full;
     }
     let ellipsis = encode("…");
     let mut cut = String::new();
-    for c in description.chars() {
+    for c in s.chars() {
         let mut buf = [0u8; 4];
         let piece = encode(c.encode_utf8(&mut buf));
         if cut.len() + piece.len() + ellipsis.len() > budget {
@@ -415,7 +414,20 @@ pub fn github_url(description: &str, summary: &str) -> String {
         }
         cut.push_str(&piece);
     }
-    head + &cut + &ellipsis
+    cut + &ellipsis
+}
+
+/// The prefilled new-issue address (R6): the `comentarios` form with the user's text and the
+/// report summary, never a log line. The summary takes at most half of [`MAX_URL_CHARS`] (many
+/// roots), the text the rest; either is shortened, ending in "…", to fit.
+pub fn github_url(description: &str, summary: &str) -> String {
+    let head = format!(
+        "{ISSUE_URL}?template={}&{FIELD_SUMMARY}={}&{FIELD_TEXT}=",
+        encode(ISSUE_TEMPLATE),
+        encode_within(summary, MAX_URL_CHARS / 2)
+    );
+    let budget = MAX_URL_CHARS.saturating_sub(head.len());
+    head + &encode_within(description.trim(), budget)
 }
 
 /// Where the report is saved (R5): Downloads, else Desktop, else home; the first that exists.
@@ -895,6 +907,8 @@ mod tests {
             "[2026-11-21][09:00:06][vfs_bookmarks][WARN] Firefox profile /Users/ana/Library/Application Support/Firefox/Profiles/x1.default-release: locked",
             "[2026-11-21][09:00:07][vfs_desktop_lib::commands][WARN] mark_dirty /Volumes/Archivo/Notaría Pérez/escritura 2019.pdf: gone",
             r"[2026-11-21][09:00:08][vfs_core::indexer][WARN] cannot watch D:\Fotos familia: overlaps an indexed folder: inside D:\Fotos familia\Viejas",
+            r"[2026-11-21][09:00:08][vfs_core::indexer][WARN] cannot list E:\Archivo (2019)\Nueva carpeta (2)\Casa d'Ana: Acceso denegado. (os error 5)",
+            r"[2026-11-21][09:00:08][vfs_core::indexer][WARN] root E:\Archivo (2019) became unreachable",
             r"[2026-11-21][09:00:09][vfs::panic][ERROR] panic at crates/vfs-core/src/x.rs:10: called `Result::unwrap()` on an `Err` value: NotFound(D:\Fotos familia\Boda Laura.jpg)",
             r#"[2026-11-21][09:00:10][vfs_core::indexer][ERROR] indexer: not a directory: "/Users/ana/Documentos/Declaración renta.pdf""#,
             "continuation line ~/Escritorio/Carta al banco.odt",
@@ -916,6 +930,10 @@ mod tests {
         "Boda Laura",
         "Declaración",
         "Carta al banco",
+        "Archivo (2019)",
+        "(2019)",
+        "Nueva carpeta",
+        "Casa d'Ana",
     ];
 
     fn logs() -> Vec<LogFile> {
@@ -945,7 +963,7 @@ mod tests {
             "files: 1200\nfolders: 80\nroots: 1\nsize_mb: 5.0\nwal_mb: 1.0\nschema: 4",
             "indexer: idle",
             "firefox_bookmarks: on (profiles=1 bookmarks=230)",
-            "files: 2\nlines: 13\nwarnings: 8\nerrors: 2\npanics: 1",
+            "files: 2\nlines: 15\nwarnings: 10\nerrors: 2\npanics: 1",
             "names_included: no",
         ] {
             assert!(r.text.contains(want), "missing {want:?} in\n{}", r.text);
@@ -964,7 +982,12 @@ mod tests {
     /// warning format, `<ruta>` takes their place, and diagnostic lines are unchanged.
     #[test]
     fn report_without_names_redacts_every_path() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "", false, &logs());
+        let r = build_report(
+            &env(&[r"D:\Fotos familia", r"E:\Archivo (2019)"]),
+            "",
+            false,
+            &logs(),
+        );
         for secret in SECRETS {
             assert!(!r.text.contains(secret), "{secret:?} leaked in\n{}", r.text);
         }
@@ -988,9 +1011,20 @@ mod tests {
             redact_message(r"cannot list C:\Mis cosas\a b: denied", none),
             "cannot list <ruta>: denied"
         );
+        assert_eq!(redact_message("x=/home/u/a b (gone)", none), "x=<ruta>");
+        // Parentheses and apostrophes are common in names and never end a path.
         assert_eq!(
-            redact_message("x=/home/u/a b (gone)", none),
-            "x=<ruta> (gone)"
+            redact_message(r"cannot list D:\F\Nueva carpeta (2)\Boda.jpg: denied", none),
+            "cannot list <ruta>: denied"
+        );
+        assert_eq!(
+            redact_message(r"list D:\Casa d'Ana\x.jpg: e", none),
+            "list <ruta>: e"
+        );
+        // A quoted path ends at its closing quote.
+        assert_eq!(
+            redact_message(r#"not a dir: "/a/Casa b.txt" (x)"#, none),
+            r#"not a dir: "<ruta>" (x)"#
         );
         assert_eq!(redact_message(r"open \\srv\a\b", none), "open <ruta>");
         assert_eq!(redact_message("at ~/Docs/x", none), "at <ruta>");
@@ -1089,6 +1123,10 @@ mod tests {
                 .all(|b| b.is_ascii_alphanumeric() || b"-._~%=&".contains(&b)),
             "{query}"
         );
+
+        let huge = github_url(&long, &"root 1: drive=local disk=hdd\n".repeat(2000));
+        assert!(huge.len() <= MAX_URL_CHARS, "{}", huge.len());
+        assert!(huge.contains(&format!("&{FIELD_TEXT}=No%20encuentra")));
 
         let short = github_url("Va lento", &r.summary);
         assert!(short.ends_with(&format!("&{FIELD_TEXT}=Va%20lento")));
