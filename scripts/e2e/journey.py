@@ -609,21 +609,28 @@ class Journey:
         return out
 
     def with_setting(self, toggle, media, label):
-        """Turns a Windows setting on, waits for the page to match `media`, takes a
-        screenshot and turns it off again."""
-        before = self.wd.js(f"return matchMedia('{media}').matches")
+        """Starts from the Windows setting off (the runner may have it on already), checks
+        the page does not match `media`, turns the setting on, waits for the page to match,
+        takes a screenshot and turns it off again: the page must follow both ways."""
+        def matches(want):
+            try:
+                wait_for(lambda: self.wd.js(f"return matchMedia('{media}').matches") == want,
+                         15, 0.5, f"{media} = {want}")
+                return True
+            except TimeoutError:
+                return False
+        initially = self.wd.js(f"return matchMedia('{media}').matches")
+        toggle(False)
+        off = matches(False)
         toggle(True)
         try:
-            try:
-                wait_for(lambda: self.wd.js(f"return matchMedia('{media}').matches"), 15, 0.5,
-                         media)
-                follows = True
-            except TimeoutError:
-                follows = False
+            on = matches(True)
             self.shoot(label)
         finally:
             toggle(False)
-        return {"before": before, "follows": follows}
+        back = matches(False)
+        return {"initially": initially, "off": off, "on": on, "back_off": back,
+                "follows": off and on and back}
 
     def s_close_and_change(self):
         self.app.stop()
