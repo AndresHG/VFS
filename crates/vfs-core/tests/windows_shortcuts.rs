@@ -192,8 +192,9 @@ fn shell_links_to_absent_drives() {
     assert_target(&root.join("nunca.lnk"), never.to_str().unwrap());
 }
 
-/// VFS-18 AC-2, AC-3: a target on a network share (the runner's administrative share of
-/// its own system drive) is read as its UNC path; reading it makes no network access.
+/// VFS-18 AC-2: a target on a network share (the runner's administrative share of its own
+/// system drive) is read as its UNC path. AC-3, an unreachable server, is
+/// `link::tests::unreachable_network_target_is_never_contacted`.
 #[test]
 fn shell_links_to_network_targets() {
     let t = tempfile::tempdir().unwrap();

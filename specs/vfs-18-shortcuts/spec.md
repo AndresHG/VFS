@@ -11,7 +11,7 @@
 ## Problem
 
 The end user keeps a large archive on a slow Windows PC and uses Windows shortcuts
-("Acceso directo", `.lnk`) heavily: often a shortcut is how she remembers where something
+("Acceso directo", `.lnk`) heavily: often a shortcut is how they remember where something
 is, and some point to places VFS does not index (the NAS, a USB disk). Today a shortcut is
 an ordinary file of kind "other" named `Fotos boda.lnk`; nothing reads where it points, it
 cannot be found by its destination, and "Mostrar en carpeta" shows the shortcut, not the
@@ -115,7 +115,7 @@ Rust standard library source. Full notes with a link per claim: `docs/research/s
   name gets a badge (`Acceso directo`, `Página web`, `Enlace`); its second line becomes
   `Lleva a: <target>` (highlighted like a path) or, for no target, stays the folder. The
   details line shows both: `Acceso directo en: <full path> · Lleva a: <target>`. A second
-  button under the first: `Mostrar el destino` for shortcuts and link entries with a
+  button beside the first: `Mostrar el destino` for shortcuts and link entries with a
   target, `Abrir en Firefox` for an openable `.url` (keyboard: Mayús+Intro). A missing
   target shows `No se encuentra el destino «<target>». Puede que se haya movido o borrado,
   o que el disco no esté conectado.` The target is text only: never a link, image or URL in
@@ -228,7 +228,7 @@ Tests cite these ids (`VFS-18 AC-<m>`).
 | D6 | `.url` files | Like bookmarks: file results showing the address, `Abrir en Firefox`, found by name and address | owner | 2026-11-20 |
 | D7 | When targets are read | Deferred pass after the walks, not during them | session | 2026-11-20 |
 | D8 | Parser | Hand-written, bounded; no crate (research above) | session | 2026-11-20 |
-| D9 | Row layout | Target replaces the folder on the second line (fixed row height); both in the details line; second button stacked; Mayús+Intro | session | 2026-11-20 |
+| D9 | Row layout | Target replaces the folder on the second line (fixed row height); both in the details line; second button beside the first; Mayús+Intro | session | 2026-11-20 |
 | D10 | Type filter on links | Only "Otros" keeps them | session | 2026-11-20 |
 
 ## Open questions

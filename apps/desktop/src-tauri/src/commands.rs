@@ -125,12 +125,16 @@ fn target_to_reveal(id: i64, link: LinkTarget) -> Result<PathBuf, vfs_core::Erro
 /// through the same path as a bookmark (VFS-6 R10).
 #[tauri::command(async)]
 pub fn open_link_url(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    let link = state.vfs.link_target(id)?;
+    let url = url_to_open(id, state.vfs.link_target(id)?)?;
+    crate::bookmarks::open_in_firefox(&url).map_err(|e| vfs_core::Error::Io(e).into())
+}
+
+/// The address "Abrir en Firefox" opens for link `id`: an Internet Shortcut's `http`/`https`
+/// address, else `unavailable`.
+fn url_to_open(id: i64, link: LinkTarget) -> Result<String, vfs_core::Error> {
     match link.target {
-        Some(url) if link.openable => {
-            crate::bookmarks::open_in_firefox(&url).map_err(|e| vfs_core::Error::Io(e).into())
-        }
-        _ => Err(vfs_core::Error::Unavailable(format!("link {id}")).into()),
+        Some(url) if link.openable => Ok(url),
+        _ => Err(vfs_core::Error::Unavailable(format!("link {id}"))),
     }
 }
 
@@ -212,6 +216,91 @@ mod tests {
             link(LinkKind::Shortcut, Some("Fotos\\relativo.jpg")),
         ] {
             assert!(target_to_reveal(1, no_path).is_err());
+        }
+    }
+
+    struct QuietSink;
+    impl vfs_core::ProgressSink for QuietSink {
+        fn on_progress(&self, _: &IndexProgress) {}
+    }
+
+    /// VFS-18 AC-11 (R8): after a `.lnk` and a `.url` are indexed and both actions are
+    /// prepared on them ("Mostrar el destino" finds the target, "Abrir en Firefox" the
+    /// address), the link files' bytes and modification times are unchanged.
+    #[test]
+    fn link_files_are_unchanged_by_indexing_and_both_actions() {
+        let tree = tempfile::tempdir().unwrap();
+        let db = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tree.path()).unwrap();
+        std::fs::create_dir_all(root.join("Boda")).unwrap();
+        std::fs::create_dir_all(root.join("Accesos")).unwrap();
+        let album = root.join("Boda").join("album.jpg");
+        std::fs::write(&album, b"x").unwrap();
+        // A minimal Shell Link: HasRelativePath | IsUnicode, then the relative path.
+        let rel: Vec<u16> = "..\\Boda\\album.jpg".encode_utf16().collect();
+        let mut lnk = vec![0u8; 0x4C];
+        lnk[0] = 0x4C;
+        lnk[4..20].copy_from_slice(&[
+            0x01, 0x14, 0x02, 0x00, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46,
+        ]);
+        lnk[0x14] = 0x08 | 0x80;
+        lnk.extend((rel.len() as u16).to_le_bytes());
+        lnk.extend(rel.iter().flat_map(|u| u.to_le_bytes()));
+        lnk.extend([0, 0, 0, 0]);
+        let url = b"[InternetShortcut]\r\nURL=https://www.mibanco.es/\r\n".to_vec();
+        let files = [
+            (root.join("Accesos").join("fotos.lnk"), lnk),
+            (root.join("Accesos").join("Banco.url"), url),
+        ];
+        for (path, bytes) in &files {
+            std::fs::write(path, bytes).unwrap();
+        }
+        let before: Vec<_> = files
+            .iter()
+            .map(|(p, _)| std::fs::metadata(p).unwrap().modified().unwrap())
+            .collect();
+
+        let vfs = vfs_core::Vfs::open(&db.path().join("index.db")).unwrap();
+        vfs.add_root(&root).unwrap();
+        vfs.start_indexer_with(
+            std::sync::Arc::new(QuietSink),
+            vfs_core::IndexerOptions {
+                boot_grace: std::time::Duration::ZERO,
+            },
+        )
+        .unwrap();
+        let id_of = |text: &str, name: &str| -> Option<i64> {
+            vfs.search(&SearchQuery {
+                text: text.into(),
+                filters: Default::default(),
+                limit: 10,
+                offset: 0,
+            })
+            .unwrap()
+            .hits
+            .into_iter()
+            .find(|h| h.name == name && h.link.as_ref().is_some_and(|l| l.target.is_some()))
+            .map(|h| h.id)
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let (lnk_id, url_id) = loop {
+            if let (Some(a), Some(b)) = (id_of("fotos", "fotos.lnk"), id_of("banco", "Banco.url")) {
+                break (a, b);
+            }
+            assert!(std::time::Instant::now() < deadline, "links never read");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+
+        let target = target_to_reveal(lnk_id, vfs.link_target(lnk_id).unwrap()).unwrap();
+        assert_eq!(std::fs::canonicalize(target).unwrap(), album);
+        assert_eq!(
+            url_to_open(url_id, vfs.link_target(url_id).unwrap()).unwrap(),
+            "https://www.mibanco.es/"
+        );
+        vfs.shutdown();
+        for ((path, bytes), mtime) in files.iter().zip(before) {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes, "{}", path.display());
+            assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), mtime);
         }
     }
 }

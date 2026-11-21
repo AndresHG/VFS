@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { S } from '../ui/strings.js';
-import { FileKind, Source } from '../ui/contract.js';
+import { FileKind, LinkKind, Source } from '../ui/contract.js';
 import { DateChoice, SizeChoice } from '../ui/choices.js';
 import { placesOf } from '../ui/copies.js';
+import { SecondAction, secondActionOf } from '../ui/links.js';
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
 
@@ -89,4 +90,34 @@ test('copies have their Spanish copy and dialog', () => {
   assert.ok(S.copiesIntro && S.copiesBadgeLabel(2) && S.copiesModified('1 mar'));
   assert.match(html, /<dialog id="copies"[^>]*aria-labelledby="copies-title"/);
   assert.match(html, /<ul class="roots" id="copies-list"/);
+});
+
+/** VFS-18 D2, AC-6: every link kind has its badge and its details label, and a missing
+ *  target names the target and says why it may be missing. */
+test('link rows have their wording and the missing-target message', () => {
+  for (const kind of Object.values(LinkKind)) {
+    assert.ok(S.linkBadge[kind], `badge for ${kind}`);
+    assert.ok(S.detailsLinkAt[kind], `details label for ${kind}`);
+  }
+  const t = 'D:\\Boda 2003';
+  const msg = S.targetMissing(t);
+  assert.ok(msg.includes(`«${t}»`));
+  assert.match(msg, /movido o borrado/);
+  assert.match(msg, /disco no esté conectado/);
+  assert.equal(S.targetButton, 'Mostrar el destino');
+  assert.equal(S.secondKey, 'Mayús+Intro');
+});
+
+/** VFS-18 AC-6, AC-7, D3, D6: "Mostrar el destino" only for a shortcut or link with a
+ *  target; "Abrir en Firefox" only for an Internet Shortcut that can be opened (http/https);
+ *  nothing for a file: address, a link with no target or an ordinary file. */
+test('the second action of a row depends on the link', () => {
+  const hit = (link) => ({ id: 1, name: 'x', dir: '/a', isDir: false, ...(link ? { link } : {}) });
+  assert.equal(secondActionOf(hit({ kind: LinkKind.SHORTCUT, target: 'D:\\Boda', openable: false })), SecondAction.TARGET);
+  assert.equal(secondActionOf(hit({ kind: LinkKind.SYMLINK, target: '/Volumes/Fotos', openable: false })), SecondAction.TARGET);
+  assert.equal(secondActionOf(hit({ kind: LinkKind.INTERNET, target: 'https://mibanco.es/', openable: true })), SecondAction.OPEN);
+  assert.equal(secondActionOf(hit({ kind: LinkKind.INTERNET, target: 'file:///C:/x.txt', openable: false })), null);
+  assert.equal(secondActionOf(hit({ kind: LinkKind.SHORTCUT, target: null, openable: false })), null);
+  assert.equal(secondActionOf(hit(null)), null);
+  assert.equal(secondActionOf(undefined), null);
 });

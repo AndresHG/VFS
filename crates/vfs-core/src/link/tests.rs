@@ -502,3 +502,76 @@ fn reads_a_bounded_prefix() {
         Some("https://a.es")
     );
 }
+
+struct QuietSink;
+impl crate::ProgressSink for QuietSink {
+    fn on_progress(&self, _: &crate::IndexProgress) {}
+}
+
+/// VFS-18 AC-3 (R3): a shortcut to a share on a server that never answers (192.0.2.1, the
+/// TEST-NET-1 block) is indexed, read, found by its target and shown with no access to the
+/// target: the whole run ends well under the seconds an SMB connection attempt waits on
+/// Windows, where the target would be a network path if any call touched it.
+#[test]
+fn unreachable_network_target_is_never_contacted() {
+    let tree = tempfile::tempdir().unwrap();
+    let db = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tree.path()).unwrap();
+    std::fs::create_dir(root.join("Familia")).unwrap();
+    let target = "\\\\192.0.2.1\\fotos\\Boda 2003";
+    std::fs::write(
+        root.join("Familia").join("Fotos NAS.lnk"),
+        build(
+            Info::Net {
+                name: "\\\\192.0.2.1\\fotos",
+                device: None,
+                suffix: "Boda 2003",
+                wide: true,
+            },
+            Link::default(),
+        ),
+    )
+    .unwrap();
+
+    let started = std::time::Instant::now();
+    let vfs = crate::Vfs::open(&db.path().join("index.db")).unwrap();
+    vfs.add_root(&root).unwrap();
+    vfs.start_indexer_with(
+        std::sync::Arc::new(QuietSink),
+        crate::IndexerOptions {
+            boot_grace: std::time::Duration::ZERO,
+        },
+    )
+    .unwrap();
+    let query = crate::SearchQuery {
+        text: "boda".into(),
+        filters: Default::default(),
+        limit: 10,
+        offset: 0,
+    };
+    let hit = loop {
+        let found = vfs.search(&query).unwrap().hits.into_iter().find(|h| {
+            h.link
+                .as_ref()
+                .is_some_and(|l| l.target.as_deref() == Some(target))
+        });
+        if let Some(hit) = found {
+            break hit;
+        }
+        assert!(
+            started.elapsed().as_secs() < 10,
+            "never found by its target"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    // Displaying the row reads what the index holds, nothing more.
+    let shown = vfs.link_target(hit.id).unwrap();
+    assert_eq!(shown.target.as_deref(), Some(target));
+    assert_eq!(hit.matched, crate::MatchKind::Target);
+    vfs.shutdown();
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "took {:?}: something waited on the network",
+        started.elapsed()
+    );
+}

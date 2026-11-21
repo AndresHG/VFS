@@ -5,6 +5,7 @@ import { S } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
+import { SecondAction, secondActionOf } from './links.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -506,10 +507,11 @@ function main() {
   /** The second action of a file hit, or null: "Mostrar el destino" for a shortcut or link
    *  with a target, "Abrir en Firefox" for an Internet Shortcut that can be opened. */
   function secondAction(hit) {
-    const link = hit?.link;
-    if (!link) return null;
-    if (link.kind === LinkKind.INTERNET) return link.openable ? { icon: OPEN_ICON, text: S.openButton } : null;
-    return link.target ? { icon: TARGET_ICON, text: S.targetButton } : null;
+    switch (secondActionOf(hit)) {
+      case SecondAction.OPEN: return { icon: OPEN_ICON, text: S.openButton };
+      case SecondAction.TARGET: return { icon: TARGET_ICON, text: S.targetButton };
+      default: return null;
+    }
   }
 
   function setSecond(row, action) {
