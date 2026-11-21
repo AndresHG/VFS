@@ -235,6 +235,7 @@ export const en = {
   feedbackPreview: 'See the report',
   feedbackLoading: 'Preparing the report…',
   feedbackHowTo: '“Send via GitHub” saves the report and opens a GitHub page (a free account is needed) to drag it into. Without an account, use “Export diagnostics” and send the file to whoever installed the app for you.',
+  feedbackPublic: 'The GitHub page is public: anyone can see what you write and the file you attach. Folder and file names never go in the page text; only in the .zip, if you ticked the box.',
   feedbackGithub: 'Send via GitHub',
   feedbackExport: 'Export diagnostics (.zip)',
   feedbackSaved: (folder, file) => `Report saved in “${folder}” as “${file}”. Send it to whoever installed the app for you, or attach it on GitHub.`,

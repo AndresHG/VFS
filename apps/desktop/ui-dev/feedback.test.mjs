@@ -27,6 +27,13 @@ test('feedback dialog markup and copy', () => {
   assert.match(S.feedbackExport, /Exportar diagnóstico/);
 });
 
+/** VFS-20 R6: the dialog says the GitHub issue is public, in both catalogs. */
+test('feedback dialog warns that the GitHub page is public', () => {
+  assert.match(html, /data-s="feedbackPublic"/);
+  assert.match(S.feedbackPublic, /pública/);
+  assert.match(EN.feedbackPublic, /public/);
+});
+
 /** VFS-20 AC-4, AC-5: after saving, the message names the folder and the file, and says what
  * to do with it: give it to whoever installed the program, or drag it into GitHub. */
 test('saved message says where the report is and what to do', () => {

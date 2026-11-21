@@ -23,7 +23,7 @@ informe" shows. This page says what is in it and how to analyse it in a session 
 |---|---|
 | `## What happened` | The user's own words. |
 | `## App` | Version, OS (`windows 10.0.<build> <release>`; a build ≥ 22000 is Windows 11), local time it was made, whether names are included. |
-| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, time since the last full walk. The path only with names included. |
+| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, time since the last full walk. The path only with names included, and never in the GitHub issue's prefilled summary. |
 | `## Index` | Files, folders, roots, index size, WAL size (MB), schema version. |
 | `## Settings` | Indexer state (idle/scanning/paused), Firefox bookmarks on/off with profiles and count. |
 | `## Log` | Number of log files and lines; warnings, errors and panics in them. |
@@ -40,7 +40,8 @@ Log lines are `[date][time UTC][target][LEVEL] message`. Targets worth knowing:
 - `vfs::panic` (ERROR): a panic, with the source location in this repo.
 - Any other target (WARN/ERROR): problems such as unreadable folders or watcher failures.
   Without names, every path in them reads `<ruta>`, and the redaction may swallow the rest of
-  the clause (`root <ruta>` for "root … became unreachable").
+  the clause (`root <ruta>` for "root … became unreachable"); after a macOS path (`/…`, `~/…`)
+  it swallows the rest of the line, error text included, since a macOS name can hold `": "`.
 
 ## Analysing it in a Claude session
 

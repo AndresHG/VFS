@@ -93,8 +93,9 @@ pub struct LogFile {
     pub text: String,
 }
 
-/// The report: `summary` is everything but the user's text and the log lines (what the issue
-/// URL carries), `text` the whole report (what the `.zip` holds and the preview shows).
+/// The report: `summary` is everything but the user's text, the log lines and the root paths
+/// (what the public issue URL carries), `text` the whole report (what the `.zip` holds and the
+/// preview shows).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub summary: String,
@@ -180,13 +181,15 @@ fn path_starts_at(s: &str, i: usize, private: &[String]) -> bool {
     drive || rest.starts_with("\\\\") || rest.starts_with('/') || rest.starts_with("~/")
 }
 
-/// How many bytes of `rest`, where a path starts, belong to it: up to the first `": "` (a
-/// colon cannot be in a Windows name, and every log format puts `": "` before its error text),
-/// the closing `"` when the path was opened by one (`quoted`), or the line end. Names hold
-/// spaces, parentheses, commas and apostrophes, so nothing else ends a path: this over-redacts
-/// rather than leaks (R3), e.g. `root C:\a b became unreachable` keeps only `root`.
-fn path_len(rest: &str, quoted: bool) -> usize {
-    let colon = rest.find(": ");
+/// How many bytes of `rest`, where a path starts, belong to it: up to the closing `"` when the
+/// path was opened by one (`quoted`), else the line end; a Windows path (`posix` false) also
+/// ends at the first `": "`, since a colon cannot be in a Windows name and every log format puts
+/// `": "` before its error text. A macOS name can hold `": "` (Finder shows it as "/"), so a
+/// POSIX path never ends there (R3). Names hold spaces, parentheses, commas and apostrophes, so
+/// nothing else ends a path: this over-redacts rather than leaks, e.g. `root C:\a b became
+/// unreachable` keeps only `root`.
+fn path_len(rest: &str, quoted: bool, posix: bool) -> usize {
+    let colon = if posix { None } else { rest.find(": ") };
     let quote = if quoted { rest.find('"') } else { None };
     colon.into_iter().chain(quote).min().unwrap_or(rest.len())
 }
@@ -206,7 +209,8 @@ pub fn redact_message(message: &str, private: &[String]) -> String {
                 .max()
                 .unwrap_or(0);
             let quoted = i > 0 && message.as_bytes()[i - 1] == b'"';
-            let tail = path_len(&rest[known..], quoted);
+            let posix = rest.starts_with('/') || rest.starts_with("~/");
+            let tail = path_len(&rest[known..], quoted, posix);
             out.push_str(REDACTED);
             i += (known + tail).max(1);
             continue;
@@ -298,10 +302,13 @@ pub fn build_report(
     if env.roots.is_empty() {
         let _ = writeln!(s, "(none)");
     }
+    // The root paths go only into the saved report, never into the summary the public issue
+    // URL carries (R6): `named_roots` is this section with them.
+    let roots_start = s.len();
+    let mut named_roots = String::new();
     for (root, disk) in &env.roots {
-        let _ = writeln!(
-            s,
-            "root {}: drive={} disk={} status={} files={} folders={} last_full_scan={}",
+        let line = format!(
+            "root {}: drive={} disk={} status={} files={} folders={} last_full_scan={}\n",
             root.id,
             wire_name(root.drive),
             disk.name(),
@@ -310,10 +317,13 @@ pub fn build_report(
             root.dirs,
             age(env.now, root.last_full_scan),
         );
+        s.push_str(&line);
+        named_roots.push_str(&line);
         if include_names {
-            let _ = writeln!(s, "  path: {}", root.path);
+            let _ = writeln!(named_roots, "  path: {}", root.path);
         }
     }
+    let roots_end = s.len();
     let _ = writeln!(s, "\n## Index");
     match &env.stats {
         Some(st) => {
@@ -369,7 +379,9 @@ pub fn build_report(
         description
     });
     text.push_str("\n\n");
-    text.push_str(&summary);
+    text.push_str(&summary[..roots_start]);
+    text.push_str(&named_roots);
+    text.push_str(&summary[roots_end..]);
     text.push_str("\n## Log lines\n");
     for file in logs {
         let _ = writeln!(text, "--- {} ---", file.name);
@@ -856,6 +868,7 @@ mod tests {
             dirs: 80,
             last_full_scan: Some(1_000_000 - 3 * 86_400),
             drive: DriveKind::Local,
+            unreadable: 0,
         }
     }
 
@@ -997,7 +1010,8 @@ mod tests {
             .contains("[vfs_core::indexer][WARN] cannot list <ruta>: Acceso denegado."));
         assert!(r
             .text
-            .contains("[vfs_bookmarks][WARN] Firefox profile <ruta>: locked"));
+            .lines()
+            .any(|l| l.ends_with("[vfs_bookmarks][WARN] Firefox profile <ruta>")));
         assert!(r.text.contains("panic at crates/vfs-core/src/x.rs:10"));
         assert!(!r.text.contains("path: "));
     }
@@ -1041,6 +1055,38 @@ mod tests {
         assert_eq!(
             redact_message("watch Archivo\\Fotos\\x: e", &roots),
             "watch <ruta>: e"
+        );
+    }
+
+    /// VFS-20 AC-2: a macOS name typed with "/" in Finder is stored with ":", so `": "` can be
+    /// inside a POSIX path: such a path runs to the line end (or its closing quote), while a
+    /// Windows path, whose names cannot hold a colon, still ends at `": "`.
+    #[test]
+    fn finder_slash_in_a_name_never_ends_a_path() {
+        let none: &[String] = &[];
+        assert_eq!(
+            redact_message(
+                "cannot list /Volumes/Archivo/Nota: banco/x.pdf: Permission denied",
+                none
+            ),
+            "cannot list <ruta>"
+        );
+        assert_eq!(
+            redact_message("at ~/Docs/Carta: Ana.odt: gone", none),
+            "at <ruta>"
+        );
+        assert_eq!(
+            redact_message(r#"not a dir: "/a/Nota: banco.txt" (x)"#, none),
+            r#"not a dir: "<ruta>" (x)"#
+        );
+        let roots = vec!["/Volumes/Archivo".to_owned()];
+        assert_eq!(
+            redact_message("watch /Volumes/Archivo/Nota: banco failed: denied", &roots),
+            "watch <ruta>"
+        );
+        assert_eq!(
+            redact_message(r"cannot list D:\Nota banco\x: Acceso denegado.", none),
+            "cannot list <ruta>: Acceso denegado."
         );
     }
 
@@ -1134,6 +1180,24 @@ mod tests {
         let form = include_str!("../../../../.github/ISSUE_TEMPLATE/comentarios.yml");
         assert!(form.contains(&format!("id: {FIELD_TEXT}")));
         assert!(form.contains(&format!("id: {FIELD_SUMMARY}")));
+    }
+
+    /// VFS-20 AC-5: with the names box ticked the root paths are in the saved report but never
+    /// in the issue URL, which becomes a public page.
+    #[test]
+    fn github_url_never_holds_root_paths() {
+        let roots = [r"D:\Fotos familia", "/Volumes/Archivo/Notaría"];
+        let r = build_report(&env(&roots), "Va lento", true, &logs());
+        let url = github_url("Va lento", &r.summary);
+        for root in roots {
+            assert!(r.text.contains(&format!("path: {root}")), "{}", r.text);
+            assert!(!url.contains(&encode(root)), "{url}");
+        }
+        for secret in ["Fotos", "Notar", "path%3A"] {
+            assert!(!url.contains(secret), "{secret:?} in {url}");
+        }
+        assert!(url.contains("names_included%3A%20yes"), "{url}");
+        assert!(url.contains("root%201%3A%20drive%3Dlocal"), "{url}");
     }
 
     /// VFS-20 AC-1: `diskutil` output maps to a disk kind.

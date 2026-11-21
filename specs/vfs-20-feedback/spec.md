@@ -42,7 +42,8 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
 - R1. THE app SHALL show an "Enviar comentarios" button in the bottom bar, which opens a
   dialog with: a free-text box ("¿Qué ha pasado o qué le gustaría?"), an unticked box to
   include folder and file names, a "Ver el informe" disclosure showing the exact report text,
-  and two actions: "Enviar por GitHub" and "Exportar diagnóstico (.zip)".
+  and two actions: "Enviar por GitHub" and "Exportar diagnóstico (.zip)"; a line says the
+  GitHub page is public and that folder names go only in the `.zip`.
 - R2. THE report SHALL be plain UTF-8 text holding: the user's text; app version; OS name,
   version and architecture; per root folder its number, drive kind (local, network,
   removable), disk kind (SSD, HDD, unknown), status, file and folder counts and time since
@@ -63,9 +64,10 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
   for them or attach it on GitHub.
 - R6. WHEN "Enviar por GitHub" is pressed, THE app SHALL do what R5 does and then open in the
   default browser a new issue on the project from the `comentarios` issue form, prefilled
-  with the user's text and the report summary (everything but the log lines), the URL kept
-  under 8,000 characters by shortening the user's text if needed; the form asks the user to
-  drag the `.zip` into the issue.
+  with the user's text and the report summary (everything but the log lines and the root
+  paths, which go only in the `.zip` even with the names box ticked), the URL kept at most
+  8,000 characters by shortening the user's text if needed; the form asks the user to drag
+  the `.zip` into the issue.
 - R7. THE app SHALL keep up to 11 log files of 2 MB (22 MB at most), enough for several
   weeks of history on the reference machine, and SHALL write every panic, with its source
   location, to the log as an error before the default panic behavior runs.
@@ -89,8 +91,9 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
   falls back to Desktop, then home, when missing.
 - AC-5 (R6) Given a user text of 20,000 characters, When the GitHub URL is built, Then it
   points to `issues/new?template=comentarios.yml`, carries the text (shortened) and the
-  summary but no log line, is under 8,000 characters, and every field value is
-  percent-encoded; the issue form file declares the fields the URL fills.
+  summary but no log line and no root path (even with the names box ticked), is at most
+  8,000 characters, and every field value is percent-encoded; the issue form file declares
+  the fields the URL fills.
 - AC-6 (R7) Given the logger and the panic hook installed, When a thread panics, Then the log
   file holds an error naming the panic and its location; and the logger rotates at 2 MB
   keeping 10 old files.
@@ -120,10 +123,15 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
 - User files: never opened, never written; only the log and the index stats are read.
 - Antivirus, killed mid-write: a half-written zip is a temporary file renamed at the end.
 - A huge log flood: capped by rotation (R7); the URL never holds log lines.
-- Privacy leak through a new log format or an unusual name: a path runs to the next `": "`
-  (never inside a Windows name; every log format puts it before the error text), its closing
-  quote, or the line end, so parentheses and apostrophes in names never end it; a known root
-  is always consumed whole; a test feeds every log format in the code plus such names.
+- Privacy leak through a new log format or an unusual name: a path runs to its closing quote
+  or the line end, and a Windows path also to the next `": "` (never inside a Windows name;
+  every log format puts it before the error text). A macOS name can hold `": "` (a "/" typed
+  in Finder), so a POSIX path never ends there and its error text is redacted with it.
+  Parentheses and apostrophes never end a path; a known root is always consumed whole; a test
+  feeds every log format in the code plus such names.
+- Names on a public page: the issue URL never carries the root paths, even with the names box
+  ticked; they reach GitHub only if the user attaches the `.zip`, and the dialog says the page
+  is public.
 
 ## Decisions
 
