@@ -102,6 +102,9 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 - Buttons are verbs: *Mostrar en carpeta, Añadir carpeta…, Buscar cambios ahora, Quitar*.
   The ellipsis means "asks something more" (a picker or a confirm).
 - No exclamation marks, no "¡Ups!", no blame ("ha introducido mal…").
+- English copy (VFS-22) keeps the same rules in plain words ("check", "show", "remove", never
+  "index" or "scan"); numbers group with commas (`30,569`) and dates and times follow the
+  system's English locale (`Nov 8, 2025`, `9:14 AM` in en-US).
 
 ## Sources (VFS-6)
 

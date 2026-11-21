@@ -7,14 +7,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { CATALOGS } from '../ui/strings.js';
-
-const S = CATALOGS.es;
+import { CATALOGS, Lang } from '../ui/strings.js';
 import { BookmarkRoot, ReadState, SortOrder, Source } from '../ui/contract.js';
 import { SourceChoice } from '../ui/choices.js';
 import {
   PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sourcesFor,
 } from '../ui/sources.js';
+
+const S = CATALOGS[Lang.ES];
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
 
