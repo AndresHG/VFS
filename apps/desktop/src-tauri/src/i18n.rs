@@ -254,22 +254,14 @@ mod tests {
         assert_eq!(Lang::from_code("system"), None);
     }
 
-    /// VFS-22 AC-6: the menu words are Spanish in Spanish and English in English, and every
-    /// string of one language has its counterpart in the other.
+    /// VFS-22 AC-6: the menu words are Spanish in Spanish and English in English (both
+    /// languages fill the same struct, so the compiler checks that every string exists).
     #[test]
     fn shell_strings_exist_in_both_languages() {
         assert_eq!(Lang::Es.strings().menu.edit, "Edición");
         assert_eq!(Lang::Es.strings().menu.window, "Ventana");
         assert_eq!(Lang::En.strings().menu.edit, "Edit");
         assert_eq!(Lang::En.strings().menu.window, "Window");
-        let es = format!("{:?}", Lang::Es.strings());
-        let en = format!("{:?}", Lang::En.strings());
-        let fields = |s: &str| {
-            s.split([',', '{', '}'])
-                .filter_map(|p| p.split_once(':').map(|(k, _)| k.trim().to_string()))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(fields(&es), fields(&en));
         for s in [Lang::Es.strings(), Lang::En.strings()] {
             assert!(s.startup_failed.contains("{detail}"));
             assert!(s.menu.quit.contains("{app}"));

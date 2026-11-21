@@ -494,7 +494,7 @@ The main window starts hidden and is shown when its page has loaded (or after 12
 its outer frame is larger than its monitor's work area (the screen minus the taskbar), it is
 shrunk to fit and centred, with its minimum size capped at the new size (`fit_window`, issue
 106). On Windows a native splash window (`splash.rs`, plain Win32 on its own thread) says
-"Preparando VFS…" until then, because WebView2 can take tens of seconds to paint on its
+"Preparando VFS…" (or "Getting VFS ready…", by the OS language, VFS-22) until then, because WebView2 can take tens of seconds to paint on its
 first run (issue 108).
 
 The app opens the index at `<local app data dir>/index.db` in `setup` (Tauri
@@ -504,7 +504,8 @@ folder, which can be synced to a NAS or backed up with the profile; on macOS the
 index in the roaming folder and the local one has none, `move_legacy_index` moves it once,
 with its WAL, shared memory, session folder and `.bad` copy; if that rename fails, a new
 index is built (C6). It then starts the indexer, and on exit calls `Vfs::shutdown`. A
-startup failure shows a Spanish error dialog and quits. A
+startup failure shows an error dialog in the OS language (the UI's, once it has set it;
+VFS-22) and quits. A
 second launch focuses the running window (single-instance plugin). The webview may only use
 core IPC (`capabilities/default.json`) under a strict content security policy
 (`tauri.conf.json`).

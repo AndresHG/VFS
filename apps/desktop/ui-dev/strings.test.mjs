@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CATALOGS, Lang, intlLocale, languageFor, localeFor } from '../ui/strings.js';
+import { CATALOGS, Lang, choiceFor, intlLocale, languageFor, localeFor } from '../ui/strings.js';
 import { LanguageChoice } from '../ui/choices.js';
 import * as F from '../ui/format.js';
 
@@ -126,4 +126,9 @@ test('the Ajustes panel offers every language and the system one', () => {
     assert.equal(opts[LanguageChoice.ES], 'Español');
     assert.equal(opts[LanguageChoice.EN], 'English');
   }
+  // The open panel shows the saved choice; anything else saved shows "system", which is
+  // also what languageFor applies for it.
+  assert.equal(choiceFor('en'), LanguageChoice.EN);
+  assert.equal(choiceFor('es'), LanguageChoice.ES);
+  for (const saved of [null, '', 'system', 'fr', 'toString']) assert.equal(choiceFor(saved), LanguageChoice.SYSTEM);
 });
