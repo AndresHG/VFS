@@ -65,15 +65,6 @@ Tests cite these ids (`VFS-8 AC-<m>`) in their doc comments.
 - AC-8 (R2) The tree generator is deterministic and produces the shape AC-2 relies on (count,
   accents, NFD names, paths over 260 characters, planted targets); unit tests prove it.
 - AC-9 (R7) Given a default build, Then the WebDriver plugin is not in the dependency graph.
-- AC-10 (R2, issue 48) Given the app idle after a search, When the window is minimised for
-  5 minutes and restored, Then the journey records app and WebView2 memory open, at 15 s,
-  60 s and 300 s minimised, and 10 s after restoring; the app log says whether WebView2
-  suspended (VFS-5 AC-12); and the restored window still searches and renders.
-- AC-11 (R2, issue 22) Given the app with results, Then UI Automation (what Narrator reads)
-  exposes the search box, the results list and each result row with their Spanish names;
-  When Windows high contrast is turned on, Then the page matches `forced-colors: active` and a
-  screenshot is kept; When Windows animations are turned off, Then the page matches
-  `prefers-reduced-motion: reduce`. Both settings are restored afterwards.
 
 ## Non-goals
 
