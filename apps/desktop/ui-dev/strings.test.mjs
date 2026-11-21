@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CATALOGS, Lang, S, intlLocale, languageFor, setLanguage } from '../ui/strings.js';
+import { CATALOGS, Lang, intlLocale, languageFor, localeFor } from '../ui/strings.js';
 import * as F from '../ui/format.js';
 
 const UI = new URL('../ui/', import.meta.url).pathname;
@@ -82,35 +82,32 @@ test('a saved choice wins over the system locale', () => {
   for (const saved of ['system', 'fr', 'toString', '', null]) assert.equal(languageFor('es-ES', saved), Lang.ES, String(saved));
 });
 
-/** VFS-22 AC-5: numbers and dates follow the active language; English keeps the system's
+/** VFS-22 AC-5: numbers and dates follow the language; English keeps the system's
  *  English order (en-GB day first), and a system in another language gets the default. */
-test('numbers and dates follow the language', (t) => {
-  t.after(() => setLanguage(Lang.ES, 'es-ES'));
+test('numbers and dates follow the language', () => {
   const secs = new Date(2021, 2, 12, 9, 14).getTime() / 1000;
 
-  setLanguage(Lang.EN, 'en-US');
-  assert.equal(S.revealButton, 'Show in folder');
-  assert.equal(F.count(1234567), '1,234,567');
-  assert.equal(F.count(1234), '1,234');
-  assert.equal(F.date(secs), 'Mar 12, 2021');
-  assert.equal(F.size(1.5 * 1024 * 1024), '1.5 MB');
+  const us = localeFor(Lang.EN, 'en-US');
+  assert.equal(us.S.revealButton, 'Show in folder');
+  assert.equal(us.N.count(1234567), '1,234,567');
+  assert.equal(us.N.count(1234), '1,234');
+  assert.equal(us.N.date(secs), 'Mar 12, 2021');
+  assert.equal(us.N.size(1.5 * 1024 * 1024), '1.5 MB');
 
-  setLanguage(Lang.EN, 'en-GB');
-  assert.equal(F.date(secs), '12 Mar 2021');
+  assert.equal(localeFor(Lang.EN, 'en-GB').N.date(secs), '12 Mar 2021');
   assert.equal(intlLocale(Lang.EN, 'es-ES'), 'en-US');
 
-  setLanguage(Lang.ES, 'en-US');
-  assert.equal(S.revealButton, 'Mostrar en carpeta');
-  assert.equal(F.count(1234567), '1.234.567');
-  assert.equal(F.date(secs), '12 mar 2021');
-  assert.equal(F.size(1.5 * 1024 * 1024), '1,5 MB');
+  const es = localeFor(Lang.ES, 'en-US');
+  assert.equal(es.S.revealButton, 'Mostrar en carpeta');
+  assert.equal(es.N.count(1234567), '1.234.567');
+  assert.equal(es.N.date(secs), '12 mar 2021');
+  assert.equal(es.N.size(1.5 * 1024 * 1024), '1,5 MB');
+
+  assert.equal(localeFor('fr', 'fr-FR').lang, Lang.ES);
 });
 
-/** VFS-22 AC-8: highlighting folds accents and case the same in both languages. */
-test('accent folding does not depend on the language', (t) => {
-  t.after(() => setLanguage(Lang.ES, 'es-ES'));
-  for (const lang of [Lang.ES, Lang.EN]) {
-    setLanguage(lang, '');
-    assert.deepEqual(F.matchRanges('Información.pdf', F.terms('informacion')), [[0, 11]], lang);
-  }
+/** VFS-22 AC-8: highlighting folds accents and case without any language input, so it is
+ *  the same in both; search folding lives in vfs-core and is untouched. */
+test('accent folding does not depend on the language', () => {
+  assert.deepEqual(F.matchRanges('Información.pdf', F.terms('informacion')), [[0, 11]]);
 });

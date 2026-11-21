@@ -4,8 +4,6 @@
 
 import { IndexerState, RootStatus } from './contract.js';
 import { SearchState, View } from './choices.js';
-import { S } from './strings.js';
-import * as F from './format.js';
 
 const DAY_MS = 86_400_000;
 
@@ -14,15 +12,15 @@ function startOfDay(d) {
 }
 
 /** Unix seconds -> "hoy 9:14", "ayer 18:02", "12 mar, 9:14", or "12 mar 2025" (local time). */
-export function checkedAt(secs, now) {
+export function checkedAt({ S, N }, secs, now) {
   const d = new Date(secs * 1000);
   const today = new Date(now * 1000);
-  const time = F.time(d);
+  const time = N.time(d);
   const days = Math.round((startOfDay(today) - startOfDay(d)) / DAY_MS);
   if (days === 0) return S.today(time);
   if (days === 1) return S.yesterday(time);
-  if (d.getFullYear() !== today.getFullYear()) return F.date(secs);
-  return S.dayAndTime(F.dayMonth(d), time);
+  if (d.getFullYear() !== today.getFullYear()) return N.date(secs);
+  return S.dayAndTime(N.dayMonth(d), time);
 }
 
 /** True while no root has finished its first scan. */
@@ -35,18 +33,19 @@ export function firstScanRunning(roots) {
  * is the oldest completed check among the reachable roots: every reachable folder has been
  * checked at least since then.
  */
-export function statusText(p, roots, now = Date.now() / 1000) {
-  const files = F.count(p?.filesIndexed ?? roots.reduce((s, r) => s + r.files, 0));
+export function statusText(L, p, roots, now = Date.now() / 1000) {
+  const { S, N } = L;
+  const files = N.count(p?.filesIndexed ?? roots.reduce((s, r) => s + r.files, 0));
   if (p?.state === IndexerState.SCANNING) {
     if (!firstScanRunning(roots)) return S.statusChecking(files);
-    return S.statusScanning(files, F.count(p.roots.reduce((s, r) => s + r.dirsPending, 0)));
+    return S.statusScanning(files, N.count(p.roots.reduce((s, r) => s + r.dirsPending, 0)));
   }
   if (p?.state === IndexerState.PAUSED) return S.statusPaused(files);
   const missing = roots.filter((r) => r.status === RootStatus.UNAVAILABLE).length;
   if (missing) return S.statusReadyUnavailable(files, missing);
   const checks = roots.map((r) => r.lastFullScan).filter((t) => t != null);
   if (!checks.length) return S.statusFiles(files);
-  return S.statusChecked(checkedAt(Math.min(...checks), now), files);
+  return S.statusChecked(checkedAt(L, Math.min(...checks), now), files);
 }
 
 /**

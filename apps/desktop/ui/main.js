@@ -1,7 +1,7 @@
 // The one screen (VFS-1 R9): search box, filters, virtualised results, folder panel, status.
 
 import { api } from './api.js';
-import { S, languageFor, setLanguage } from './strings.js';
+import { languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
@@ -55,21 +55,22 @@ function savedLanguage() {
   }
 }
 
-/** VFS-22 R2, R3: the language before anything is drawn. */
-async function applyLanguage() {
+/** VFS-22 R2, R3: the screen's language, known before anything is drawn. */
+async function loadLocale() {
   let system = '';
   try {
     system = await api.systemLocale();
   } catch {
     system = navigator.language;
   }
-  const lang = setLanguage(languageFor(system, savedLanguage()), system);
-  document.documentElement.lang = lang;
+  return localeFor(languageFor(system, savedLanguage()), system);
 }
 
 // Everything that changes while the screen is open lives in this call's scope, owned by the
 // screen; the module itself holds only constants, never mutable state.
-function main() {
+function main(L) {
+  const { S, N } = L;
+  document.documentElement.lang = L.lang;
   const state = {
     text: '',
     kinds: new Set(),
@@ -502,8 +503,8 @@ function main() {
     pathEl.title = hit.dir;
 
     const kindLabel = S.kindSingular[kindKey];
-    const dateText = F.date(hit.modified);
-    const sizeText = hit.isDir ? '' : F.size(hit.size);
+    const dateText = N.date(hit.modified);
+    const sizeText = hit.isDir ? '' : N.size(hit.size);
     kind.textContent = kindLabel;
     date.textContent = dateText;
     size.textContent = sizeText;
@@ -540,7 +541,7 @@ function main() {
     pathEl.replaceChildren(head, tail);
     pathEl.title = whole;
     const kindLabel = hit.isFolder ? S.bookmarkFolderKind : S.bookmarkKind;
-    const dateText = F.date(hit.added);
+    const dateText = N.date(hit.added);
     // A bookmark has no size; its slot shows the site (VFS-6 AC-11).
     const host = hit.isFolder ? '' : site(hit.url);
     kind.textContent = kindLabel;
@@ -679,7 +680,7 @@ function main() {
       const path = el('div', 'root-path');
       path.append(icon(FileKind.FOLDER), el('span', null, p.dir));
       const meta = el('div', 'root-meta');
-      meta.append(el('span', null, S.copiesModified(F.date(p.modified))));
+      meta.append(el('span', null, S.copiesModified(N.date(p.modified))));
       const actions = el('div', 'root-actions');
       const show = el('button', 'btn', S.revealButton);
       show.type = 'button';
@@ -701,7 +702,7 @@ function main() {
     fuzzy.hidden = true;
     if (state.searchState === SearchState.LOADING) { s.textContent = S.searching; return; }
     if (state.searchState !== SearchState.DONE || !state.total) { s.textContent = ''; return; }
-    const n = F.count(state.total);
+    const n = N.count(state.total);
     if (state.truncatedBy === TruncatedBy.CAP) s.textContent = S.resultsCapped(n);
     else if (state.truncatedBy === TruncatedBy.DEADLINE) s.textContent = S.resultsPartial(n);
     else s.textContent = S.results(n, state.total === 1);
@@ -738,10 +739,10 @@ function main() {
         mode = 'first-scan';
         const bar = document.createElement('progress');
         parts.push(icon('search'), el('h3', null, S.emptyFirstScanTitle), bar,
-          el('p', null, S.emptyFirstScanBody(F.count(filesIndexed))));
+          el('p', null, S.emptyFirstScanBody(N.count(filesIndexed))));
       } else {
         mode = SearchState.IDLE;
-        parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(F.count(filesIndexed))), el('p', null, S.emptyIdleBody));
+        parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(N.count(filesIndexed))), el('p', null, S.emptyIdleBody));
       }
     } else if (state.searchState === SearchState.DONE && !state.total) {
       if (state.truncatedBy === TruncatedBy.DEADLINE) {
@@ -832,7 +833,7 @@ function main() {
 
   /* ---------------------------------------------------------------- notices */
 
-  /** Spanish text for a rejected call; `byCode` holds the texts of one action, if any. */
+  /** Text for a rejected call, in the active language; `byCode` holds the texts of one action, if any. */
   function errorText(err, byCode) {
     const code = err?.code;
     if (code === UiErrorCode.BACKEND_MISSING) return S.backendMissing;
@@ -886,7 +887,7 @@ function main() {
     if (api.missing) { text.textContent = ''; return; }
     if (!state.rootsLoaded) { text.textContent = S.statusConnecting; return; }
     if (!state.roots.length) { text.textContent = S.statusNoRoots; return; }
-    text.textContent = statusText(p, state.roots);
+    text.textContent = statusText(L, p, state.roots);
     const actions = footerActions(p);
     bar.hidden = p?.state !== IndexerState.SCANNING;
     pause.hidden = !actions.pause;
@@ -972,8 +973,8 @@ function main() {
       const status = r.status === RootStatus.REMOVING ? r.status : progressById.get(r.id)?.status ?? r.status;
       item.st.textContent = S.rootStatus[status] || status;
       item.st.dataset.status = status;
-      item.files.textContent = S.rootFiles(F.count(progressById.get(r.id)?.filesIndexed ?? r.files));
-      item.checked.textContent = r.lastFullScan ? S.rootChecked(F.date(r.lastFullScan)) : S.rootNeverChecked;
+      item.files.textContent = S.rootFiles(N.count(progressById.get(r.id)?.filesIndexed ?? r.files));
+      item.checked.textContent = r.lastFullScan ? S.rootChecked(N.date(r.lastFullScan)) : S.rootNeverChecked;
       item.rescan.disabled = status !== RootStatus.READY && status !== RootStatus.UNAVAILABLE;
       item.remove.disabled = status === RootStatus.REMOVING;
     }
@@ -1071,7 +1072,7 @@ function main() {
     const parts = [];
     if (st?.enabled) {
       parts.push(S.bookmarksState[st.state] || '');
-      if (st.count && st.state !== ReadState.READING) parts.push(S.bookmarksCount(F.count(st.count), F.date(st.lastRead)));
+      if (st.count && st.state !== ReadState.READING) parts.push(S.bookmarksCount(N.count(st.count), N.date(st.lastRead)));
     }
     $('bookmarks-status').textContent = parts.filter(Boolean).join(' ');
   }
@@ -1152,5 +1153,4 @@ function main() {
   start();
 }
 
-await applyLanguage();
-main();
+main(await loadLocale());

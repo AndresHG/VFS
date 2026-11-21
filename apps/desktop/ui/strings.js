@@ -1,12 +1,11 @@
-// Every user-visible string (VFS-1 R9) in the active language (VFS-22). `S` is one object
-// whose contents are swapped by `setLanguage`, so callers keep `S.key` and read the current
-// language at call time. The catalogs are `strings.es.js` and `strings.en.js`, with the same
-// keys (ui-dev/strings.test.mjs). Spanish until `setLanguage` runs, so pure modules and their
-// tests need no setup.
+// Every user-visible string (VFS-1 R9) in Spanish and English (VFS-22). The catalogs are
+// `strings.es.js` and `strings.en.js`, with the same keys (ui-dev/strings.test.mjs).
+// `localeFor` gives one language's catalog `S` and formatters `N`; the screen owns that value
+// and passes it on, so no module holds the active language.
 
 import { es } from './strings.es.js';
 import { en } from './strings.en.js';
-import { setFormatLocale } from './format.js';
+import { formatsFor } from './format.js';
 
 /** The UI languages; also the values a saved choice may hold. */
 export const Lang = Object.freeze({ ES: 'es', EN: 'en' });
@@ -15,8 +14,6 @@ export const CATALOGS = Object.freeze({ [Lang.ES]: es, [Lang.EN]: en });
 
 /** The `Intl` locale of a language when the system locale is in another one. */
 const DEFAULT_INTL = Object.freeze({ [Lang.ES]: 'es-ES', [Lang.EN]: 'en-US' });
-
-export const S = { ...es };
 
 /** BCP 47 form of a system locale: `es_ES.UTF-8` -> `es-ES`. */
 function bcp47(locale) {
@@ -43,10 +40,9 @@ export function intlLocale(lang, systemLocale) {
   return DEFAULT_INTL[lang];
 }
 
-/** Makes `lang` the active language of `S` and of the formatters in format.js. */
-export function setLanguage(lang, systemLocale) {
+/** Everything language-dependent the screen needs: `lang`, the catalog `S` and the number
+ *  and date formatters `N`. An unknown `lang` is Spanish. */
+export function localeFor(lang, systemLocale) {
   const l = Object.hasOwn(CATALOGS, lang) ? lang : Lang.ES;
-  Object.assign(S, CATALOGS[l]);
-  setFormatLocale(l, intlLocale(l, systemLocale));
-  return l;
+  return Object.freeze({ lang: l, S: CATALOGS[l], N: formatsFor(l, intlLocale(l, systemLocale)) });
 }

@@ -6,9 +6,11 @@ import assert from 'node:assert/strict';
 
 import { statusText, checkedAt, viewFor, footerActions } from '../ui/status.js';
 import { SearchState, View, TypeChecklist, typeChecklistMode } from '../ui/choices.js';
-import { S } from '../ui/strings.js';
+import { localeFor } from '../ui/strings.js';
 import { IndexerState, RootStatus } from '../ui/contract.js';
 
+const L = localeFor('es', 'es-ES');
+const { S } = L;
 const secs = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime() / 1000;
 const NOW = secs(2026, 11, 20, 18, 30);
 const root = (over) => ({ id: 1, path: '/a', status: RootStatus.READY, files: 10, dirs: 1, lastFullScan: null, ...over });
@@ -16,10 +18,10 @@ const progress = (state, over = {}) => ({ state, filesIndexed: 1234, roots: [{ r
 
 /** VFS-1 U6: the last completed check reads as today, yesterday, a date this year or older. */
 test('checkedAt names the day of the last check', () => {
-  assert.equal(checkedAt(secs(2026, 11, 20, 9, 14), NOW), 'hoy 9:14');
-  assert.equal(checkedAt(secs(2026, 11, 19, 23, 5), NOW), 'ayer 23:05');
-  assert.equal(checkedAt(secs(2026, 3, 12, 9, 14), NOW), '12 mar, 9:14');
-  assert.equal(checkedAt(secs(2025, 3, 12, 9, 14), NOW), '12 mar 2025');
+  assert.equal(checkedAt(L, secs(2026, 11, 20, 9, 14), NOW), 'hoy 9:14');
+  assert.equal(checkedAt(L, secs(2026, 11, 19, 23, 5), NOW), 'ayer 23:05');
+  assert.equal(checkedAt(L, secs(2026, 3, 12, 9, 14), NOW), '12 mar, 9:14');
+  assert.equal(checkedAt(L, secs(2025, 3, 12, 9, 14), NOW), '12 mar 2025');
 });
 
 /** VFS-1 U6, I4: idle, the status shows the time of the oldest completed check of the
@@ -29,8 +31,8 @@ test('idle status shows the last completed check', () => {
     root({ lastFullScan: secs(2026, 11, 20, 9, 14) }),
     root({ id: 2, lastFullScan: secs(2026, 11, 20, 17, 0) }),
   ];
-  assert.equal(statusText(progress(IndexerState.IDLE), roots, NOW), S.statusChecked('hoy 9:14', '1.234'));
-  assert.equal(statusText(null, [root({ lastFullScan: null })], NOW), S.statusFiles('10'));
+  assert.equal(statusText(L, progress(IndexerState.IDLE), roots, NOW), S.statusChecked('hoy 9:14', '1.234'));
+  assert.equal(statusText(L, null, [root({ lastFullScan: null })], NOW), S.statusFiles('10'));
 });
 
 /** VFS-1 U6, I4: scanning after a first scan has finished (a catch-up walk at start, a
@@ -38,16 +40,16 @@ test('idle status shows the last completed check', () => {
  *  own wording with the folders left. */
 test('scanning reads as checking for changes once a first scan has finished', () => {
   const checked = [root({ status: RootStatus.SCANNING, lastFullScan: secs(2026, 11, 19, 9, 0) })];
-  assert.equal(statusText(progress(IndexerState.SCANNING), checked, NOW), S.statusChecking('1.234'));
+  assert.equal(statusText(L, progress(IndexerState.SCANNING), checked, NOW), S.statusChecking('1.234'));
   const first = [root({ status: RootStatus.SCANNING })];
-  assert.equal(statusText(progress(IndexerState.SCANNING), first, NOW), S.statusScanning('1.234', '7'));
+  assert.equal(statusText(L, progress(IndexerState.SCANNING), first, NOW), S.statusScanning('1.234', '7'));
 });
 
 /** VFS-1 U3, U6: paused and unavailable states keep their own wording. */
 test('paused and unavailable states', () => {
   const roots = [root({ lastFullScan: NOW }), root({ id: 2, status: RootStatus.UNAVAILABLE, lastFullScan: NOW })];
-  assert.equal(statusText(progress(IndexerState.PAUSED), roots, NOW), S.statusPaused('1.234'));
-  assert.equal(statusText(progress(IndexerState.IDLE), roots, NOW), S.statusReadyUnavailable('1.234', 1));
+  assert.equal(statusText(L, progress(IndexerState.PAUSED), roots, NOW), S.statusPaused('1.234'));
+  assert.equal(statusText(L, progress(IndexerState.IDLE), roots, NOW), S.statusReadyUnavailable('1.234', 1));
 });
 
 /** VFS-1 decision 16: no status or button text says "indexar" or "índice". */
