@@ -122,6 +122,11 @@ export const en = {
   emptyNoHitsTitle: (q) => (q ? `Nothing found for “${q}”` : 'No files match these filters'),
   emptyNoHitsBody: 'Check what you typed or try fewer words.',
   emptyNoHitsFilters: 'Some filters are on and may be hiding results.',
+  // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
+  suggestDropFilters: (n) => `No results with these filters. Search without filters? (${n})`,
+  suggestSpelling: (word, n) => `Did you mean “${word}”? (${n})`,
+  suggestDropTerm: (word, n) => `Search without “${word}”? (${n})`,
+  suggestCapped: (n) => `more than ${n}`,
   emptyDeadlineTitle: 'The search did not finish; please try again.',
   emptyDeadlineBody: 'The computer is very busy right now. If it happens again, type another word.',
   emptyErrorTitle: 'The search could not be done',

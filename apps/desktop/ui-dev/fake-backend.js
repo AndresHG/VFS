@@ -21,7 +21,7 @@
 
 import {
   BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
-  RootStatus, SortOrder, Source, TruncatedBy,
+  RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -402,6 +402,31 @@ export function createFakeBackend(params) {
     async openLinkUrl(id) {
       const e = corpus.files.find((x) => x.id === id);
       if (!e?.link?.openable) throw { code: ErrorCode.UNAVAILABLE, message: `link ${id}` };
+    },
+
+    /** VFS-13, enough for looking at the screen: without filters, or without the last word. */
+    async suggest(q) {
+      const f = q.filters || {};
+      const filtered = (f.kinds || []).length || f.modifiedFrom != null || f.modifiedTo != null
+        || f.sizeMin != null || f.sizeMax != null || f.folder;
+      const count = async (text, filters) => (await this.search({ text, filters, limit: 1, offset: 0 }));
+      if (q.text && filtered) {
+        const r = await count(q.text, {});
+        if (r.total) {
+          return { kind: SuggestionKind.DROP_FILTERS, text: q.text, clearFilters: true, term: null,
+            replacement: null, count: r.total, capped: r.truncated };
+        }
+      }
+      const words = q.text.split(/\s+/).filter(Boolean);
+      if (words.length > 1) {
+        const text = words.slice(0, -1).join(' ');
+        const r = await count(text, f);
+        if (r.total) {
+          return { kind: SuggestionKind.DROP_TERM, text, clearFilters: false, term: words.at(-1),
+            replacement: null, count: r.total, capped: r.truncated };
+        }
+      }
+      return null;
     },
 
     async searchSources(q, options = {}) {

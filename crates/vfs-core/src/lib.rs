@@ -15,6 +15,7 @@ mod platform;
 mod rank;
 mod roots;
 mod search;
+mod suggest;
 mod types;
 
 pub use error::{Error, OverlapRelation, Result};
@@ -155,6 +156,18 @@ impl Vfs {
             }
             r => r,
         }
+    }
+
+    /// One search that finds something for a `query` that found nothing (VFS-13): without
+    /// filters, a short word respelt, or a word dropped. Counts only, within
+    /// `SearchConfig::suggest_budget`. Never interrupts a search: it waits for a running one;
+    /// a newer search ends it with `None`.
+    pub fn suggest(&self, query: &SearchQuery) -> Result<Option<Suggestion>> {
+        let generation = self.inner.searches.load(Ordering::SeqCst);
+        let mut guard = lock(&self.inner.searcher);
+        let (conn, _) = &mut *guard;
+        let stale = || self.inner.searches.load(Ordering::SeqCst) != generation;
+        suggest::suggest(conn, &self.inner.config, query, &stale)
     }
 
     /// Absolute path of an indexed file, built from the original names.

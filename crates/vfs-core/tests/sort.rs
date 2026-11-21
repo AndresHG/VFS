@@ -22,6 +22,7 @@ fn index(folders: &[&str], files: &[(Option<usize>, String, u64, i64)]) -> Fx {
         &path,
         SearchConfig {
             deadline: Duration::from_secs(60),
+            ..SearchConfig::default()
         },
     )
     .unwrap();

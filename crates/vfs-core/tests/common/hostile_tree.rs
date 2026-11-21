@@ -61,6 +61,7 @@ impl Env {
         // A generous deadline: a loaded test machine must not truncate the name checks.
         let config = SearchConfig {
             deadline: Duration::from_secs(30),
+            ..SearchConfig::default()
         };
         let vfs = Vfs::open_with(&db_path, config).unwrap();
         Env {

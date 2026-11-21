@@ -123,6 +123,75 @@ pub(crate) fn search(
     response
 }
 
+/// Counts the hits of `query` as the list would show them (copies grouped, VFS-19) under
+/// relevance, with both deadlines given: `Some((count, capped))`, or `None` when nothing
+/// matched or the deadline or an interruption cut the read (VFS-13 R3, R4). Resolves no page
+/// and leaves the S7 cache alone.
+pub(crate) fn count(
+    conn: &mut Connection,
+    query: &SearchQuery,
+    deadline: Instant,
+) -> Result<Option<(usize, bool)>> {
+    let begin = match conn.is_autocommit() {
+        true => conn.execute_batch("BEGIN"),
+        false => conn.execute_batch("ROLLBACK; BEGIN"),
+    };
+    match begin {
+        Ok(()) => {}
+        Err(e) if is_interrupt(&e) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    }
+    let counted = count_snapshot(conn, query, deadline);
+    if conn.execute_batch("COMMIT").is_err() {
+        conn.execute_batch("ROLLBACK")?;
+    }
+    counted
+}
+
+fn count_snapshot(
+    conn: &mut Connection,
+    query: &SearchQuery,
+    deadline: Instant,
+) -> Result<Option<(usize, bool)>> {
+    let terms = crate::matching::parse_query(&query.text).terms;
+    let f = &query.filters;
+    if terms.is_empty() && !has_filter(f) {
+        return Ok(None);
+    }
+    let mut run = Run {
+        soft: deadline,
+        hard: deadline,
+        hits: Vec::new(),
+        seen_files: HashSet::new(),
+        seen_dirs: HashSet::new(),
+        truncated: None,
+        stopped: false,
+        limit: MAX_HITS,
+    };
+    let outcome = run_query(conn, &mut run, &terms, f, false);
+    conn.progress_handler(0, None::<fn() -> bool>)?;
+    match outcome {
+        Err(Error::Db(e)) if is_interrupt(&e) => return Ok(None),
+        other => other?,
+    }
+    if run.truncated == Some(TruncatedBy::Deadline) || run.hits.is_empty() {
+        return Ok(None);
+    }
+    let shown = group_copies(run.hits).0.len();
+    let capped = shown > MAX_HITS || run.truncated == Some(TruncatedBy::Cap);
+    Ok(Some((shown.min(MAX_HITS), capped)))
+}
+
+/// Any type, date, size or folder filter.
+pub(crate) fn has_filter(f: &SearchFilters) -> bool {
+    !f.kinds.is_empty()
+        || f.modified_from.is_some()
+        || f.modified_to.is_some()
+        || f.size_min.is_some()
+        || f.size_max.is_some()
+        || f.folder.is_some()
+}
+
 fn search_snapshot(
     conn: &mut Connection,
     state: &mut SearchState,
@@ -134,13 +203,7 @@ fn search_snapshot(
     let offset = query.offset as usize;
     let crate::matching::ParsedQuery { folded, terms } = crate::matching::parse_query(&query.text);
     let f = &query.filters;
-    let has_filter = !f.kinds.is_empty()
-        || f.modified_from.is_some()
-        || f.modified_to.is_some()
-        || f.size_min.is_some()
-        || f.size_max.is_some()
-        || f.folder.is_some();
-    if terms.is_empty() && !has_filter {
+    if terms.is_empty() && !has_filter(f) {
         return Ok(respond(&[], None, false, offset, limit, start));
     }
 
@@ -1825,6 +1888,7 @@ mod tests {
         };
         let config = SearchConfig {
             deadline: Duration::from_secs(60),
+            ..SearchConfig::default()
         };
         // A text query, its folders read for the returned page only (VFS-4 AC-3): an
         // interruption at any point, the folder lookups included, is a response, never an

@@ -124,6 +124,11 @@ export const es = {
   emptyNoHitsTitle: (q) => (q ? `No se encontró nada para «${q}»` : 'No hay archivos con estos filtros'),
   emptyNoHitsBody: 'Compruebe lo escrito o pruebe con menos palabras.',
   emptyNoHitsFilters: 'Hay filtros puestos que pueden estar ocultando resultados.',
+  // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
+  suggestDropFilters: (n) => `Ningún resultado con estos filtros. ¿Buscar sin filtros? (${n})`,
+  suggestSpelling: (word, n) => `¿Quería decir «${word}»? (${n})`,
+  suggestDropTerm: (word, n) => `¿Buscar sin «${word}»? (${n})`,
+  suggestCapped: (n) => `más de ${n}`,
   emptyDeadlineTitle: 'La búsqueda no terminó; inténtelo de nuevo.',
   emptyDeadlineBody: 'El equipo está muy ocupado ahora mismo. Si vuelve a pasar, escriba alguna palabra más.',
   emptyErrorTitle: 'No se pudo hacer la búsqueda',

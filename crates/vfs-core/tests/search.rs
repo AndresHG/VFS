@@ -515,6 +515,7 @@ fn ac9_truncation_by_cap_is_reported() {
 fn ac9_truncation_by_deadline_is_reported() {
     let fx = fixture_with(SearchConfig {
         deadline: Duration::ZERO,
+        ..SearchConfig::default()
     });
     let mut w = fx.writer();
     let (_, top) = w.root("/datos");
