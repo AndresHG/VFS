@@ -486,12 +486,18 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `open_bookmark` | `id` | `null`; `not_found` for an unknown id, `unavailable` for a non-web address |
 | `reveal_target` | `id` (a link's `files.id`) | `"revealed"` or `"opened_parent"`; `not_found` when the recorded target does not exist (VFS-18 "Mostrar el destino") |
 | `open_link_url` | `id` | `null`; `unavailable` unless the Internet Shortcut has an `http`/`https` address (VFS-18 "Abrir en Firefox") |
+| `get_update_settings` | — | `{ checkOnOpen }` (VFS-21; on when `updates.json` is missing or unreadable) |
+| `set_update_check` | `enabled` | `{ checkOnOpen }` |
+| `check_for_update` | — | `{ version } \| null`; `null` without any connection when the setting is off; later calls in the same launch return the first answer (VFS-21) |
+| `install_update` | — | `null` (the app is replaced and relaunched); `not_found` when no update was offered, `io` when the download, signature or install fails |
 
 `rescan` with `id: null` ("Buscar cambios ahora") also wakes the bookmark reader.
 
 Events: `index-progress` (payload `IndexProgress`) and `index-changed` (payload `null`), sent
 by `EventSink` in `apps/desktop/src-tauri/src/lib.rs`; `bookmarks-changed` (payload
-`BookmarkStatus`) after every bookmark read, from `src-tauri/src/bookmarks.rs`.
+`BookmarkStatus`) after every bookmark read, from `src-tauri/src/bookmarks.rs`;
+`update-progress` (payload `{ downloaded, total | null }`, bytes) while an update downloads
+and once when it finishes, from `src-tauri/src/updates.rs`.
 
 Key shapes:
 
@@ -545,7 +551,8 @@ startup failure shows an error dialog in the OS language (the UI's, once it has 
 VFS-22) and quits. A
 second launch focuses the running window (single-instance plugin). The webview may only use
 core IPC (`capabilities/default.json`) under a strict content security policy
-(`tauri.conf.json`).
+(`tauri.conf.json`); the web view has no network access. The only connection is the update
+check, made in Rust by the updater plugin (VFS-21, [`updates.md`](updates.md)).
 
 ## Bookmarks (VFS-6)
 

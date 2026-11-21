@@ -111,6 +111,13 @@
         <p id="banner-unavailable-text"></p>
         <button type="button" class="btn btn-quiet" id="banner-unavailable-close" data-s="understood"></button>
       </div>
+      <div id="banner-update" class="banner banner-info" hidden>
+        <svg aria-hidden="true"><use href="#i-info"/></svg>
+        <p id="banner-update-text" aria-live="polite"></p>
+        <progress id="update-progress" max="100" hidden></progress>
+        <button type="button" class="btn btn-primary" id="update-action" hidden></button>
+        <button type="button" class="btn btn-quiet" id="update-later" data-s="updateLater"></button>
+      </div>
       <div id="banner-scan" class="banner banner-info" hidden>
         <svg aria-hidden="true"><use href="#i-info"/></svg>
         <p data-s="firstScanNote"></p>
@@ -170,7 +177,7 @@
     </div>
   </dialog>
 
-  <!-- VFS-22: settings; the language now, more settings join later. -->
+  <!-- VFS-22: settings (language); VFS-21: the update check. -->
   <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="any">
     <div class="drawer-head">
       <h2 id="settings-title" data-s="settingsTitle"></h2>
@@ -182,6 +189,11 @@
     <section class="setting">
       <label for="language" data-s="languageLabel"></label>
       <select id="language"></select>
+    </section>
+    <section class="setting" aria-labelledby="updates-title">
+      <h3 id="updates-title" data-s="updatesTitle"></h3>
+      <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
+      <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
     </section>
   </dialog>
 
