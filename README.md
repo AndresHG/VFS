@@ -7,13 +7,14 @@
 
 <p align="center">
   <b>Find any file in a huge personal archive, by name or folder, as you type.</b><br>
-  Offline desktop app for Windows and macOS · designed for 5 million files · Spanish interface
+  Offline desktop app for Windows and macOS · designed for 5 million files · Spanish and English interface
 </p>
 
 # VFS: offline file search for huge personal archives
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
-is a desktop app for Windows 10+ and macOS, fully offline, with a Spanish interface.
+is a desktop app for Windows 10+ and macOS, fully offline, in Spanish and English (the
+system language by default).
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -85,7 +86,7 @@ in [`docs/vision.md`](docs/vision.md).
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
-| `apps/desktop/ui` | The Spanish screen: static HTML, CSS and JavaScript, no npm build. |
+| `apps/desktop/ui` | The screen, in Spanish and English (`strings.es.js`, `strings.en.js`): static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
 | `specs/` | Specs with acceptance criteria (`VFS-<n>`); tests cite them. |
 | `docs/` | [Vision](docs/vision.md), [brand assets](docs/brand/README.md), [architecture](docs/architecture.md), [decisions](docs/decisions.md), [content-search design](docs/content-search-design.md). |
@@ -299,4 +300,5 @@ of connections. See [`docs/vision.md`](docs/vision.md).
 
 Read [`CLAUDE.md`](CLAUDE.md) first: specs before code, tests cite acceptance criteria
 (`/// VFS-1 AC-10: …`), branches `feat/vfs-<n>-<slug>`, squash-merged pull requests. Code,
-comments and docs are in English; everything the user sees is in Spanish.
+comments and docs are in English; everything the user sees is in both string catalogs,
+Spanish and English.
