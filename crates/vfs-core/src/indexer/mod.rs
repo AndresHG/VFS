@@ -86,6 +86,36 @@ const WATCH_RETRY: Duration = Duration::from_secs(60);
 /// A watched root's change cursor advances this often, to the position taken at the
 /// previous check (VFS-9 R6).
 const CURSOR_EVERY: Duration = Duration::from_secs(300);
+/// A root's history is replayed this long after its last watcher overflow (VFS-26 R2)…
+const REPLAY_QUIET: Duration = Duration::from_secs(10);
+/// …and never later than this after the first overflow of the burst.
+const REPLAY_MAX: Duration = Duration::from_secs(60);
+
+/// The worker's clocks for change cursors and overflow replays (tests use short ones).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Timing {
+    pub cursor_every: Duration,
+    pub replay_quiet: Duration,
+    pub replay_max: Duration,
+}
+
+impl Default for Timing {
+    fn default() -> Timing {
+        Timing {
+            cursor_every: CURSOR_EVERY,
+            replay_quiet: REPLAY_QUIET,
+            replay_max: REPLAY_MAX,
+        }
+    }
+}
+
+/// A replay owed to a root after watcher overflows: the burst's first overflow and when it
+/// is due (VFS-26 R2).
+#[derive(Clone, Copy, Debug)]
+struct ReplayDue {
+    first: Instant,
+    at: Instant,
+}
 
 /// SQL condition of a directory waiting to be listed. The value of `ScanState::Clean` is
 /// spelled into the SQL text, not bound, so SQLite can prove the query matches the partial
@@ -825,7 +855,7 @@ impl IndexerHandle {
             sched,
             uptime,
             Box::new(OsHistory),
-            CURSOR_EVERY,
+            Timing::default(),
         )
     }
 
@@ -836,7 +866,7 @@ impl IndexerHandle {
         mut sched: Sched,
         uptime: Option<Duration>,
         history: Box<dyn History + Send>,
-        cursor_every: Duration,
+        timing: Timing,
     ) -> Result<IndexerHandle> {
         let mut conn = db::open_rw(&db_path)?;
         sched::install_checkpoint_hook(
@@ -882,10 +912,12 @@ impl IndexerHandle {
             catchup: Vec::new(),
             db_path,
             history,
-            cursor_every,
+            cursor_every: timing.cursor_every,
+            timing,
             last_cursor: Instant::now(),
             candidates: HashMap::new(),
             lost: HashMap::new(),
+            replay_due: HashMap::new(),
         };
         let join = std::thread::Builder::new()
             .name("vfs-indexer".into())
@@ -983,6 +1015,10 @@ struct Worker {
     /// Roots that lost events, with the cursor stored when they did: theirs stays put until
     /// a full walk stores another (VFS-9 R6).
     lost: HashMap<i64, Option<String>>,
+    timing: Timing,
+    /// Roots whose history is to be replayed after a watcher overflow (VFS-26 R2); their
+    /// cursor is frozen meanwhile.
+    replay_due: HashMap<i64, ReplayDue>,
 }
 
 /// Prepares the folder holding the index (VFS-5 R9): not content-indexed on Windows, a
@@ -1038,6 +1074,7 @@ impl Worker {
                 self.last_cursor = Instant::now();
                 self.advance_cursors();
             }
+            self.run_due_replays();
             if !self.catchup.is_empty() && Instant::now() >= self.catchup_at {
                 let ids = std::mem::take(&mut self.catchup);
                 self.owe_catchup(&ids);
@@ -1163,6 +1200,9 @@ impl Worker {
                     }
                     timeout =
                         timeout.min(self.cursor_every.saturating_sub(self.last_cursor.elapsed()));
+                    if let Some(due) = self.replay_due.values().map(|d| d.at).min() {
+                        timeout = timeout.min(due.saturating_duration_since(Instant::now()));
+                    }
                     self.wait(timeout.max(Duration::from_millis(10)));
                 }
                 Err(e) => {
@@ -1262,6 +1302,11 @@ impl Worker {
             Err(e) => return log::warn!("indexer: {e}"),
         };
         for (id, path) in roots {
+            // A replay is due: changes were dropped after the stored cursor (VFS-26 R2).
+            if self.replay_due.contains_key(&id) {
+                self.candidates.remove(&id);
+                continue;
+            }
             if let Some(at_loss) = self.lost.get(&id) {
                 match cursor::load(&self.conn, id) {
                     // A full walk has stored its own cursor since: advance again from now.
@@ -1286,6 +1331,77 @@ impl Worker {
                 self.candidates.insert(id, c);
             }
         }
+    }
+
+    /// Replays the history of every root whose overflow replay is due (VFS-26 R3); a replay
+    /// that cannot run or fails falls back to the lost-events walk (R4).
+    fn run_due_replays(&mut self) {
+        let now = Instant::now();
+        let due: Vec<i64> = self
+            .replay_due
+            .iter()
+            .filter(|(_, d)| d.at <= now)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in due {
+            self.replay_due.remove(&id);
+            let started = Instant::now();
+            let outcome = self.replay_root(id);
+            let ms = started.elapsed().as_millis();
+            match outcome {
+                Ok(Some(folders)) => self.sched.diag.emit(&format!(
+                    "overflow_replay root={id} folders={folders} ms={ms} result=replayed"
+                )),
+                Ok(None) | Err(_) => {
+                    if let Err(e) = outcome {
+                        log::warn!("indexer: replay of root {id}: {e}");
+                    }
+                    self.sched.diag.emit(&format!(
+                        "overflow_replay root={id} folders=0 ms={ms} result=lost"
+                    ));
+                    self.events_lost(id);
+                    self.request(&[id], true);
+                }
+            }
+        }
+    }
+
+    /// Writes the pending watcher hints, replays `root_id`'s history from its stored cursor,
+    /// marks the changed folders and stores the new cursor in one transaction (VFS-26 R3).
+    /// `Ok(None)` when it cannot replay: no cursor, history lost, root unreachable or being
+    /// removed.
+    fn replay_root(&mut self, root_id: i64) -> Result<Option<usize>> {
+        let paths = std::mem::take(&mut self.dirty);
+        self.dirty_since = None;
+        if let Err(e) = mark_dirty(&mut self.conn, &paths) {
+            self.dirty = paths;
+            self.dirty_since = Some(Instant::now());
+            return Err(e);
+        }
+        let Some((_, root)) = root_paths(&self.conn)?
+            .into_iter()
+            .find(|(id, _)| *id == root_id)
+        else {
+            return Ok(None);
+        };
+        let Some(stored) = cursor::load(&self.conn, root_id)? else {
+            return Ok(None);
+        };
+        if !reachable(&root.to_string_lossy()) {
+            return Ok(None);
+        }
+        let history = &*self.history;
+        let replayed = self.sched.listing(|| history.replay(&root, &stored));
+        let Ok((mut changed, next)) = replayed else {
+            return Ok(None);
+        };
+        let filter = watch::Filter::new(self.ignore.clone());
+        changed.retain(|p| p.starts_with(&root) && !filter.dropped(p, &root));
+        let tx = begin(&self.conn)?;
+        mark_paths(&tx, &[(root_id, root)], &changed, true)?;
+        cursor::store(&tx, root_id, Some(&next))?;
+        tx.commit()?;
+        Ok(Some(changed.len()))
     }
 
     fn request(&mut self, ids: &[i64], lost_events: bool) {
@@ -1320,9 +1436,23 @@ impl Worker {
                 self.dirty.push(path);
                 self.dirty_since.get_or_insert_with(Instant::now);
             }
-            Cmd::Watch(watch::WatchEvent::Rescan(root_id)) => {
-                // An overflow or a failed watch: events were lost.
+            Cmd::Watch(watch::WatchEvent::Overflow(root_id)) => {
+                // Events were dropped but the watch is armed: replay the history once the
+                // burst is over, with the cursor frozen until then (VFS-26 R2).
                 self.sched.diag.overflow(root_id);
+                self.candidates.remove(&root_id);
+                let now = Instant::now();
+                let t = self.timing;
+                let due = self.replay_due.entry(root_id).or_insert(ReplayDue {
+                    first: now,
+                    at: now,
+                });
+                due.at = (now + t.replay_quiet).min(due.first + t.replay_max);
+            }
+            Cmd::Watch(watch::WatchEvent::Failed(root_id)) => {
+                // Nothing watched for a while: as before VFS-26 (R5).
+                self.sched.diag.overflow(root_id);
+                self.replay_due.remove(&root_id);
                 self.events_lost(root_id);
                 self.request(&[root_id], true)
             }

@@ -261,9 +261,12 @@ until the system has been up 10 minutes. The thread:
 
 There is one I/O stream: roots are scanned one after another, one directory at a time.
 Full re-walks run one at a time (`request_rewalk`, `start_owed`), and a walk in progress is
-never restarted: a request for the root being walked owes one more pass after it. Requests
-caused by lost events (an overflow, a watch that failed), and those owed by a root that was
-being walked, wait until that root's last full scan is 1 hour old; manual requests do not
+never restarted: a request for the root being walked owes one more pass after it. A watcher
+overflow (the watch stays armed) does not ask for a walk: 10 s after the last overflow of a
+burst, and at most 60 s after its first, the root's change history is replayed from its
+cursor (VFS-26, `Worker::run_due_replays`), with the cursor frozen meanwhile; only when that
+replay cannot run does it fall back to a walk. Requests caused by lost events (a watch that
+failed, an overflow without usable history), and those owed by a root that was being walked, wait until that root's last full scan is 1 hour old; manual requests do not
 wait, and the start-up catch-up never waits, even for a root whose walk was interrupted: a
 power cut can roll the index back to an older walk (VFS-3 AC-5). An owed walk that is due
 starts before the indexer reports idle, so the status never reads up to date while one is
@@ -289,8 +292,8 @@ directory ids are kept. Anything else falls back to re-listing both parents (I9)
 
 | System | Backend | When events may be lost |
 |---|---|---|
-| macOS | `notify` (FSEvents), recursive per root, canonical paths | `need_rescan` flag or a watcher error → re-walk of the affected root (or every root when the path is unknown) |
-| Windows | own `ReadDirectoryChangesW` loop, one thread per root (`vfs-watch-<id>`), 64 KB buffer, overlapped I/O | 0 bytes or `ERROR_NOTIFY_ENUM_DIR` (overflow) → re-walk, re-arm on the same handle; any other failure → re-walk, close the handle, reopen every 2 s, re-walk again once reopened (I2) |
+| macOS | `notify` (FSEvents), recursive per root, canonical paths | `need_rescan` flag → overflow of the affected root (every root when the path is unknown): history replay (VFS-26); a watcher error → failed watch: re-walk |
+| Windows | own `ReadDirectoryChangesW` loop, one thread per root (`vfs-watch-<id>`), 64 KB buffer, overlapped I/O | 0 bytes or `ERROR_NOTIFY_ENUM_DIR` → overflow, re-arm on the same handle, history replay (VFS-26); the event or the call failing, any other completion error → failed watch: re-walk, close the handle, reopen every 2 s, failed again once reopened (I2) |
 
 A re-walk (`queue_rewalk`) sets the root directory pending deep and the root `scanning`;
 the deep listing then cascades through the whole tree. Re-walks also happen when the user

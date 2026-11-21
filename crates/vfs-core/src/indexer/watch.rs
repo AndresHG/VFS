@@ -17,12 +17,41 @@ pub(crate) enum WatchEvent {
     /// Something changed at this absolute path; its parent (and itself, if a known directory)
     /// becomes pending shallow.
     Dirty(PathBuf),
-    /// Events were lost for this root; queue a full re-walk.
-    Rescan(i64),
+    /// The watch overflowed and dropped events for this root, but stays armed: the changes
+    /// can be read back from the change history (VFS-26 R1).
+    Overflow(i64),
+    /// The watch of this root failed (closed or never armed): events were lost while
+    /// nothing watched (VFS-26 R1).
+    Failed(i64),
     /// `from` was renamed or moved to `to` (absolute paths). Sent in addition to `Dirty` for
     /// both paths, so ignoring it is always safe.
     #[cfg_attr(not(windows), allow(dead_code))]
     Renamed { from: PathBuf, to: PathBuf },
+}
+
+/// What a lost batch of events means for the watch (VFS-26 R1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Loss {
+    /// Events dropped, the watch still armed: the history can be replayed.
+    Overflow,
+    /// The watch is closed: nothing watches until it is opened again.
+    Failed,
+}
+
+/// `ERROR_NOTIFY_ENUM_DIR`: the system dropped the changes and asks for a re-listing.
+const NOTIFY_ENUM_DIR: u32 = 1022;
+
+/// How a completed `ReadDirectoryChangesW` lost events, if it did (VFS-26 R1): `error` is
+/// `GetLastError` when `GetOverlappedResult` failed. 0 bytes or `ERROR_NOTIFY_ENUM_DIR` is an
+/// overflow; any other error a failed watch. Pure, so it is tested on every platform.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn completion_loss(error: Option<u32>, bytes: u32) -> Option<Loss> {
+    match error {
+        Some(NOTIFY_ENUM_DIR) => Some(Loss::Overflow),
+        Some(_) => Some(Loss::Failed),
+        None if bytes == 0 => Some(Loss::Overflow),
+        None => None,
+    }
 }
 
 /// Receives watcher events on the watcher's own thread(s); must not block.
@@ -236,7 +265,9 @@ mod imp {
 
     fn handle(sink: &WatchSink, filter: &Filter, roots: &Roots, res: notify::Result<Event>) {
         match res {
-            Ok(event) if event.need_rescan() => rescan(sink, roots, &event.paths),
+            Ok(event) if event.need_rescan() => {
+                lost(sink, roots, &event.paths, WatchEvent::Overflow)
+            }
             Ok(event) => {
                 if matches!(event.kind, EventKind::Access(_)) {
                     return;
@@ -254,13 +285,19 @@ mod imp {
             }
             Err(e) => {
                 log::warn!("watcher error, queueing a re-walk: {e}");
-                rescan(sink, roots, &e.paths);
+                lost(sink, roots, &e.paths, WatchEvent::Failed);
             }
         }
     }
 
-    /// Queues a re-walk of the roots containing `paths`, or of every root when none does.
-    fn rescan(sink: &WatchSink, roots: &Roots, paths: &[PathBuf]) {
+    /// Reports lost events (`kind`: overflow or failed watch) for the roots containing
+    /// `paths`, or for every root when none does.
+    pub(super) fn lost(
+        sink: &WatchSink,
+        roots: &Roots,
+        paths: &[PathBuf],
+        kind: fn(i64) -> WatchEvent,
+    ) {
         let roots = lock(roots).clone();
         let hit: Vec<i64> = roots
             .iter()
@@ -273,7 +310,44 @@ mod imp {
             hit
         };
         for id in ids {
-            sink(WatchEvent::Rescan(id));
+            sink(kind(id));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// VFS-26 AC-5: a `notify` event that needs a rescan is an overflow of the root
+        /// holding its path, or of every root when none does; a `notify` error is a failed
+        /// watch.
+        #[test]
+        fn notify_losses_are_classified() {
+            let got = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&got);
+            let sink: WatchSink = Arc::new(move |e| seen.lock().unwrap().push(e));
+            let roots: Roots = Arc::new(Mutex::new(vec![
+                (1, PathBuf::from("/r1")),
+                (2, PathBuf::from("/r2")),
+            ]));
+            let filter = Filter::new(PathBuf::from("/data"));
+            let rescan = |p: &str| {
+                Ok(Event::new(EventKind::Other)
+                    .set_flag(notify::event::Flag::Rescan)
+                    .add_path(PathBuf::from(p)))
+            };
+            handle(&sink, &filter, &roots, rescan("/r1/a"));
+            assert_eq!(*got.lock().unwrap(), vec![WatchEvent::Overflow(1)]);
+            got.lock().unwrap().clear();
+            handle(&sink, &filter, &roots, rescan("/elsewhere"));
+            assert_eq!(
+                *got.lock().unwrap(),
+                vec![WatchEvent::Overflow(1), WatchEvent::Overflow(2)]
+            );
+            got.lock().unwrap().clear();
+            let err = notify::Error::generic("gone").add_path(PathBuf::from("/r2/b"));
+            handle(&sink, &filter, &roots, Err(err));
+            assert_eq!(*got.lock().unwrap(), vec![WatchEvent::Failed(2)]);
         }
     }
 }
@@ -286,8 +360,7 @@ mod imp {
     use std::thread::JoinHandle;
 
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_NOTIFY_ENUM_DIR, HANDLE, INVALID_HANDLE_VALUE,
-        WAIT_OBJECT_0, WAIT_TIMEOUT,
+        CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, ReadDirectoryChangesW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED,
@@ -300,7 +373,7 @@ mod imp {
     };
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
-    use super::{notify_events, Filter, WatchEvent, WatchSink};
+    use super::{completion_loss, notify_events, Filter, Loss, WatchEvent, WatchSink};
     use crate::error::Result;
 
     /// 64 KB: the largest buffer `ReadDirectoryChangesW` accepts on network shares.
@@ -427,8 +500,12 @@ mod imp {
     }
 
     impl Loop {
-        fn rescan(&self) {
-            (self.sink)(WatchEvent::Rescan(self.root_id));
+        fn failed(&self) {
+            (self.sink)(WatchEvent::Failed(self.root_id));
+        }
+
+        fn overflow(&self) {
+            (self.sink)(WatchEvent::Overflow(self.root_id));
         }
 
         /// Arms `ReadDirectoryChangesW` until `stop` is signalled. Overflow (0 bytes or
@@ -439,7 +516,7 @@ mod imp {
                 Ok(e) => e,
                 Err(e) => {
                     log::warn!("watcher event for {}: {e}", self.root.display());
-                    self.rescan();
+                    self.failed();
                     return;
                 }
             };
@@ -456,7 +533,7 @@ mod imp {
                     if let Ok(d) = open_dir(&self.root) {
                         dir = Some(d);
                         // Changes made while the handle was closed were not seen.
-                        self.rescan();
+                        self.failed();
                     }
                     continue;
                 };
@@ -484,7 +561,7 @@ mod imp {
                         self.root.display(),
                         std::io::Error::last_os_error()
                     );
-                    self.rescan();
+                    self.failed();
                     dir = None;
                     continue;
                 }
@@ -505,20 +582,22 @@ mod imp {
                 if unsafe { GetOverlappedResult(handle, &ov, &mut bytes, 0) } == 0 {
                     // SAFETY: reads the calling thread's last error.
                     let err = unsafe { GetLastError() };
-                    if err != ERROR_NOTIFY_ENUM_DIR {
+                    if completion_loss(Some(err), bytes) == Some(Loss::Failed) {
                         log::warn!(
                             "watch {} failed: {}",
                             self.root.display(),
                             std::io::Error::from_raw_os_error(err as i32)
                         );
                         dir = None;
+                        self.failed();
+                    } else {
+                        self.overflow();
                     }
-                    self.rescan();
                     continue;
                 }
-                if bytes == 0 {
+                if completion_loss(None, bytes) == Some(Loss::Overflow) {
                     // The buffer overflowed: the system dropped this batch of changes.
-                    self.rescan();
+                    self.overflow();
                     continue;
                 }
                 // SAFETY: the system wrote `bytes` (<= BUF_BYTES) bytes into `buf`.
@@ -539,6 +618,31 @@ mod live_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-26 AC-5: a completed watch with 0 bytes or `ERROR_NOTIFY_ENUM_DIR` overflowed; any
+    /// other error failed; bytes and no error lost nothing.
+    #[test]
+    fn completions_are_classified() {
+        assert_eq!(completion_loss(None, 0), Some(Loss::Overflow));
+        assert_eq!(
+            completion_loss(Some(NOTIFY_ENUM_DIR), 0),
+            Some(Loss::Overflow)
+        );
+        for err in [5, 6, 64, 87] {
+            assert_eq!(completion_loss(Some(err), 0), Some(Loss::Failed), "{err}");
+        }
+        assert_eq!(completion_loss(None, 120), None);
+    }
+
+    /// VFS-26 R1: the overflow code is windows-sys's `ERROR_NOTIFY_ENUM_DIR`.
+    #[cfg(windows)]
+    #[test]
+    fn notify_enum_dir_matches_windows_sys() {
+        assert_eq!(
+            NOTIFY_ENUM_DIR,
+            windows_sys::Win32::Foundation::ERROR_NOTIFY_ENUM_DIR
+        );
+    }
 
     /// One `FILE_NOTIFY_INFORMATION` record, padded to 4 bytes, with a next offset of 0.
     fn record(action: u32, name: &str) -> Vec<u8> {

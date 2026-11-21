@@ -207,8 +207,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 - S9. At most 1 KB of query text and 128 characters per term are read; terms over 64
   characters get no typo tolerance. The search box accepts at most 1,024 characters.
 - I1. A watcher event never downgrades a directory pending a deep re-list.
-- I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an overflow or error
-  requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its
+- I2. Windows watcher: `ReadDirectoryChangesW` with a 64 KB buffer; an error requests a
+  re-walk of the root (I10); an overflow replays the change history first (VFS-26). macOS: FSEvents through `notify`, honouring its
   rescan flag.
 - I3. Watcher events under the app data directory are ignored.
 - I4. At start, a root whose change cursor is missing or whose history is lost (VFS-9) is
