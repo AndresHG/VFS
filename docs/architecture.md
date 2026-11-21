@@ -124,8 +124,9 @@ query terms all go through it.
 
 ASCII input takes a byte-lowercasing shortcut. So `Notaría`, `NOTARIA` and the NFD form
 `Notari\u{301}a` all become `notaria`; `año` becomes `ano`; full-width `ＡＢＣ` becomes `abc`.
-Root and query paths have `\` replaced by `/` before folding, so separators match on both
-systems. Original names are stored untouched and are the only thing used to build a path.
+Root paths have `\` replaced by `/` before folding, so separators match on both systems.
+Queries get the same on Windows only; on macOS, where a name can hold a backslash, it stays
+literal (VFS-23 D3). Original names are stored untouched and are the only thing used to build a path.
 
 ## From a folder on disk to rows
 
@@ -299,7 +300,7 @@ about 2 s.
 locked means the previous session ended uncleanly; only then does the core run
 `PRAGMA quick_check(1)`. An index that SQLite reports as corrupt or not a database, or that
 fails the check, is replaced: a fresh index holding every root path still readable from it
-(pending deep, C5) is built at `index.db.new`, the damaged one is renamed to `index.db.bad`
+(pending deep, C5; roots being removed left out) is built at `index.db.new`, the damaged one is renamed to `index.db.bad`
 (with its `-wal` and `-shm`), and `index.db.new` takes its place. A kill between the last two
 steps is finished by the next open, so the root list survives a crash during recovery
 (VFS-3 AC-3). Once every root is ready with a finished full scan, the indexer deletes the
@@ -307,6 +308,15 @@ steps is finished by the next open, so the root list survives a crash during rec
 locked, I/O) is returned, never recovered. Several processes (the app and the CLI) can share
 one index; each holds its own marker, and the migration takes the write lock before reading
 the schema version (VFS-3 AC-9).
+
+The root list is also kept outside the database, in `<index>.roots`: UTF-8 paths, each ended
+by a NUL, written to a per-process temporary file and renamed after every root change and on
+each open whose list differs, flushed to disk before the rename. Recovery joins it with the
+roots still readable from the damaged `roots` table (none after a destroyed first page, an
+overwritten header or a truncated file; some after a torn page); only whole, valid entries
+of the backup count. An index file of 0 bytes with no WAL content, while the backup lists
+roots, counts as damaged instead of being opened as a new, empty index. The name starts with `index.db`, so the one-time move
+out of roaming app data carries it along (VFS-23 AC-1, D1).
 
 ## From a query to results
 
@@ -316,8 +326,8 @@ one (S6).
 
 ### Parsing
 
-At most 1 KB of the text is read (`MAX_QUERY_BYTES`; the search box allows no more); it has
-`\` replaced by `/`, is folded, and is split on whitespace into at most 8 distinct terms,
+At most 1 KB of the text is read (`MAX_QUERY_BYTES`; the search box allows no more); on
+Windows it has `\` replaced by `/` (VFS-23 D3), then it is folded, and is split on whitespace into at most 8 distinct terms,
 each cut to 128 characters (`MAX_TERM_CHARS`). Terms over 64 characters get no typo work
 (`FUZZY_MAX_LEN`), whose cost grows with the cube of the length (S9). With no terms and no
 filter, the response is empty.

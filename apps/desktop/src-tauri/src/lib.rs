@@ -466,18 +466,19 @@ mod tests {
         assert_eq!(webview_power(false, false), None);
     }
 
-    /// VFS-1 C6: an index left in the old (roaming) directory moves with its sibling files and
-    /// its session folder, the emptied old directory goes away, and a second call does nothing.
+    /// VFS-1 C6, VFS-23 D1: an index left in the old (roaming) directory moves with its sibling
+    /// files (the root list backup too) and its session folder, the emptied old directory goes
+    /// away, and a second call does nothing.
     #[test]
     fn legacy_index_is_moved_once() {
         let tmp = tempfile::tempdir().unwrap();
         let (old, new) = (tmp.path().join("Roaming"), tmp.path().join("Local"));
         std::fs::create_dir_all(old.join("index.db.session")).unwrap();
-        for name in ["index.db", "index.db-wal", "index.db-shm"] {
+        for name in ["index.db", "index.db-wal", "index.db-shm", "index.db.roots"] {
             std::fs::write(old.join(name), name).unwrap();
         }
         assert!(move_legacy_index(&old, &new).unwrap());
-        for name in ["index.db", "index.db-wal", "index.db-shm"] {
+        for name in ["index.db", "index.db-wal", "index.db-shm", "index.db.roots"] {
             assert_eq!(std::fs::read_to_string(new.join(name)).unwrap(), name);
         }
         assert!(new.join("index.db.session").is_dir());

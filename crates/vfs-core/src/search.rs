@@ -2,11 +2,11 @@
 //! Owned by task T2a; ranking is `rank.rs` and typo tolerance `fuzzy.rs` (T2b).
 //!
 //! Semantics: the query is split on whitespace into at most 8 folded terms (`\` folded to
-//! `/`). A file matches when every term is a substring of its `name_key` or of its
-//! directory's `path_key`; a folder (decision D1) matches when every term is in its own
-//! `path_key` (the root directory: its name) and at least one term is in its name. Terms
-//! already contained in a root's `path_key` are ignored for that root, unless that would
-//! leave no term (S1). Folders are results; empty folders included.
+//! `/` on Windows only, VFS-23 AC-2). A file matches when every term is a substring of its
+//! `name_key` or of its directory's `path_key`; a folder (decision D1) matches when every
+//! term is in its own `path_key` (the root directory: its name) and at least one term is in
+//! its name. Terms already contained in a root's `path_key` are ignored for that root,
+//! unless that would leave no term (S1). Folders are results; empty folders included.
 //! NUL is read as whitespace; typo tolerance covers terms of 6 to 64 folded characters.
 //!
 //! Evaluation is candidate generation in SQL plus verification in Rust, in ranking-tier
@@ -568,6 +568,24 @@ where
 
 fn is_interrupt(e: &rusqlite::Error) -> bool {
     e.sqlite_error_code() == Some(ErrorCode::OperationInterrupted)
+}
+
+/// An FTS5 table that failed to open without its own reason. An interruption that lands
+/// while SQLite opens the table surfaces this way rather than as `SQLITE_INTERRUPT` (seen on
+/// the Windows CI runner), but so can a real failure: the facade counts it as an
+/// interruption only when one happened (VFS-3 AC-7).
+pub(crate) fn is_table_open_cut(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Db(rusqlite::Error::SqliteFailure(f, Some(msg)))
+            if f.code == ErrorCode::Unknown && msg.starts_with("vtable constructor failed")
+    )
+}
+
+/// The answer of a query cut short before it found anything.
+pub(crate) fn interrupted_response(query: &SearchQuery, start: Instant) -> SearchResponse {
+    let limit = query.limit.clamp(1, MAX_LIMIT) as usize;
+    interrupted(query.offset as usize, limit, start)
 }
 
 struct RootRow {
@@ -1740,6 +1758,31 @@ mod tests {
 
     use super::*;
     use crate::db::{self, ingest};
+
+    /// VFS-3 AC-7: a failed FTS5 table open is recognised; interruptions and other errors
+    /// are not taken for one.
+    #[test]
+    fn table_open_cut_is_recognised() {
+        let failure = |code: i32, msg: &str| {
+            Error::Db(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some(msg.into()),
+            ))
+        };
+        let ffi = rusqlite::ffi::SQLITE_ERROR;
+        assert!(is_table_open_cut(&failure(
+            ffi,
+            "vtable constructor failed: files_fts"
+        )));
+        assert!(!is_table_open_cut(&failure(
+            ffi,
+            "no such table: files_fts"
+        )));
+        assert!(!is_table_open_cut(&failure(
+            rusqlite::ffi::SQLITE_CORRUPT,
+            "vtable constructor failed: files_fts"
+        )));
+    }
 
     /// VFS-1 AC-10 (S6), VFS-4 AC-3: a newer query interrupting a running one makes it
     /// return what it has with `truncated_by = deadline` instead of an error, also while it

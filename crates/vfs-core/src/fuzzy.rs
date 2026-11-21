@@ -209,8 +209,8 @@ mod tests {
         assert!(!candidate_queries("notari").is_empty());
     }
 
-    /// VFS-1 AC-9, AC-10, S9: terms over `FUZZY_MAX_LEN` get no typo work, which would grow with
-    /// the cube of their length.
+    /// VFS-23 AC-3, VFS-1 AC-9, AC-10, S9: terms over `FUZZY_MAX_LEN` get no typo work, which
+    /// would grow with the cube of their length.
     #[test]
     fn overlong_terms_have_no_queries() {
         let max = "notaria".repeat(10)[..FUZZY_MAX_LEN].to_string();

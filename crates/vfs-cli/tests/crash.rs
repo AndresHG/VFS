@@ -430,7 +430,7 @@ fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
     )
 }
 
-/// VFS-3 AC-5, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
+/// VFS-3 AC-5, VFS-23 AC-1, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
 /// the database, the WAL or the marker is truncated or corrupted at a random offset. The
 /// next open never fails, SQLite's check passes, searches never fail and the index
 /// converges to the disk; when SQLite detected the damage (the index was rebuilt from the
@@ -462,8 +462,10 @@ fn torn_writes_are_recovered() {
         // Recovery ran (SQLite detected the damage): the rebuilt index must agree fully.
         let recovered = vfs_core::db::bad_path(&s.db).exists();
         if roots.is_empty() {
-            // The root row itself was destroyed with the page that held it: nothing left
-            // to salvage. The user adds the folder again; the index must accept it.
+            // A recovery takes the roots from the backup list when it cannot read them
+            // (VFS-23 AC-1); only damage SQLite cannot detect may still drop the root row.
+            // The user adds the folder again; the index must accept it.
+            assert!(!recovered, "{context}: recovery lost the root list");
             index(&s.db, &[&s.tree]);
         }
         tainted = undetectable && !recovered;

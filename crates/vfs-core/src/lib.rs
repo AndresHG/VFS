@@ -24,7 +24,7 @@ pub use kind::file_kind;
 pub use types::*;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, InterruptHandle};
@@ -60,6 +60,8 @@ struct Inner {
     /// Dedicated search reader, interrupted by each new query.
     searcher: Mutex<(Connection, SearchState)>,
     search_interrupt: InterruptHandle,
+    /// Searches started so far: a query sees whether a newer one interrupted it.
+    searches: AtomicU64,
     indexer: Mutex<Option<IndexerHandle>>,
     /// Open session marker; dropped by `shutdown` or with the last clone (clean shutdown).
     session: Mutex<Option<db::Session>>,
@@ -92,10 +94,18 @@ impl Vfs {
                 reader: Mutex::new(reader),
                 searcher: Mutex::new((search_conn, SearchState::default())),
                 search_interrupt,
+                searches: AtomicU64::new(0),
                 indexer: Mutex::new(None),
                 session: Mutex::new(Some(session)),
             }),
         })
+    }
+
+    /// Root changes are committed; a failed backup only weakens recovery (VFS-23 AC-1).
+    fn backup_roots(&self, conn: &rusqlite::Connection) {
+        if let Err(e) = db::sync_roots_backup(&self.inner.db_path, conn) {
+            log::warn!("root list backup not written: {e}");
+        }
     }
 
     fn notify_roots_changed(&self) {
@@ -110,23 +120,41 @@ impl Vfs {
 
     /// `path` must be an existing directory that neither contains nor is inside another root.
     pub fn add_root(&self, path: &Path) -> Result<Root> {
-        let root = roots::add_root(&mut db::open_rw(&self.inner.db_path)?, path)?;
+        let mut conn = db::open_rw(&self.inner.db_path)?;
+        let root = roots::add_root(&mut conn, path)?;
+        self.backup_roots(&conn);
         self.notify_roots_changed();
         Ok(root)
     }
 
     pub fn remove_root(&self, root_id: i64) -> Result<()> {
-        roots::remove_root(&mut db::open_rw(&self.inner.db_path)?, root_id)?;
+        let mut conn = db::open_rw(&self.inner.db_path)?;
+        roots::remove_root(&mut conn, root_id)?;
+        self.backup_roots(&conn);
         self.notify_roots_changed();
         Ok(())
     }
 
     /// Runs a query; a query still running on another thread is interrupted first.
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
+        let this = self.inner.searches.fetch_add(1, Ordering::SeqCst) + 1;
         self.inner.search_interrupt.interrupt();
         let mut guard = lock(&self.inner.searcher);
+        let started = std::time::Instant::now();
         let (conn, state) = &mut *guard;
-        search::search(conn, state, &self.inner.config, query)
+        match search::search(conn, state, &self.inner.config, query) {
+            // An FTS table cut short while opening is an interruption only when a newer
+            // query or the deadline caused one (VFS-3 AC-7); otherwise it is an error.
+            Err(e)
+                if search::is_table_open_cut(&e)
+                    && (self.inner.searches.load(Ordering::SeqCst) != this
+                        // The earliest bound a progress handler cuts at.
+                        || started.elapsed() >= self.inner.config.deadline) =>
+            {
+                Ok(search::interrupted_response(query, started))
+            }
+            r => r,
+        }
     }
 
     /// Absolute path of an indexed file, built from the original names.
@@ -435,6 +463,114 @@ mod tests {
         assert_eq!(inside.code(), "overlapping_root");
         assert!(!inside.is_same_root());
         assert!(!vfs.add_root(dir.path()).unwrap_err().is_same_root());
+    }
+
+    /// VFS-23 AC-1 (issue 58): the backup root list follows every root change, and an index
+    /// whose header is overwritten or which is truncated to nothing (no root readable) is
+    /// rebuilt with the roots from that backup.
+    #[test]
+    fn destroyed_header_keeps_roots_from_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        // A path may hold a newline on macOS, never a NUL (the backup's separator).
+        let second = if cfg!(unix) { "dos\nlinea" } else { "dos" };
+        let trees: Vec<_> = ["uno", second, "tres"]
+            .iter()
+            .map(|n| {
+                let t = dir.path().join(n);
+                std::fs::create_dir(&t).unwrap();
+                t
+            })
+            .collect();
+        let vfs = Vfs::open(&path).unwrap();
+        let ids: Vec<i64> = trees.iter().map(|t| vfs.add_root(t).unwrap().id).collect();
+        vfs.remove_root(ids[2]).unwrap();
+        let paths = |vfs: &Vfs| -> Vec<String> {
+            let roots = vfs.list_roots().unwrap().into_iter();
+            roots
+                .filter(|r| r.status != RootStatus::Removing)
+                .map(|r| r.path)
+                .collect()
+        };
+        let expected = paths(&vfs);
+        assert_eq!(expected.len(), 2);
+        assert_eq!(db::read_roots_backup(&path), Some(expected.clone()));
+        drop(vfs);
+        for wreck in ["header", "truncate"] {
+            let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            if wreck == "header" {
+                use std::io::Write;
+                (&f).write_all(&[0xA5; 4096]).unwrap();
+            } else {
+                f.set_len(0).unwrap();
+            }
+            drop(f);
+            for suffix in ["-wal", "-shm"] {
+                let _ = std::fs::remove_file(db::with_suffix(&path, suffix));
+            }
+            let vfs = Vfs::open(&path).unwrap();
+            assert_eq!(paths(&vfs), expected, "{wreck}");
+        }
+    }
+
+    /// VFS-23 AC-1: a backup that cannot be written never fails the root change, and the next
+    /// open repairs it.
+    #[test]
+    fn failed_backup_write_is_repaired_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let tree = dir.path().join("archivo");
+        std::fs::create_dir(&tree).unwrap();
+        let vfs = Vfs::open(&path).unwrap();
+        // A folder where the backup goes makes its rename fail on every platform.
+        let blocker = db::with_suffix(&path, ".roots");
+        std::fs::remove_file(&blocker).unwrap(); // the open wrote an empty list
+        std::fs::create_dir(&blocker).unwrap();
+        let root = vfs.add_root(&tree).unwrap();
+        assert_eq!(db::read_roots_backup(&path), None);
+        drop(vfs);
+        std::fs::remove_dir(&blocker).unwrap();
+        let _vfs = Vfs::open(&path).unwrap();
+        assert_eq!(db::read_roots_backup(&path), Some(vec![root.path]));
+    }
+
+    /// VFS-3 AC-7: an FTS table that fails to open with no newer query and no deadline
+    /// behind it is an error, never taken for an interruption.
+    #[test]
+    fn real_fts_failure_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut conn = db::open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = db::ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let file = db::ingest::NewFile {
+            name: "archivo notaria.pdf",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        db::ingest::insert_file(&tx, top, &file).unwrap();
+        tx.commit().unwrap();
+        // Without its config table FTS5 cannot open: "vtable constructor failed".
+        conn.execute_batch("DROP TABLE files_fts_config").unwrap();
+        drop(conn);
+        let vfs = Vfs::open(&path).unwrap();
+        let r = vfs.search(&SearchQuery {
+            text: "notaria".into(),
+            filters: SearchFilters::default(),
+            limit: 10,
+            offset: 0,
+            sort: Default::default(),
+        });
+        assert!(
+            matches!(&r, Err(e) if search::is_table_open_cut(e)),
+            "{r:?}"
+        );
     }
 
     /// The facade is shareable across threads (Tauri state, indexer callbacks).
