@@ -1490,6 +1490,11 @@ fn offline_attribute_marks_a_file_cloud_only() {
 /// is scanned first and starts with a cursor whose start-up replay is empty, so no walk runs
 /// while a test watches its rows. Returns once that replay is done.
 fn overflow_indexer(fx: &mut Fx) -> (IndexerHandle, Arc<FakeHistory>) {
+    overflow_indexer_with(fx, Sched::inert())
+}
+
+/// `overflow_indexer` with a given schedule (a recording one for diagnostics).
+fn overflow_indexer_with(fx: &mut Fx, sched: Sched) -> (IndexerHandle, Arc<FakeHistory>) {
     fx.scan();
     cursor::store(&fx.conn, fx.root_id, Some("fake:boot")).unwrap();
     let history = Arc::new(FakeHistory::default());
@@ -1497,7 +1502,7 @@ fn overflow_indexer(fx: &mut Fx) -> (IndexerHandle, Arc<FakeHistory>) {
     let h = IndexerHandle::spawn_with_history(
         fx.db_path.clone(),
         Arc::new(NullSink),
-        Sched::inert(),
+        sched,
         None,
         Box::new(Arc::clone(&history)),
         Timing {
@@ -1780,4 +1785,53 @@ fn overflow_replays_the_real_history() {
     );
     assert_eq!(fx.last_scan(), checked, "a full walk ran");
     drop(h);
+}
+
+/// VFS-26 R6: each overflow replay writes one diagnostic line with the root id, the folders
+/// marked, the milliseconds and the outcome (replayed, or lost and walked), never a file name.
+#[test]
+fn overflow_replays_are_recorded_without_names() {
+    let mut fx = fixture(&["Zorropálido_secreto"]);
+    let (records, sink) = capture();
+    let sched = Sched::new(
+        SchedConfig::default(),
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        sink,
+    );
+    let (h, history) = overflow_indexer_with(&mut fx, sched);
+    let line = |outcome: &str| -> Option<String> {
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.starts_with("overflow_replay ") && r.ends_with(outcome))
+            .cloned()
+    };
+    *history.replay.lock().unwrap() = Some(Ok((
+        vec![fx.root().join("Zorropálido_secreto")],
+        "fake:replayed".into(),
+    )));
+    h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
+    wait_for("the replayed record", || line("result=replayed").is_some());
+    // Nothing scripted now: the history reports itself lost.
+    h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
+    wait_for("the lost record", || line("result=lost").is_some());
+    drop(h);
+    let replayed = line("result=replayed").unwrap();
+    assert!(
+        replayed.starts_with(&format!(
+            "overflow_replay root={} folders=1 ms=",
+            fx.root_id
+        )),
+        "{replayed}"
+    );
+    let lost = line("result=lost").unwrap();
+    assert!(lost.contains("folders=0"), "{lost}");
+    let root = fx.root().to_string_lossy().into_owned();
+    for r in [replayed, lost] {
+        for name in ["Zorro", "secreto", root.as_str()] {
+            assert!(!r.contains(name), "{name} in diagnostic record {r}");
+        }
+    }
 }
