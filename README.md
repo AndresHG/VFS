@@ -205,8 +205,8 @@ read, and `bookmarks.db.snapshot/` exists only for the moment a copy of Firefox'
 is being read. Deleting the folder while the app is closed resets VFS: the folders have to
 be added again and are scanned from scratch, and the bookmark setting is off again. The indexer never indexes this folder, even when it lies inside a chosen folder.
 
-The index has schema version 4 (version 2 added a per-file path index; versions 3 and 4 make the
-index about a sixth smaller, VFS-4). An index written by an older build is upgraded in place
+The index has schema version 5 (version 2 added a per-file path index; versions 3 and 4 make the
+index about a sixth smaller, VFS-4; version 5 adds the table of shortcuts and links, VFS-18). An index written by an older build is upgraded in place
 when the app opens it, without a rescan, and then compacted once; one written by a newer
 build is refused, never overwritten.
 

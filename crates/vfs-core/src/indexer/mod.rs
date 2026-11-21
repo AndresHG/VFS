@@ -504,6 +504,9 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
             "UPDATE roots SET status = ?2, last_full_scan_at = ?3 WHERE id = ?1",
             params![root.id, RootStatus::Ready.code(), now_secs()],
         )?;
+        // A link file that could not be read (locked, antivirus) is read again by the next
+        // deferred pass after each full walk (VFS-18 R9).
+        ingest::retry_unreadable_links(&tx, root.id)?;
         tx.execute(
             "INSERT INTO files_fts(files_fts, rank) VALUES('merge', 500)",
             [],
@@ -689,6 +692,10 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
             let mut rows = 0u64;
             for dir_id in dirs {
                 rows += ingest::delete_files_fts(&tx, "f.dir_id = ?1", [dir_id])? as u64;
+                tx.execute(
+                    "DELETE FROM links WHERE file_id IN (SELECT id FROM files WHERE dir_id = ?1)",
+                    [dir_id],
+                )?;
                 tx.execute("DELETE FROM files WHERE dir_id = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs_fts WHERE rowid = ?1", [dir_id])?;
                 tx.execute("DELETE FROM dirs WHERE id = ?1", [dir_id])?;
@@ -1118,6 +1125,21 @@ impl Worker {
                     self.log_err(r);
                     if walking(&self.conn).is_ok_and(|w| !w.is_empty()) {
                         continue;
+                    }
+                    // VFS-18 D7: shortcut targets are read once the walks are done.
+                    let shared = &self.shared;
+                    let yield_now = || {
+                        shared.stop.load(Ordering::SeqCst)
+                            || shared.paused.load(Ordering::SeqCst)
+                            || shared.wake.load(Ordering::SeqCst)
+                    };
+                    match crate::link::read_pending(&mut self.conn, &yield_now) {
+                        Ok(0) => {}
+                        Ok(_) => {
+                            self.sink.on_index_changed();
+                            self.last_changed = Instant::now();
+                        }
+                        Err(e) => log::warn!("link pass: {e}"),
                     }
                     self.publish(IndexerState::Idle);
                     let mut timeout = match self.dirty_since {

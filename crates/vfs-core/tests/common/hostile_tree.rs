@@ -275,9 +275,6 @@ pub fn disk_snapshot(root: &Path) -> Snapshot {
             let os = entry.file_name();
             let name = os.to_string_lossy().into_owned();
             let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_symlink() {
-                continue;
-            }
             let meta = match entry.metadata() {
                 Ok(meta) => meta,
                 Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
@@ -291,7 +288,11 @@ pub fn disk_snapshot(root: &Path) -> Snapshot {
             if os.to_str().is_none() {
                 snap.lossy.insert(child.clone());
             }
-            if ft.is_dir() {
+            if ft.is_symlink() {
+                // A link is a row of size 0 with its own time, never entered (VFS-18 R1).
+                let mtime = meta.modified().map(floor_secs).unwrap_or(0);
+                snap.files.insert(child, (0, mtime));
+            } else if ft.is_dir() {
                 snap.dirs.insert(child.clone());
                 stack.push((entry.path(), child));
             } else if ft.is_file() {

@@ -38,8 +38,8 @@ use crate::fuzzy;
 use crate::matching::FUZZY_TRIGGER;
 use crate::rank::{self, Candidate};
 use crate::types::{
-    FileCopy, FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchHit, SearchQuery,
-    SearchResponse, TruncatedBy,
+    FileCopy, FileKind, LinkKind, LinkTarget, MatchKind, RootStatus, SearchConfig, SearchFilters,
+    SearchHit, SearchQuery, SearchResponse, TruncatedBy,
 };
 
 /// Hits per query after ranking; more sets `truncated_by = cap`.
@@ -178,6 +178,11 @@ fn search_snapshot(
     }
 
     let mut candidates = run.hits;
+    match attach_links(conn, &mut candidates) {
+        Ok(()) => {}
+        Err(Error::Db(e)) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
+        Err(e) => return Err(e),
+    }
     if terms.is_empty() {
         // S6: filter-only queries list newest first.
         candidates.sort_by(|a, b| {
@@ -215,8 +220,9 @@ fn search_snapshot(
 }
 
 /// VFS-19: the ranked candidates as hits, each file folded into the first (best-ranked)
-/// file with the same folded name and size as one of its `copies`; folders are never
-/// grouped. Returns the hits with, per hit, its pending directory and its copies' ones.
+/// file with the same folded name and size as one of its `copies`; folders and links are
+/// never grouped (two links of one name may lead to different places, VFS-18). Returns the
+/// hits with, per hit, its pending directory and its copies' ones.
 #[allow(clippy::type_complexity)]
 fn group_copies(
     candidates: Vec<Candidate>,
@@ -226,7 +232,7 @@ fn group_copies(
     let mut copy_pending: Vec<Vec<Option<i64>>> = Vec::with_capacity(candidates.len());
     let mut first: HashMap<(String, u64), usize> = HashMap::new();
     for c in candidates {
-        if !c.hit.is_dir {
+        if !c.hit.is_dir && c.hit.link.is_none() {
             if let Some(&i) = first.get(&(c.name_key.clone(), c.hit.size)) {
                 hits[i].copies.push(FileCopy {
                     id: c.hit.id,
@@ -282,6 +288,116 @@ fn folder_of(conn: &Connection, dir_id: i64) -> Result<String> {
         )?
         .query_row([dir_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(join_rel(&root, &rel).to_string_lossy().into_owned())
+}
+
+/// VFS-18: attaches its link (kind and target) to every file candidate that is a link, then
+/// drops each link whose target is an indexed file or folder that is itself a candidate:
+/// the real item is already in the list (R5, D1). Nothing outside the index is read.
+fn attach_links(conn: &Connection, candidates: &mut Vec<Candidate>) -> Result<()> {
+    let any: bool = conn
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM links)")?
+        .query_row([], |r| r.get(0))?;
+    if !any {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached("SELECT kind, target FROM links WHERE file_id = ?1")?;
+    for c in candidates.iter_mut().filter(|c| !c.hit.is_dir) {
+        let row: Option<(i64, Option<String>)> = stmt
+            .query_row([c.hit.id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        if let Some((kind, target)) = row {
+            let kind = LinkKind::from_code(kind);
+            let openable = kind == LinkKind::Internet
+                && target.as_deref().is_some_and(crate::link::is_openable_url);
+            c.hit.link = Some(LinkTarget {
+                kind,
+                target,
+                openable,
+            });
+        }
+    }
+    let roots: Vec<(i64, String)> = conn
+        .prepare_cached("SELECT id, path FROM roots")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let files: HashSet<i64> = candidates
+        .iter()
+        .filter(|c| !c.hit.is_dir)
+        .map(|c| c.hit.id)
+        .collect();
+    let dirs: HashSet<i64> = candidates
+        .iter()
+        .filter(|c| c.hit.is_dir)
+        .map(|c| c.hit.id)
+        .collect();
+    let mut shadowed = HashSet::new();
+    for c in candidates.iter() {
+        let Some(LinkTarget {
+            kind: LinkKind::Shortcut | LinkKind::Symlink,
+            target: Some(t),
+            ..
+        }) = &c.hit.link
+        else {
+            continue;
+        };
+        let present = match indexed_target(conn, &roots, t)? {
+            Some(Indexed::File(id)) => files.contains(&id),
+            Some(Indexed::Dir(id)) => dirs.contains(&id),
+            None => false,
+        };
+        if present {
+            shadowed.insert(c.hit.id);
+        }
+    }
+    candidates.retain(|c| c.hit.is_dir || !shadowed.contains(&c.hit.id));
+    Ok(())
+}
+
+/// An indexed file or folder.
+enum Indexed {
+    File(i64),
+    Dir(i64),
+}
+
+/// The indexed file or folder at the absolute path `target`, looked up by its root, folder
+/// and name in the index only (the target itself is never touched, VFS-18 R3).
+fn indexed_target(
+    conn: &Connection,
+    roots: &[(i64, String)],
+    target: &str,
+) -> Result<Option<Indexed>> {
+    let is_sep = |c: char| c == '\\' || c == '/';
+    for (root_id, path) in roots {
+        let root = path.trim_end_matches(is_sep);
+        let Some(head) = target.get(..root.len()) else {
+            continue;
+        };
+        let rest = &target[root.len()..];
+        if !head.eq_ignore_ascii_case(root) || !(rest.is_empty() || rest.starts_with(is_sep)) {
+            continue;
+        }
+        let rel = rest.trim_matches(is_sep).replace('\\', "/");
+        // By exact `rel_path` (indexed): a target recorded in other capitals than the folder
+        // is not matched, and its shortcut stays listed beside it.
+        let dir_id = |rel: &str| -> rusqlite::Result<Option<i64>> {
+            conn.prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?
+                .query_row(rusqlite::params![root_id, rel], |r| r.get(0))
+                .optional()
+        };
+        if let Some(id) = dir_id(&rel)? {
+            return Ok(Some(Indexed::Dir(id)));
+        }
+        let (parent, name) = rel.rsplit_once('/').unwrap_or(("", &rel));
+        if let Some(dir) = dir_id(parent)? {
+            let file: Option<i64> = conn
+                .prepare_cached("SELECT id FROM files WHERE dir_id = ?1 AND name_key = ?2")?
+                .query_row(rusqlite::params![dir, fold_key(name)], |r| r.get(0))
+                .optional()?;
+            return Ok(file.map(Indexed::File));
+        }
+        return Ok(None);
+    }
+    Ok(None)
 }
 
 /// Writes the directory of the file hits read without their directory row (`dir_id`
@@ -704,6 +820,7 @@ impl Ctx {
                 matched,
                 is_dir: false,
                 copies: Vec::new(),
+                link: None,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -748,6 +865,7 @@ impl Ctx {
                 matched,
                 is_dir: true,
                 copies: Vec::new(),
+                link: None,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -925,6 +1043,20 @@ fn run_query(
     if run.hits.len() < MAX_HITS {
         for g in &groups {
             exact_group(conn, run, &ctx, g)?;
+        }
+    }
+    // VFS-18 R4: links found with the help of their target, ranked with path matches.
+    if !terms.is_empty() && run.hits.len() < MAX_HITS {
+        for g in &groups {
+            link_pass(conn, run, &ctx, g, false)?;
+        }
+    }
+    // Links within one edit of a term (VFS-18 R4), under the same trigger as the typo tiers.
+    // They run before the S8 probe, which reads only the path indexes and not link targets;
+    // there are few links and few hits here, so no better tier is pushed out.
+    if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
+        for g in &groups {
+            link_pass(conn, run, &ctx, g, true)?;
         }
     }
     // S8: with nothing found yet, both typo tiers would run to exhaustion; one probe of the
@@ -1216,6 +1348,7 @@ fn name_matches(
                     matched,
                     is_dir: false,
                     copies: Vec::new(),
+                    link: None,
                 },
                 name_key,
                 dir_id: Some(dir_id),
@@ -1373,6 +1506,49 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
         })?;
     }
     Ok(())
+}
+
+/// Links whose every term is in their own folder path, their name or their target (VFS-18
+/// R4, D4). `links` holds only links (a few thousand rows): it is scanned, with the file
+/// filters, not indexed. A link that its own folder and name already match keeps that
+/// `matched` (the name and path tiers usually found it first); one that needed its target
+/// is `MatchKind::Target`. With `fuzzy`, only the links that need the one-typo rule (VFS-1)
+/// for some term are taken, as typo hits; the exact ones were taken by the pass without it.
+fn link_pass(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    fuzzy: bool,
+) -> Result<()> {
+    let Some(clause) = &ctx.files else {
+        return Ok(());
+    };
+    let sql = format!(
+        "SELECT {FILE_COLS}, l.target_key FROM links l CROSS JOIN files f ON f.id = l.file_id \
+         CROSS JOIN dirs d ON d.id = f.dir_id WHERE l.target_key IS NOT NULL{}{}",
+        g.roots_sql(),
+        clause.sql
+    );
+    let params = with_params(None, clause);
+    let deadline = run.soft;
+    each_row(conn, run, &sql, &params, deadline, |run, _, row| {
+        let target: String = row.get(9)?;
+        let r = FileRow::read(row)?;
+        let matched = verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy)
+            .or_else(|| {
+                let own = format!("{}/{}", r.path_key, r.name_key);
+                verify_file(&g.terms, &target, &own, fuzzy).map(|m| match m {
+                    MatchKind::Fuzzy => MatchKind::Fuzzy,
+                    _ => MatchKind::Target,
+                })
+            })
+            .filter(|m| !fuzzy || *m == MatchKind::Fuzzy);
+        Ok(match matched {
+            Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
+            None => true,
+        })
+    })
 }
 
 /// Filter-only queries and groups whose terms are all shorter than 3 characters: a
@@ -1697,6 +1873,7 @@ mod tests {
             matched: MatchKind::Name,
             is_dir: false,
             copies: Vec::new(),
+            link: None,
         };
         let mut hits = vec![hit(), hit(), hit()];
         let mut pending = vec![Some(top), Some(sub + 1000), Some(sub)];

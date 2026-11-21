@@ -94,6 +94,7 @@ mod tests {
                 matched,
                 is_dir,
                 copies: Vec::new(),
+                link: None,
             },
             name_key: fold_key(name),
             dir_id: None,
