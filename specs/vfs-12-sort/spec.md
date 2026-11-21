@@ -25,14 +25,15 @@ Tests cite these ids (`VFS-12 AC-<m>`).
   every result is in that order: newest or oldest modification first, an unknown date (0)
   last in both; folded name A to Z; largest first with folders last. Ties keep the relevance
   order, and paging returns the same sequence as one big page.
-- AC-2 Given more matches than the 2,000-hit cap but at most 20,000 (the sorted read cap)
+- AC-2 Given more matches than the 2,000-hit cap but at most 6,000 (the sorted read cap)
   When a non-relevance order is chosen Then the list holds the first 2,000 of all matches in
   that order: the newest file is first even when 2,000 better-ranked files exist. The order
   is exact, so `approximateOrder` is false.
 - AC-3 Given more matches than the sorted read cap, or a read cut by the deadline, under a
   non-relevance order or a filter-only query Then the response sets `approximateOrder`, and
   the results line says «Más de N resultados: hay demasiados para ordenarlos todos. Escriba
-  algo más para afinar.». Relevance never sets it.
+  algo más para afinar.». Relevance never sets it, except on a filter-only query read past
+  the 2,000-hit cap.
 - AC-4 Given the default order (relevance) Then results and caps are unchanged and the
   VFS-11 golden set stays green.
 - AC-5 Given the «Orden» select Then it is always on screen with «Lo más parecido primero»
@@ -57,6 +58,6 @@ Tests cite these ids (`VFS-12 AC-<m>`).
 |---|----------|--------|-----|------|
 | 1 | Which orders does the select offer (P2 asked for relevance/newest/name/size; issue 82 for relevance/newest/oldest)? | All five: «Lo más parecido primero», «Lo más reciente primero», «Lo más antiguo primero», «Por nombre (A-Z)», «Lo más grande primero» | owner | 2026-11-20 |
 | 2 | Keep «Archivos primero, luego marcadores» as an order, or replace it with per-row labels? | Keep it as an order while bookmarks are included | owner | 2026-11-20 |
-| 3 | How to sort before the cap without a schema change | Read up to 20,000 verified candidates (10× the cap), rank them, re-sort stably, then cut to 2,000. Past that, or on the deadline, flag the order as approximate | session | 2026-11-20 |
-| 4 | Filter-only queries | Same read cap as a sorted query, since their order is newest first | session | 2026-11-20 |
+| 3 | How to sort before the cap without a schema change | Read up to 6,000 verified candidates (3× the cap), rank them, re-sort stably, then cut to 2,000. Past that, or on the deadline, flag the order as approximate. 20,000 was measured at 200–470 ms warm p95 on 2 M files; 6,000 keeps every order under 150 ms | session, after `vfs bench --sort` | 2026-11-21 |
+| 4 | Filter-only queries | Under relevance they keep the 2,000-hit read (newest first among it) and flag the order approximate past it: reading 20,000 took the filter-only class from 15 to 185 ms warm p95 | session, after `vfs bench --sort` | 2026-11-21 |
 | 5 | Where the order travels | The core gets `SearchQuery.sort`; the screen keeps sending `search_sources`' `options.sort`, which maps onto it (`SortOrder::files`) | session | 2026-11-20 |

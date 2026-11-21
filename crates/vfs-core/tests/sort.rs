@@ -158,7 +158,7 @@ fn ac2_sorting_happens_before_the_cap() {
 /// VFS-12 AC-3: past the sorted read cap the order is flagged approximate; relevance never is.
 #[test]
 fn ac3_too_many_matches_make_the_order_approximate() {
-    let files: Vec<_> = (0..20_100)
+    let files: Vec<_> = (0..6_100)
         .map(|i| file(&format!("foto {i:05}.jpg"), 1, i))
         .collect();
     let fx = index(&[], &files);
@@ -167,6 +167,25 @@ fn ac3_too_many_matches_make_the_order_approximate() {
     assert!(newest.truncated);
     let relevance = search(&fx, "foto", SortOrder::Relevance, 0, 10);
     assert!(!relevance.approximate_order);
+}
+
+/// VFS-12 AC-3: a filter-only query lists newest first among the rows its scan read, up to
+/// the hit cap, so past it the order is flagged approximate.
+#[test]
+fn ac3_filter_only_past_the_cap_is_approximate() {
+    let files: Vec<_> = (0..2_100)
+        .map(|i| file(&format!("foto {i:04}.jpg"), 1, i))
+        .collect();
+    let fx = index(&[], &files);
+    let mut q: SearchQuery = serde_json::from_value(serde_json::json!({
+        "text": "", "filters": { "kinds": ["photo"] }, "limit": 10
+    }))
+    .unwrap();
+    let r = fx.vfs.search(&q).unwrap();
+    assert!(r.truncated);
+    assert!(r.approximate_order);
+    q.filters.kinds = vec![vfs_core::FileKind::Video];
+    assert!(!fx.vfs.search(&q).unwrap().approximate_order);
 }
 
 /// VFS-12 AC-4: the default order is relevance, unchanged.
