@@ -548,6 +548,7 @@ fn unreachable_network_target_is_never_contacted() {
         filters: Default::default(),
         limit: 10,
         offset: 0,
+        sort: Default::default(),
     };
     let hit = loop {
         let found = vfs.search(&query).unwrap().hits.into_iter().find(|h| {
