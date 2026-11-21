@@ -40,8 +40,9 @@ ordinary or fast machines. The product spec is
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
 - "Orden" sorts by relevance (the default), newest, oldest, name or size, applied before the
   2,000-result cap (spec [VFS-12](specs/vfs-12-sort/spec.md)).
-- "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected. On Windows,
-  a path Explorer cannot address (over 259 characters) opens the nearest folder it can.
+- "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected, on Windows
+  also for paths over 259 characters; only if the Shell cannot address one does the nearest
+  folder open.
 - Optionally includes Firefox bookmarks ("Incluir marcadores de Firefox" in the "Carpetas"
   panel, off by default; spec [VFS-6](specs/vfs-6-bookmarks/spec.md)). Bookmarks are found by
   title, address, folder path, tags and keyword with the same rules as files; bookmark
