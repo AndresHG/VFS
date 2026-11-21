@@ -2,9 +2,10 @@
 //! macOS: `open -R <path>`. Windows: the Shell's `SHOpenFolderAndSelectItems`, which selects
 //! the item and reuses an Explorer window already showing its folder, repeated into the new
 //! Explorer window when it had to open one; `explorer.exe /select,"<path>"` only when that
-//! call fails (issue 107). Explorer cannot select
-//! items through a `\\?\` path or a path over `MAX_PATH`, so those open the nearest usable
-//! ancestor folder instead and report [`RevealOutcome::OpenedParent`]. On macOS a failed
+//! call fails (issue 107). A path over `MAX_PATH` is selected the same way through its plain
+//! (non-`\\?\`) form, which the Shell's ID-list calls accept (VFS-24 AC-1); only if that
+//! fails does the nearest folder Explorer can address open, reporting
+//! [`RevealOutcome::OpenedParent`]. On macOS a failed
 //! `open -R` reveals the nearest existing ancestor with `open -R` too. Nothing is opened
 //! with its default application, and no ancestor is ever launched (an `.app` bundle would
 //! be).
@@ -58,6 +59,21 @@ pub fn plan_windows(path: &Path, exists: impl Fn(&Path) -> bool) -> Option<Actio
     .map(|a| Action::OpenDir(dunce::simplified(&a).to_path_buf()))
 }
 
+/// The plain form of `path` that the Shell's ID-list calls accept past `MAX_PATH`:
+/// `\\?\C:\…` becomes `C:\…` and `\\?\UNC\server\share\…` becomes `\\server\share\…`
+/// (VFS-24 D1, measured on the Windows runner: `ILCreateFromPathW` returns no ID list for the
+/// verbatim form of a 362-character path and a usable one for its plain form).
+pub fn shell_form(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Explorer's argument for `action`: `/select,"<path>"` or `"<path>"`. A trailing backslash
 /// (a drive root, `C:\`) is doubled, because under the Windows command-line rules
 /// (`CommandLineToArgvW`) a backslash before the closing quote escapes it, so `"C:\"` would
@@ -96,9 +112,18 @@ pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
             }
             Ok(RevealOutcome::Revealed)
         }
-        Some(dir @ Action::OpenDir(_)) => {
-            spawn_explorer(&dir)?;
-            Ok(RevealOutcome::OpenedParent)
+        Some(Action::OpenDir(p)) => {
+            // Past MAX_PATH Explorer's command line fails, but the Shell's ID-list call can
+            // still select the item through its plain path (VFS-24 AC-1); only if it cannot
+            // is the nearest folder opened instead.
+            match shell_select(&shell_form(path)) {
+                Ok(()) => Ok(RevealOutcome::Revealed),
+                Err(e) => {
+                    log::warn!("long path not selectable ({e}); opening {}", p.display());
+                    spawn_explorer(&Action::OpenDir(p))?;
+                    Ok(RevealOutcome::OpenedParent)
+                }
+            }
         }
         None => Err(io::Error::other(format!(
             "no folder of {} can be shown in Explorer",
@@ -322,6 +347,19 @@ mod tests {
         }
     }
 
+    /// VFS-24 AC-1: the Shell gets long paths without the verbatim prefix.
+    #[test]
+    fn shell_form_drops_the_verbatim_prefix() {
+        let cases = [
+            (r"\\?\C:\Datos\Año 2019\f.pdf", r"C:\Datos\Año 2019\f.pdf"),
+            (r"\\?\UNC\nas\fotos\f.jpg", r"\\nas\fotos\f.jpg"),
+            (r"C:\Datos\f.pdf", r"C:\Datos\f.pdf"),
+        ];
+        for (from, to) in cases {
+            assert_eq!(shell_form(Path::new(from)), PathBuf::from(to));
+        }
+    }
+
     /// VFS-1 AC-13: the Explorer length limit counts UTF-16 units and rejects `\\?\` paths.
     #[test]
     fn explorer_limit() {
@@ -332,8 +370,9 @@ mod tests {
         assert!(!explorer_usable(Path::new(r"\\?\C:\x")));
     }
 
-    /// VFS-1 AC-8 + AC-13: short paths are selected (verbatim prefix dropped); paths over
-    /// MAX_PATH open the nearest existing ancestor Explorer can address.
+    /// VFS-1 AC-8 + AC-13: short paths are selected (verbatim prefix dropped); for paths over
+    /// MAX_PATH the fallback plan is the nearest existing ancestor Explorer can address
+    /// (used only when the Shell cannot select the item, VFS-24 AC-1).
     #[cfg(windows)]
     #[test]
     fn plan_windows_long_paths() {
