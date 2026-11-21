@@ -107,7 +107,16 @@ pub(crate) fn read_pending(
             if stop() {
                 break;
             }
-            let path = db::file_abs_path(conn, id)?;
+            // A row whose path cannot be built is marked unreadable, so it never stalls the
+            // pass on every later batch.
+            let path = match db::file_abs_path(conn, id) {
+                Ok(p) => p,
+                Err(e) => {
+                    log::debug!("link {id}: {e}");
+                    read.push((id, Err(())));
+                    continue;
+                }
+            };
             let target = match kind {
                 LinkKind::Shortcut => read_target(&path, LinkFileKind::Lnk),
                 LinkKind::Internet => read_target(&path, LinkFileKind::Url),

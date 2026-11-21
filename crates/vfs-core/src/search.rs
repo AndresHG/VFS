@@ -376,6 +376,8 @@ fn indexed_target(
             continue;
         }
         let rel = rest.trim_matches(is_sep).replace('\\', "/");
+        // By exact `rel_path` (indexed): a target recorded in other capitals than the folder
+        // is not matched, and its shortcut stays listed beside it.
         let dir_id = |rel: &str| -> rusqlite::Result<Option<i64>> {
             conn.prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?
                 .query_row(rusqlite::params![root_id, rel], |r| r.get(0))
@@ -1509,10 +1511,8 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
 /// R4, D4). `links` holds only links (a few thousand rows): it is scanned, with the file
 /// filters, not indexed. A link that its own folder and name already match keeps that
 /// `matched` (the name and path tiers usually found it first); one that needed its target
-/// is `MatchKind::Target`.
-/// Links whose every term is in their own folder, name or target (VFS-18 R4). With `fuzzy`,
-/// only the links that need the one-typo rule (VFS-1) for some term, as typo hits; the exact
-/// ones were taken by the pass without it.
+/// is `MatchKind::Target`. With `fuzzy`, only the links that need the one-typo rule (VFS-1)
+/// for some term are taken, as typo hits; the exact ones were taken by the pass without it.
 fn link_pass(
     conn: &mut Connection,
     run: &mut Run,

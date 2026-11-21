@@ -30,6 +30,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │   │    └─ watch.rs     FSEvents (notify) / own Windows loop │
 │   ├─ platform.rs       volume key, drive kind, priority     │
 │   ├─ db.rs             connections, schema, ingest, session │
+│   ├─ link.rs           .lnk / .url / symlink target reader  │
 │   └─ fold.rs, kind.rs  search keys, extension → type        │
 └──────────────────────────────┬─────────────────────────────┘
                                │ SQLite, WAL mode
@@ -480,9 +481,13 @@ Key shapes:
 
 - `SearchQuery { text, filters: { kinds, modifiedFrom, modifiedTo, sizeMin, sizeMax, folder },
   limit, offset }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes.
-- `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies? }`. `id` is a
-  `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs both.
-  `copies` (VFS-19) is left out when empty and never set on folders.
+- `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link? }`. `id`
+  is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
+  both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
+  `fuzzy`. `copies` (VFS-19) is left out when empty and never set on folders.
+- `link { kind: shortcut | internet | symlink, target: string | null, openable }`: set on a
+  file hit that is a shortcut, Internet Shortcut or link (VFS-18); `openable` only for an
+  `http`/`https` Internet Shortcut.
 - `FileCopy { id, dir, modified }`: another place of a file hit; `id` is a `files.id`.
 - `SearchResponse { hits, total, truncated, truncatedBy, elapsedMs }`.
 
