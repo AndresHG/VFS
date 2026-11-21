@@ -73,7 +73,7 @@ index, it stays valid and uncompacted. An index from a newer build fails with
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`) |
-| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18), `content_state` (document content search, milestone Fase 3; always 0) |
+| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18; bit 2: cloud-only, a placeholder whose data reading would download, VFS-25), `content_state` (document content search, milestone Fase 3; always 0) |
 | `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
 | `file_paths_fts` | version 2: FTS5 trigram index over each file's folded relative path and name (`<dir path_key>/<name_key>`, or `name_key` alone in the root directory), `detail=none` (rowids only, no positions), `rowid = files.id` |
@@ -166,7 +166,13 @@ followed, and a root that has become a link is unavailable. It skips:
   listed. An entry whose metadata is denied fails the whole listing, so the folder is
   retried like one that cannot be listed (VFS-3, #56).
 
-A name that is not valid Unicode is stored in its lossy form with `flags` bit 0 set.
+A name that is not valid Unicode is stored in its lossy form with `flags` bit 0 set. On
+Windows a file whose enumeration attributes carry `RECALL_ON_DATA_ACCESS`, `RECALL_ON_OPEN`
+or `OFFLINE` (a cloud placeholder, Synology on-demand sync or OneDrive) gets `flags` bit 2
+(`ingest::FLAG_CLOUD_ONLY`), kept equal to every listing; attribute-only changes are not
+watched live, so a download shows at the folder's next listing (VFS-25). Nothing reads the
+data of such a file: the link pass leaves a cloud-only link unreadable, and content
+extraction must skip them.
 
 ### Shortcuts and links (VFS-18)
 
@@ -541,11 +547,13 @@ Key shapes:
 - `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link? }`. `id`
   is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
   both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
-  `fuzzy`. `copies` (VFS-19) is left out when empty and never set on folders.
+  `fuzzy`. `copies` (VFS-19) is left out when empty and never set on folders. `cloudOnly`
+  (VFS-25, on the hit and on each copy) is left out when false; it is read for the page
+  returned, one lookup per file, not in the candidate scans.
 - `link { kind: shortcut | internet | symlink, target: string | null, openable }`: set on a
   file hit that is a shortcut, Internet Shortcut or link (VFS-18); `openable` only for an
   `http`/`https` Internet Shortcut.
-- `FileCopy { id, dir, modified }`: another place of a file hit; `id` is a `files.id`.
+- `FileCopy { id, dir, modified, cloudOnly? }`: another place of a file hit; `id` is a `files.id`.
 - `SearchResponse { hits, total, truncated, truncatedBy, elapsedMs }`.
 
 `reveal` builds the path from the index. If it no longer exists on disk, it marks the folder

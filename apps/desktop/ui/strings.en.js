@@ -98,6 +98,9 @@ export const en = {
   copiesModified: (date) => `Modified on ${date}`,
   detailsLabel: 'Location:',
 
+  // A file whose data is only in the cloud (VFS-25 R4).
+  cloudOnlyBadge: 'Cloud only',
+
   // Shortcuts and links (VFS-18 D2, D3, D6).
   linkBadge: {
     [LinkKind.SHORTCUT]: 'Shortcut', [LinkKind.INTERNET]: 'Web page', [LinkKind.SYMLINK]: 'Link',

@@ -26,6 +26,8 @@ pub(crate) struct Entry {
     pub name: String,
     pub lossy: bool,
     pub kind: EntryKind,
+    /// A file whose data is only in the cloud (VFS-25 R1); never set on folders or links.
+    pub cloud_only: bool,
 }
 
 /// Exact names (compared ignoring ASCII case) that are never indexed, nor watched.
@@ -146,9 +148,42 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
         } else {
             continue;
         };
-        out.push(Entry { name, lossy, kind });
+        let cloud_only = matches!(kind, EntryKind::File { .. }) && cloud_only(&meta);
+        out.push(Entry {
+            name,
+            lossy,
+            kind,
+            cloud_only,
+        });
     }
     Ok(out)
+}
+
+/// Attribute bits of a cloud placeholder whose data is not on the disk (VFS-25 R1):
+/// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, `FILE_ATTRIBUTE_RECALL_ON_OPEN`,
+/// `FILE_ATTRIBUTE_OFFLINE`.
+#[cfg_attr(not(windows), allow(dead_code))]
+const CLOUD_ONLY_ATTRIBUTES: u32 = 0x0040_0000 | 0x0004_0000 | 0x0000_1000;
+
+/// True when Windows file attributes mark a cloud-only file (VFS-25 R1).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn cloud_only_attributes(attributes: u32) -> bool {
+    attributes & CLOUD_ONLY_ATTRIBUTES != 0
+}
+
+/// Whether listing metadata marks a cloud-only file: on Windows from the enumeration
+/// record's attributes (no extra call, no open); never elsewhere (VFS-25 non-goal).
+fn cloud_only(meta: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        cloud_only_attributes(meta.file_attributes())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = meta;
+        false
+    }
 }
 
 /// Every `ERROR_CLOUD_FILE_*` code of `winerror.h` (Windows SDK, windows-sys 0.61): a listing
@@ -208,6 +243,26 @@ fn unix_unavailable(_: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-25 AC-1: each of the three placeholder bits marks a file cloud-only; plain,
+    /// hidden, archive, read-only and reparse-point words do not; the stored flag is bit 2.
+    #[test]
+    fn cloud_only_attribute_bits() {
+        for bit in [0x0040_0000, 0x0004_0000, 0x1000] {
+            assert!(cloud_only_attributes(bit | 0x20), "{bit:#x}");
+        }
+        // FILE_ATTRIBUTE_NORMAL, HIDDEN, ARCHIVE, READONLY, REPARSE_POINT.
+        for word in [0x80, 0x2, 0x20, 0x1, 0x400, 0x0] {
+            assert!(!cloud_only_attributes(word), "{word:#x}");
+        }
+        use crate::db::ingest::{FLAG_CLOUD_ONLY, FLAG_LINK};
+        assert_eq!(FLAG_CLOUD_ONLY, 1 << 2);
+        assert_eq!(
+            FLAG_CLOUD_ONLY & (FLAG_LINK | 1),
+            0,
+            "distinct from the link and lossy bits"
+        );
+    }
 
     /// VFS-10 AC-3: each row of the reason table maps to its reason.
     #[test]

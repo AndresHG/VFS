@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { choiceFor, languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
-import { placesOf } from './copies.js';
+import { placesOf, showsCloudBadge } from './copies.js';
 import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
@@ -544,6 +544,7 @@ function main(L) {
     const nameParts = [nameText];
     const unavailable = unavailableRootFor(hit.dir);
     if (unavailable) nameParts.push(el('span', 'badge badge-unavailable', S.unavailableBadge));
+    if (showsCloudBadge(hit)) nameParts.push(el('span', 'badge badge-cloud', S.cloudOnlyBadge));
     const places = placesOf(hit).length;
     if (places > 1) {
       const copies = el('button', 'badge badge-copies', S.copiesBadge(places));
@@ -794,6 +795,7 @@ function main(L) {
       path.append(icon(FileKind.FOLDER), el('span', null, p.dir));
       const meta = el('div', 'root-meta');
       meta.append(el('span', null, S.copiesModified(N.date(p.modified))));
+      if (showsCloudBadge(p)) meta.append(el('span', 'badge badge-cloud', S.cloudOnlyBadge));
       const actions = el('div', 'root-actions');
       const show = el('button', 'btn', S.revealButton);
       show.type = 'button';

@@ -328,6 +328,7 @@ fn group_copies(
                     id: c.hit.id,
                     dir: c.hit.dir,
                     modified: c.hit.modified,
+                    cloud_only: false,
                 });
                 copy_pending[i].push(c.dir_id);
                 continue;
@@ -352,7 +353,10 @@ fn resolve_page(
     resolve_dirs(conn, &mut hits[page.clone()], &mut pending[page.clone()])?;
     // Copies often share a folder (a backup folder holds many): each is read once per page.
     let mut folders: HashMap<i64, String> = HashMap::new();
-    for (hit, waiting) in hits[page.clone()].iter_mut().zip(&mut copy_pending[page]) {
+    for (hit, waiting) in hits[page.clone()]
+        .iter_mut()
+        .zip(&mut copy_pending[page.clone()])
+    {
         for (copy, dir) in hit.copies.iter_mut().zip(waiting.iter_mut()) {
             let Some(id) = *dir else { continue };
             copy.dir = match folders.get(&id) {
@@ -364,6 +368,19 @@ fn resolve_page(
                 }
             };
             *dir = None;
+        }
+    }
+    // VFS-25 R4: the cloud-only bit of each file shown on this page and of its copies, read
+    // here rather than in every candidate scan; one primary-key lookup each.
+    let mut flags = conn.prepare_cached("SELECT flags FROM files WHERE id = ?1")?;
+    let mut cloud = |id: i64| -> Result<bool> {
+        let f: Option<i64> = flags.query_row([id], |r| r.get(0)).optional()?;
+        Ok(f.is_some_and(|f| f & crate::db::ingest::FLAG_CLOUD_ONLY != 0))
+    };
+    for hit in hits[page].iter_mut().filter(|h| !h.is_dir) {
+        hit.cloud_only = cloud(hit.id)?;
+        for copy in hit.copies.iter_mut() {
+            copy.cloud_only = cloud(copy.id)?;
         }
     }
     Ok(())
@@ -938,6 +955,7 @@ impl Ctx {
                 is_dir: false,
                 copies: Vec::new(),
                 link: None,
+                cloud_only: false,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -983,6 +1001,7 @@ impl Ctx {
                 is_dir: true,
                 copies: Vec::new(),
                 link: None,
+                cloud_only: false,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -1473,6 +1492,7 @@ fn name_matches(
                     is_dir: false,
                     copies: Vec::new(),
                     link: None,
+                    cloud_only: false,
                 },
                 name_key,
                 dir_id: Some(dir_id),
@@ -2026,6 +2046,7 @@ mod tests {
             is_dir: false,
             copies: Vec::new(),
             link: None,
+            cloud_only: false,
         };
         let mut hits = vec![hit(), hit(), hit()];
         let mut pending = vec![Some(top), Some(sub + 1000), Some(sub)];

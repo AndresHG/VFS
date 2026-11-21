@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { CATALOGS, Lang } from '../ui/strings.js';
 import { FileKind, LinkKind, Source, UnreadableReason } from '../ui/contract.js';
 import { DateChoice, SizeChoice } from '../ui/choices.js';
-import { placesOf } from '../ui/copies.js';
+import { placesOf, showsCloudBadge } from '../ui/copies.js';
 import { SecondAction, secondActionOf } from '../ui/links.js';
 
 const S = CATALOGS[Lang.ES];
@@ -206,4 +206,21 @@ test('folders that could not be read have their wording', () => {
     assert.ok(cat.unreadableSee && cat.unreadableTitle && cat.unreadableHint);
   }
   assert.deepEqual(Object.values(es.unreadableReason).sort(), ['Error de disco', 'No disponible', 'Sin permiso', 'Solo en la nube']);
+});
+
+/** VFS-25 AC-4: the cloud-only badge has its text in both catalogs; `placesOf` carries each
+ *  place's `cloudOnly`; the badge shows only for a file marked cloud-only. */
+test('cloud-only files and places get the badge', () => {
+  assert.equal(CATALOGS[Lang.ES].cloudOnlyBadge, 'Solo en la nube');
+  assert.equal(CATALOGS[Lang.EN].cloudOnlyBadge, 'Cloud only');
+  const hit = {
+    id: 1, name: 'boda.mp4', dir: 'C:\\Fotos', isDir: false, modified: 1, cloudOnly: true,
+    copies: [{ id: 2, dir: 'D:\\Copia', modified: 1 }, { id: 3, dir: 'E:\\Nube', modified: 1, cloudOnly: true }],
+  };
+  assert.deepEqual(placesOf(hit).map((p) => showsCloudBadge(p)), [true, false, true]);
+  assert.equal(showsCloudBadge(hit), true);
+  assert.equal(showsCloudBadge({ ...hit, cloudOnly: false }), false);
+  assert.equal(showsCloudBadge({ ...hit, isDir: true }), false);
+  assert.equal(showsCloudBadge({ ...hit, source: Source.BOOKMARKS }), false);
+  assert.equal(showsCloudBadge(undefined), false);
 });

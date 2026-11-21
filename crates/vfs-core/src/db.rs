@@ -642,6 +642,10 @@ pub mod ingest {
     /// `files.flags` bit 1: the entry is a symbolic link or junction (VFS-18).
     pub const FLAG_LINK: i64 = 2;
 
+    /// `files.flags` bit 2: the file's data is only in the cloud, a placeholder that reading
+    /// would download (VFS-25). Content extraction must skip such files.
+    pub const FLAG_CLOUD_ONLY: i64 = 4;
+
     /// Value of `links.state` (VFS-18). Written into SQL as a literal so the partial index
     /// `links_pending` (`WHERE state = 0`) serves the pending query.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -667,6 +671,8 @@ pub mod ingest {
         pub mtime: i64,
         /// A symbolic link or junction entry (`flags` bit 1, VFS-18).
         pub link: bool,
+        /// A cloud-only file (`flags` bit 2, VFS-25).
+        pub cloud_only: bool,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -796,6 +802,24 @@ pub mod ingest {
         Ok(id)
     }
 
+    /// Sets or clears a file's cloud-only bit (VFS-25 R2). A link file that is local again
+    /// goes back to the link pass, which skipped it while it was cloud-only (VFS-25 R3).
+    pub fn set_cloud_only(tx: &Transaction, file_id: i64, cloud_only: bool) -> Result<()> {
+        if cloud_only {
+            tx.prepare_cached("UPDATE files SET flags = flags | ?2 WHERE id = ?1")?
+                .execute(params![file_id, FLAG_CLOUD_ONLY])?;
+        } else {
+            tx.prepare_cached("UPDATE files SET flags = flags & ~?2 WHERE id = ?1")?
+                .execute(params![file_id, FLAG_CLOUD_ONLY])?;
+            tx.prepare_cached(&format!(
+                "UPDATE links SET state = {}, target = NULL, target_key = NULL WHERE file_id = ?1",
+                LinkState::Pending as i64
+            ))?
+            .execute([file_id])?;
+        }
+        Ok(())
+    }
+
     /// Inserts a symbolic link or junction entry as a file row (`flags` bit 1) with a pending
     /// link row of kind symlink, whatever its name (VFS-18 R1, D5).
     pub fn insert_link_entry(tx: &Transaction, dir_id: i64, file: &NewFile) -> Result<i64> {
@@ -822,15 +846,23 @@ pub mod ingest {
         Ok(())
     }
 
-    /// Up to `limit` links waiting for the deferred pass, in id order: (file id, kind).
-    pub fn pending_links(conn: &Connection, limit: usize) -> Result<Vec<(i64, LinkKind)>> {
+    /// Up to `limit` links waiting for the deferred pass, in id order: (file id, kind,
+    /// cloud-only).
+    pub fn pending_links(conn: &Connection, limit: usize) -> Result<Vec<(i64, LinkKind, bool)>> {
         let mut stmt = conn.prepare_cached(&format!(
-            "SELECT file_id, kind FROM links WHERE state = {} ORDER BY file_id LIMIT ?1",
+            "SELECT l.file_id, l.kind, COALESCE(f.flags, 0) FROM links l \
+             LEFT JOIN files f ON f.id = l.file_id \
+             WHERE l.state = {} ORDER BY l.file_id LIMIT ?1",
             LinkState::Pending as i64
         ))?;
         let rows = stmt
             .query_map([limit as i64], |r| {
-                Ok((r.get(0)?, LinkKind::from_code(r.get(1)?)))
+                let flags: i64 = r.get(2)?;
+                Ok((
+                    r.get(0)?,
+                    LinkKind::from_code(r.get(1)?),
+                    flags & FLAG_CLOUD_ONLY != 0,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -1027,6 +1059,7 @@ pub mod ingest {
                     size: r.get::<_, i64>(2)? as u64,
                     mtime: r.get(3)?,
                     link: r.get::<_, i64>(4)? & FLAG_LINK != 0,
+                    cloud_only: r.get::<_, i64>(4)? & FLAG_CLOUD_ONLY != 0,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1457,7 +1490,8 @@ mod tests {
                 name: "IMG_0001.JPG".into(),
                 size: 20,
                 mtime: 200,
-                link: false
+                link: false,
+                cloud_only: false
             }]
         );
         assert_eq!(

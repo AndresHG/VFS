@@ -8,8 +8,9 @@
 //   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs, approximateOrder}
 //   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir,
 //                   copies?: FileCopy[],  (VFS-19; left out when empty, never on folders)
-//                   link?: {kind: LinkKind, target: string|null, openable}}  (VFS-18)
-//   FileCopy       {id, dir, modified}    (another place of the same file; id is a files.id)
+//                   link?: {kind: LinkKind, target: string|null, openable},  (VFS-18)
+//                   cloudOnly?: true}  (VFS-25: its data is only in the cloud; left out when false)
+//   FileCopy       {id, dir, modified, cloudOnly?}  (another place of the same file; id is a files.id)
 //   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind,
 //                   unreadable}  (VFS-10: folders that could not be listed)
 //   UnreadableDir  {id, path, reason: UnreadableReason}  (id is a dirs.id; list_unreadable)

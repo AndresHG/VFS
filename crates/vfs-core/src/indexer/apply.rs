@@ -56,6 +56,11 @@ pub(crate) fn apply_listing(
                             summary.files_updated += 1;
                             changed += 1;
                         }
+                        // The stored bit follows every listing (VFS-25 R2).
+                        if old.cloud_only != entry.cloud_only {
+                            ingest::set_cloud_only(tx, old.id, entry.cloud_only)?;
+                            changed += 1;
+                        }
                     }
                     _ => {
                         // A file replaced by a link of the same name, or the reverse.
@@ -72,7 +77,10 @@ pub(crate) fn apply_listing(
                         if link {
                             ingest::insert_link_entry(tx, dir_id, &file)?;
                         } else {
-                            ingest::insert_file(tx, dir_id, &file)?;
+                            let id = ingest::insert_file(tx, dir_id, &file)?;
+                            if entry.cloud_only {
+                                ingest::set_cloud_only(tx, id, true)?;
+                            }
                         }
                         summary.files_added += 1;
                         changed += 1;

@@ -220,6 +220,9 @@ pub struct SearchHit {
     /// Set when the file is a shortcut or link (VFS-18).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<LinkTarget>,
+    /// The file's data is only in the cloud (VFS-25 R4); left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cloud_only: bool,
 }
 
 /// Another place of a file hit (VFS-19).
@@ -231,6 +234,9 @@ pub struct FileCopy {
     /// Absolute path of the containing directory, native separators.
     pub dir: String,
     pub modified: i64,
+    /// This place's data is only in the cloud (VFS-25 R4); left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cloud_only: bool,
 }
 
 /// What cut a search short.
@@ -475,8 +481,10 @@ mod tests {
                     id: 9,
                     dir: "/c".into(),
                     modified: 5,
+                    cloud_only: true,
                 }],
                 link: None,
+                cloud_only: false,
             }],
             total: 1,
             truncated: true,
@@ -489,7 +497,7 @@ mod tests {
             json!({
                 "hits": [{ "id": 7, "name": "Notaría.pdf", "dir": "/a/b", "kind": "document",
                            "size": 3, "modified": 4, "matched": "fuzzy", "isDir": false,
-                           "copies": [{ "id": 9, "dir": "/c", "modified": 5 }] }],
+                           "copies": [{ "id": 9, "dir": "/c", "modified": 5, "cloudOnly": true }] }],
                 "total": 1, "truncated": true, "truncatedBy": "deadline", "elapsedMs": 2,
                 "approximateOrder": false
             })

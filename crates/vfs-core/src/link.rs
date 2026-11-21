@@ -103,9 +103,15 @@ pub(crate) fn read_pending(
             return Ok(done);
         }
         let mut read = Vec::with_capacity(batch.len());
-        for (id, kind) in batch {
+        for (id, kind, cloud_only) in batch {
             if stop() {
                 break;
+            }
+            // A cloud-only link file is never opened: reading it would download it (VFS-25
+            // R3). It is unreadable until a listing finds it local and queues it again.
+            if cloud_only {
+                read.push((id, Err(())));
+                continue;
             }
             // A row whose path cannot be built is marked unreadable, so it never stalls the
             // pass on every later batch.
