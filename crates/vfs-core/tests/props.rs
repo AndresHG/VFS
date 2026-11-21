@@ -242,7 +242,7 @@ proptest! {
 }
 
 /// A file name the query side can reproduce: no `/` (a path separator on every platform),
-/// no `\` (the query folds `\` to `/` by design, search.rs module doc; also excluded when a
+/// no `\` (on Windows the query folds `\` to `/`, VFS-23 AC-2; also excluded when a
 /// compatibility form such as `＼` folds to it) and no NUL (impossible in a file name). It
 /// must fold to at least 3 characters with something other than whitespace.
 fn name_strategy() -> impl Strategy<Value = String> {
@@ -701,11 +701,17 @@ fn junk_query() -> impl Strategy<Value = String> {
     prop::collection::vec(prop::sample::select(JUNK), 1..12).prop_map(|v| v.concat())
 }
 
-/// The terms the search derives from `text`: `\` as `/`, NUL as whitespace, folded, split
-/// on whitespace, deduplicated, at most 8.
+/// The terms the search derives from `text`: `\` as `/` on Windows (VFS-23 AC-2), NUL as
+/// whitespace, folded, split on whitespace, deduplicated, at most 8.
 fn terms_of(text: &str) -> Vec<String> {
     let mut terms: Vec<String> = Vec::new();
-    for t in fold_key(&text.replace('\\', "/").replace('\0', " ")).split_whitespace() {
+    let text = text.replace('\0', " ");
+    let text = if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    };
+    for t in fold_key(&text).split_whitespace() {
         if terms.len() < 8 && !terms.iter().any(|x| x == t) {
             terms.push(t.to_string());
         }
@@ -855,9 +861,9 @@ fn size_min_above_i64_max_matches_no_file() {
     assert_eq!(ix.query("acta", f, 500, 0).unwrap().hits.len(), 1);
 }
 
-/// VFS-1 AC-9, AC-10 regression (found by `arbitrary_queries_never_fail` hanging): the typo
-/// alternatives of one long term grew faster than quadratically outside the deadline, so a
-/// pasted 10k-character term without spaces took minutes. A term too long for typo
+/// VFS-23 AC-3, VFS-1 AC-9, AC-10 regression (found by `arbitrary_queries_never_fail`
+/// hanging): the typo alternatives of one long term grew faster than quadratically outside
+/// the deadline, so a pasted 10k-character term without spaces took minutes. A term too long for typo
 /// tolerance now matches exactly and the query returns in well under the bound here.
 #[test]
 fn a_10k_character_term_returns_promptly() {

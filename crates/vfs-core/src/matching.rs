@@ -25,14 +25,21 @@ pub struct ParsedQuery {
 }
 
 /// Bounded input: at most `MAX_QUERY_BYTES` of text and `MAX_TERM_CHARS` per term, so no
-/// query costs more than a typed one, whatever is pasted. `\` reads as `/`, NUL as a space.
+/// query costs more than a typed one, whatever is pasted. NUL reads as a space, and `\\` as
+/// `/` on Windows only: a macOS name can hold a backslash (VFS-23 AC-2).
 pub fn parse_query(text: &str) -> ParsedQuery {
     let mut text_end = text.len().min(MAX_QUERY_BYTES);
     while !text.is_char_boundary(text_end) {
         text_end -= 1;
     }
     // NUL cannot occur in a file name and would end an FTS5 expression early: whitespace.
-    let folded = fold_key(&text[..text_end].replace('\\', "/").replace('\0', " "));
+    let text = text[..text_end].replace('\0', " ");
+    let text = if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    };
+    let folded = fold_key(&text);
     let folded = folded
         .split_whitespace()
         .map(|t| t.chars().take(MAX_TERM_CHARS).collect::<String>())
@@ -75,7 +82,7 @@ mod tests {
     /// VFS-6 AC-6: both sources read a query the same way (folded, deduplicated, bounded).
     #[test]
     fn parse_folds_dedups_and_bounds() {
-        let q = parse_query("  Recetas  RECETAS año\\2019 ");
+        let q = parse_query("  Recetas  RECETAS año/2019 ");
         assert_eq!(q.terms, vec!["recetas", "ano/2019"]);
         assert_eq!(q.folded, "recetas recetas ano/2019");
         let many = (0..20)
@@ -85,6 +92,18 @@ mod tests {
         assert_eq!(parse_query(&many).terms.len(), MAX_TERMS);
         let long = "é".repeat(2000);
         assert!(parse_query(&long).folded.chars().count() <= MAX_TERM_CHARS);
+    }
+
+    /// VFS-23 AC-2: a backslash is a separator only on Windows, where no name holds one; on
+    /// macOS a name can, so the query keeps it.
+    #[test]
+    fn backslash_is_a_separator_only_on_windows() {
+        let q = parse_query("año\\2019 dos\\barras\\x");
+        if cfg!(windows) {
+            assert_eq!(q.terms, vec!["ano/2019", "dos/barras/x"]);
+        } else {
+            assert_eq!(q.terms, vec!["ano\\2019", "dos\\barras\\x"]);
+        }
     }
 
     /// VFS-6 AC-6: the tier of a title follows the file-name tiers.
