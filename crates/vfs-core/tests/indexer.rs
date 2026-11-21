@@ -621,6 +621,10 @@ fn startup_catch_up_runs_after_an_interrupted_walk() {
         [RootStatus::Scanning.code()],
     )
     .unwrap();
+    // No change cursor, so the catch-up is the walk this test is about (VFS-9 R3); the
+    // replay of a rolled-back walk is VFS-9 AC-2.
+    conn.execute("DELETE FROM meta WHERE key LIKE 'cursor/%'", [])
+        .unwrap();
     drop(conn);
 
     let (tx, rx) = mpsc::channel();

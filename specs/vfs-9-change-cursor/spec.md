@@ -101,6 +101,10 @@ the real OS in CI (Windows and macOS); AC-4 runs everywhere through a fake histo
 
 ## Pre-mortem
 
+- Change made just before start (macOS): FSEvents records event ids about a second late, so a
+  change made in the second before VFS starts may be missing from that start's replay. It is
+  never lost: its id is above the stored cursor, so the next start replays it, and the weekly
+  re-walk remains. Tests wait 1.1 s between changing the disk and starting.
 - Slow PC, multi-TB HDD: replay reads the journal (32 MB by default) sequentially and resolves
   one MFT record per changed directory, then shallow re-lists only those directories: seconds
   to minutes instead of hours. It runs on the indexer thread at background priority. Killed
