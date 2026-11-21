@@ -109,6 +109,19 @@ pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> taur
     )
 }
 
+/// Starts the indexer again after a failed update install stopped it (VFS-21 R5). A no-op
+/// while it runs.
+pub fn restart_indexer<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(e) = state
+            .vfs
+            .start_indexer(Arc::new(EventSink { app: app.clone() }))
+        {
+            log::warn!("indexer restart: {e}");
+        }
+    }
+}
+
 /// Opens the index at `db_path` (creating its directory), manages it as [`AppState`] and
 /// starts the background indexer. Shared by [`run`] and the integration test.
 pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), String> {

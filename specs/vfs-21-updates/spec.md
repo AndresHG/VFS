@@ -1,6 +1,6 @@
 # VFS-21 — App updates: offer on open, install with one click
 
-- **Status**: approved
+- **Status**: approved (independent spec review, 2026-11-21: install-failure path and step order added)
 - **Size**: L. It changes the installer and release pipeline (signed updater artifacts,
   `latest.json`), adds the app's only network connection, and behaves differently on Windows
   (the NSIS installer replaces the app and the app exits) and macOS (the bundle is replaced
@@ -46,18 +46,24 @@ because it is the app's only network connection the UI and the README say so.
 ## Requirements (EARS)
 
 - R1. WHEN the app has started and the update check is on, THE app SHALL request
-  `latest.json` from the GitHub release endpoint once per launch, in the background, without
-  delaying the window or searches.
+  `latest.json` from the GitHub release endpoint once per launch, in the background, starting
+  10 s after the window has loaded, without delaying the window or searches.
 - R2. WHEN the manifest's version is newer than the running version, THE app SHALL show a
   non-modal notice "Hay una versión nueva de VFS (x.y.z)" with "Actualizar" and "Ahora no".
-  A pre-release version is offered only to a pre-release build.
-- R3. WHEN the user clicks "Actualizar", THE app SHALL download the update showing progress,
-  verify its signature, close the index cleanly, install it and relaunch on the new version.
+  A pre-release version is offered only to a pre-release build (a comparator rule; the
+  endpoint itself never serves pre-releases, D7).
+- R3. WHEN the user clicks "Actualizar", THE app SHALL, in this order, download the update
+  showing progress, verify its signature, stop the indexer, install the update and relaunch
+  on the new version. On Windows the NSIS installer shows its passive progress window and
+  reopens VFS itself; on macOS the app relaunches itself.
 - R4. IF the network is unavailable, blocked, slow (no answer within 20 s) or the manifest is
   invalid, THEN THE app SHALL show nothing, log the cause, and try again on the next launch.
-- R5. IF the download fails or is interrupted, or the signature does not verify, THEN THE app
-  SHALL install nothing, keep running normally, and show "No se ha podido descargar la
-  actualización" with "Reintentar" in the same notice.
+- R5. IF the download fails or is interrupted, THEN THE app SHALL install nothing, keep running
+  normally, and show "No se ha podido descargar la actualización" with "Reintentar" in the
+  same notice. IF the signature does not verify or the install step fails (installer cannot
+  start, bundle not writable), THEN THE app SHALL restart the indexer if it was stopped, keep
+  running on the current version, and show "No se ha podido instalar la actualización" with
+  "Reintentar".
 - R6. WHERE the user turns off "Buscar actualizaciones al abrir", THE app SHALL make no network
   connection at all; the setting persists across launches and defaults to on.
 - R7. THE settings panel and the README SHALL say that the update check is the app's only
@@ -67,7 +73,9 @@ because it is the app's only network connection the UI and the README say so.
   relaunch.
 - R9. THE release workflow SHALL produce, for each platform, the signed updater artifact and
   its `.sig`, and a `latest.json` that points at the release assets, keeping today's
-  installer, zip and checksum artifacts.
+  installer, zip and checksum artifacts. On a tag it SHALL refuse a tag that differs from the
+  app version and create only a draft release with every asset already attached, so a
+  published release never has a partial manifest.
 
 ## Acceptance scenarios
 
@@ -94,11 +102,17 @@ Tests cite these ids (`VFS-21 AC-<m>`) in their doc comments.
 - AC-9 (R9) Given a `workflow_dispatch` run of `release.yml`, Then its artifacts contain the
   NSIS setup.exe + `.sig`, `VFS.app.tar.gz` + `.sig`, the existing zip and checksum files,
   and a `latest.json` with `windows-x86_64` and `darwin-aarch64` entries whose signatures
-  equal the `.sig` files and whose URLs name the release assets.
+  equal the `.sig` files and whose URLs name the release assets; the manifest job fails on a
+  tag that is not `v<app version>`.
 - AC-10 (R3) Manual: a local build of 0.2.0 pointing at a local manifest is updated to a
   local 0.2.1 signed with a test key, and relaunches as 0.2.1 (macOS, recorded in the PR);
   the Windows check is the documented manual step in `docs/updates.md`.
 - AC-11 (R2, R7) The notice and the setting copy come from the text catalog, in Spanish.
+- AC-12 (R5) Given the download completed, When the signature check or the installer fails,
+  Then the install command rejects, the indexer is restarted, the app never relaunches, and
+  the notice shows "No se ha podido instalar la actualización" with "Reintentar".
+- AC-13 (R3) Given a download in progress, When progress events arrive, Then the notice shows
+  the percentage and a progress bar, and "Instalando…" once the download completes.
 
 ## Non-goals
 
@@ -119,10 +133,12 @@ Tests cite these ids (`VFS-21 AC-<m>`) in their doc comments.
 - Long paths: n/a because the updater writes only to the temp dir and the install dir.
 - NFC/NFD: n/a because no user file names are involved.
 - Antivirus: Defender may scan the downloaded unsigned setup.exe and SmartScreen may not
-  apply (launched by the app, not double-clicked); if the installer fails to launch, R5
-  applies and the log has the cause.
+  apply (launched by the app, not double-clicked); if the installer fails to launch, R5's
+  install-failure branch applies and the log has the cause. A macOS app run from a
+  quarantined, translocated (read-only) location cannot replace itself: same branch.
 - Killed mid-write: the indexer is shut down (WAL checkpoint) before install; a kill during
-  download leaves nothing behind but memory.
+  download leaves nothing behind but memory. While the shutdown runs the notice already says
+  "Instalando…"; an interrupted scan resumes or restarts at the next launch as on any close.
 - Million-match queries: n/a because search is untouched.
 - Permission-denied / placeholders: n/a; per-user install dirs are user-writable, so no UAC.
 - User files: no user file is opened, written, moved or deleted; only the app's own install.
@@ -135,7 +151,7 @@ Tests cite these ids (`VFS-21 AC-<m>`) in their doc comments.
 | D2 | Where the setting lives | Folders panel ("Carpetas"), next to the bookmarks setting: the one settings place the app has | agent | 2026-11-21 |
 | D3 | Settings storage | `updates.json` in the local app-data dir, separate from the index DB (deleting or rebuilding the index keeps the choice) | agent | 2026-11-21 |
 | D4 | Who runs the check | Rust, when the UI asks after load; Rust enforces the setting and the once-per-launch rule, so a UI bug cannot open a connection | agent | 2026-11-21 |
-| D5 | Signing key | minisign key with a password, both stored as Actions secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`; the only other copy is on the owner's machine for backup; public key in `tauri.conf.json` | agent | 2026-11-21 |
+| D5 | Signing key | minisign key with a password, both stored as Actions secrets `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`; the only other copy is on the owner's machine for backup; public key in `tauri.conf.json`. Losing it means one manual reinstall for every user; backup and rotation in `docs/updates.md` | agent | 2026-11-21 |
 | D6 | Windows install mode | `passive` (progress window, no questions; per-user so no UAC) | agent | 2026-11-21 |
 | D7 | Pre-releases | The endpoint serves only the latest non-prerelease release; the comparator also refuses a pre-release for a stable build | agent | 2026-11-21 |
 | D8 | "Ahora no" | Hides the notice for this launch only; the next launch offers again | agent | 2026-11-21 |

@@ -104,23 +104,31 @@ impl<T: Clone> CheckOnce<T> {
     }
 }
 
-/// Download, then install, then `after_install` (VFS-21 R3, R5). A failed download or a bad
-/// signature returns before anything is installed or shut down; `install` verifies the
-/// signature itself. On Windows `install` never returns on success: the index is shut down in
-/// the updater's `on_before_exit` hook and the process exits for the installer.
-pub async fn install_flow<D, DFut, I, A, E>(
+/// The order is download, verify, stop the indexer, install, relaunch (VFS-21 R3, R5, R8).
+/// `install` verifies the signature before anything else, so a failed download or a bad
+/// signature returns before anything is installed or stopped. On Windows the indexer is
+/// stopped inside `install` (the updater's `on_before_exit` hook, after verifying), and on
+/// success the process exits for the installer; if launching the installer fails, `recover`
+/// restarts the indexer so the app stays usable. On macOS `after_install` stops the indexer
+/// and relaunches.
+pub async fn install_flow<D, DFut, I, A, F, E>(
     download: D,
     install: I,
     after_install: A,
+    recover: F,
 ) -> Result<(), E>
 where
     D: FnOnce() -> DFut,
     DFut: Future<Output = Result<Vec<u8>, E>>,
     I: FnOnce(&[u8]) -> Result<(), E>,
     A: FnOnce(),
+    F: FnOnce(),
 {
     let bytes = download().await?;
-    install(&bytes)?;
+    if let Err(e) = install(&bytes) {
+        recover();
+        return Err(e);
+    }
     after_install();
     Ok(())
 }
@@ -214,7 +222,8 @@ pub async fn check_for_update<R: Runtime>(
 }
 
 /// "Actualizar": download with progress events, verify, install and relaunch. Rejects, with
-/// nothing installed, when the download or the signature fails (VFS-21 R5).
+/// nothing installed and the indexer running, when the download, the signature or the
+/// install step fails (VFS-21 R5).
 #[tauri::command]
 pub async fn install_update<R: Runtime>(
     app: AppHandle<R>,
@@ -250,6 +259,7 @@ pub async fn install_update<R: Runtime>(
             shutdown_index(&app);
             app.restart();
         },
+        || crate::restart_indexer(&app),
     )
     .await;
     result.map_err(|e| {
@@ -372,21 +382,27 @@ mod tests {
                 }
             },
             || steps.borrow_mut().push("shutdown+relaunch"),
+            || steps.borrow_mut().push("restart indexer"),
         ));
         (result, steps.into_inner())
     }
 
-    /// VFS-21 AC-7: a failed download or a bad signature installs nothing and leaves the
-    /// index running (no shutdown, no relaunch).
+    /// VFS-21 AC-7: a failed download installs nothing and leaves the index running (no
+    /// shutdown, no relaunch).
     #[test]
-    fn failures_install_nothing_and_keep_running() {
+    fn failed_download_installs_nothing_and_keeps_running() {
         let (result, steps) = run_flow(false, true);
         assert!(result.is_err());
         assert_eq!(steps, ["download"]);
+    }
 
+    /// VFS-21 AC-12: a bad signature or an installer that cannot run (possibly after the
+    /// indexer was stopped) rejects, never relaunches, and restarts the indexer.
+    #[test]
+    fn failed_install_restarts_the_indexer() {
         let (result, steps) = run_flow(true, false);
         assert_eq!(result.unwrap_err(), "signature mismatch");
-        assert_eq!(steps, ["download", "install"]);
+        assert_eq!(steps, ["download", "install", "restart indexer"]);
     }
 
     /// VFS-21 AC-8: the index is shut down only after the update is installed and before the

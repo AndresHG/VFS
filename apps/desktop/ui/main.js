@@ -1106,7 +1106,7 @@ function main() {
     try {
       updatesToggle.checked = (await api.getUpdateSettings()).checkOnOpen;
     } catch { /* the toggle stays as rendered */ }
-    await api.onUpdateProgress((p) => updates.onProgress(p));
+    try { await api.onUpdateProgress((p) => updates.onProgress(p)); } catch { /* no progress bar */ }
     updates.start();
   }
 

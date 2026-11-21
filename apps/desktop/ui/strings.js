@@ -163,6 +163,7 @@ export const S = {
   updateDownloading: (pct) => (pct == null ? 'Descargando la actualización…' : `Descargando la actualización… ${pct} %`),
   updateInstalling: 'Instalando la actualización. VFS se volverá a abrir solo en unos segundos.',
   updateFailed: 'No se ha podido descargar la actualización. Puede reintentarlo ahora o la próxima vez que abra VFS.',
+  updateInstallFailed: 'No se ha podido instalar la actualización. VFS sigue funcionando con la versión actual; puede reintentarlo ahora o la próxima vez que lo abra.',
   updateRetry: 'Reintentar',
   bookmarksCount: (n, when) => `${n} marcadores · leídos ${when}`,
   bookmarksState: {

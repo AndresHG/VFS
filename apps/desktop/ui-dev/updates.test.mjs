@@ -37,7 +37,7 @@ test('nothing is shown when there is no update or the check fails', async () => 
   }
 });
 
-/** VFS-21 R3: download progress, then the installing text when the download completes. */
+/** VFS-21 AC-13: download progress, then the installing text when the download completes. */
 test('installing shows progress and then the installing text', async () => {
   let finish;
   const { u, views, runTimers } = harness({
@@ -73,6 +73,23 @@ test('a failed download offers to retry', async () => {
   await u.install();
   assert.equal(attempts, 2);
   assert.equal(u.phase(), UpdatePhase.INSTALLING);
+});
+
+/** VFS-21 AC-12: a failure after the download completed (signature or installer) says the
+ *  install failed, not the download, and still offers "Reintentar". */
+test('a failed install after the download says so', async () => {
+  const { u, views, runTimers } = harness({
+    checkForUpdate: async () => ({ version: '0.2.1' }),
+    installUpdate: async () => {
+      u.onProgress({ downloaded: 10, total: 10 });
+      throw { code: 'io' };
+    },
+  });
+  u.start();
+  await runTimers();
+  await u.install();
+  assert.equal(u.phase(), UpdatePhase.INSTALL_FAILED);
+  assert.deepEqual(views.at(-1), { text: S.updateInstallFailed, action: S.updateRetry, later: true, progress: null });
 });
 
 /** VFS-21 D8: "Ahora no" hides the notice; late progress events do not bring it back. */

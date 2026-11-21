@@ -10,6 +10,7 @@ export const UpdatePhase = Object.freeze({
   DOWNLOADING: 'downloading',
   INSTALLING: 'installing',
   FAILED: 'failed',
+  INSTALL_FAILED: 'install-failed',
 });
 
 export const CHECK_DELAY_MS = 10_000;
@@ -27,6 +28,8 @@ export function updateView(st) {
       return { text: S.updateInstalling, action: null, later: false, progress: null };
     case UpdatePhase.FAILED:
       return { text: S.updateFailed, action: S.updateRetry, later: true, progress: null };
+    case UpdatePhase.INSTALL_FAILED:
+      return { text: S.updateInstallFailed, action: S.updateRetry, later: true, progress: null };
     default:
       return null;
   }
@@ -58,7 +61,8 @@ export function createUpdates({ api, render, schedule = setTimeout, delay = CHEC
       await api.installUpdate();
       st.phase = UpdatePhase.INSTALLING;
     } catch {
-      st.phase = UpdatePhase.FAILED;
+      // Past the download, the failure was the signature check or the installer (VFS-21 R5).
+      st.phase = st.phase === UpdatePhase.INSTALLING ? UpdatePhase.INSTALL_FAILED : UpdatePhase.FAILED;
     }
     show();
   }
