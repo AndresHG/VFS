@@ -1,6 +1,6 @@
 # VFS-25 — Cloud-only files: record them, never open them
 
-- **Status**: approved (independent architect review: two final fixes applied, nothing else blocking)
+- **Status**: implemented; approved after an independent architect review
 - **Size**: M (one subsystem, Windows-only behavior, no schema change: a bit of the existing
   `files.flags`)
 - **Links**: issue 49; R11 in `docs/research/windows-recommendations.md`; §3.4 of
@@ -81,6 +81,7 @@ Tests cite these ids (`VFS-25 AC-<m>`) in their doc comments.
 | 2 | Which attributes? | The three of R11; `OFFLINE` included because Windows treats it as "data not immediately available" and it is the one a test can set | Claude (windows-io §3.4) | 2026-11-21 |
 | 3 | Badge text | "Solo en la nube" / "Cloud only", as issue 49 proposes | owner (issue 49) | 2026-11-21 |
 | 4 | Grouped copies (VFS-19) | The flag travels per place: the row's badge is for the file it shows, the copies list badges each cloud-only place | Claude (architect review) | 2026-11-21 |
+| 6 | Search cost (R7 of the review rubric) | The bit is read from `f.flags`, which comes with the `files` row every candidate query already reads: no query and no page read added. `vfs bench` on 2 M synthetic files, warm p50 / p95 ms, main → VFS-25: relevance 10.4/42.5 → 9.9/41.5; newest 16.7/64.2 → 15.9/59.1; oldest 16.0/58.8 → 15.9/59.0; name 16.9/59.3 → 17.9/72.2; size 18.0/62.2 → 17.2/59.8; AC-9 passes in all ten runs (macOS, other sessions running: the spread is noise) | Claude | 2026-11-21 |
 | 5 | Watch attribute changes live? | No: R2 relies on listings that already happen; Synology's attribute churn would re-list folders on the HDD | Claude (architect review) | 2026-11-21 |
 
 ## Open questions
