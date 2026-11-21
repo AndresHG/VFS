@@ -3,14 +3,14 @@
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 export const es = {
   appName: 'Buscador de archivos',
   windowTitle: 'VFS — Buscador de archivos',
   searchLabel: 'Buscar por nombre de archivo o de carpeta',
   searchPlaceholder: 'Por ejemplo: escritura notaría',
-  searchHint: 'Use las flechas arriba y abajo para recorrer los resultados, Intro para mostrar el elegido en su carpeta y Escape para borrar la búsqueda.',
+  searchHint: 'Use las flechas arriba y abajo para recorrer los resultados, Intro para mostrar el elegido en su carpeta, Mayús e Intro para mostrar el destino de un acceso directo y Escape para borrar la búsqueda.',
   clearSearch: 'Borrar la búsqueda',
   devBadge: 'Datos de prueba',
 
@@ -96,6 +96,21 @@ export const es = {
   copiesIntro: 'Son archivos con el mismo nombre y el mismo tamaño: casi seguro, copias del mismo archivo. Elija cuál quiere ver.',
   copiesModified: (date) => `Modificado el ${date}`,
   detailsLabel: 'Ubicación:',
+
+  // Shortcuts and links (VFS-18 D2, D3, D6).
+  linkBadge: {
+    [LinkKind.SHORTCUT]: 'Acceso directo', [LinkKind.INTERNET]: 'Página web', [LinkKind.SYMLINK]: 'Enlace',
+  },
+  linkTargetPrefix: 'Lleva a: ',
+  targetButton: 'Mostrar el destino',
+  secondKey: 'Mayús+Intro',
+  linkRowLabel: (badge, target) => [badge, target && `lleva a ${target}`].filter(Boolean).join(', '),
+  detailsLinkAt: {
+    [LinkKind.SHORTCUT]: 'Acceso directo en:', [LinkKind.INTERNET]: 'Página web guardada en:',
+    [LinkKind.SYMLINK]: 'Enlace en:',
+  },
+  detailsLinkTarget: 'Lleva a:',
+  targetMissing: (t) => `No se encuentra el destino «${t}». Puede que se haya movido o borrado, o que el disco no esté conectado.`,
 
   emptyNoRootsTitle: 'Añada una carpeta para empezar',
   emptyNoRootsBody: 'Elija la carpeta donde guarda sus archivos. El programa la revisará y después podrá buscar en ella. Sus archivos no se mueven ni se modifican.',
@@ -188,6 +203,13 @@ export const es = {
     reveal: {
       [ErrorCode.NOT_FOUND]: 'El archivo ya no está en esa ubicación.',
       [ErrorCode.UNAVAILABLE]: 'Esa carpeta no está disponible ahora. Compruebe que el disco está conectado.',
+    },
+    revealTarget: {
+      [ErrorCode.UNAVAILABLE]: 'Este acceso directo no indica a dónde lleva.',
+    },
+    openLinkUrl: {
+      [ErrorCode.NOT_FOUND]: 'El archivo ya no está en esa ubicación.',
+      [ErrorCode.UNAVAILABLE]: 'Esta dirección no es una página web y no se puede abrir.',
     },
     openBookmark: {
       [ErrorCode.NOT_FOUND]: 'Ese marcador ya no existe en Firefox.',

@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
 use vfs_core::api::RevealOutcome;
-use vfs_core::{DriveKind, Error, FileKind, IndexerState, MatchKind, RootStatus, TruncatedBy};
+use vfs_core::{
+    DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, TruncatedBy,
+};
 
 /// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
 /// name -> values in source order.
@@ -86,10 +88,21 @@ fn all_truncations() -> Vec<TruncatedBy> {
 
 fn all_match_kinds() -> Vec<MatchKind> {
     use MatchKind::*;
-    let all = vec![Name, Path, Fuzzy];
+    let all = vec![Name, Path, Fuzzy, Target];
     for m in &all {
         match m {
-            Name | Path | Fuzzy => {}
+            Name | Path | Fuzzy | Target => {}
+        }
+    }
+    all
+}
+
+fn all_link_kinds() -> Vec<LinkKind> {
+    use LinkKind::*;
+    let all = vec![Shortcut, Internet, Symlink];
+    for k in &all {
+        match k {
+            Shortcut | Internet | Symlink => {}
         }
     }
     all
@@ -200,6 +213,7 @@ fn contract_js_matches_the_rust_enums() {
         ("IndexerState", serde_names(&all_indexer_states())),
         ("TruncatedBy", serde_names(&all_truncations())),
         ("MatchKind", serde_names(&all_match_kinds())),
+        ("LinkKind", serde_names(&all_link_kinds())),
         ("DriveKind", serde_names(&all_drive_kinds())),
         ("RevealOutcome", serde_names(&all_reveal_outcomes())),
         ("ErrorCode", all_error_codes()),
@@ -242,6 +256,7 @@ fn source_hit_tags_are_the_source_values() {
         matched: MatchKind::Name,
         is_dir: false,
         copies: Vec::new(),
+        link: None,
     });
     let mark = SourceHit::Bookmarks(vfs_bookmarks::BookmarkHit {
         id: 2,

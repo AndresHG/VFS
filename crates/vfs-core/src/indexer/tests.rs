@@ -1141,3 +1141,77 @@ fn os_cursor_advances_while_running() {
     }
     drop(h);
 }
+
+/// VFS-18 R9: a link file that could not be read is read again after the next full walk,
+/// not before.
+#[test]
+fn unreadable_link_is_retried_after_a_full_walk() {
+    let mut fx = fixture(&["A"]);
+    fs::write(
+        fx.root().join("A").join("Banco.url"),
+        "[InternetShortcut]\r\nURL=https://example.com/\r\n",
+    )
+    .unwrap();
+    fx.scan();
+    let id: i64 = fx
+        .conn
+        .query_row("SELECT file_id FROM links", [], |r| r.get(0))
+        .unwrap();
+    let state = |conn: &Connection| -> i64 {
+        conn.query_row("SELECT state FROM links WHERE file_id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    // The deferred pass found it locked.
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_link_target(&tx, id, Err(())).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        0
+    );
+    assert_eq!(state(&fx.conn), ingest::LinkState::Unreadable as i64);
+
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(state(&fx.conn), ingest::LinkState::Pending as i64);
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        1
+    );
+    assert_eq!(state(&fx.conn), ingest::LinkState::Read as i64);
+}
+
+/// VFS-18 R9: a pending link whose path cannot be built (its file row is gone) is marked
+/// unreadable; the pass goes on and reads the other links instead of failing every time.
+#[test]
+fn a_broken_link_row_does_not_stall_the_link_pass() {
+    let mut fx = fixture(&["A"]);
+    fs::write(
+        fx.root().join("A").join("Banco.url"),
+        "[InternetShortcut]\r\nURL=https://example.com/\r\n",
+    )
+    .unwrap();
+    fx.scan();
+    fx.conn
+        .execute(
+            "INSERT INTO links(file_id, kind) VALUES (0, ?1)",
+            [crate::types::LinkKind::Shortcut.code()],
+        )
+        .unwrap();
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        2
+    );
+    let states: Vec<(i64, i64)> = fx
+        .conn
+        .prepare("SELECT file_id, state FROM links ORDER BY file_id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(states[0], (0, ingest::LinkState::Unreadable as i64));
+    assert_eq!(states[1].1, ingest::LinkState::Read as i64);
+}

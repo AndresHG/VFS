@@ -5,9 +5,10 @@ import { choiceFor, languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
+import { SecondAction, secondActionOf } from './links.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
-  DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
+  DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
   Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
@@ -43,6 +44,8 @@ const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
 const BOOKMARK_ICON = 'bookmark';
 const OPEN_ICON = 'open';
 const REVEAL_ICON = 'reveal';
+/** "Mostrar el destino" (VFS-18): the shortcut arrow. */
+const TARGET_ICON = 'target';
 
 /** Where the user's language choice is kept (VFS-22 R3); absent means the system language. */
 const LANGUAGE_KEY = 'vfs.language';
@@ -461,7 +464,13 @@ function main(L) {
     reveal.setAttribute('aria-hidden', 'true');
     reveal.dataset.icon = REVEAL_ICON;
     reveal.append(icon(REVEAL_ICON), el('span', 'reveal-text', S.revealButton), el('span', 'kbd', S.revealKey));
-    row.append(ico, main, el('span', 'kind', 'Documento'), el('span', 'date', '12 sept 2026'), el('span', 'size', '999,9 MB'), reveal);
+    // The second action of a shortcut or link row (VFS-18 D3, D6); hidden on other rows.
+    const second = el('button', 'reveal reveal-second');
+    second.type = 'button';
+    second.tabIndex = -1;
+    second.setAttribute('aria-hidden', 'true');
+    second.hidden = true;
+    row.append(ico, main, el('span', 'kind', 'Documento'), el('span', 'date', '12 sept 2026'), el('span', 'size', '999,9 MB'), reveal, second);
     return row;
   }
 
@@ -481,8 +490,9 @@ function main(L) {
       return;
     }
     row.classList.remove('loading');
-    if (hit.source === Source.BOOKMARKS) { fillBookmarkRow(row, hit); return; }
+    if (hit.source === Source.BOOKMARKS) { setSecond(row, null); fillBookmarkRow(row, hit); return; }
     setAction(row.children[5], REVEAL_ICON, S.revealButton, true);
+    setSecond(row, secondAction(hit));
     const kindKey = hit.isDir ? FileKind.FOLDER : hit.kind;
     ico.dataset.kind = kindKey;
     ico.replaceChildren(icon(kindKey));
@@ -501,16 +511,22 @@ function main(L) {
       copies.setAttribute('aria-label', S.copiesBadgeLabel(places));
       nameParts.push(copies);
     }
+    const link = hit.link;
+    if (link) nameParts.push(el('span', 'badge badge-link', S.linkBadge[link.kind]));
     nameEl.replaceChildren(...nameParts);
 
-    const ranges = F.matchRanges(hit.dir, state.terms);
-    const cut = F.lastSegmentStart(hit.dir);
+    // A link's second line is where it leads (VFS-18 D2, D9): text only, nothing on the
+    // target is touched; its own folder is in the details line and "Mostrar en carpeta".
+    const line = link?.target ?? hit.dir;
+    const ranges = F.matchRanges(line, state.terms);
+    const cut = F.lastSegmentStart(line);
     const head = el('span', 'p-head');
     const tail = el('span', 'p-tail');
-    F.appendHighlighted(head, hit.dir, ranges, 0, cut);
-    F.appendHighlighted(tail, hit.dir, ranges, cut, hit.dir.length);
-    pathEl.replaceChildren(head, tail);
-    pathEl.title = hit.dir;
+    F.appendHighlighted(head, line, ranges, 0, cut);
+    F.appendHighlighted(tail, line, ranges, cut, line.length);
+    const parts = link?.target ? [el('span', 'p-lead', S.linkTargetPrefix), head, tail] : [head, tail];
+    pathEl.replaceChildren(...parts);
+    pathEl.title = link?.target ? S.linkTargetPrefix + link.target : hit.dir;
 
     const kindLabel = S.kindSingular[kindKey];
     const dateText = N.date(hit.modified);
@@ -518,7 +534,28 @@ function main(L) {
     kind.textContent = kindLabel;
     date.textContent = dateText;
     size.textContent = sizeText;
-    row.setAttribute('aria-label', S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable, places));
+    const label = S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable, places);
+    row.setAttribute('aria-label', link ? `${label}, ${S.linkRowLabel(S.linkBadge[link.kind], link.target)}` : label);
+  }
+
+  /** The second action of a file hit, or null: "Mostrar el destino" for a shortcut or link
+   *  with a target, "Abrir en Firefox" for an Internet Shortcut that can be opened. */
+  function secondAction(hit) {
+    switch (secondActionOf(hit)) {
+      case SecondAction.OPEN: return { icon: OPEN_ICON, text: S.openButton };
+      case SecondAction.TARGET: return { icon: TARGET_ICON, text: S.targetButton };
+      default: return null;
+    }
+  }
+
+  function setSecond(row, action) {
+    const btn = row.children[6];
+    row.classList.toggle('has-second', !!action);
+    btn.hidden = !action;
+    if (!action || btn.querySelector('.reveal-text')?.textContent === action.text) return;
+    btn.dataset.icon = action.icon;
+    btn.title = `${action.text} (${S.secondKey})`;
+    btn.replaceChildren(icon(action.icon), el('span', 'reveal-text', action.text), el('span', 'kbd', S.secondKey));
   }
 
   /** The row's one action: "Mostrar en carpeta", "Abrir en Firefox" or "Ver su contenido". */
@@ -594,8 +631,10 @@ function main(L) {
       case 'Enter':
         e.preventDefault();
         if (state.active < 0) break;
-        if (e.shiftKey && placesOf(hitAt(state.active)).length > 1) openPlaces(state.active);
-        else act(state.active);
+        // Mayús+Intro: a link's own second action first, else the places of a file's copies.
+        if (!e.shiftKey) act(state.active);
+        else if (secondActionOf(hitAt(state.active))) actSecond(state.active);
+        else if (placesOf(hitAt(state.active)).length > 1) openPlaces(state.active);
         break;
       case 'Escape':
         e.preventDefault();
@@ -625,7 +664,10 @@ function main(L) {
     const copies = e.target.closest('.badge-copies');
     if (copies) { openPlaces(Number(copies.closest('.row').dataset.index)); return; }
     const btn = e.target.closest('.reveal');
-    if (btn) act(Number(btn.closest('.row').dataset.index));
+    if (!btn) return;
+    const i = Number(btn.closest('.row').dataset.index);
+    if (btn.classList.contains('reveal-second')) actSecond(i);
+    else act(i);
   });
   listEl.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.row');
@@ -638,6 +680,26 @@ function main(L) {
     if (hit?.source !== Source.BOOKMARKS) reveal(i);
     else if (hit.isFolder) showBookmarkFolder(hit);
     else openBookmark(hit);
+  }
+
+  /** The selected link's second action (Mayús+Intro or its button, VFS-18 R6, R7). */
+  async function actSecond(i) {
+    const hit = hitAt(i);
+    if (hit?.source === Source.BOOKMARKS || !secondAction(hit)) return;
+    try {
+      if (hit.link.kind === LinkKind.INTERNET) {
+        await api.openLinkUrl(hit.id);
+        return;
+      }
+      const outcome = await api.revealTarget(hit.id);
+      if (outcome === RevealOutcome.OPENED_PARENT) toast(S.revealedParent);
+    } catch (err) {
+      if (err?.code === ErrorCode.NOT_FOUND && hit.link.kind !== LinkKind.INTERNET) {
+        showError(S.targetMissing(hit.link.target));
+      } else {
+        showError(errorText(err, hit.link.kind === LinkKind.INTERNET ? S.errors.openLinkUrl : S.errors.revealTarget));
+      }
+    }
   }
 
   /** "Abrir en Firefox" (VFS-6 R10). */
@@ -824,7 +886,17 @@ function main(L) {
       d.replaceChildren(...parts);
       return;
     }
-    d.replaceChildren(el('strong', null, `${S.detailsLabel} `), F.joinPath(hit.dir, hit.name));
+    const full = F.joinPath(hit.dir, hit.name);
+    if (hit.link) {
+      const parts = [el('strong', null, `${S.detailsLinkAt[hit.link.kind]} `), full];
+      if (hit.link.target) {
+        const label = hit.link.kind === LinkKind.INTERNET ? S.detailsBookmark : S.detailsLinkTarget;
+        parts.push(' · ', el('strong', null, `${label} `), hit.link.target);
+      }
+      d.replaceChildren(...parts);
+      return;
+    }
+    d.replaceChildren(el('strong', null, `${S.detailsLabel} `), full);
   }
 
   /* Screen readers hear the result count once typing pauses, not on every keystroke. */

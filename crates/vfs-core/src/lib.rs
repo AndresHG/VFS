@@ -9,6 +9,7 @@ mod fold;
 mod fuzzy;
 mod indexer;
 mod kind;
+pub mod link;
 pub mod matching;
 mod platform;
 mod rank;
@@ -131,6 +132,11 @@ impl Vfs {
     /// Absolute path of an indexed file, built from the original names.
     pub fn file_path(&self, file_id: i64) -> Result<PathBuf> {
         db::file_abs_path(&lock(&self.inner.reader), file_id)
+    }
+
+    /// Kind and target of an indexed shortcut or link (VFS-18), from the index only.
+    pub fn link_target(&self, file_id: i64) -> Result<LinkTarget> {
+        db::link_of(&lock(&self.inner.reader), file_id)
     }
 
     /// Absolute path of an indexed folder (a hit with `is_dir`).
