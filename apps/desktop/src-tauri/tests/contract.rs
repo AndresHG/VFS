@@ -9,7 +9,7 @@ use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
 use vfs_core::api::RevealOutcome;
 use vfs_core::{
     DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, SuggestionKind,
-    TruncatedBy,
+    TruncatedBy, UnreadableReason,
 };
 
 /// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
@@ -104,6 +104,17 @@ fn all_link_kinds() -> Vec<LinkKind> {
     for k in &all {
         match k {
             Shortcut | Internet | Symlink => {}
+        }
+    }
+    all
+}
+
+fn all_unreadable_reasons() -> Vec<UnreadableReason> {
+    use UnreadableReason::*;
+    let all = vec![NoPermission, Unavailable, CloudOnly, DiskError];
+    for r in &all {
+        match r {
+            NoPermission | Unavailable | CloudOnly | DiskError => {}
         }
     }
     all
@@ -227,6 +238,7 @@ fn contract_js_matches_the_rust_enums() {
         ("MatchKind", serde_names(&all_match_kinds())),
         ("LinkKind", serde_names(&all_link_kinds())),
         ("DriveKind", serde_names(&all_drive_kinds())),
+        ("UnreadableReason", serde_names(&all_unreadable_reasons())),
         ("RevealOutcome", serde_names(&all_reveal_outcomes())),
         ("ErrorCode", all_error_codes()),
         ("Source", serde_names(&all_sources())),

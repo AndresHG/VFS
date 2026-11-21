@@ -209,6 +209,21 @@
     <ul class="roots" id="copies-list" role="list"></ul>
   </dialog>
 
+  <!-- VFS-10: the folders of one chosen folder that could not be read. -->
+  <dialog id="unreadable" class="drawer" aria-labelledby="unreadable-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="unreadable-title" data-s="unreadableTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <p class="drawer-intro" data-s="unreadableIntro"></p>
+    <ul class="roots" id="unreadable-list" role="list"></ul>
+    <p class="drawer-intro" id="unreadable-more" hidden></p>
+    <p class="drawer-intro" data-s="unreadableHint"></p>
+  </dialog>
+
   <dialog id="confirm-remove" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
     <h2 id="confirm-title" data-s="removeTitle"></h2>
     <p class="confirm-path" id="confirm-path"></p>

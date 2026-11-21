@@ -9,9 +9,12 @@ use crate::db::ingest;
 use crate::error::{Error, OverlapRelation, Result};
 use crate::fold::fold_key;
 use crate::platform;
-use crate::types::{Root, RootStatus};
+use crate::types::{Root, RootStatus, UnreadableDir, UnreadableReason};
 
-const ROOT_COLS: &str = "id, path, status, files_count, dirs_count, last_full_scan_at";
+/// The last column counts the root's unreadable folders on the partial index
+/// `dirs_unreadable` (its condition is spelled out so SQLite uses it, VFS-10 R4).
+const ROOT_COLS: &str = "id, path, status, files_count, dirs_count, last_full_scan_at, \
+    (SELECT COUNT(*) FROM dirs d WHERE d.root_id = roots.id AND d.error IS NOT NULL)";
 
 fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
     let path: String = r.get(1)?;
@@ -23,6 +26,7 @@ fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
         files: r.get::<_, i64>(3)?.max(0) as u64,
         dirs: r.get::<_, i64>(4)?.max(0) as u64,
         last_full_scan: r.get(5)?,
+        unreadable: r.get::<_, i64>(6)?.max(0) as u64,
     })
 }
 
@@ -33,6 +37,35 @@ pub(crate) fn list_roots(conn: &Connection) -> Result<Vec<Root>> {
         .query_map([], read_root)?
         .collect::<rusqlite::Result<_>>()?;
     Ok(roots)
+}
+
+/// Most folders [`unreadable_dirs`] returns (VFS-10 R4).
+pub(crate) const UNREADABLE_LIST_CAP: usize = 500;
+
+/// The folders of `root_id` that could not be listed, in path order, at most
+/// [`UNREADABLE_LIST_CAP`] (VFS-10 R4); `Root::unreadable` has the full count.
+pub(crate) fn unreadable_dirs(conn: &Connection, root_id: i64) -> Result<Vec<UnreadableDir>> {
+    let mut stmt = conn.prepare(
+        "SELECT d.id, r.path, d.rel_path, d.error FROM dirs d JOIN roots r ON r.id = d.root_id \
+         WHERE d.root_id = ?1 AND d.error IS NOT NULL ORDER BY d.rel_path LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![root_id, UNREADABLE_LIST_CAP as i64],
+            |r| {
+                let root: String = r.get(1)?;
+                let rel: String = r.get(2)?;
+                Ok(UnreadableDir {
+                    id: r.get(0)?,
+                    path: crate::db::join_rel(&root, &rel)
+                        .to_string_lossy()
+                        .into_owned(),
+                    reason: UnreadableReason::from_code(r.get(3)?),
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 /// True when the folded path `path` lies strictly below the folded path `ancestor`.

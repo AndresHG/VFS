@@ -9,6 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 use vfs_core::api::{ApiError, RevealOutcome};
 use vfs_core::{
     IndexProgress, LinkKind, LinkTarget, Root, SearchQuery, SearchResponse, Suggestion,
+    UnreadableDir,
 };
 
 use crate::{reveal, AppState};
@@ -25,6 +26,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         system_locale,
         set_language,
         list_roots,
+        list_unreadable,
         pick_folder,
         add_root,
         remove_root,
@@ -73,6 +75,12 @@ pub fn set_language<R: Runtime>(app: AppHandle<R>, lang: String) -> CmdResult<()
 #[tauri::command(async)]
 pub fn list_roots(state: State<'_, AppState>) -> CmdResult<Vec<Root>> {
     Ok(state.vfs.list_roots()?)
+}
+
+/// The folders of a root that could not be listed (VFS-10 R4), at most 500 in path order.
+#[tauri::command(async)]
+pub fn list_unreadable(state: State<'_, AppState>, root_id: i64) -> CmdResult<Vec<UnreadableDir>> {
+    Ok(state.vfs.unreadable_dirs(root_id)?)
 }
 
 /// Native folder dialog; `None` when the user cancels.

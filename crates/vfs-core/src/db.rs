@@ -12,15 +12,16 @@ use crate::types::{LinkKind, LinkTarget};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Migrations: entry `i` takes an index from version `i` to `i + 1`.
-const MIGRATIONS: [&str; 5] = [
+const MIGRATIONS: [&str; 6] = [
     include_str!("schema.sql"),
     include_str!("schema_v2.sql"),
     include_str!("schema_v3.sql"),
     include_str!("schema_v4.sql"),
     include_str!("schema_v5.sql"),
+    include_str!("schema_v6.sql"),
 ];
 
 /// Page size of a new index, and of an existing index compacted after a migration.
@@ -623,7 +624,7 @@ pub mod ingest {
     use crate::kind::file_kind;
     use crate::link::{link_file_kind, LinkFileKind};
     use crate::search::NAME_START;
-    use crate::types::{FileKind, LinkKind, RootStatus};
+    use crate::types::{FileKind, LinkKind, RootStatus, UnreadableReason};
 
     /// A file's `file_paths_fts` value from its row `f` and its directory `d`: the folder's
     /// folded path and the folded name, or the name alone in the root directory.
@@ -977,6 +978,31 @@ pub mod ingest {
         )?;
         tx.execute("DELETE FROM dirs WHERE root_id = ?1", [root_id])?;
         tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
+        Ok(())
+    }
+
+    /// Marks a directory listed: clean, and its unreadable reason forgotten (VFS-10 R2).
+    pub fn mark_listed(tx: &Transaction, dir_id: i64) -> Result<()> {
+        tx.prepare_cached("UPDATE dirs SET scan_state = 0, error = NULL WHERE id = ?1")?
+            .execute([dir_id])?;
+        Ok(())
+    }
+
+    /// Records why a directory failed to list (VFS-10 R1); with `settled` (its retries are
+    /// exhausted) it is also marked clean until the next full walk (VFS-1 I11).
+    pub fn record_unreadable(
+        tx: &Transaction,
+        dir_id: i64,
+        reason: UnreadableReason,
+        settled: bool,
+    ) -> Result<()> {
+        let sql = if settled {
+            "UPDATE dirs SET error = ?2, scan_state = 0 WHERE id = ?1"
+        } else {
+            "UPDATE dirs SET error = ?2 WHERE id = ?1"
+        };
+        tx.prepare_cached(sql)?
+            .execute(params![dir_id, reason.code()])?;
         Ok(())
     }
 

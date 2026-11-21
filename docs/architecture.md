@@ -58,8 +58,8 @@ peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Reade
 ## Schema
 
 `core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2,
-`core/schema_v3.sql` version 3, `core/schema_v4.sql` version 4 and `core/schema_v5.sql`
-version 5 (`PRAGMA user_version`). `db::open_rw` runs the missing
+`core/schema_v3.sql` version 3, `core/schema_v4.sql` version 4, `core/schema_v5.sql`
+version 5 and `core/schema_v6.sql` version 6 (`PRAGMA user_version`). `db::open_rw` runs the missing
 migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
 of them, and an older index is migrated from the rows already there, so no rescan is
 needed. After migrating an existing index it compacts the file once (`VACUUM`, at
@@ -72,7 +72,7 @@ index, it stays valid and uncompacted. An index from a newer build fails with
 | `meta` | key/value pairs: each root's change cursor, `cursor/<root id>` (VFS-9) |
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
-| `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state` |
+| `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`) |
 | `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18), `content_state` (document content search, milestone Fase 3; always 0) |
 | `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
@@ -207,7 +207,10 @@ walked again at its new place; the Windows watcher's rename pairs avoid that (se
 If a directory cannot be listed because of a permission or I/O error, what is indexed
 stays, the error is counted, and the directory stays pending: it is retried after 1
 minute, then after doubling delays, and after 6 failures it waits for the next full walk
-(I11). If it is gone, its subtree is deleted — unless the root itself is unreachable, in
+(I11). Its reason (`walk::unreadable_reason`, from the error alone) is stored in
+`dirs.error` at the first "no permission" failure, or when the retries of any other failure
+are exhausted, and cleared by the next successful listing (`ingest::mark_listed`); the
+folders panel lists them per root (VFS-10). If it is gone, its subtree is deleted — unless the root itself is unreachable, in
 which case the root becomes `unavailable` and nothing is deleted.
 
 When no directory of a root is pending, `finalize_root` recounts files and folders, marks
@@ -498,7 +501,8 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 |---|---|---|
 | `system_locale` | — | `string`: the OS locale as BCP 47, `""` when unknown; the UI picks its language from it (VFS-22) |
 | `set_language` | `lang` (`"es"` or `"en"`; anything else is ignored) | `null`; window title, macOS menu and folder picker follow it (VFS-22) |
-| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`) |
+| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`, and `unreadable`: its number of folders that could not be listed, VFS-10) |
+| `list_unreadable` | `rootId` | `UnreadableDir[]` (`{ id, path, reason }`, `reason`: `no_permission`, `unavailable`, `cloud_only`, `disk_error`; `id` is a `dirs.id`), at most 500 in path order |
 | `pick_folder` | — | `string \| null` (native folder dialog) |
 | `add_root` | `path` | `Root` |
 | `remove_root` | `id` | `null` |

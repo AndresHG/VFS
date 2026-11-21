@@ -1079,6 +1079,12 @@ function main(L) {
     const files = el('span');
     const checked = el('span');
     meta.append(st, files, checked);
+    // VFS-10 R5: "N carpetas no se pudieron revisar · Ver", shown while there are any.
+    const unreadable = el('div', 'root-unreadable');
+    const unreadableText = el('span');
+    const see = button(S.unreadableSee, 'link-btn', () => openUnreadable(r.id));
+    unreadable.append(unreadableText, ' · ', see);
+    unreadable.hidden = true;
     const actions = el('div', 'root-actions');
     const name = F.baseName(r.path);
     const rescan = button(S.rescan, 'btn', () => rescanRoot(r.id));
@@ -1089,8 +1095,8 @@ function main(L) {
     });
     remove.setAttribute('aria-label', `${S.remove}: ${name}`);
     actions.append(rescan, remove);
-    li.append(path, meta, actions);
-    return { li, st, files, checked, rescan, remove };
+    li.append(path, meta, unreadable, actions);
+    return { li, st, files, checked, rescan, remove, unreadable, unreadableText };
   }
 
   function renderRoots() {
@@ -1120,9 +1126,37 @@ function main(L) {
       item.st.dataset.status = status;
       item.files.textContent = S.rootFiles(N.count(progressById.get(r.id)?.filesIndexed ?? r.files));
       item.checked.textContent = r.lastFullScan ? S.rootChecked(N.date(r.lastFullScan)) : S.rootNeverChecked;
+      const unreadable = S.unreadableLine(r.unreadable || 0, N.count(r.unreadable || 0));
+      item.unreadable.hidden = !unreadable;
+      item.unreadableText.textContent = unreadable;
       item.rescan.disabled = status !== RootStatus.READY && status !== RootStatus.UNAVAILABLE;
       item.remove.disabled = status === RootStatus.REMOVING;
     }
+  }
+
+  const unreadableDialog = $('unreadable');
+
+  /** The folders of root `id` that could not be read, each with its reason (VFS-10 R5). */
+  async function openUnreadable(id) {
+    const root = state.roots.find((r) => r.id === id);
+    let dirs;
+    try { dirs = await api.listUnreadable(id); } catch (err) { showError(errorText(err)); return; }
+    $('unreadable-list').replaceChildren(...dirs.map((d) => {
+      const li = el('li', 'root');
+      const path = el('div', 'root-path');
+      path.append(icon(FileKind.FOLDER), el('span', null, d.path));
+      const meta = el('div', 'root-meta');
+      meta.append(el('span', null, S.unreadableReason[d.reason] || d.reason));
+      const actions = el('div', 'root-actions');
+      actions.append(button(S.revealButton, 'btn', () => revealFile(d.id, true)));
+      li.append(path, meta, actions);
+      return li;
+    }));
+    const more = Math.max(0, (root?.unreadable || 0) - dirs.length);
+    $('unreadable-more').hidden = !more;
+    $('unreadable-more').textContent = more ? S.unreadableMore(N.count(more)) : '';
+    unreadableDialog.showModal();
+    $('unreadable-list').querySelector('button')?.focus();
   }
 
   async function rescanRoot(id) {

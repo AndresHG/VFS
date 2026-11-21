@@ -229,6 +229,7 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   until that root's last full scan is 1 hour old; start-up and manual requests do not.
 - I11. A directory that fails to list keeps its rows, stays pending and counts as an error;
   it is retried after 1 min, doubling, and after 6 failures waits for the next full walk.
+  Its reason is recorded and listed in the folders panel (VFS-10).
 - I12. A root that cannot be watched is retried every minute and as soon as it is
   reachable again; once watched it owes a re-walk (I10). Marking a folder dirty from the
   app (a missing file at "mostrar en carpeta") wakes the indexer at once.

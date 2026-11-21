@@ -10,7 +10,9 @@
 //                   copies?: FileCopy[],  (VFS-19; left out when empty, never on folders)
 //                   link?: {kind: LinkKind, target: string|null, openable}}  (VFS-18)
 //   FileCopy       {id, dir, modified}    (another place of the same file; id is a files.id)
-//   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind}
+//   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind,
+//                   unreadable}  (VFS-10: folders that could not be listed)
+//   UnreadableDir  {id, path, reason: UnreadableReason}  (id is a dirs.id; list_unreadable)
 //   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}
 //   (VFS-6) search_sources(query, options: {sources: Source[], bookmarkFolder, sort: SortOrder})
@@ -42,6 +44,7 @@ function tauriBackend(t) {
     systemLocale: () => invoke('system_locale'),
     setLanguage: (lang) => invoke('set_language', { lang }),
     listRoots: () => invoke('list_roots'),
+    listUnreadable: (rootId) => invoke('list_unreadable', { rootId }),
     pickFolder: () => invoke('pick_folder'),
     addRoot: (path) => invoke('add_root', { path }),
     removeRoot: (id) => invoke('remove_root', { id }),
@@ -83,7 +86,8 @@ function missingBackend() {
     missing: true,
     systemLocale: async () => navigator.language,
     setLanguage: async () => {},
-    listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail, suggest: fail,
+    listRoots: fail, listUnreadable: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
+    suggest: fail,
     reveal: fail, revealTarget: fail, openLinkUrl: fail, getProgress: fail, rescan: fail, setPaused: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,

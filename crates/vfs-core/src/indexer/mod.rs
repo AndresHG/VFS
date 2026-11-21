@@ -55,7 +55,9 @@ use crate::db::ingest::ScanState;
 use crate::db::{self, ingest};
 use crate::error::Result;
 use crate::fold::fold_key;
-use crate::types::{IndexProgress, IndexerState, RootProgress, RootStatus, ScanSummary};
+use crate::types::{
+    IndexProgress, IndexerState, RootProgress, RootStatus, ScanSummary, UnreadableReason,
+};
 use crate::{platform, ProgressSink};
 use cursor::{History, OsHistory};
 use sched::{Mode, Sched, SchedConfig, Step};
@@ -453,11 +455,17 @@ fn scan_root(
                     next_at: now,
                 });
                 retry.attempts += 1;
+                // Its reason is recorded when it should show (VFS-10 R1): "no permission" at
+                // once (it is still retried), any other only once the retries are exhausted.
+                let reason = walk::unreadable_reason(&e, cfg!(windows));
                 if retry.attempts >= RETRY_ATTEMPTS {
                     retries.remove(&dir_id);
-                    ingest::set_dir_state(t, dir_id, ingest::ScanState::Clean)?;
+                    ingest::record_unreadable(t, dir_id, reason, true)?;
                 } else {
                     retry.next_at = now + RETRY_FIRST * 2u32.pow(retry.attempts - 1);
+                    if reason == UnreadableReason::NoPermission {
+                        ingest::record_unreadable(t, dir_id, reason, false)?;
+                    }
                 }
                 rows += 1;
             }
