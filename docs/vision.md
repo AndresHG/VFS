@@ -90,6 +90,10 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
   exact files and messages used.
 - The retrieval layer is the same index as search; the answer is written by the model API
   the user configured (Anthropic, OpenAI or another provider), which is pluggable.
+  Options, costs and the phased plan:
+  [`docs/research/content-vector-rag.md`](research/content-vector-rag.md).
+- A connector (MCP server) that lets the AI app the user already has (Claude Desktop, ChatGPT)
+  query VFS's index, as some Zotero plugins do: a later line, after the built-in questions.
 
 ### Knowledge graph
 
