@@ -14,7 +14,9 @@ and the problems listed in [audit.md](audit.md).
 
 ## Type
 
-Atkinson Hyperlegible (OFL, bundled, regular 400 and bold 700). No second family.
+Atkinson Hyperlegible (OFL, bundled as TrueType, regular 400 and bold 700). No second family.
+The bundled copy has a plain zero: the face's slashed zero ("2Ø19") reads as a letter to some
+older readers, so `scripts/plain_zero.py` replaces its slashed counter with one oval (issue 111).
 Base size is the system size (`1rem`); the body runs one step above it.
 
 | Token | Size | Line height | Weight | Use |
