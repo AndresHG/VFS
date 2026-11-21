@@ -31,7 +31,7 @@ export function bookmarkFolderOf(value) {
 }
 
 /** Where a bookmark or bookmark folder is saved, outermost first: the profile name when
- *  there are several, the root's Spanish name, then the folders. */
+ *  there are several, the root's name in the active language, then the folders. */
 export function bookmarkPathParts(hit, rootLabels) {
   const parts = [rootLabels[hit.root] ?? hit.root, ...hit.folder];
   if (hit.profile) parts.unshift(hit.profile);

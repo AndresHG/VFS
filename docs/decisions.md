@@ -11,7 +11,7 @@ from Windows or an HDD.
 
 The core is a Rust library; the index is one SQLite file in WAL mode with FTS5 trigram
 tables over accent-folded names and paths; the app is a Tauri 2 window over a static
-Spanish web page (spec decision 6). Rust gives one native core for Windows and macOS with
+web page, Spanish and English since VFS-22 (spec decision 6). Rust gives one native core for Windows and macOS with
 direct access to the Win32 and macOS APIs the indexer needs (directory change
 notifications, volume identity, background I/O priority). SQLite gives a single
 transactional file, so the indexer's work queue, the rows and the FTS entries commit

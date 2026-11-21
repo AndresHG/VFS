@@ -10,7 +10,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 
 ```
 ┌──────────────── Tauri 2 app (one process) ─────────────────┐
-│ apps/desktop/ui        static Spanish screen (JS, no build) │
+│ apps/desktop/ui        static es/en screen (JS, no build)   │
 │        │  invoke(command) / listen(event)                   │
 │ apps/desktop/src-tauri commands.rs, reveal.rs, lib.rs,      │
 │        │               bookmarks.rs (VFS-6), splash.rs      │
@@ -439,6 +439,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 
 | Command | Arguments | Returns |
 |---|---|---|
+| `system_locale` | — | `string`: the OS locale as BCP 47, `""` when unknown; the UI picks its language from it (VFS-22) |
 | `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`) |
 | `pick_folder` | — | `string \| null` (native folder dialog) |
 | `add_root` | `path` | `Root` |

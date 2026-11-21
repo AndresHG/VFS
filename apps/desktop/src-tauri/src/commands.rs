@@ -20,6 +20,7 @@ fn io_error(e: impl std::fmt::Display) -> ApiError {
 /// Every command of the contract, for `Builder::invoke_handler`.
 pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        system_locale,
         list_roots,
         pick_folder,
         add_root,
@@ -34,6 +35,13 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::bookmarks::set_bookmarks_enabled,
         crate::bookmarks::open_bookmark,
     ]
+}
+
+/// The OS locale as a BCP 47 tag ("es-ES"), or "" when unknown (VFS-22 R2). The UI picks
+/// its language from it; WKWebView's `navigator.language` follows the bundle, not the OS.
+#[tauri::command(async)]
+pub fn system_locale() -> String {
+    sys_locale::get_locale().unwrap_or_default()
 }
 
 #[tauri::command(async)]

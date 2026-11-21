@@ -1,27 +1,41 @@
-// Formatting for Spanish (es-ES) and the matching helpers the row renderer needs.
+// Dates and numbers per language (VFS-22 R4), and the matching helpers the row renderer
+// needs. `formatsFor` builds one language's formatters; the screen holds them, so the module
+// keeps no state.
 
-/** 1234567 -> "1.234.567". Manual so 4-digit numbers group too (es-ES Intl prints "1234"). */
-export function count(n) {
-  return String(Math.trunc(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-}
-
-const dec1 = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
 const UNITS = ['KB', 'MB', 'GB', 'TB'];
 
-/** Bytes -> "1,2 MB" in binary units, the ones Windows Explorer shows. */
-export function size(bytes) {
-  if (bytes < 1024) return bytes === 1 ? '1 byte' : `${count(bytes)} bytes`;
-  let v = bytes / 1024;
-  let u = 0;
-  while (v >= 1024 && u < UNITS.length - 1) { v /= 1024; u++; }
-  return `${v < 10 ? dec1.format(v) : count(Math.round(v))} ${UNITS[u]}`;
-}
+/** Spanish short months carry a dot ("mar."); the UI drops it. */
+const noDot = (s) => s.replace('.', '');
 
-const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+/** Number and date formatters for `Intl` locale `intl`, grouping thousands with `group`. */
+export function formatsFor(group, intl) {
+  const dec1 = new Intl.NumberFormat(intl, { maximumFractionDigits: 1 });
+  const dateFmt = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeFmt = new Intl.DateTimeFormat(intl, { hour: 'numeric', minute: '2-digit' });
+  const dayFmt = new Intl.DateTimeFormat(intl, { day: 'numeric', month: 'short' });
 
-/** Unix seconds -> "12 mar 2021". */
-export function date(secs) {
-  return secs ? dateFmt.format(new Date(secs * 1000)).replace('.', '') : '';
+  /** 1234567 -> "1.234.567" (es) or "1,234,567" (en). Manual so 4-digit numbers group too
+   *  (es-ES Intl prints "1234"). */
+  const count = (n) => String(Math.trunc(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, group);
+
+  return Object.freeze({
+    count,
+    /** Bytes -> "1,2 MB" (es) or "1.2 MB" (en) in binary units, the ones Windows Explorer
+     *  shows. "byte" is the same word in both languages. */
+    size(bytes) {
+      if (bytes < 1024) return bytes === 1 ? '1 byte' : `${count(bytes)} bytes`;
+      let v = bytes / 1024;
+      let u = 0;
+      while (v >= 1024 && u < UNITS.length - 1) { v /= 1024; u++; }
+      return `${v < 10 ? dec1.format(v) : count(Math.round(v))} ${UNITS[u]}`;
+    },
+    /** Unix seconds -> "12 mar 2021" (es) or "Mar 12, 2021" (en-US). */
+    date: (secs) => (secs ? noDot(dateFmt.format(new Date(secs * 1000))) : ''),
+    /** Date -> "9:14" (es) or "9:14 AM" (en-US). */
+    time: (d) => timeFmt.format(d),
+    /** Date -> "12 mar" (es) or "Mar 12" (en-US). */
+    dayMonth: (d) => noDot(dayFmt.format(d)),
+  });
 }
 
 /**

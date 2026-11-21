@@ -5,10 +5,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { S } from '../ui/strings.js';
+import { CATALOGS, Lang } from '../ui/strings.js';
 import { FileKind, Source } from '../ui/contract.js';
 import { DateChoice, SizeChoice } from '../ui/choices.js';
 import { placesOf } from '../ui/copies.js';
+
+const S = CATALOGS[Lang.ES];
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
 

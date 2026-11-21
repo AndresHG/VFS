@@ -1,6 +1,6 @@
 // The screen's own closed sets (VFS-1 R8, AC-11, AC-12): the values of the date and size
 // selects, where a search is, and how the screen is laid out. Their meaning is in main.js and
-// status.js, their Spanish labels in strings.js.
+// status.js, their labels in the catalogs (strings.es.js, strings.en.js).
 
 export const DateChoice = Object.freeze({
   ANY: 'any',
