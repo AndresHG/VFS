@@ -109,6 +109,13 @@
         <p id="banner-unavailable-text"></p>
         <button type="button" class="btn btn-quiet" id="banner-unavailable-close" data-s="understood"></button>
       </div>
+      <div id="banner-update" class="banner banner-info" hidden>
+        <svg aria-hidden="true"><use href="#i-info"/></svg>
+        <p id="banner-update-text" aria-live="polite"></p>
+        <progress id="update-progress" max="100" hidden></progress>
+        <button type="button" class="btn btn-primary" id="update-action" hidden></button>
+        <button type="button" class="btn btn-quiet" id="update-later" data-s="updateLater"></button>
+      </div>
       <div id="banner-scan" class="banner banner-info" hidden>
         <svg aria-hidden="true"><use href="#i-info"/></svg>
         <p data-s="firstScanNote"></p>
@@ -160,6 +167,11 @@
       <label class="toggle"><input type="checkbox" id="bookmarks-on"> <span data-s="bookmarksToggle"></span></label>
       <p class="bookmarks-intro" data-s="bookmarksIntro"></p>
       <p class="bookmarks-status" id="bookmarks-status" aria-live="polite"></p>
+    </section>
+    <section class="bookmarks-setting" aria-labelledby="updates-title">
+      <h3 id="updates-title" data-s="updatesTitle"></h3>
+      <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
+      <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
     </section>
     <div class="drawer-foot">
       <button id="add-folder" class="btn btn-primary" type="button" data-s="addFolder"></button>

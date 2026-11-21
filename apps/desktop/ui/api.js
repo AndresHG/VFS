@@ -17,6 +17,8 @@
 //   BookmarkHit    {id, isFolder, title, url, root: BookmarkRoot, folder: string[], profile, added,
 //                   matched, openable}
 //   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead, roots: {id, root, profile}[]}
+//   (VFS-21) UpdateSettings {checkOnOpen}; check_for_update -> {version} | null (null when the
+//     setting is off); install_update emits 'update-progress' {downloaded, total|null}
 //
 // Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
 // bundled `ui/` folder (frontendDist), so it is not in the packaged app at all. On top of that
@@ -49,6 +51,11 @@ function tauriBackend(t) {
     setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),
     openBookmark: (id) => invoke('open_bookmark', { id }),
     onBookmarksChanged: (cb) => listen('bookmarks-changed', (e) => cb(e.payload)),
+    getUpdateSettings: () => invoke('get_update_settings'),
+    setUpdateCheck: (enabled) => invoke('set_update_check', { enabled }),
+    checkForUpdate: () => invoke('check_for_update'),
+    installUpdate: () => invoke('install_update'),
+    onUpdateProgress: (cb) => listen('update-progress', (e) => cb(e.payload)),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -69,6 +76,8 @@ function missingBackend() {
     listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
     reveal: fail, getProgress: fail, rescan: fail, setPaused: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
+    getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,
+    onUpdateProgress: async () => () => {},
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
     onBookmarksChanged: async () => () => {},
   };

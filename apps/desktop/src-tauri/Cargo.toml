@@ -26,9 +26,13 @@ tauri-plugin-dialog = "2.8"
 vfs-core.workspace = true
 vfs-bookmarks.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 log.workspace = true
 dunce.workspace = true
 tauri-plugin-log = "2"
+# VFS-21: the update check, the app's only network connection.
+tauri-plugin-updater = "2.10"
+semver = "1"
 tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 
 [target.'cfg(windows)'.dependencies]

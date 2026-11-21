@@ -13,7 +13,8 @@
 # VFS: offline file search for huge personal archives
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
-is a desktop app for Windows 10+ and macOS, fully offline, with a Spanish interface.
+is a desktop app for Windows 10+ and macOS that works offline, with a Spanish interface. Its only
+connection to the internet is a check for a new version when it opens, which can be turned off.
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -64,7 +65,8 @@ ordinary or fast machines. The product spec is
 - Index network drives, a NAS or removable disks. The app warns when a chosen folder is on
   one.
 - Need administrator rights, read the NTFS master file table, or install a service.
-- Use an LLM, OCR, code signing or auto-update (today; see where it is heading below).
+- Use an LLM, OCR or code signing (today; see where it is heading below).
+- Connect to the internet for anything but the update check (see "Updates" below).
 
 ## Where it is heading
 
@@ -163,7 +165,12 @@ macOS runners and produces:
   administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
   while installing if WebView2 is missing). It is unsigned, so Windows SmartScreen warns on
   first run and the user has to choose to run it anyway.
-- `vfs-macos`: a zipped, ad-hoc signed `VFS.app`.
+- `vfs-macos`: a zipped, ad-hoc signed `VFS.app`, and `VFS.app.tar.gz`, the updater's
+  macOS payload.
+- `vfs-release`: every release asset together, the updater signatures (`.sig`),
+  `latest.json` for the updater and one combined `SHA256SUMS.txt`. On a tag, the workflow
+  also creates a draft GitHub release with these files; publishing it is what makes installed
+  apps offer the update.
 
 Each artifact carries a `SHA256SUMS.txt`; check a download with `sha256sum -c` (or
 `shasum -a 256 -c` on macOS). Build provenance attestation is not published: for a private
@@ -180,6 +187,17 @@ or start it by hand with `gh workflow run release.yml --ref <branch>` (or "Run w
 the Actions tab). GitHub only offers the manual start once the workflow file is on the
 default branch, `main`. Then download the artifact from the run page, or with
 `gh run download <run-id> -n vfs-windows-installer`.
+
+## Updates
+
+From v0.2.0 on, VFS checks once each time it opens whether a newer version is published on
+GitHub (it downloads `latest.json` from the latest release, about 1 KB, and sends nothing
+about your files). If there is one it offers "Actualizar"; one click downloads it, checks its
+signature against the public key built into the app, installs it and reopens VFS. Nothing is
+downloaded or installed without that click. The check can be turned off under "Carpetas" →
+"Buscar actualizaciones al abrir"; then VFS never connects to the internet. v0.1.1 has no
+updater: install v0.2.0 by hand once. How it is built, the signing key and the manual test:
+[`docs/updates.md`](docs/updates.md); spec: [VFS-21](specs/vfs-21-updates/spec.md).
 
 ## Where the index lives
 
@@ -251,7 +269,7 @@ Work is tracked as GitHub issues grouped in milestones:
 | [Fase 1 · Búsqueda por nombre y ruta](https://github.com/AndresHG/VFS/milestone/2) | Core, indexer, watcher, app, UI, CI, Windows installer (spec VFS-1). |
 | [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the reference machine; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
 | [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4) | Text extraction from Word/PDF and Spanish full-text search. |
-| [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Updates, code signing, optional OCR and embeddings. |
+| [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Code signing, optional OCR and embeddings (updates shipped in v0.2.0, VFS-21). |
 
 ## FAQ
 
@@ -269,7 +287,9 @@ Not yet. VFS finds files by name, folder, type, date and size. Searching inside 
 files is planned for phase 3 ([design](docs/content-search-design.md)).
 
 **Does it send my data anywhere?**
-No. VFS works fully offline: no account, no cloud service, no LLM. It reads only names, sizes
+No. VFS works offline: no account, no cloud service, no LLM. Its only connection is the
+update check when it opens (it downloads a small file from GitHub and sends nothing about
+your files), and it can be turned off. It reads only names, sizes
 and dates, and never opens, moves or changes your files. Future AI features (answers over
 your archive, a knowledge graph) would be opt-in, through a model API you configure
 yourself; see [`docs/vision.md`](docs/vision.md).
