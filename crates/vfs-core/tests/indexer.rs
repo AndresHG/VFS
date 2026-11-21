@@ -544,14 +544,20 @@ fn last_full_scan(fx: &Fixture) -> Option<i64> {
         .unwrap()
 }
 
-/// VFS-1 AC-6, AC-7, I4: changes made while the app was closed are found at the next start,
-/// however recent the last finished check, and the check's time is recorded. Without a boot
-/// grace: a CI runner has often been up for less than the default (VFS-5 AC-7).
+/// VFS-1 AC-6, AC-7, I4, VFS-9 R3: with no change cursor, changes made while the app was
+/// closed are found by the walk at the next start, however recent the last finished check,
+/// and the check's time is recorded. Without a boot grace: a CI runner has often been up for
+/// less than the default (VFS-5 AC-7).
 #[test]
 fn startup_catches_up_changes_made_while_closed() {
     let fx = Fixture::new();
     fx.file("A/antes.txt", 1);
     fx.scan();
+    // No change cursor: the full walk is the only way to see what changed (VFS-9 R3).
+    db::open_rw(&fx.db_path)
+        .unwrap()
+        .execute("DELETE FROM meta WHERE key LIKE 'cursor/%'", [])
+        .unwrap();
     let checked = last_full_scan(&fx).unwrap();
     fx.file("A/mientras cerrado.txt", 1);
     fs::remove_file(fx.root().join("A/antes.txt")).unwrap();
@@ -615,6 +621,10 @@ fn startup_catch_up_runs_after_an_interrupted_walk() {
         [RootStatus::Scanning.code()],
     )
     .unwrap();
+    // No change cursor, so the catch-up is the walk this test is about (VFS-9 R3); the
+    // replay of a rolled-back walk is VFS-9 AC-2.
+    conn.execute("DELETE FROM meta WHERE key LIKE 'cursor/%'", [])
+        .unwrap();
     drop(conn);
 
     let (tx, rx) = mpsc::channel();

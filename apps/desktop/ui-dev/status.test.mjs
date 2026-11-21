@@ -33,7 +33,7 @@ test('idle status shows the last completed check', () => {
   assert.equal(statusText(null, [root({ lastFullScan: null })], NOW), S.statusFiles('10'));
 });
 
-/** VFS-1 U6, I4: scanning after a first scan has finished (the catch-up at every start, a
+/** VFS-1 U6, I4: scanning after a first scan has finished (a catch-up walk at start, a
  *  manual or periodic check) reads as checking for changes; the first scan keeps its
  *  own wording with the folders left. */
 test('scanning reads as checking for changes once a first scan has finished', () => {

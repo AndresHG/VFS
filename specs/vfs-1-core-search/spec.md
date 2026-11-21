@@ -211,9 +211,10 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   requests a re-walk of the root (I10). macOS: FSEvents through `notify`, honouring its
   rescan flag.
 - I3. Watcher events under the app data directory are ignored.
-- I4. Until a change journal is read, every start owes each root a catch-up re-walk
-  (resumable, low priority, searchable meanwhile); while running, roots are re-walked when
-  their last full scan is 7 days old or stored in the future (a clock set back).
+- I4. At start, a root whose change cursor is missing or whose history is lost (VFS-9) is
+  owed a catch-up re-walk (resumable, low priority, searchable meanwhile); while running,
+  roots are re-walked when their last full scan is 7 days old or stored in the future (a
+  clock set back).
 - I8. One exclusion list (`walk::is_excluded`: system names, `.SynologyWorkingDirectory`,
   `@eaDir`, `#recycle`, `#snapshot`, `~$*`, `.~lock.*#`, `~*.tmp`, ...) serves the walker and
   the watcher, which drops events for any excluded component below the root before

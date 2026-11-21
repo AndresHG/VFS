@@ -172,7 +172,7 @@ fn kill_during_first_scan_then_resume() {
     }
 }
 
-/// Renames, moves, deletions and creations that a catch-up re-walk or the watcher's
+/// Renames, moves, deletions and creations that the start-up catch-up or the watcher's
 /// in-place rename must apply.
 fn churn(tree: &Path, rng: &mut Rng, round: u64) {
     let truth = disk_truth(tree);
@@ -206,8 +206,9 @@ fn churn(tree: &Path, rng: &mut Rng, round: u64) {
 }
 
 /// VFS-3 AC-2, VFS-1 AC-6/AC-7: with a complete index, folders are renamed, moved, deleted
-/// and created, and the app is killed while it applies them: during the catch-up re-walk at
-/// start, or while the watcher applies a folder rename in place. The index converges.
+/// and created, and the app is killed while it applies them: during the start-up catch-up
+/// (a replay of the change history, VFS-9, or a walk when it is lost), or while the watcher
+/// applies a folder rename in place. The index converges.
 #[test]
 fn kill_during_rewalk_and_rename() {
     let iterations = scaled(6, 150);
@@ -217,7 +218,7 @@ fn kill_during_rewalk_and_rename() {
     for i in 0..iterations {
         churn(&s.tree, &mut rng, i as u64);
         if i % 2 == 0 {
-            // Killed during the catch-up re-walk that applies changes made while closed.
+            // Killed during the start-up catch-up that applies changes made while closed.
             let child = spawn(&args(Cmd::Run, &s.db, &s.tree));
             std::thread::sleep(delay(&mut rng, full));
             kill(child);

@@ -26,6 +26,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │   │    ├─ mod.rs       scheduler, scan loop, resume         │
 │   │    ├─ walk.rs      list one directory                   │
 │   │    ├─ apply.rs     diff a listing against the index     │
+│   │    ├─ cursor.rs    change cursor: USN / FSEvents replay │
 │   │    └─ watch.rs     FSEvents (notify) / own Windows loop │
 │   ├─ platform.rs       volume key, drive kind, priority     │
 │   ├─ db.rs             connections, schema, ingest, session │
@@ -66,7 +67,7 @@ index, it stays valid and uncompacted. An index from a newer build fails with
 
 | Table | Holds |
 |---|---|
-| `meta` | key/value pairs (unused in v1) |
+| `meta` | key/value pairs: each root's change cursor, `cursor/<root id>` (VFS-9) |
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state` |
@@ -201,11 +202,15 @@ for a segment merge.
 Writes happen in transactions that commit between directories every 20,000 changed rows or
 5 s (I5). Because the queue lives in the same transaction as the rows, a run killed at any
 point redoes only the directories of its last uncommitted transaction. On start
-(`Worker::init`) the indexer finishes roots left in `removing`, recounts the roots, owes
-every root a catch-up re-walk (changes made while the app was closed are seen by nothing
-else until a change journal is read, I4), starts the watcher, and then continues with
-whatever is pending (AC-6). The catch-up is resumable, runs at low priority, and the user
-can search meanwhile; the status bar says "Comprobando cambios…" while it runs (U6).
+(`Worker::init`) the indexer finishes roots left in `removing`, recounts the roots, starts
+the watcher, then replays each root's change cursor (`indexer/cursor.rs`, VFS-9): the
+folders that changed since it become pending shallow, stored with the new cursor in one
+transaction. A root with no cursor, or whose history is lost, owes a catch-up re-walk
+instead (I4). Then it continues with whatever is pending (AC-6). The catch-up is resumable,
+runs at low priority, and the user can search meanwhile; the status bar says "Comprobando
+cambios…" while it runs (U6). A full walk stores the cursor taken just before it starts;
+while running, a watched root's cursor advances every 5 min to the position taken at the
+previous check, unless the watcher lost events for it meanwhile.
 
 ### The indexer thread
 
@@ -264,10 +269,11 @@ directory ids are kept. Anything else falls back to re-listing both parents (I9)
 A re-walk (`queue_rewalk`) sets the root directory pending deep and the root `scanning`;
 the deep listing then cascades through the whole tree. Re-walks also happen when the user
 asks (`rescan`, "Buscar cambios ahora"), when an unavailable root becomes reachable, once a
-root that could not be watched is watched (I12), at every start, and while running after 7
-days. If the watcher cannot start, indexing still runs and these re-walks still catch
-changes. The Windows loop has run only on a GitHub runner (VFS-8), where it followed create,
-rename and delete within about 2 s.
+root that could not be watched is watched (I12), at start for a root whose change cursor
+is missing or whose history is lost (VFS-9), and while running after 7 days. If the watcher
+cannot start, indexing still runs and these re-walks still catch changes. The Windows loop
+has run only on a GitHub runner (VFS-8), where it followed create, rename and delete within
+about 2 s.
 
 ### Session marker and recovery
 

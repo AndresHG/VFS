@@ -139,14 +139,21 @@ every word of 3 or more characters. Words longer than 64 characters (`FUZZY_MAX_
 pasted path or URL) match exactly: their typo alternatives grow faster than quadratically
 and are not bounded by the deadline (VFS-3, #53).
 
-## A catch-up re-walk at every start
+## Replay the change history at start; walk only when it is lost
 
-Every start owes each folder a full re-walk, resumable, at low priority, searchable
-meanwhile (spec I4), never deferred: not even behind a walk the previous session left
-unfinished, which after a power cut may be an older walk than the last one (VFS-3). While the app is closed nothing watches the disk, and the Synology
-client keeps syncing; without a change journal (which needs administrator rights) only a
-walk finds what changed. Rejected: re-walking only when the last walk is older than a day,
-the previous rule, which missed changes made the same day while the app was closed.
+While the app is closed nothing watches the disk, and the Synology client keeps syncing.
+Each root stores a change cursor (VFS-9): the NTFS USN journal position (read with the
+unprivileged FSCTL, no administrator rights) or the FSEvents event id. At start the changes
+since the cursor become "re-list this folder" marks; a root whose history is missing or
+lost (another file system, a network drive, a trimmed or recreated journal, a changed
+event store, an FSEvents rescan flag) owes the full catch-up walk of spec I4, never
+deferred: not even behind a walk the previous session left unfinished, which after a power
+cut may be an older walk than the last one (VFS-3). A root with an unfinished walk and a
+cursor resumes that walk; the replay marks the folders it already listed that changed since.
+Windows records carry no names for a standard user, so they are keyed on their parent
+folder, resolved by file id at replay: no file-id map, no schema change. Rejected: a full
+walk at every start (hours of seeking on the target HDD, prior art §5); re-walking only when
+the last walk is older than a day, which missed changes made the same day while closed.
 
 ## One full re-walk at a time, with a cooldown for lost events
 
