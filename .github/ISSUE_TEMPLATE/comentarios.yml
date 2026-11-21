@@ -1,0 +1,32 @@
+# VFS-20: the form "Enviar comentarios" opens prefilled. The app fills `que-paso` and
+# `resumen` through the URL (apps/desktop/src-tauri/src/feedback.rs); keep the ids in step.
+name: Comentarios
+description: Cuente qué ha pasado o qué le gustaría, con el informe de VFS.
+title: "Comentarios: "
+labels: ["comentarios"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por escribirnos. Si ha llegado aquí desde VFS, el programa ya ha guardado un
+        archivo `vfs-informe-….zip` en su carpeta de Descargas y lo ha mostrado en pantalla.
+        **Arrastre ese archivo al cuadro «Informe completo» de abajo** antes de enviar.
+        El informe no incluye nombres de archivos ni de carpetas salvo que usted lo eligiera.
+  - type: textarea
+    id: que-paso
+    attributes:
+      label: ¿Qué ha pasado o qué le gustaría?
+      description: Con sus palabras. Si algo falla, diga qué hizo y qué esperaba que pasara.
+    validations:
+      required: true
+  - type: textarea
+    id: informe
+    attributes:
+      label: Informe completo
+      description: Arrastre aquí el archivo `vfs-informe-….zip`.
+  - type: textarea
+    id: resumen
+    attributes:
+      label: Resumen del equipo
+      description: Lo rellena VFS. Versión, sistema, discos, tamaño de la búsqueda y ajustes.
+      render: text

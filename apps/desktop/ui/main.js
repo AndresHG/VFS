@@ -5,6 +5,7 @@ import { S } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
+import { setupFeedback } from './feedback.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -880,6 +881,10 @@ function main() {
       renderStatus();
     } catch (err) { showError(errorText(err)); }
   });
+
+  /* ---------------------------------------------------------------- feedback (VFS-20) */
+
+  setupFeedback({ api, S, $, errorText });
 
   /* ---------------------------------------------------------------- folder panel */
 
