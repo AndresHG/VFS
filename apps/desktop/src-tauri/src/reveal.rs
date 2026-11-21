@@ -75,9 +75,10 @@ pub fn shell_form(path: &Path) -> PathBuf {
 }
 
 /// The plain form of `path` for the Shell when only its length keeps Explorer from it: over
-/// `MAX_PATH`, with no component ending in a dot or a space. Such names, and short paths that
-/// still need `\\?\`, could name another item without the prefix, so they get `None` and the
-/// nearest folder opens instead (VFS-24 AC-1).
+/// `MAX_PATH`, with no component ending in a dot or a space and no reserved device name
+/// (`CON`, `NUL.txt`, `COM1`…). Without the prefix such names name another item, as would a
+/// short path that still needs `\\?\`, so they get `None` and the nearest folder opens
+/// instead (VFS-24 AC-1).
 pub fn long_shell_path(path: &Path) -> Option<PathBuf> {
     let plain = shell_form(path);
     let s = plain.to_string_lossy();
@@ -85,8 +86,20 @@ pub fn long_shell_path(path: &Path) -> Option<PathBuf> {
     let lossless = s
         .split('\\')
         .skip(1)
-        .all(|c| !c.ends_with('.') && !c.ends_with(' '));
+        .all(|c| !c.ends_with('.') && !c.ends_with(' ') && !is_device_name(c));
     (long && lossless).then_some(plain)
+}
+
+/// Whether a path component is a Win32 reserved device name, with or without an extension
+/// (`COM0`/`LPT0` included: newer Windows reserves them too, and a false match only opens the
+/// folder instead).
+fn is_device_name(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or_default().trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.as_bytes()[3].is_ascii_digit())
 }
 
 /// Explorer's argument for `action`: `/select,"<path>"` or `"<path>"`. A trailing backslash
@@ -390,9 +403,13 @@ mod tests {
             long_shell_path(Path::new(r"\\?\C:\Datos\punto.\f.pdf")),
             None
         );
-        for odd in ["fin.", "fin "] {
+        for odd in ["fin.", "fin ", "nul.txt", "CON", "com1.log", "Lpt9"] {
             let p = format!(r"\\?\C:\Datos\{}\{odd}\f.pdf", "x".repeat(300));
             assert_eq!(long_shell_path(Path::new(&p)), None, "{odd:?}");
+        }
+        for fine in ["console.txt", "com10", "nulo.pdf"] {
+            let p = format!(r"\\?\C:\Datos\{}\{fine}", "x".repeat(300));
+            assert!(long_shell_path(Path::new(&p)).is_some(), "{fine:?}");
         }
     }
 

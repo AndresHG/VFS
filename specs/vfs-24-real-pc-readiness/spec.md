@@ -18,17 +18,20 @@ Three Windows behaviors were built but never checked on Windows, or were knowing
 ## Acceptance scenarios
 
 - AC-1 (issue 21) Given a file whose path is over 260 characters, When "Mostrar en carpeta" is
-  used on it, Then an Explorer window's selected items (read through `Shell.Application`)
-  include that file, with 8.3 short names enabled (Windows CI test, C:) or disabled (e2e
-  journey, D:). Given a long path with a component ending in a dot or a space, whose plain
-  form could name another item, Then the Shell is not asked and the nearest folder opens
-  (`opened_parent`).
+  used on it, Then the Explorer window that action opens shows the file's folder with the file
+  among its selected items (read through `Shell.Application`). Both are required: with 8.3
+  short names enabled (Windows CI test, C:) and disabled (e2e journey, D:). Given a long path
+  with a component that ends in a dot or a space or is a reserved device name (`CON`,
+  `NUL.txt`, `COM1`…), Then the Shell is not asked and the nearest folder opens
+  (`opened_parent`); the same happens when the Shell cannot build or open the item.
 - AC-2 (issue 48) Given the app idle after a search, When the window is minimised for 5 minutes
-  and restored, Then the app log says `webview suspended: true` and the restored window
+  and restored, Then the app log says `webview suspended: true`, written from WebView2's own
+  `TrySuspend` completion result, and the restored window
   searches and renders its hit; the journey fails otherwise. It also records the working set
   and the private bytes of the app and every WebView2 process: open, at 15 s, 60 s and 300 s
   minimised, and 10 s after restoring. The numbers are a measurement, not a pass condition:
   Windows trims any minimised process's working set, so only the log line proves suspension.
+  They are kept in the journey artifact (`journey.json`, `memory_minimised`).
 - AC-3 (issue 22) Given the app with results, Then UI Automation (what Narrator reads) exposes
   the search box, the results list and a result row with the names the page gives them.
   Starting from each Windows setting off, the page does not match its media query; with
@@ -36,8 +39,8 @@ Three Windows behaviors were built but never checked on Windows, or were knowing
   `prefers-reduced-motion: reduce`, and it stops matching when the setting is turned back
   off, which happens even when the step fails. Static UI tests check that every control has
   a name, that motion runs only without "reduce motion", and that under forced colours the
-  selected row, the folder state dots and the progress bars are drawn with system colours
-  (`Highlight`, `CanvasText`) or an outline rather than a background colour alone.
+  selected row, the folder state dots and the progress bars are drawn with `Highlight`,
+  `CanvasText` or an outline (that whole list) rather than a background colour alone.
 
 ## Non-goals
 
@@ -47,8 +50,9 @@ Three Windows behaviors were built but never checked on Windows, or were knowing
 ## Known risks
 
 - Measured on the Windows Server 2025 runner with the webdriver build; the target is a
-  Windows 10 PC with the release build. Explorer's long-path handling and WebView2's suspend
-  are checked there in the target-PC measurement plan before relying on them.
+  Windows 10 PC with the release build. The target-PC measurement plan
+  (`docs/research/target-pc-measurement-plan.md`, issue 59, milestone Fase 2) re-runs the
+  AC-1, AC-2 and AC-3 checks there with the release build.
 - UNC and mapped network paths over 260 characters take the same route (`\\?\UNC\` becomes
   `\\server\share\`) but were not measured.
 
