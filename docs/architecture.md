@@ -311,10 +311,11 @@ the schema version (VFS-3 AC-9).
 
 The root list is also kept outside the database, in `<index>.roots`: UTF-8 paths, each ended
 by a NUL, written to a per-process temporary file and renamed after every root change and on
-each open whose list differs. Recovery reads it when the `roots` table cannot be read or
-reads as empty (a destroyed first page, an overwritten header, a truncated file). An index
-file of 0 bytes with no WAL content, while the backup lists roots, counts as damaged instead
-of being opened as a new, empty index. The name starts with `index.db`, so the one-time move
+each open whose list differs, flushed to disk before the rename. Recovery joins it with the
+roots still readable from the damaged `roots` table (none after a destroyed first page, an
+overwritten header or a truncated file; some after a torn page); only whole, valid entries
+of the backup count. An index file of 0 bytes with no WAL content, while the backup lists
+roots, counts as damaged instead of being opened as a new, empty index. The name starts with `index.db`, so the one-time move
 out of roaming app data carries it along (VFS-23 AC-1, D1).
 
 ## From a query to results

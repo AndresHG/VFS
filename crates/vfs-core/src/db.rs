@@ -399,27 +399,26 @@ fn emptied(db_path: &Path) -> bool {
         && read_roots_backup(db_path).is_some_and(|r| !r.is_empty())
 }
 
-/// Root paths readable from a possibly damaged index. When the `roots` table cannot be read
-/// (its page destroyed, the header overwritten, the file truncated) or reads as empty, the
-/// backup list (VFS-23 AC-1): the backup is synced after every root change, so it is empty
-/// too when the user removed every folder. Empty when neither yields a root.
+/// Roots for a recovery (VFS-23 AC-1, D1): those still readable from the damaged index (none
+/// when `roots` cannot be read: a destroyed page, an overwritten header, a truncated file),
+/// joined with the backup list. Empty when neither yields a root.
 fn salvage_root_paths(db_path: &Path) -> Vec<String> {
     let read = || -> rusqlite::Result<Vec<String>> {
         let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         root_paths(&conn)
     };
-    match read() {
-        Ok(paths) if !paths.is_empty() => paths,
-        Ok(_) => read_roots_backup(db_path).unwrap_or_default(),
-        Err(e) => {
-            let backup = read_roots_backup(db_path).unwrap_or_default();
-            log::warn!(
-                "roots unreadable ({e}); {} taken from the backup",
-                backup.len()
-            );
-            backup
+    // A torn page can leave `roots` partly readable: the union with the backup never loses
+    // a kept root. A root it may bring back (a stale backup) only costs a scan.
+    let mut paths = read().unwrap_or_else(|e| {
+        log::warn!("roots unreadable ({e}); taking them from the backup");
+        Vec::new()
+    });
+    for p in read_roots_backup(db_path).unwrap_or_default() {
+        if !paths.contains(&p) {
+            paths.push(p);
         }
     }
+    paths
 }
 
 /// Paths of the roots the user keeps: one being removed is not brought back by a recovery.
@@ -441,12 +440,22 @@ fn roots_backup_path(db_path: &Path) -> PathBuf {
 /// The backup root list, or `None` when it is missing or unreadable.
 pub(crate) fn read_roots_backup(db_path: &Path) -> Option<Vec<String>> {
     let bytes = std::fs::read(roots_backup_path(db_path)).ok()?;
-    let text = String::from_utf8(bytes).ok()?;
-    Some(text.split_terminator('\0').map(str::to_string).collect())
+    // Only entries ended by their NUL are whole: a cut-off tail, and any entry that is not
+    // UTF-8 (a torn write), are dropped rather than becoming a folder that never existed.
+    let whole = bytes.rsplitn(2, |b| *b == 0).nth(1).unwrap_or_default();
+    Some(
+        whole
+            .split(|b| *b == 0)
+            .filter_map(|p| std::str::from_utf8(p).ok())
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
-/// Makes the backup equal `conn`'s root list. Written to a per-process temporary file and
-/// renamed over the old one, so a kill or a second process never leaves half a list; left
+/// Makes the backup equal `conn`'s root list. Written to a per-process temporary file,
+/// flushed and renamed over the old one, so a kill, a power cut or a second process never
+/// leaves half a list; left
 /// alone when already equal, so a normal open writes nothing.
 pub(crate) fn sync_roots_backup(db_path: &Path, conn: &Connection) -> Result<()> {
     let paths = root_paths(conn)?;
@@ -460,7 +469,12 @@ pub(crate) fn sync_roots_backup(db_path: &Path, conn: &Connection) -> Result<()>
     }
     let target = roots_backup_path(db_path);
     let tmp = with_suffix(&target, &format!(".tmp{}", std::process::id()));
-    std::fs::write(&tmp, &bytes)?;
+    let write = || -> std::io::Result<()> {
+        let mut f = File::create(&tmp)?;
+        std::io::Write::write_all(&mut f, &bytes)?;
+        f.sync_all() // on disk before the rename, so a power cut cannot leave it empty
+    };
+    write()?;
     std::fs::rename(&tmp, &target).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })?;
@@ -1535,6 +1549,36 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, 1);
+    }
+
+    /// VFS-23 AC-1: when a torn page leaves `roots` partly readable, recovery joins what is
+    /// left with the backup; a backup cut short or holding a torn entry keeps its whole ones.
+    #[test]
+    fn recovery_joins_partial_roots_with_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut conn = open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        insert_root(&tx, "/", "/datos/Fotos").unwrap();
+        tx.commit().unwrap();
+        drop(conn);
+        // The backup knows a root the damaged table lost, then a torn entry and a cut tail.
+        let mut backup = b"/datos/Fotos\0/datos/Cartas\0".to_vec();
+        backup.extend_from_slice(b"\xff\xfe\0/datos/Cort");
+        std::fs::write(roots_backup_path(&path), &backup).unwrap();
+        assert_eq!(
+            read_roots_backup(&path).unwrap(),
+            vec!["/datos/Fotos", "/datos/Cartas"]
+        );
+        let conn = recover(&path).unwrap();
+        let paths: Vec<String> = conn
+            .prepare("SELECT path FROM roots ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(paths, vec!["/datos/Fotos", "/datos/Cartas"]);
     }
 
     /// VFS-23 AC-1: a root the user is removing is not brought back by a recovery.

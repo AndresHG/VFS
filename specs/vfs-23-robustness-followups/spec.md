@@ -25,8 +25,8 @@ yet (status `removing`). "The kept roots" are all the others.
 
 - AC-1 (issue 58) Given an index with roots, When its first page is overwritten, the file is
   truncated to nothing, or a random page or WAL block is torn so that SQLite reports damage
-  (the page holding `roots` included), Then the next open recovers and holds exactly the kept
-  roots. After any root is added or removed, the backup lists exactly the kept roots; a failed
+  (the page holding `roots` included, wholly or partly lost), Then the next open recovers and
+  holds every kept root. After any root is added or removed, the backup lists exactly the kept roots; a failed
   backup write never fails the root change (it is logged), and the next open repairs it.
 - AC-2 (issue 57) Given a file named `dos\barras\invertidas.txt` (two backslashes) on macOS,
   When its exact name is searched, Then it is found as an exact name match, also in an index
@@ -48,7 +48,7 @@ yet (status `removing`). "The kept roots" are all the others.
 
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
-| D1 | Root list backup (issue 58) | `<index>.roots`: UTF-8 paths of the kept roots, each ended by a NUL (a path may hold a newline, never a NUL). Written to a per-process temporary file and renamed, after every root change and on each open whose list differs. Read only by a recovery (a damaged index), when `roots` cannot be read or reads as empty; a healthy open never takes roots from it. An index file of 0 bytes with no WAL content, while the backup lists roots, counts as damaged. Only if damage coincides with a kill between removing the last root and writing the backup can that root come back, pending a scan; the user removes it again. The name starts with `index.db`, so the one-time move out of roaming app data carries it (`legacy_index_is_moved_once`) | lead | 2026-11-21 |
+| D1 | Root list backup (issue 58) | `<index>.roots`: UTF-8 paths of the kept roots, each ended by a NUL (a path may hold a newline, never a NUL). Written to a per-process temporary file, flushed to disk and renamed, after every root change and on each open whose list differs. Read only by a recovery (a damaged index), which takes the union of the roots still readable from `roots` and the backup; a healthy open never takes roots from it. Only entries ended by their NUL and valid UTF-8 count, so a backup torn by the same power cut keeps its whole entries. An index file of 0 bytes with no WAL content, while the backup lists roots, counts as damaged. A root can come back, pending a scan, only if damage coincides with a backup that missed its last removal; the user removes it again. The name starts with `index.db`, so the one-time move out of roaming app data carries it (`legacy_index_is_moved_once`) | lead | 2026-11-21 |
 | D2 | Stale FTS entries after undetectable damage (issue 103) | Accepted. Only bit rot or a disk that lies about writes causes them. Search stays correct because candidates are checked against `files`; each stale entry costs one candidate read. Rebuilding the FTS of 5 M rows on the target HDD costs far more | lead | 2026-11-21 |
 | D3 | Backslash in queries (issue 57) | A separator on Windows only, where no name can hold one; literal on macOS. Supersedes VFS-1 S6's "`\` is folded to `/`" | lead | 2026-11-21 |
 | D4 | Approval | The owner's standing instruction: a spec is approved once an independent critic, given only the spec, confirms it makes sense | owner | 2026-11-21 |
