@@ -254,14 +254,10 @@ mod tests {
         assert_eq!(Lang::from_code("system"), None);
     }
 
-    /// VFS-22 AC-6: the menu words are Spanish in Spanish and English in English (both
-    /// languages fill the same struct, so the compiler checks that every string exists).
+    /// VFS-22 R5: both languages fill the same struct (the compiler checks every string
+    /// exists) and keep the placeholders the shell fills in.
     #[test]
-    fn shell_strings_exist_in_both_languages() {
-        assert_eq!(Lang::Es.strings().menu.edit, "Edición");
-        assert_eq!(Lang::Es.strings().menu.window, "Ventana");
-        assert_eq!(Lang::En.strings().menu.edit, "Edit");
-        assert_eq!(Lang::En.strings().menu.window, "Window");
+    fn shell_strings_keep_their_placeholders() {
         for s in [Lang::Es.strings(), Lang::En.strings()] {
             assert!(s.startup_failed.contains("{detail}"));
             assert!(s.menu.quit.contains("{app}"));

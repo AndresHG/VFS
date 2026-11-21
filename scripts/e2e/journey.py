@@ -115,6 +115,7 @@ class App:
             60, what="UI ready")
         # VFS-22: the steps below read Spanish copy and the Spanish folder picker title, and
         # the runner's OS may be English: pin the app to Spanish and wait for the redraw.
+        # 'vfs.language' is LANGUAGE_KEY in apps/desktop/ui/main.js.
         self.wd.js("localStorage.setItem('vfs.language', 'es'); setTimeout(() => location.reload(), 0);"
                    " return true")
         wait_for(lambda: self.wd.js(
