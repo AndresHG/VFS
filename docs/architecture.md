@@ -544,7 +544,8 @@ Key shapes:
   is a `SortOrder` (VFS-12).
 - `Suggestion { kind: dropFilters | spelling | dropTerm, text, clearFilters, term,
   replacement, count, capped }` (VFS-13): the box text to run and the grouped, capped count.
-- `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link? }`. `id`
+- `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link?,
+  cloudOnly? }`. `id`
   is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
   both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
   `fuzzy`. `copies` (VFS-19) is left out when empty and never set on folders. `cloudOnly`

@@ -1342,7 +1342,8 @@ fn removing_a_root_forgets_its_unreadable_folders() {
     assert_eq!(left, 0);
 }
 
-/// The file `rel` (`/`-separated, below the root) as (id, cloud-only bit).
+/// The file `name` in the folder `dir` (`/`-separated, below the root) as (id, cloud-only
+/// bit).
 fn cloud_bit(conn: &Connection, dir: &str, name: &str) -> (i64, bool) {
     conn.query_row(
         "SELECT f.id, f.flags & ?3 FROM files f JOIN dirs d ON d.id = f.dir_id \
