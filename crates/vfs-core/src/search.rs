@@ -48,11 +48,11 @@ const MAX_HITS: usize = 2000;
 /// the list is cut to `MAX_HITS`, so a better-ranked name match is never lost to rowid
 /// order while its tier has at most this many matches.
 const NAME_READ_CAP: usize = 4_000;
-/// Candidates read by every tier when the order is not relevance (or the query is
-/// filter-only): all of them are sorted before the cut to `MAX_HITS`, so the order is exact
-/// while a query has at most this many matches; past it the response says
-/// `approximate_order` (VFS-12 AC-2, AC-3).
-const SORT_READ_CAP: usize = 20_000;
+/// Candidates read by every tier when the order is not relevance: all of them are sorted
+/// before the cut to `MAX_HITS`, so the order is exact while a query has at most this many
+/// matches; past it the response says `approximate_order` (VFS-12 AC-2, AC-3). 3× the cap
+/// keeps every order under the AC-9 budget on 2 M files; 20,000 did not.
+const SORT_READ_CAP: usize = 6_000;
 /// Directories read by a directory-driven stage.
 const SCAN_CAP_DIR: usize = 20_000;
 /// Rows read by the fuzzy pass (best effort: reaching it does not mark truncation).
@@ -182,9 +182,10 @@ fn search_snapshot(
         stopped: false,
         limit: MAX_HITS,
     };
-    // VFS-12: an order other than relevance, or a filter-only query (newest first), reads up
-    // to `SORT_READ_CAP` candidates and sorts them all before the cut.
-    let sorted = query.sort != SortOrder::Relevance || terms.is_empty();
+    // VFS-12: an order other than relevance reads up to `SORT_READ_CAP` candidates and sorts
+    // them all before the cut. A filter-only query under relevance keeps the hit cap (its
+    // scan has no index to stop early; S6 lists newest first among what it read).
+    let sorted = query.sort != SortOrder::Relevance;
     let outcome = run_query(conn, &mut run, &terms, f, sorted);
     conn.progress_handler(0, None::<fn() -> bool>)?;
     match outcome {
@@ -203,7 +204,7 @@ fn search_snapshot(
         rank::rank(&mut candidates, &folded, &terms);
     }
     rank::sort_by_order(&mut candidates, query.sort);
-    let approximate_order = sorted && run.truncated.is_some();
+    let approximate_order = (sorted || terms.is_empty()) && run.truncated.is_some();
     let (mut hits, mut pending, mut copy_pending) = group_copies(candidates);
     if hits.len() > MAX_HITS {
         hits.truncate(MAX_HITS);
