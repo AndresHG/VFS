@@ -266,8 +266,8 @@ overflow (the watch stays armed) does not ask for a walk: 10 s after the last ov
 burst, and at most 60 s after its first, the root's change history is replayed from its
 cursor (VFS-26, `Worker::run_due_replays`), with the cursor frozen meanwhile; only when that
 replay cannot run does it fall back to a walk. Requests caused by lost events (a watch that
-failed, an overflow without usable history), and those owed by a root that was being walked, wait until that root's last full scan is 1 hour old; manual requests do not
-wait, and the start-up catch-up never waits, even for a root whose walk was interrupted: a
+failed, an overflow without usable history), and those owed by a root that was being
+walked, wait until that root's last full scan is 1 hour old; manual requests do not wait, and the start-up catch-up never waits, even for a root whose walk was interrupted: a
 power cut can roll the index back to an older walk (VFS-3 AC-5). An owed walk that is due
 starts before the indexer reports idle, so the status never reads up to date while one is
 owed (I10). So a burst of sync-client churn cannot chain full walks back to back.

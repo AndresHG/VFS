@@ -1528,22 +1528,25 @@ fn has_row(fx: &Fx, name: &str) -> bool {
 }
 
 /// VFS-26 AC-1 (R2, R3): three overflows within the quiet delay give one replay; a cursor
-/// check before it leaves the stored cursor alone; the replay re-lists exactly the folder
-/// it names, stores its cursor and owes no walk; cursor checks advance it again afterwards.
+/// check before it leaves the stored cursor alone; the replay re-lists exactly the two
+/// folders it names (the third keeps a dropped row), stores its cursor and owes no walk; cursor checks advance it again afterwards.
 /// Overflows that keep coming still get their replay by the maximum delay.
 #[test]
 fn overflow_burst_gives_one_replay() {
-    let fx = fixture(&["A", "B"]);
-    fs::write(fx.root().join("A").join("a.txt"), b"x").unwrap();
-    fs::write(fx.root().join("B").join("b.txt"), b"x").unwrap();
+    let fx = fixture(&["A", "B", "C"]);
+    for (d, f) in [("A", "a.txt"), ("B", "b.txt"), ("C", "c.txt")] {
+        fs::write(fx.root().join(d).join(f), b"x").unwrap();
+    }
     let (h, history) = overflow_indexer(&fx);
     let checked = fx.last_scan();
     wait_for("the cursor advanced", || {
         stored_cursor(&fx.db_path, fx.root_id).is_some_and(|c| c != "fake:0")
     });
-    drop_row(&fx, "a.txt");
-    drop_row(&fx, "b.txt");
-    *history.replay.lock().unwrap() = Some(Ok((vec![fx.root().join("A")], "fake:replayed".into())));
+    for f in ["a.txt", "b.txt", "c.txt"] {
+        drop_row(&fx, f);
+    }
+    let named = vec![fx.root().join("A"), fx.root().join("B")];
+    *history.replay.lock().unwrap() = Some(Ok((named, "fake:replayed".into())));
     let before = history.replays.load(Ordering::SeqCst);
     for _ in 0..3 {
         h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
@@ -1556,10 +1559,12 @@ fn overflow_burst_gives_one_replay() {
         frozen,
         "a check moved the cursor"
     );
-    wait_for("the replay", || has_row(&fx, "a.txt"));
+    wait_for("the replay", || {
+        has_row(&fx, "a.txt") && has_row(&fx, "b.txt")
+    });
     assert_eq!(history.replays.load(Ordering::SeqCst) - before, 1);
     std::thread::sleep(Duration::from_millis(300));
-    assert!(!has_row(&fx, "b.txt"), "B was listed: a walk ran");
+    assert!(!has_row(&fx, "c.txt"), "C was listed: a walk ran");
     assert_eq!(fx.last_scan(), checked, "a full walk ran");
     wait_for("the cursor advanced after the replay", || {
         stored_cursor(&fx.db_path, fx.root_id)
@@ -1567,9 +1572,9 @@ fn overflow_burst_gives_one_replay() {
     });
 
     // A burst that never pauses is replayed by the maximum delay.
-    *history.replay.lock().unwrap() = Some(Ok((vec![fx.root().join("B")], "fake:second".into())));
+    *history.replay.lock().unwrap() = Some(Ok((vec![fx.root().join("C")], "fake:second".into())));
     let started = Instant::now();
-    while !has_row(&fx, "b.txt") {
+    while !has_row(&fx, "c.txt") {
         assert!(started.elapsed() < Duration::from_secs(5), "never replayed");
         h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
         std::thread::sleep(Duration::from_millis(100));
@@ -1613,14 +1618,23 @@ fn replay_on_a_held_root_keeps_the_owed_walk() {
     drop(h);
 }
 
-/// VFS-26 AC-3 (R4): an overflow with no cursor, or whose replay reports the history lost,
-/// falls back to the deferred lost-events walk with the cursor held.
+/// Proves a deferred walk is owed for `fx`'s root: once its cooldown is made to have passed
+/// (last full scan two hours ago, short of the weekly re-walk), a walk runs.
+fn assert_walk_owed(fx: &Fx) {
+    let ago = now_secs() - 7200;
+    fx.set_last_scan(ago);
+    wait_for("the owed walk", || fx.last_scan() != Some(ago));
+}
+
+/// VFS-26 AC-3 (R4): an overflow whose replay reports the history lost, of a root with no
+/// cursor, or of a root that is unreachable, falls back to the deferred lost-events walk
+/// with the cursor held.
 #[test]
 fn overflow_without_usable_history_holds_and_owes_a_walk() {
+    // History lost: nothing scripted, so the fake reports it lost.
     let fx = fixture(&["A"]);
     let (h, history) = overflow_indexer(&fx);
     let checked = fx.last_scan();
-    // History lost: nothing scripted, so the fake reports it lost.
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
     wait_for("the replay", || history.replays.load(Ordering::SeqCst) == 1);
     let held = stored_cursor(&fx.db_path, fx.root_id);
@@ -1631,9 +1645,10 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
         "the cursor moved"
     );
     assert_eq!(fx.last_scan(), checked, "the walk is deferred");
+    assert_walk_owed(&fx);
     drop(h);
 
-    // No cursor at all: no replay is attempted, and none is stored.
+    // No cursor at all: no replay is attempted, none is stored, a walk is owed.
     let fx = fixture(&["A"]);
     let (h, history) = overflow_indexer(&fx);
     cursor::store(&db::open_rw(&fx.db_path).unwrap(), fx.root_id, None).unwrap();
@@ -1646,11 +1661,27 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
         None,
         "a cursor was stored"
     );
+    assert_walk_owed(&fx);
+    drop(h);
+
+    // Unreachable when the replay is due: no replay, the cursor holds, a walk is owed.
+    let fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&fx);
+    let away = fx.root().with_file_name("lejos");
+    fs::rename(fx.root(), &away).unwrap();
+    let before = history.replays.load(Ordering::SeqCst);
+    let held = stored_cursor(&fx.db_path, fx.root_id);
+    h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
+    std::thread::sleep(Duration::from_millis(600));
+    fs::rename(&away, fx.tree.path()).unwrap();
+    assert_eq!(history.replays.load(Ordering::SeqCst), before);
+    assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held);
+    assert_walk_owed(&fx);
     drop(h);
 }
 
 /// VFS-26 AC-4 (R5): a failed watch never replays; an overflow followed by a failed watch
-/// before the replay is due never replays either, and the cursor holds.
+/// before the replay is due never replays either; the cursor holds and a walk is owed.
 #[test]
 fn failed_watch_never_replays() {
     let fx = fixture(&["A"]);
@@ -1664,6 +1695,7 @@ fn failed_watch_never_replays() {
     std::thread::sleep(Duration::from_millis(700));
     assert_eq!(history.replays.load(Ordering::SeqCst), 0);
     assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held);
+    assert_walk_owed(&fx);
     drop(h);
 }
 
