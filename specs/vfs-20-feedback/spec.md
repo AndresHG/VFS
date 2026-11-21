@@ -1,6 +1,6 @@
 # VFS-20 — "Enviar comentarios" with a diagnostic report, sent by the user
 
-- **Status**: implemented (this PR)
+- **Status**: implemented (PR #130)
 - **Size**: M (one desktop feature: a dialog, three commands, a report builder; log retention
   and a panic hook in the shell; no index schema change, nothing sent automatically)
 - **Links**: VFS-5 (R7 diagnostic log, R8 no names in it), VFS-1 C7 (log file), VFS-22
