@@ -21,7 +21,7 @@
 
 import {
   BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
-  RootStatus, Source, TruncatedBy,
+  RootStatus, SortOrder, Source, TruncatedBy,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -315,10 +315,10 @@ export function createFakeBackend(params) {
   /** VFS-12 orders, enough for looking at the screen (the core sorts before its cap). */
   function sortFake(list, sort) {
     const by = {
-      newest: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || b.e.modified - a.e.modified,
-      oldest: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || a.e.modified - b.e.modified,
-      name: (a, b) => (a.e.fName < b.e.fName ? -1 : a.e.fName > b.e.fName ? 1 : 0),
-      size: (a, b) => (b.e.size || 0) - (a.e.size || 0),
+      [SortOrder.NEWEST]: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || b.e.modified - a.e.modified,
+      [SortOrder.OLDEST]: (a, b) => (a.e.modified === 0) - (b.e.modified === 0) || a.e.modified - b.e.modified,
+      [SortOrder.NAME]: (a, b) => (a.e.fName < b.e.fName ? -1 : a.e.fName > b.e.fName ? 1 : 0),
+      [SortOrder.SIZE]: (a, b) => (b.e.size || 0) - (a.e.size || 0),
     }[sort];
     return by ? [...list].sort(by) : list;
   }
