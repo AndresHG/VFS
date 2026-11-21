@@ -16,7 +16,9 @@ use vfs_desktop_lib::splash::{Splash, SPLASH_CLASS, SPLASH_DELAY};
 /// Polls every open Explorer window for up to 20 s and prints the paths selected in it, one
 /// per line, as soon as one of them ends with `$env:VFS_NAME`; then prints one `window:` line
 /// per Shell window and the Explorer processes (context for a failure), and closes the
-/// windows that show `$env:VFS_DIR_NAME`.
+/// windows that show `$env:VFS_DIR_NAME`, waiting until they are gone: `Quit` returns before
+/// the window closes, and a reveal sent meanwhile went to the closing window, which kept the
+/// previous item selected (CI flake on `reveal_selects_the_item_in_explorer`).
 const SELECTED_ITEMS_PS: &str = r#"
 $deadline = (Get-Date).AddSeconds(20)
 $shell = New-Object -ComObject Shell.Application
@@ -37,6 +39,12 @@ Write-Output ("this session " + (Get-Process -Id $PID).SessionId)
 foreach ($w in @($shell.Windows())) {
   try { if ($w.Document.Folder.Self.Name -eq $env:VFS_DIR_NAME) { $w.Quit() } } catch {}
 }
+$deadline = (Get-Date).AddSeconds(10)
+do {
+  $open = @(@($shell.Windows()) | Where-Object { try { $_.Document.Folder.Self.Name -eq $env:VFS_DIR_NAME } catch { $false } })
+  if ($open.Count -eq 0) { break }
+  Start-Sleep -Milliseconds 200
+} while ((Get-Date) -lt $deadline)
 "#;
 
 /// Paths selected in Explorer windows once `name` is among them (or after the timeout).
