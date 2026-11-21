@@ -51,6 +51,36 @@ macOS (short journey, `webdriver` build of the `.app`, 20,000 files): every step
 including Finder opening on the file **with it selected**. First scan 1.7 s (11,553 files/s);
 memory after a search 274 MB RSS (app 122 + all WebKit processes 152).
 
+## VFS-24 checks (e2e runs 44941016992 and 44941112099, 2026-11-21)
+
+Same runner and 100,000-file tree as above; webdriver build, app idle after a search.
+
+**WebView2 suspended when minimised (issue 48, VFS-5 AC-12).** The app log says
+`webview suspended: true`. Working set (RSS) in MB:
+
+| Moment | App | WebView2 (6 processes) | Total | Private, total |
+|---|---|---|---|---|
+| Open | 121.0 | 334.3 | 455.3 | 196.3 |
+| Minimised 15 s | 121.0 | 327.0 | 448.0 | 190.6 |
+| Minimised 60 s | 120.9 | 17.5 | 138.4 | 187.2 |
+| Minimised 300 s | 18.7 | 34.3 | 53.0 | 186.4 |
+| Restored 10 s | 19.2 | 122.0 | 141.2 | 184.5 |
+
+Windows trims the working set once the WebView2 is suspended: from 455 MB to 53 MB after
+5 minutes. Private (committed) memory stays at about 190 MB, so other programs get physical
+memory back but the commit charge barely moves. After restoring, a search rendered its hit
+in 134 ms. A first run measured the same within 20 MB (473 → 56 MB).
+
+**Accessibility (issue 22).** UI Automation, which Narrator reads, exposes the search box
+("Buscar por nombre de archivo o de carpeta", a combo box), the results list ("Resultados")
+and each result row with its full label (name, type, folder, date, size). With Windows high
+contrast on, the page matches `forced-colors: active`; with animations off, it matches
+`prefers-reduced-motion: reduce`. Screenshots: `26-high-contrast-window.png` in the run's
+artifact.
+
+**Long paths (issue 21).** "Mostrar en carpeta" on a 350-character path selected the file in
+Explorer in 1.4 s, with no fallback message (run 44941112099, tree on D:).
+
 ## Screenshots (docs/research/windows-e2e/)
 
 - `win-01-first-launch-blank.png` — first launch, 7 s in: blank white window.
