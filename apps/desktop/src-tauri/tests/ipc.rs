@@ -77,6 +77,23 @@ fn system_locale_over_ipc() {
     assert!(locale.is_string(), "{locale}");
 }
 
+/// VFS-22 R5: the UI hands its language to the shell, which answers with nothing and ignores
+/// a code that is not a language. Off macOS a real language is applied too; on macOS that
+/// builds the app menu, which AppKit allows only on the main thread the mock runtime lacks.
+#[test]
+fn set_language_over_ipc() {
+    let (_app, webview) = mock_app();
+    let langs: &[&str] = if cfg!(target_os = "macos") {
+        &["fr"]
+    } else {
+        &["en", "es", "fr"]
+    };
+    for lang in langs {
+        let reply = invoke(&webview, "set_language", json!({ "lang": lang })).unwrap();
+        assert!(reply.is_null(), "{lang}: {reply}");
+    }
+}
+
 fn write_file(path: &Path) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, b"x").unwrap();

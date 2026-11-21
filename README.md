@@ -14,7 +14,7 @@
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS, fully offline, in Spanish and English (the
-system language by default).
+system language by default, changeable in Settings).
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -160,7 +160,7 @@ The installer is built by the `release` GitHub Actions workflow
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)). It runs on Windows and
 macOS runners and produces:
 
-- `vfs-windows-installer`: an NSIS `*-setup.exe`, Spanish, per-user install (no
+- `vfs-windows-installer`: an NSIS `*-setup.exe` in Spanish or English (from the system language), per-user install (no
   administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
   while installing if WebView2 is missing). It is unsigned, so Windows SmartScreen warns on
   first run and the user has to choose to run it anyway.

@@ -80,6 +80,7 @@ Tests cite these ids (`VFS-22 AC-<m>`) in their doc comments.
 | 3 | English product name | Not decided; owner plans a rebrand. Name kept in one key, `VFS — File Finder` meanwhile | owner | 2026-11-21 |
 | 4 | Where the choice is stored | WebView `localStorage`; the UI tells the shell the active language at start and on change | agent | 2026-11-21 |
 | 5 | System locale source | Rust `sys-locale` (WKWebView's `navigator.language` follows the bundle's localizations, not the system) | agent | 2026-11-21 |
+| 6 | How a switch applies | The page reloads in the new language (search box and filters start over); the shell retitles and rebuilds the menu | agent | 2026-11-21 |
 
 ## Open questions
 

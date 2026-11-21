@@ -21,6 +21,7 @@ fn io_error(e: impl std::fmt::Display) -> ApiError {
 pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         system_locale,
+        set_language,
         list_roots,
         pick_folder,
         add_root,
@@ -44,6 +45,22 @@ pub fn system_locale() -> String {
     sys_locale::get_locale().unwrap_or_default()
 }
 
+/// Makes `lang` ("es" or "en", the UI's language) the shell's: window title, macOS menu and
+/// folder picker (VFS-22 R5). Any other code is ignored.
+#[tauri::command(async)]
+pub fn set_language<R: Runtime>(app: AppHandle<R>, lang: String) -> CmdResult<()> {
+    let Some(lang) = crate::i18n::Lang::from_code(&lang) else {
+        return Ok(());
+    };
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Err(e) = crate::i18n::apply(&handle, lang) {
+            log::warn!("shell language: {e}");
+        }
+    })
+    .map_err(io_error)
+}
+
 #[tauri::command(async)]
 pub fn list_roots(state: State<'_, AppState>) -> CmdResult<Vec<Root>> {
     Ok(state.vfs.list_roots()?)
@@ -55,7 +72,7 @@ pub fn pick_folder<R: Runtime>(app: AppHandle<R>) -> CmdResult<Option<String>> {
     let picked = app
         .dialog()
         .file()
-        .set_title("Elegir carpeta")
+        .set_title(crate::i18n::current(&app).strings().choose_folder)
         .blocking_pick_folder();
     match picked {
         None => Ok(None),

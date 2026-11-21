@@ -7,8 +7,9 @@ import { es } from './strings.es.js';
 import { en } from './strings.en.js';
 import { formatsFor } from './format.js';
 
-/** The UI languages; also the values a saved choice may hold. */
-export const Lang = Object.freeze({ ES: 'es', EN: 'en' });
+import { Lang } from './choices.js';
+
+export { Lang };
 
 export const CATALOGS = Object.freeze({ [Lang.ES]: es, [Lang.EN]: en });
 
