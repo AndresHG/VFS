@@ -15,6 +15,7 @@ mod platform;
 mod rank;
 mod roots;
 mod search;
+mod suggest;
 mod types;
 
 pub use error::{Error, OverlapRelation, Result};
@@ -157,6 +158,23 @@ impl Vfs {
         }
     }
 
+    /// One search that finds something for a `query` that found nothing (VFS-13): without
+    /// filters, a short word respelt, or a word dropped. Counts only, within
+    /// `SearchConfig::suggest_budget`. Never interrupts a search: it waits for a running one;
+    /// a newer search ends it with `None`.
+    pub fn suggest(&self, query: &SearchQuery) -> Result<Option<Suggestion>> {
+        let generation = self.inner.searches.load(Ordering::SeqCst);
+        let mut guard = lock(&self.inner.searcher);
+        let (conn, _) = &mut *guard;
+        let stale = || self.inner.searches.load(Ordering::SeqCst) != generation;
+        match suggest::suggest(conn, &self.inner.config, query, &stale) {
+            // A try cut while an FTS table opened (a newer search, or its budget) counts as
+            // finding nothing (R4), as `search` reads the same cut as an interruption.
+            Err(e) if search::is_table_open_cut(&e) => Ok(None),
+            r => r,
+        }
+    }
+
     /// Absolute path of an indexed file, built from the original names.
     pub fn file_path(&self, file_id: i64) -> Result<PathBuf> {
         db::file_abs_path(&lock(&self.inner.reader), file_id)
@@ -282,6 +300,58 @@ impl Vfs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-13 AC-5: a newer search ends a suggestion with none, whether it started before the
+    /// first try or while a try ran; with no newer search the same query gets one.
+    #[test]
+    fn a_newer_search_ends_a_suggestion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let vfs = Vfs::open(&path).unwrap();
+        let mut conn = db::open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = db::ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let f = db::ingest::NewFile {
+            name: "factura luz.pdf",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        db::ingest::insert_file(&tx, top, &f).unwrap();
+        tx.commit().unwrap();
+        let q = SearchQuery {
+            text: "factura".into(),
+            filters: SearchFilters {
+                kinds: vec![FileKind::Photo],
+                ..SearchFilters::default()
+            },
+            limit: 1,
+            offset: 0,
+            sort: SortOrder::Relevance,
+        };
+        let mut guard = lock(&vfs.inner.searcher);
+        let (conn, _) = &mut *guard;
+        let config = SearchConfig::default();
+        let found = suggest::suggest(conn, &config, &q, &|| false).unwrap();
+        assert_eq!(found.map(|s| s.kind), Some(SuggestionKind::DropFilters));
+        assert_eq!(suggest::suggest(conn, &config, &q, &|| true).unwrap(), None);
+        // Fresh at the first check, stale once the try has run.
+        let checks = std::cell::Cell::new(0);
+        let after_first = || {
+            checks.set(checks.get() + 1);
+            checks.get() > 1
+        };
+        assert_eq!(
+            suggest::suggest(conn, &config, &q, &after_first).unwrap(),
+            None
+        );
+        assert_eq!(checks.get(), 2);
+    }
 
     /// The facade opens a fresh index (current schema version, empty) and reports it.
     #[test]

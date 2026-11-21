@@ -8,7 +8,8 @@ use serde::Serialize;
 use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
 use vfs_core::api::RevealOutcome;
 use vfs_core::{
-    DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, TruncatedBy,
+    DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, SuggestionKind,
+    TruncatedBy,
 };
 
 /// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
@@ -152,6 +153,17 @@ fn all_sort_orders() -> Vec<SortOrder> {
     all
 }
 
+fn all_suggestion_kinds() -> Vec<SuggestionKind> {
+    use SuggestionKind::*;
+    let all = vec![DropFilters, Spelling, DropTerm];
+    for k in &all {
+        match k {
+            DropFilters | Spelling | DropTerm => {}
+        }
+    }
+    all
+}
+
 fn all_bookmark_roots() -> Vec<BookmarkRoot> {
     use BookmarkRoot::*;
     let all = vec![Menu, Toolbar, Unfiled, Mobile];
@@ -220,6 +232,7 @@ fn contract_js_matches_the_rust_enums() {
         ("Source", serde_names(&all_sources())),
         ("BookmarkRoot", serde_names(&all_bookmark_roots())),
         ("ReadState", serde_names(&all_read_states())),
+        ("SuggestionKind", serde_names(&all_suggestion_kinds())),
         ("SortOrder", serde_names(&all_sort_orders())),
     ]
     .into_iter()

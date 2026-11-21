@@ -367,6 +367,7 @@ fn golden() -> Golden {
         &path,
         SearchConfig {
             deadline: Duration::from_secs(30),
+            ..SearchConfig::default()
         },
     )
     .unwrap();

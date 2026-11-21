@@ -143,7 +143,7 @@ fn write_file(path: &Path) {
 }
 
 /// VFS-1 AC-4 + AC-5 + AC-10 (X1): add_root -> search -> get_progress end to end
-/// over IPC, with the real indexer thread on a temporary tree.
+/// over IPC, with the real indexer thread on a temporary tree; VFS-13 AC-7: `suggest` too.
 #[test]
 fn add_root_search_progress_end_to_end() {
     let data = tempfile::tempdir().unwrap();
@@ -195,6 +195,20 @@ fn add_root_search_progress_end_to_end() {
     assert_eq!(hit["kind"], json!("document"));
     assert_eq!(hit["isDir"], json!(false));
     assert!(hit["dir"].as_str().unwrap().ends_with("Año 2019"));
+
+    // VFS-13 AC-7: `suggest` answers a search with no hits with the contract's shape, or null.
+    let photos = json!({ "query": { "text": "notaria", "filters": { "kinds": ["photo"] } } });
+    let s = invoke(&webview, "suggest", photos).expect("suggest");
+    assert_eq!(s["kind"], json!("dropFilters"));
+    assert_eq!(s["clearFilters"], json!(true));
+    assert_eq!(s["text"], json!("notaria"));
+    assert_eq!(s["count"], json!(1));
+    assert_eq!(s["capped"], json!(false));
+    let hopeless = json!({ "query": { "text": "zqxw", "filters": {} } });
+    assert_eq!(
+        invoke(&webview, "suggest", hopeless).expect("suggest"),
+        json!(null)
+    );
 
     let progress = invoke(&webview, "get_progress", json!({})).unwrap();
     assert!(["idle", "scanning", "paused"].contains(&progress["state"].as_str().unwrap()));

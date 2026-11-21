@@ -46,6 +46,7 @@ function tauriBackend(t) {
     addRoot: (path) => invoke('add_root', { path }),
     removeRoot: (id) => invoke('remove_root', { id }),
     search: (query) => invoke('search', { query }),
+    suggest: (query) => invoke('suggest', { query }),
     // File and folder ids are separate id spaces, so the shell needs `isDir` (-> is_dir).
     reveal: (id, isDir) => invoke('reveal', { id, isDir }),
     revealTarget: (id) => invoke('reveal_target', { id }),
@@ -82,7 +83,7 @@ function missingBackend() {
     missing: true,
     systemLocale: async () => navigator.language,
     setLanguage: async () => {},
-    listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
+    listRoots: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail, suggest: fail,
     reveal: fail, revealTarget: fail, openLinkUrl: fail, getProgress: fail, rescan: fail, setPaused: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,

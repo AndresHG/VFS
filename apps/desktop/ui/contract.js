@@ -59,6 +59,11 @@ export const ReadState = Object.freeze({
   FAILED: 'failed',
 });
 
+/** `Suggestion.kind`: what a suggestion for a search with no hits changes (VFS-13). */
+export const SuggestionKind = Object.freeze({
+  DROP_FILTERS: 'dropFilters', SPELLING: 'spelling', DROP_TERM: 'dropTerm',
+});
+
 /** Order of a search over several sources (VFS-6). */
 export const SortOrder = Object.freeze({
   RELEVANCE: 'relevance', NEWEST: 'newest', OLDEST: 'oldest', NAME: 'name', SIZE: 'size', SOURCE: 'source',

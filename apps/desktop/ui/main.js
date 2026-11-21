@@ -7,6 +7,7 @@ import { createVirtualList } from './vlist.js';
 import { placesOf } from './copies.js';
 import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
+import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -96,6 +97,8 @@ function main(L) {
     roots: [],
     progress: null,
     seq: 0,
+    /** The core's suggestion for the current search with no hits (VFS-13), or null. */
+    suggestion: null,
     total: 0,
     truncatedBy: null,
     approximateOrder: false, // VFS-12: the order covers only the matches read
@@ -325,17 +328,20 @@ function main(L) {
       if (p) { state.pickedFolder = p; state.folder = p; renderFolderSelect(); filtersChanged(); }
     } catch (err) { showError(errorText(err)); }
   });
-  $('f-clear').addEventListener('click', () => {
+  /** Clears type, date, size and folder; a suggestion (VFS-13) keeps a bookmark folder. */
+  function clearFilters({ keepBookmarkFolder = false } = {}) {
     state.kinds.clear();
     for (const c of chips.querySelectorAll('input')) c.checked = false;
     state.date = DateChoice.ANY; $('f-date').value = DateChoice.ANY;
     $('date-range').hidden = true; $('f-from').value = ''; $('f-to').value = '';
     $('range-error').textContent = '';
     state.size = SizeChoice.ANY; $('f-size').value = SizeChoice.ANY;
-    state.folder = ''; $('f-folder').value = '';
+    state.folder = folderAfterClear(state.folder, keepBookmarkFolder);
+    $('f-folder').value = state.folder;
     filtersChanged();
     $('q').focus();
-  });
+  }
+  $('f-clear').addEventListener('click', () => clearFilters());
   $('filters').addEventListener('submit', (e) => e.preventDefault());
 
   function filtersChanged() {
@@ -374,6 +380,8 @@ function main(L) {
   /** Runs page 0 of the current query. `quiet` keeps the list and selection (live refresh). */
   async function runSearch({ quiet = false } = {}) {
     const seq = ++state.seq;
+    // A live refresh keeps the suggestion on screen until its own answer replaces it.
+    if (!quiet) state.suggestion = null;
     clearTimeout(loadingTimer);
     if (!hasQuery()) {
       state.searchState = SearchState.IDLE;
@@ -400,6 +408,11 @@ function main(L) {
         active = same >= 0 ? same : state.active;
       }
       setResults(res.total, res.truncatedBy, new Map([[0, res.hits]]), active, res.approximateOrder);
+      if (wantsSuggestion(res.total, res.truncatedBy, sourcesFor(state.source, bookmarksOn()))) {
+        askSuggestion(seq);
+      } else {
+        state.suggestion = null;
+      }
     } catch (err) {
       if (seq !== state.seq) return;
       clearTimeout(loadingTimer);
@@ -407,6 +420,27 @@ function main(L) {
       state.lastError = err;
       setResults(0, null, new Map());
     }
+  }
+
+  /** VFS-13 R1, R5: asks the core for one suggestion; shown only while no newer search
+   *  started. A failure leaves the empty state as it is. */
+  async function askSuggestion(seq) {
+    const query = { text: state.text.trim(), filters: filters(), limit: 1, offset: 0 };
+    try {
+      const s = await api.suggest(query);
+      if (seq !== state.seq) return;
+      state.suggestion = s;
+      renderEmpty();
+    } catch { /* no suggestion */ }
+  }
+
+  /** Runs the suggested search: the box gets its text; filters go when it says so. */
+  function applySuggestion(s) {
+    q.value = s.text;
+    state.text = s.text;
+    $('q-clear').hidden = !s.text;
+    if (s.clearFilters) clearFilters({ keepBookmarkFolder: true }); else runSearch();
+    q.focus();
   }
 
   function setResults(total, truncatedBy, pages, active = 0, approximateOrder = false) {
@@ -830,14 +864,18 @@ function main(L) {
         parts.push(icon('info'), el('h3', null, S.emptyDeadlineTitle), el('p', null, S.emptyDeadlineBody));
         actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
       } else {
-        mode = `no-hits:${activeFilterCount() > 0}`;
+        const sg = state.suggestion;
+        mode = `no-hits:${activeFilterCount() > 0}:${sg ? sg.kind + sg.text : ''}`;
         parts.push(icon('search'), el('h3', null, S.emptyNoHitsTitle(state.text.trim())));
         if (activeFilterCount()) {
           parts.push(el('p', null, S.emptyNoHitsFilters));
-          actions = [button(S.clearFilters, 'btn btn-primary', () => $('f-clear').click())];
+          // A "drop filters" suggestion is this same action with its count.
+          if (!sg?.clearFilters) actions = [button(S.clearFilters, sg ? 'btn' : 'btn btn-primary', () => $('f-clear').click())];
         } else {
           parts.push(el('p', null, S.emptyNoHitsBody));
         }
+        // VFS-13: the suggestion goes first, as the one primary action.
+        if (sg) actions.unshift(button(suggestionLabel(S, N, sg), 'btn btn-primary', () => applySuggestion(sg)));
       }
     } else {
       box.hidden = true;

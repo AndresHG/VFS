@@ -221,19 +221,56 @@ pub struct SearchResponse {
 /// at it and the response says `truncatedBy = deadline` (VFS-1 AC-9, S3).
 pub const DEFAULT_SEARCH_DEADLINE: Duration = Duration::from_millis(1000);
 
+/// Default wall-clock budget of one `Vfs::suggest` call (VFS-13 R4).
+pub const DEFAULT_SUGGEST_BUDGET: Duration = Duration::from_millis(1500);
+
 /// Search tuning; not part of the UI contract.
 #[derive(Debug, Clone)]
 pub struct SearchConfig {
     /// Wall-clock budget for scans and the typo pass ([`DEFAULT_SEARCH_DEADLINE`]).
     pub deadline: Duration,
+    /// Wall-clock budget of every try of one suggestion ([`DEFAULT_SUGGEST_BUDGET`]).
+    pub suggest_budget: Duration,
 }
 
 impl Default for SearchConfig {
     fn default() -> SearchConfig {
         SearchConfig {
             deadline: DEFAULT_SEARCH_DEADLINE,
+            suggest_budget: DEFAULT_SUGGEST_BUDGET,
         }
     }
+}
+
+/// What a suggestion for a search with no hits changes (VFS-13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionKind {
+    /// The same text without the type, date, size and folder filters.
+    DropFilters,
+    /// A short word with two adjacent letters swapped or one letter removed.
+    Spelling,
+    /// The query without one of its words.
+    DropTerm,
+}
+
+/// One search that finds something where the asked one found nothing (VFS-13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Suggestion {
+    pub kind: SuggestionKind,
+    /// The search-box text to run: the typed text with the word replaced or removed.
+    pub text: String,
+    /// True only for `DropFilters`; sources and the bookmark folder are not filters here.
+    pub clear_filters: bool,
+    /// The typed word that changes (`Spelling`, `DropTerm`).
+    pub term: Option<String>,
+    /// The word that replaces it (`Spelling`).
+    pub replacement: Option<String>,
+    /// Hits of the suggested search as the list shows them, at most the hit cap.
+    pub count: u32,
+    /// The hit cap was reached.
+    pub capped: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

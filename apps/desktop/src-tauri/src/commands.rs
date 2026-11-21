@@ -7,7 +7,9 @@ use tauri::ipc::Invoke;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 use vfs_core::api::{ApiError, RevealOutcome};
-use vfs_core::{IndexProgress, LinkKind, LinkTarget, Root, SearchQuery, SearchResponse};
+use vfs_core::{
+    IndexProgress, LinkKind, LinkTarget, Root, SearchQuery, SearchResponse, Suggestion,
+};
 
 use crate::{reveal, AppState};
 
@@ -27,6 +29,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         add_root,
         remove_root,
         search,
+        suggest,
         reveal,
         reveal_target,
         open_link_url,
@@ -102,6 +105,12 @@ pub fn remove_root(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
 #[tauri::command(async)]
 pub fn search(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<SearchResponse> {
     Ok(state.vfs.search(&query)?)
+}
+
+/// One search that finds something for a file search with no hits (VFS-13), or none.
+#[tauri::command(async)]
+pub fn suggest(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<Option<Suggestion>> {
+    Ok(state.vfs.suggest(&query)?)
 }
 
 /// "Mostrar en carpeta" (VFS-1 AC-13): Finder/Explorer with the file or folder selected.

@@ -22,6 +22,7 @@ use vfs_core::{
 fn patient() -> SearchConfig {
     SearchConfig {
         deadline: std::time::Duration::from_secs(600),
+        ..SearchConfig::default()
     }
 }
 

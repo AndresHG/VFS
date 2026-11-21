@@ -396,6 +396,23 @@ or filter-only query, the response sets `approximateOrder` and the screen says s
 `search_sources` passes the order to the core and merges bookmarks into the sorted file list
 (dates saved, titles; no size, so after files).
 
+### A suggestion when nothing is found (VFS-13)
+
+When a file search ends with no hits (and the deadline did not cut it), the screen asks
+`Vfs::suggest` (command `suggest`) for one search that finds something. `suggest.rs` tries,
+in order: the same text without the type, date, size and folder filters (only with text and
+a filter); for each term of 4–5 letters, its adjacent transpositions and, for 5 letters, its
+deletions (shorter terms would need 2-letter variants below the trigram index; from 6
+letters the search already tolerates a typo); then, for two or more terms, the query without
+one term, last first. The first try that finds anything wins. Each try is
+`search::count`: relevance, no page resolved, no S7 cache entry, both deadlines at the end
+of `SearchConfig::suggest_budget` (1.5 s); a cut try counts as nothing. `suggest` takes the
+search lock without interrupting; every `search` bumps a generation counter before it
+interrupts, and a changed generation ends the suggestion with none. On 2 M synthetic files
+a suggestion takes 1–24 ms. The `Suggestion` carries the box text to run (typed words
+replaced or removed in place), whether to clear filters, the changed word and the grouped,
+capped count; the empty state shows it as its one primary button.
+
 ### Deadline
 
 Each query has two deadlines, checked every 1,000 SQLite VM steps and between rows:
@@ -486,6 +503,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `add_root` | `path` | `Root` |
 | `remove_root` | `id` | `null` |
 | `search` | `query: SearchQuery` | `SearchResponse` |
+| `suggest` | `query: SearchQuery` | `Suggestion \| null` (VFS-13) |
 | `reveal` | `id`, `isDir` | `"revealed"` or `"opened_parent"` |
 | `get_progress` | — | `IndexProgress` |
 | `rescan` | `id \| null` | `null` (`unavailable` if the indexer is not running) |
@@ -512,7 +530,10 @@ and once when it finishes, from `src-tauri/src/updates.rs`.
 Key shapes:
 
 - `SearchQuery { text, filters: { kinds, modifiedFrom, modifiedTo, sizeMin, sizeMax, folder },
-  limit, offset }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes.
+  limit, offset, sort }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes; `sort`
+  is a `SortOrder` (VFS-12).
+- `Suggestion { kind: dropFilters | spelling | dropTerm, text, clearFilters, term,
+  replacement, count, capped }` (VFS-13): the box text to run and the grouped, capped count.
 - `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link? }`. `id`
   is a `files.id`, or a `dirs.id` when `isDir`; the two id spaces overlap, so `reveal` needs
   both. `matched` is `name`, `path`, `target` (found with a link's target, VFS-18) or
