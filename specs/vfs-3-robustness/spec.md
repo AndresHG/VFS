@@ -1,6 +1,6 @@
 # VFS-3 — Robustness harness: crashes, hostile trees, properties, concurrency, soak
 
-- **Status**: implemented (PR #85); R5–R6 and AC-11..AC-13 added for issues 53, 57, 58, 103
+- **Status**: implemented (PR #85)
 - **Size**: M
 - **Links**: VFS-1 (`specs/vfs-1-core-search/spec.md`, AC-4..AC-11)
 
@@ -23,11 +23,6 @@ those harnesses and makes every defect they find a test.
   index aside, return a search error, or lose committed rows.
 - R4. WHILE a tree is churned under the running app, THE indexer SHALL keep resident memory
   bounded and, once the churn stops, reach "up to date" with the index equal to the disk.
-- R5. IF recovery cannot read the root list from the damaged index (the page holding it is
-  destroyed, the file is truncated or its header overwritten), THEN THE core SHALL rebuild
-  the index with the roots from a backup list kept next to the index (issue 58).
-- R6. WHEN a query holds a backslash, THE core SHALL read it as a path separator on Windows,
-  where no name can contain one, and literally on macOS, where a name can (issue 57).
 
 Structural invariants: `PRAGMA integrity_check` is ok; each FTS5 table passes its
 `integrity-check` and holds exactly one entry per base row (no orphan, none missing); every
@@ -65,15 +60,6 @@ Process-level tests live in `crates/vfs-cli/tests/` (`crash.rs`, `concurrency.rs
 - AC-10 (R4) Given `VFS_SOAK_SECS` of churn under `vfs run`, Then the index reaches up to date,
   equals the disk, and the second half's peak RSS is within 64 MiB of the first half's.
 
-- AC-11 (R5) Given an index with roots, When its first page is overwritten or the file is
-  truncated to nothing, Then the next open recovers and keeps every root; after any root is
-  added or removed, the backup list equals the index's root list.
-- AC-12 (R6) Given on macOS a file named `dos\barras\invertidas.txt` (two backslashes), When
-  its exact name is searched, Then it is found with an exact (not typo) match.
-- AC-13 (VFS-1 AC-9) Given a 10,000-character word without spaces, When it is searched,
-  Then the query returns promptly: typo tolerance stops at 64 characters
-  (`a_10k_character_term_returns_promptly`, issue 53).
-
 ## Running
 
 `cargo test` runs every scenario at a small size. `VFS_STRESS=1` runs hundreds of kill
@@ -85,7 +71,6 @@ on Windows and macOS, in release.
 
 - Real power loss (SIGKILL keeps the OS page cache; torn writes are simulated instead).
 - Hardware that lies about fsync.
-- Cleaning stale FTS entries left by damage SQLite cannot detect (D5).
 
 ## Decisions
 
@@ -94,6 +79,3 @@ on Windows and macOS, in release.
 | D1 | Slow variants | Same tests, sized by `VFS_STRESS`, never `#[ignore]` | lead | 2026-11-20 |
 | D2 | Recovery trigger | Only SQLite corrupt / not-a-database errors and a failed quick check; supersedes VFS-1 C5's "cannot be opened" | lead | 2026-11-20 |
 | D3 | Start-up catch-up | Never deferred, not even behind an interrupted walk, and idle is not reported while it is owed; supersedes VFS-1 I10's rule for start-up requests (#95) | lead | 2026-11-20 |
-| D4 | Root list backup (issue 58) | `<index>.roots`: root paths UTF-8, each ended by a NUL (a path can hold a newline, never a NUL), written to a temporary file and renamed after every root change and on each open whose list differs; read only when recovery cannot read `roots`. Named with the index prefix so the legacy-index move carries it | lead | 2026-11-21 |
-| D5 | Stale FTS entries after undetectable damage (issue 103) | Accepted: only bit rot or a lying disk causes it, search stays correct (candidates are checked against `files`), and the cure (rebuilding the FTS of 5 M rows) costs far more on the target HDD than the extra reads | lead | 2026-11-21 |
-| D6 | Backslash in queries (issue 57) | Separator on Windows only; stored keys unchanged, so no reindex | lead | 2026-11-21 |

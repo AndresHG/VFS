@@ -205,7 +205,8 @@ fn ac8_nfc_and_nfd_names() {
 }
 
 /// VFS-1 AC-10: a term may match any segment of the directory path, including a middle one,
-/// and terms may be split between the path and the name; `\` in the query is `/`.
+/// and terms may be split between the path and the name; `\` in the query is `/` on Windows
+/// (VFS-23 AC-2).
 #[test]
 fn ac10_matches_a_middle_path_segment() {
     let a = archive();
@@ -230,7 +231,7 @@ fn ac10_matches_a_middle_path_segment() {
     let r = a.fx.text("año extr");
     assert_eq!(only(&r).id, a.extracto);
     assert_eq!(r.hits[0].matched, MatchKind::Path);
-    // VFS-3 AC-12: a backslash separates folders on Windows only; on macOS it is literal.
+    // VFS-23 AC-2: a backslash separates folders on Windows only; on macOS it is literal.
     let backslash = a.fx.search("9\\ban", docs.clone());
     if cfg!(windows) {
         assert_eq!(only(&backslash).id, a.extracto);

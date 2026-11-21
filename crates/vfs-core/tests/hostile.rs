@@ -113,7 +113,7 @@ fn unicode_and_syntax_names() {
     }
 }
 
-/// VFS-3 AC-12 (issue 57): on macOS a name may hold backslashes; searching it exactly finds
+/// VFS-23 AC-2 (issue 57): on macOS a name may hold backslashes; searching it exactly finds
 /// it as an exact name match, with one backslash or several.
 #[cfg(unix)]
 #[test]

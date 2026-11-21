@@ -26,7 +26,7 @@ pub struct ParsedQuery {
 
 /// Bounded input: at most `MAX_QUERY_BYTES` of text and `MAX_TERM_CHARS` per term, so no
 /// query costs more than a typed one, whatever is pasted. NUL reads as a space, and `\\` as
-/// `/` on Windows only: a macOS name can hold a backslash (VFS-3 AC-12).
+/// `/` on Windows only: a macOS name can hold a backslash (VFS-23 AC-2).
 pub fn parse_query(text: &str) -> ParsedQuery {
     let mut text_end = text.len().min(MAX_QUERY_BYTES);
     while !text.is_char_boundary(text_end) {
@@ -94,7 +94,7 @@ mod tests {
         assert!(parse_query(&long).folded.chars().count() <= MAX_TERM_CHARS);
     }
 
-    /// VFS-3 AC-12: a backslash is a separator only on Windows, where no name holds one; on
+    /// VFS-23 AC-2: a backslash is a separator only on Windows, where no name holds one; on
     /// macOS a name can, so the query keeps it.
     #[test]
     fn backslash_is_a_separator_only_on_windows() {
