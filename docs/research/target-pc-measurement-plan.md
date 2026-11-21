@@ -269,7 +269,8 @@ Zip `%LOCALAPPDATA%\VFS-probe`, `%LOCALAPPDATA%\app.vfs.desktop\logs` and the Sy
 photographs. The log's info lines (`start`, `pass`, `pass_end`, `memory`, `watch_overflow`)
 hold only counts, durations, sizes and root numbers; its **warning** lines can name a folder
 that could not be listed, so read them before sharing with anyone else. Weeks later, bring
-the log folder back again: it keeps about 5 MB. The probe output holds no file
+the log folder back again (it keeps about 22 MB), or use "Exportar diagnóstico" in the app
+(`docs/diagnostic-report.md`). The probe output holds no file
 contents, only counts, timings, five sample names from the journal (`sample_names` in
 `usn.json`), and process names. Check `usn.json` before sharing it with anyone else.
 

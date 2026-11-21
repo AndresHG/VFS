@@ -6,12 +6,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { CATALOGS, Lang } from '../ui/strings.js';
-import { savedMessage } from '../ui/feedback.js';
+import { savedMessage, setupFeedback } from '../ui/feedback.js';
 
 const S = CATALOGS[Lang.ES];
 const EN = CATALOGS[Lang.EN];
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
-const api = readFileSync(new URL('../ui/api.js', import.meta.url), 'utf8');
 
 /** VFS-20 AC-7: the bottom bar opens a dialog with the text box, the names box unticked,
  * the "Ver el informe" preview and both actions, every label in the catalog. */
@@ -26,8 +25,6 @@ test('feedback dialog markup and copy', () => {
   assert.equal(S.feedbackButton, 'Enviar comentarios');
   assert.equal(S.feedbackPreview, 'Ver el informe');
   assert.match(S.feedbackExport, /Exportar diagnóstico/);
-  assert.match(api, /feedbackReport: \(description, includeNames\) => invoke\('feedback_report'/);
-  assert.match(api, /feedbackSave: \(description, includeNames, github\) => invoke\('feedback_save'/);
 });
 
 /** VFS-20 AC-4, AC-5: after saving, the message names the folder and the file, and says what
@@ -46,4 +43,56 @@ test('saved message says where the report is and what to do', () => {
   assert.ok(enLocal.includes(saved.folder) && enLocal.includes(saved.file), enLocal);
   assert.match(enLocal, /whoever installed/);
   assert.match(savedMessage(EN, saved, true), /GitHub/);
+});
+
+/** A stand-in for the few DOM elements the dialog touches. */
+function fakeDom() {
+  const els = new Map();
+  const $ = (id) => {
+    if (!els.has(id)) {
+      const listeners = {};
+      els.set(id, {
+        value: '', checked: false, open: false, hidden: true, disabled: false, className: '', textContent: '',
+        addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); },
+        fire: async (type) => { for (const fn of listeners[type] ?? []) await fn(); },
+        focus() {}, scrollIntoView() {}, showModal() { this.open = true; },
+      });
+    }
+    return els.get(id);
+  };
+  return $;
+}
+
+/** VFS-20 AC-7: the dialog opens with the names box unticked; opening "Ver el informe" asks
+ * for the report, and ticking the box asks again with names; saving reports where it went. */
+test('dialog asks for the report and refreshes it when the names box changes', async () => {
+  const $ = fakeDom();
+  const calls = [];
+  const api = {
+    feedbackReport: async (text, names) => { calls.push(['report', text, names]); return `informe ${names}`; },
+    feedbackSave: async (text, names, github) => {
+      calls.push(['save', text, names, github]);
+      return { folder: 'C:\\Descargas', file: 'vfs-informe-x.zip' };
+    },
+  };
+  setupFeedback({ api, S, $, errorText: () => 'error' });
+  $('feedback-names').checked = true;
+  await $('open-feedback').fire('click');
+  assert.equal($('feedback').open, true);
+  assert.equal($('feedback-names').checked, false);
+
+  $('feedback-text').value = 'Va lento';
+  $('feedback-details').open = true;
+  await $('feedback-details').fire('toggle');
+  assert.equal($('feedback-report').value, 'informe false');
+  $('feedback-names').checked = true;
+  await $('feedback-names').fire('change');
+  assert.equal($('feedback-report').value, 'informe true');
+  assert.deepEqual(calls, [['report', 'Va lento', false], ['report', 'Va lento', true]]);
+
+  await $('feedback-github').fire('click');
+  assert.deepEqual(calls.at(-1), ['save', 'Va lento', true, true]);
+  assert.equal($('feedback-msg').hidden, false);
+  assert.ok($('feedback-msg-text').textContent.includes('vfs-informe-x.zip'));
+  assert.equal($('feedback-github').disabled, false);
 });

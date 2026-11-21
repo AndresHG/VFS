@@ -10,7 +10,7 @@ use vfs_desktop_lib::{install_logger, LOG_KEEP, LOG_MAX_BYTES};
 /// VFS-5 AC-9: info records of the diagnostic target are written; info from any other
 /// target is not.
 /// VFS-20 AC-6: a panic is written as an error with its location; the file rotates at
-/// `LOG_MAX_BYTES` and the kept files hold at least 20 MB, several weeks of history.
+/// `LOG_MAX_BYTES`, keeps `LOG_KEEP` old files, and they hold at least 20 MB (several weeks).
 #[test]
 fn warnings_go_to_the_log_file_and_info_does_not() {
     let app = mock_builder()
@@ -41,16 +41,19 @@ fn warnings_go_to_the_log_file_and_info_does_not() {
     assert!(line.contains("simulated failure 42"), "{line}");
     assert!(line.contains("logging.rs:"), "{line}");
 
-    assert!((LOG_KEEP as u128 + 1) * LOG_MAX_BYTES >= 20 * 1024 * 1024);
+    // Enough warnings for two more rotations than are kept: exactly LOG_KEEP old files plus
+    // the active one remain, together holding at least 20 MB of history.
     let filler = "x".repeat(1000);
-    for _ in 0..(LOG_MAX_BYTES / 1000 + 10) {
+    for _ in 0..((LOG_KEEP as u128 + 2) * LOG_MAX_BYTES / 1000) {
         log::warn!("{filler}");
     }
     log::logger().flush();
     let files = read_logs(&dir.path().join("logs"));
-    assert!(files.len() >= 2, "no rotation: {}", files.len());
+    assert_eq!(files.len(), LOG_KEEP + 1);
     assert!(files[0].name.starts_with("vfs_"), "{}", files[0].name);
     assert!(files
         .iter()
         .all(|f| f.text.len() as u128 <= LOG_MAX_BYTES + 2048));
+    let kept: usize = files.iter().map(|f| f.text.len()).sum();
+    assert!(kept >= 20 * 1024 * 1024, "{kept}");
 }
