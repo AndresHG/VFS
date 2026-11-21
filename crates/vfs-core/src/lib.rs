@@ -137,10 +137,10 @@ impl Vfs {
 
     /// Runs a query; a query still running on another thread is interrupted first.
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
-        let started = std::time::Instant::now();
         let this = self.inner.searches.fetch_add(1, Ordering::SeqCst) + 1;
         self.inner.search_interrupt.interrupt();
         let mut guard = lock(&self.inner.searcher);
+        let started = std::time::Instant::now();
         let (conn, state) = &mut *guard;
         match search::search(conn, state, &self.inner.config, query) {
             // An FTS table cut short while opening is an interruption only when a newer
@@ -148,7 +148,7 @@ impl Vfs {
             Err(e)
                 if search::is_table_open_cut(&e)
                     && (self.inner.searches.load(Ordering::SeqCst) != this
-                        || started.elapsed() >= self.inner.config.deadline) =>
+                        || started.elapsed() >= search::cut_after(&self.inner.config)) =>
             {
                 Ok(search::interrupted_response(query, started))
             }
@@ -531,6 +531,44 @@ mod tests {
         std::fs::remove_dir(&blocker).unwrap();
         let _vfs = Vfs::open(&path).unwrap();
         assert_eq!(db::read_roots_backup(&path), Some(vec![root.path]));
+    }
+
+    /// VFS-3 AC-7: an FTS table that fails to open with no newer query and no deadline
+    /// behind it is an error, never taken for an interruption.
+    #[test]
+    fn real_fts_failure_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut conn = db::open_rw(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let root = db::ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let file = db::ingest::NewFile {
+            name: "archivo notaria.pdf",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        db::ingest::insert_file(&tx, top, &file).unwrap();
+        tx.commit().unwrap();
+        // Without its config table FTS5 cannot open: "vtable constructor failed".
+        conn.execute_batch("DROP TABLE files_fts_config").unwrap();
+        drop(conn);
+        let vfs = Vfs::open(&path).unwrap();
+        let r = vfs.search(&SearchQuery {
+            text: "notaria".into(),
+            filters: SearchFilters::default(),
+            limit: 10,
+            offset: 0,
+        });
+        assert!(
+            matches!(&r, Err(e) if search::is_table_open_cut(e)),
+            "{r:?}"
+        );
     }
 
     /// The facade is shareable across threads (Tauri state, indexer callbacks).
