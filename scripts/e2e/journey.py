@@ -50,7 +50,8 @@ NO_FILTERS = {"kinds": [], "modifiedFrom": None, "modifiedTo": None, "sizeMin": 
 DATE_WEEK = "week"
 SIZE_MEDIUM, SIZE_LARGE, SIZE_HUGE = "medium", "large", "huge"
 
-# What "Mostrar en carpeta" must show: the item selected, or (path over 260 chars) an ancestor.
+# What "Mostrar en carpeta" must show: the item selected (also past 260 chars, VFS-24 AC-1),
+# or an ancestor (the fallback when the Shell cannot select the item).
 EXPECT_SELECT = "select"
 EXPECT_PARENT = "parent"
 

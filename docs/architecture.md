@@ -472,10 +472,11 @@ own COM apartment, which selects the item and reuses an Explorer window already 
 folder. When the call has to open a new Explorer window, the folder opens with nothing
 selected (issue 107: measured on the Windows CI runner, also with `explorer /select,`), so
 once a new window appears the call is repeated into it. Only if the call fails it runs
-`explorer.exe /select,"<path>"`. A path over 259 UTF-16 units opens the nearest ancestor
-Explorer can address instead; a trailing backslash (a drive root) is doubled so it cannot
-escape the closing quote under the Windows command-line rules (`explorer_arg`; the
-drive-root case is unverified on Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No
+`explorer.exe /select,"<path>"`. A path over 259 UTF-16 units is selected the same way
+through its plain (non-`\\?\`) form (VFS-24 AC-1); only if that fails does the nearest
+ancestor Explorer can address open, reporting `opened_parent`. A trailing backslash (a
+drive root) is doubled so it cannot escape the closing quote under the Windows command-line
+rules (`explorer_arg`; the drive-root case is unverified on Windows). See `apps/desktop/src-tauri/src/reveal.rs`. No
 file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
