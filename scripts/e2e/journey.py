@@ -32,6 +32,8 @@ import gen_tree  # noqa: E402
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
+# Seconds after minimising at which memory is sampled (measurement plan step 9: 5 minutes).
+MINIMISED_SAMPLES_S = (15, 60, 300)
 
 # Serde values of `IndexerState` and `RootStatus` (crates/vfs-core/src/types.rs), as
 # `get_progress` reports them.
@@ -541,6 +543,103 @@ class Journey:
         self.metrics["memory_idle_after_search"] = mem
         return mem
 
+    def s_memory_minimised(self):
+        """VFS-24 AC-2, VFS-5 AC-12: memory with the window open, minimised
+        (WebView2 suspended) and restored."""
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = main_window(self.app.proc.pid)
+        samples = {"open": self.app.memory()}
+        user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+        t0 = now()
+        for at in MINIMISED_SAMPLES_S:
+            time.sleep(max(0.0, at - (now() - t0)))
+            samples[f"minimised_{at}s"] = self.app.memory()
+        # Only the app's own log proves WebView2 suspended: Windows trims any minimised
+        # process's working set anyway.
+        log = os.path.join(os.environ.get("LOCALAPPDATA", ""), "app.vfs.desktop", "logs",
+                           "vfs.log")
+        with open(log, encoding="utf-8", errors="replace") as f:
+            samples["suspend_log"] = [l.strip() for l in f if "webview suspended" in l][-3:]
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        time.sleep(10)
+        samples["restored_10s"] = self.app.memory()
+        # The resumed page must still search and render (raises if it does not).
+        samples["restored_search"] = self.search_ui("notaria valdepenas",
+                                                    self.t[gen_tree.T_NAME]["name"])
+        self.metrics["memory_minimised"] = samples
+        if not any("webview suspended: true" in l for l in samples["suspend_log"]):
+            raise AssertionError(f"WebView2 did not report a suspend: {samples['suspend_log']}")
+        return samples
+
+    def s_accessibility(self):
+        """VFS-24 AC-3: names Narrator reads through UI Automation, and the page
+        following Windows high contrast and "show animations" off."""
+        from pywinauto import Desktop
+        self.search_ui("notaria valdepenas", self.t[gen_tree.T_NAME]["name"])
+        want = self.wd.js(
+            "return {search: document.querySelector('label[for=q]').textContent,"
+            " results: document.querySelector('#results').getAttribute('aria-label'),"
+            " row: document.querySelector('#results [role=option]').getAttribute('aria-label')}")
+        win = Desktop(backend="uia").window(handle=main_window(self.app.proc.pid))
+
+        def uia_names():
+            found = {}
+            for el in win.descendants():
+                try:
+                    info = el.element_info
+                    found.setdefault(info.control_type, []).append(info.name)
+                except Exception:
+                    pass
+            return found
+        # WebView2 builds its UI Automation tree on the first request: ask until it is there.
+        names, exposed = {}, {}
+        for _ in range(10):
+            names = uia_names()
+            seen = set(sum(names.values(), []))
+            exposed = {k: v in seen for k, v in want.items()}
+            if all(exposed.values()):
+                break
+            time.sleep(1)
+        out = {"expected": want, "exposed": exposed,
+               "uia_counts": {k: len(v) for k, v in names.items()},
+               "uia_sample": {k: [n for n in v if n][:5] for k, v in names.items()}}
+        self.metrics["accessibility"] = out
+        out["high_contrast"] = self.with_setting(
+            set_high_contrast, "(forced-colors: active)", "high-contrast")
+        out["reduced_motion"] = self.with_setting(
+            set_animations_off, "(prefers-reduced-motion: reduce)", "reduced-motion")
+        self.metrics["accessibility"] = out
+        missing = [k for k, ok in exposed.items() if not ok]
+        unfollowed = [k for k in ("high_contrast", "reduced_motion") if not out[k]["follows"]]
+        if missing or unfollowed:
+            raise AssertionError(f"not exposed: {missing}; settings not followed: {unfollowed}")
+        return out
+
+    def with_setting(self, toggle, media, label):
+        """Starts from the Windows setting off (the runner may have it on already), checks
+        the page does not match `media`, turns the setting on, waits for the page to match,
+        takes a screenshot and turns it off again: the page must follow both ways."""
+        def matches(want):
+            try:
+                wait_for(lambda: self.wd.js(f"return matchMedia('{media}').matches") == want,
+                         15, 0.5, f"{media} = {want}")
+                return True
+            except TimeoutError:
+                return False
+        initially = self.wd.js(f"return matchMedia('{media}').matches")
+        toggle(False)
+        off = matches(False)
+        toggle(True)
+        try:
+            on = matches(True)
+            self.shoot(label)
+        finally:
+            toggle(False)
+        back = matches(False)
+        return {"initially": initially, "off": off, "on": on, "back_off": back,
+                "follows": off and on and back}
+
     def s_close_and_change(self):
         self.app.stop()
         d = os.path.join(self.root, "Escritorio", "Cambios mientras cerrado")
@@ -624,6 +723,9 @@ class Journey:
             self.step("live-rename", self.s_live_rename)
             self.step("live-delete", self.s_live_delete)
         self.step("memory-idle", self.s_memory_idle)
+        if IS_WIN:
+            self.step("memory-minimised", self.s_memory_minimised)
+            self.step("accessibility", self.s_accessibility)
         if not short:
             self.step("closed-and-changed", self.s_close_and_change)
             self.step("reopen-catch-up", self.s_reopen_catch_up)
@@ -636,6 +738,52 @@ class Journey:
 
 # ---------------------------------------------------------------------------------------------
 # Native UI outside the webview: the folder dialog and the file manager
+
+
+def main_window(pid):
+    """The visible top-level window of process `pid` whose title starts with "VFS"."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        title = ctypes.create_unicode_buffer(64)
+        user32.GetWindowTextW(hwnd, title, 64)
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and title.value.startswith("VFS"):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if not found:
+        raise AssertionError(f"no visible VFS window of process {pid}")
+    return found[0]
+
+
+def set_high_contrast(on):
+    """Windows high contrast for this user (SPI_SETHIGHCONTRAST; no administrator needed)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class HIGHCONTRASTW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.UINT), ("dwFlags", wintypes.DWORD),
+                    ("lpszDefaultScheme", wintypes.LPWSTR)]
+    hc = HIGHCONTRASTW(ctypes.sizeof(HIGHCONTRASTW), 1 if on else 0, None)  # HCF_HIGHCONTRASTON
+    # SPI_SETHIGHCONTRAST, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+    if not ctypes.windll.user32.SystemParametersInfoW(0x0043, ctypes.sizeof(hc),
+                                                      ctypes.byref(hc), 0x3):
+        raise ctypes.WinError()
+
+
+def set_animations_off(off):
+    """Windows "show animations in Windows" (SPI_SETCLIENTAREAANIMATION), per user."""
+    import ctypes
+    if not ctypes.windll.user32.SystemParametersInfoW(0x1043, 0, ctypes.c_void_p(0 if off else 1),
+                                                      0x3):
+        raise ctypes.WinError()
 
 
 def drive_windows_folder_dialog(path, journey):

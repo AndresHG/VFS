@@ -123,3 +123,67 @@ test('the second action of a row depends on the link', () => {
   assert.equal(secondActionOf(hit(null)), null);
   assert.equal(secondActionOf(undefined), null);
 });
+
+const css = readFileSync(new URL('../ui/styles.css', import.meta.url), 'utf8');
+
+/** CSS blocks `@media <query> { … }`, balanced braces included. */
+function mediaBlocks(query) {
+  const out = [];
+  let at = css.indexOf(`@media ${query}`);
+  while (at >= 0) {
+    let i = css.indexOf('{', at) + 1;
+    const start = i;
+    for (let depth = 1; depth > 0; i++) depth += css[i] === '{' ? 1 : css[i] === '}' ? -1 : 0;
+    out.push(css.slice(start, i - 1));
+    at = css.indexOf(`@media ${query}`, i);
+  }
+  return out.join('\n');
+}
+
+/** VFS-24 AC-3: every control has a name a screen reader can read — its text, a
+ *  visually hidden text, a text span main.js fills, or a label set from the copy table. */
+test('every button and field has an accessible name', () => {
+  // Buttons whose whole text main.js sets from the copy table (`$('id').textContent = S.…`,
+  // or the pattern listed here).
+  const mainJs = readFileSync(new URL('../ui/main.js', import.meta.url), 'utf8');
+  const scripted = {
+    pause: /pause\.textContent = actions\.paused \? S\.resume : S\.pause/,
+    // VFS-21: shown only with an action, whose text it carries.
+    'update-action': /action\.hidden = !view\.action;\s*action\.textContent = view\.action/,
+  };
+  for (const m of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+    const [, attrs, inner] = m;
+    const id = /\bid="([^"]+)"/.exec(attrs)?.[1];
+    if (scripted[id] || mainJs.includes(`$('${id}').textContent = S.`)) {
+      if (scripted[id]) assert.match(mainJs, scripted[id], `#${id} gets its text from main.js`);
+      continue;
+    }
+    const named = /aria-label|data-s(-label)?="/.test(attrs) || /data-s="|<span id="[\w-]+-text">|>[^<\s][^<]*</.test(inner);
+    assert.ok(named, `unnamed button: ${m[0].slice(0, 80)}`);
+  }
+  for (const m of html.matchAll(/<(input|select)\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
+    const [tag, , id] = m;
+    const labelled = /aria-label/.test(tag) || html.includes(`for="${id}"`)
+      || new RegExp(`<label[^>]*>(?:(?!</label>)[\\s\\S])*id="${id}"`).test(html);
+    assert.ok(labelled, `unlabelled field #${id}`);
+  }
+});
+
+/** VFS-24 AC-3: movement runs only without "reduce motion", except the progress
+ *  sweep, which slows down instead; Windows high contrast keeps the selected row, the state
+ *  dots and the progress bars visible. */
+test('reduced motion and high contrast are honoured', () => {
+  const motion = mediaBlocks('(prefers-reduced-motion: no-preference)');
+  for (const m of css.matchAll(/animation:\s*([\w-]+)/g)) {
+    if (m[1] === 'sweep') continue;
+    assert.ok(motion.includes(m[0]), `${m[0]} runs under reduced motion`);
+  }
+  assert.match(mediaBlocks('(prefers-reduced-motion: reduce)'), /progress:not\(\[value\]\)/);
+  const forced = mediaBlocks('(forced-colors: active)');
+  for (const sel of ['.row[aria-selected="true"]', '.root-state::before', 'progress::-webkit-progress-value']) {
+    const at = forced.indexOf(`${sel} {`);
+    assert.ok(at >= 0, `${sel} under forced colours`);
+    const body = forced.slice(at, forced.indexOf('}', at));
+    assert.match(body, /Highlight|CanvasText|outline/, `${sel} drawn with system colours or an outline`);
+  }
+});
