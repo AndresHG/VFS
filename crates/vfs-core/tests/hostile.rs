@@ -113,6 +113,42 @@ fn unicode_and_syntax_names() {
     }
 }
 
+/// VFS-3 AC-12 (issue 57): on macOS a name may hold backslashes; searching it exactly finds
+/// it as an exact name match, with one backslash or several.
+#[cfg(unix)]
+#[test]
+fn backslash_names_are_found_exactly() {
+    let env = Env::new();
+    let (root_id, root) = env.add_root("raiz");
+    let names = [
+        "una\\barra.txt",
+        "dos\\barras\\invertidas.txt",
+        "tres\\\\\\juntas.txt",
+    ];
+    for name in names {
+        fs::write(root.join(name), b"x").unwrap();
+    }
+    env.scan_ok();
+    let (files, _) = index_snapshot(&env.reader(), root_id);
+    for name in names {
+        let id = files[name].id;
+        let r = env
+            .vfs
+            .search(&vfs_core::SearchQuery {
+                text: name.to_string(),
+                filters: Default::default(),
+                limit: 50,
+                offset: 0,
+            })
+            .unwrap();
+        let hit = r.hits.iter().find(|h| h.id == id);
+        assert!(
+            matches!(hit, Some(h) if h.matched == vfs_core::MatchKind::Name),
+            "{name:?}: {hit:?}"
+        );
+    }
+}
+
 /// VFS-1 AC-4, AC-8: Windows-reserved device names, trailing dots and spaces, reserved
 /// characters and control characters. NTFS refuses or rewrites some of them (and APFS
 /// accepts them all); whatever exists afterwards is what the index must hold.
