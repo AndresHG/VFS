@@ -597,8 +597,10 @@ function main() {
       case 'Enter':
         e.preventDefault();
         if (state.active < 0) break;
-        if (e.shiftKey && placesOf(hitAt(state.active)).length > 1) openPlaces(state.active);
-        else (e.shiftKey ? actSecond : act)(state.active);
+        // Mayús+Intro: a link's own second action first, else the places of a file's copies.
+        if (!e.shiftKey) act(state.active);
+        else if (secondActionOf(hitAt(state.active))) actSecond(state.active);
+        else if (placesOf(hitAt(state.active)).length > 1) openPlaces(state.active);
         break;
       case 'Escape':
         e.preventDefault();

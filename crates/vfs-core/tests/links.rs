@@ -121,6 +121,24 @@ fn found_by_target_folder_and_name() {
     assert!(f.hit("album ninos", lnk).is_some());
 }
 
+/// VFS-18 R4: a word of the target misspelled by one letter (the VFS-1 one-typo rule, words of
+/// 6 or more characters) still finds the shortcut, ranked as a typo hit; a short word must
+/// be exact.
+#[test]
+fn found_by_target_with_one_typo() {
+    let mut f = fixture();
+    let (root, top) = f.root("/archivo");
+    let familia = f.dir(root, top, "Familia");
+    let lnk = f.file(familia, "Fotos.lnk");
+    f.target(lnk, Some(r"D:\Viaje Sevilla 2003"));
+    let hit = f
+        .hit("sevila", lnk)
+        .expect("found with one typo in the target");
+    assert_eq!(hit.matched, MatchKind::Fuzzy);
+    assert_eq!(f.hit("sevilla", lnk).unwrap().matched, MatchKind::Target);
+    assert!(f.hit("vaije", lnk).is_none());
+}
+
 /// VFS-18 AC-5: a shortcut is left out when the same search returns its target (an indexed
 /// file or folder), and kept when the search finds only the shortcut.
 #[test]

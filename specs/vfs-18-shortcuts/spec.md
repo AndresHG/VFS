@@ -101,7 +101,7 @@ Rust standard library source. Full notes with a link per claim: `docs/research/s
 - **Search (`search.rs`)**: a file hit that is a link carries `link: {kind, target}`.
   A link-target pass scans `links` with a target and verifies every term in the link's own
   folder path, its name or its target (same folding and one-typo rule); a hit that needed
-  the target has `matched = target`. Ranking puts `target` with path matches (tier 3).
+  the target has `matched = target`, one that needed a typo is a typo hit (`fuzzy`). Ranking puts `target` with path matches (tier 3).
   Before the list is cut, a link hit is dropped when its target is an indexed file or
   folder that is itself among the candidates (decision D1). Type filters other than
   "Otros" exclude link hits (their target's kind is unknown without touching it); date,

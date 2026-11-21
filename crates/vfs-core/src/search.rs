@@ -1045,7 +1045,15 @@ fn run_query(
     // VFS-18 R4: links found with the help of their target, ranked with path matches.
     if !terms.is_empty() && run.hits.len() < MAX_HITS {
         for g in &groups {
-            link_pass(conn, run, &ctx, g)?;
+            link_pass(conn, run, &ctx, g, false)?;
+        }
+    }
+    // Links within one edit of a term (VFS-18 R4), under the same trigger as the typo tiers.
+    // They run before the S8 probe, which reads only the path indexes and not link targets;
+    // there are few links and few hits here, so no better tier is pushed out.
+    if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
+        for g in &groups {
+            link_pass(conn, run, &ctx, g, true)?;
         }
     }
     // S8: with nothing found yet, both typo tiers would run to exhaustion; one probe of the
@@ -1502,7 +1510,16 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
 /// filters, not indexed. A link that its own folder and name already match keeps that
 /// `matched` (the name and path tiers usually found it first); one that needed its target
 /// is `MatchKind::Target`.
-fn link_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Result<()> {
+/// Links whose every term is in their own folder, name or target (VFS-18 R4). With `fuzzy`,
+/// only the links that need the one-typo rule (VFS-1) for some term, as typo hits; the exact
+/// ones were taken by the pass without it.
+fn link_pass(
+    conn: &mut Connection,
+    run: &mut Run,
+    ctx: &Ctx,
+    g: &Group,
+    fuzzy: bool,
+) -> Result<()> {
     let Some(clause) = &ctx.files else {
         return Ok(());
     };
@@ -1517,10 +1534,15 @@ fn link_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Resu
     each_row(conn, run, &sql, &params, deadline, |run, _, row| {
         let target: String = row.get(9)?;
         let r = FileRow::read(row)?;
-        let matched = verify_file(&g.terms, &r.name_key, &r.path_key, false).or_else(|| {
-            let own = format!("{}/{}", r.path_key, r.name_key);
-            verify_file(&g.terms, &target, &own, false).map(|_| MatchKind::Target)
-        });
+        let matched = verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy)
+            .or_else(|| {
+                let own = format!("{}/{}", r.path_key, r.name_key);
+                verify_file(&g.terms, &target, &own, fuzzy).map(|m| match m {
+                    MatchKind::Fuzzy => MatchKind::Fuzzy,
+                    _ => MatchKind::Target,
+                })
+            })
+            .filter(|m| !fuzzy || *m == MatchKind::Fuzzy);
         Ok(match matched {
             Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
             None => true,
