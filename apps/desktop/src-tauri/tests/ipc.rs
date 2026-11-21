@@ -335,3 +335,32 @@ fn update_check_off_makes_no_connection() {
     let err = invoke(&webview, "install_update", json!({})).unwrap_err();
     assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
 }
+
+/// VFS-20 AC-7, AC-3: "Ver el informe" answers over IPC with the frontend's payload; the root
+/// path appears only when the names box is ticked.
+#[test]
+fn feedback_report_over_ipc() {
+    let data = tempfile::tempdir().unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    let vfs = vfs_core::Vfs::open(&data.path().join(INDEX_FILE)).unwrap();
+    let root = vfs.add_root(tree.path()).unwrap();
+    app.manage(AppState { vfs });
+
+    let args = |names: bool| json!({ "description": "Va lento", "includeNames": names });
+    let text = invoke(&webview, "feedback_report", args(false)).unwrap();
+    let text = text.as_str().unwrap();
+    assert!(text.starts_with("VFS diagnostic report"), "{text}");
+    assert!(text.contains("Va lento"));
+    assert!(
+        text.contains(&format!("root {}: drive=", root.id)),
+        "{text}"
+    );
+    assert!(!text.contains(&root.path), "{text}");
+
+    let text = invoke(&webview, "feedback_report", args(true)).unwrap();
+    assert!(text
+        .as_str()
+        .unwrap()
+        .contains(&format!("path: {}", root.path)));
+}

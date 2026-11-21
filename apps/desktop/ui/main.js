@@ -8,6 +8,7 @@ import { placesOf, showsCloudBadge } from './copies.js';
 import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
+import { setupFeedback } from './feedback.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -1051,6 +1052,10 @@ function main(L) {
     saveLanguage(e.target.value);
     location.reload();
   });
+
+  /* ---------------------------------------------------------------- feedback (VFS-20) */
+
+  setupFeedback({ api, S, $, errorText });
 
   /* ---------------------------------------------------------------- folder panel */
 

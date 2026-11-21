@@ -576,9 +576,19 @@ rules (`explorer_arg`; the drive-root case is unverified on Windows). See `apps/
 file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
-log plugin), rotated at 1 MB with four old files kept. Below warning level only the
-indexer's diagnostic records (target `vfs::diag`, VFS-5) are written: per-minute walk rates,
-back-off, commit and checkpoint durations, overflows and memory, never a file name.
+log plugin), rotated at 2 MB with ten old files kept (22 MB, several weeks; VFS-20). Below
+warning level only the indexer's diagnostic records (target `vfs::diag`, VFS-5) are written:
+per-minute walk rates, back-off, commit and checkpoint durations, overflows and memory, never
+a file name. A panic hook writes every panic as an error (target `vfs::panic`) with its source
+location.
+
+"Enviar comentarios" (VFS-20, `feedback.rs`) builds a plain-text report on demand: version,
+OS, drive and disk kind (SSD/HDD) per root, index stats, settings, log counts and every kept
+log file. Unless the user ticks the names box, root paths, the home folder and anything that
+reads as a path in non-diagnostic lines become `<ruta>` (`redact_line`). The report is saved
+as `vfs-informe-<date>.zip` in Downloads and revealed; "Enviar por GitHub" also opens a
+prefilled issue from `.github/ISSUE_TEMPLATE/comentarios.yml` carrying the summary, never a
+log line. The app makes no network request; see `docs/diagnostic-report.md`.
 
 The main window starts hidden and is shown when its page has loaded (or after 120 s). If
 its outer frame is larger than its monitor's work area (the screen minus the taskbar), it is

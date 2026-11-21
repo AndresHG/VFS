@@ -143,6 +143,7 @@
       </div>
       <button id="pause" class="btn btn-quiet" type="button" hidden></button>
       <button id="rescan-now" class="btn btn-quiet" type="button" hidden data-s="rescanAll"></button>
+      <button id="open-feedback" class="btn btn-quiet" type="button" data-s="feedbackButton"></button>
       <button id="open-folders" class="btn btn-quiet" type="button"></button>
       <button id="open-settings" class="btn btn-quiet" type="button" data-s="settingsButton"></button>
     </footer>
@@ -222,6 +223,37 @@
     <ul class="roots" id="unreadable-list" role="list"></ul>
     <p class="drawer-intro" id="unreadable-more" hidden></p>
     <p class="drawer-intro" data-s="unreadableHint"></p>
+  </dialog>
+
+  <!-- VFS-20: "Enviar comentarios". The report is built in the shell; nothing is sent from here. -->
+  <dialog id="feedback" class="drawer" aria-labelledby="feedback-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="feedback-title" data-s="feedbackTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <p class="drawer-intro" data-s="feedbackIntro"></p>
+    <div class="feedback-body">
+      <label class="feedback-label" for="feedback-text" data-s="feedbackLabel"></label>
+      <textarea id="feedback-text" rows="5" maxlength="20000"></textarea>
+      <label class="toggle"><input type="checkbox" id="feedback-names" aria-describedby="feedback-names-hint"> <span data-s="feedbackNames"></span></label>
+      <p class="feedback-hint" id="feedback-names-hint" data-s="feedbackNamesHint"></p>
+      <details id="feedback-details">
+        <summary data-s="feedbackPreview"></summary>
+        <textarea id="feedback-report" rows="12" readonly spellcheck="false" data-s-label="feedbackPreview"></textarea>
+      </details>
+      <p class="feedback-hint" data-s="feedbackHowTo"></p>
+      <div id="feedback-msg" class="banner" role="status" hidden>
+        <svg aria-hidden="true"><use href="#i-info"/></svg>
+        <p id="feedback-msg-text"></p>
+      </div>
+    </div>
+    <div class="drawer-foot">
+      <button id="feedback-github" class="btn btn-primary" type="button" data-s="feedbackGithub"></button>
+      <button id="feedback-export" class="btn btn-quiet" type="button" data-s="feedbackExport"></button>
+    </div>
   </dialog>
 
   <dialog id="confirm-remove" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-desc">

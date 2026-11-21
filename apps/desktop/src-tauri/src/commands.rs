@@ -46,6 +46,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::updates::set_update_check,
         crate::updates::check_for_update,
         crate::updates::install_update,
+        crate::feedback::feedback_report,
+        crate::feedback::feedback_save,
     ]
 }
 
