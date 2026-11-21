@@ -761,6 +761,12 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 
 /* VFS-6: bookmarks as a source (docs/design/system.md "Sources"). */
 .row .ico[data-kind="bookmark"] { color: var(--accent); }
+.setting { display: grid; gap: var(--s2); padding: 0 var(--s5) var(--s4); }
+.setting label { font-weight: 700; }
+.setting select {
+  min-block-size: 2.5rem; padding: 0 var(--s3); border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--surface);
+}
 .bookmarks-setting { padding: var(--s4) var(--s5) 0; border-block-start: 1px solid var(--line); }
 .bookmarks-setting h3 { margin: 0 0 var(--s1); font-size: 1rem; }
 .bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }

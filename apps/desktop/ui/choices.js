@@ -2,6 +2,12 @@
 // selects, where a search is, and how the screen is laid out. Their meaning is in main.js and
 // status.js, their labels in the catalogs (strings.es.js, strings.en.js).
 
+/** The UI languages (VFS-22). */
+export const Lang = Object.freeze({ ES: 'es', EN: 'en' });
+
+/** The Ajustes language select: a language, or follow the system (VFS-22 R3). */
+export const LanguageChoice = Object.freeze({ SYSTEM: 'system', ...Lang });
+
 export const DateChoice = Object.freeze({
   ANY: 'any',
   WEEK: 'week',

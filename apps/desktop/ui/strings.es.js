@@ -2,7 +2,7 @@
 // "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values. Every
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
-import { DateChoice, SizeChoice, SourceChoice } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
 import { BookmarkRoot, ErrorCode, FileKind, ReadState, RootStatus, SortOrder } from './contract.js';
 
 export const es = {
@@ -164,6 +164,13 @@ export const es = {
     [ReadState.FROM_BACKUP]: 'Firefox no dejó leer sus marcadores más recientes; se usa su última copia de seguridad.',
     [ReadState.NO_FIREFOX]: 'No se han encontrado marcadores de Firefox en este equipo.',
     [ReadState.FAILED]: 'No se pudieron leer los marcadores de Firefox. Se volverá a intentar más tarde.',
+  },
+  settingsButton: 'Ajustes',
+  settingsTitle: 'Ajustes',
+  languageLabel: 'Idioma',
+  languageOptions: {
+    [LanguageChoice.SYSTEM]: 'El del sistema', [LanguageChoice.ES]: 'Español',
+    [LanguageChoice.EN]: 'English',
   },
   removeTitle: '¿Quitar esta carpeta?',
   removeBody: 'Dejará de aparecer en las búsquedas. Sus archivos no se borran del disco.',

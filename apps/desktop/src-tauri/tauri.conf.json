@@ -28,6 +28,7 @@
     "active": true,
     "targets": ["nsis", "app"],
     "category": "Utility",
+    "publisher": "VFS",
     "shortDescription": "Buscador de archivos",
     "icon": [
       "icons/32x32.png",
@@ -40,7 +41,7 @@
       "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Spanish"],
+        "languages": ["Spanish", "English"],
         "displayLanguageSelector": false
       }
     },

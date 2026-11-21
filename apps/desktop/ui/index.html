@@ -135,6 +135,7 @@
       <button id="pause" class="btn btn-quiet" type="button" hidden></button>
       <button id="rescan-now" class="btn btn-quiet" type="button" hidden data-s="rescanAll"></button>
       <button id="open-folders" class="btn btn-quiet" type="button"></button>
+      <button id="open-settings" class="btn btn-quiet" type="button" data-s="settingsButton"></button>
     </footer>
   </div>
 
@@ -165,6 +166,21 @@
       <button id="add-folder" class="btn btn-primary" type="button" data-s="addFolder"></button>
       <button id="rescan-all" class="btn btn-quiet" type="button" data-s="rescanAll"></button>
     </div>
+  </dialog>
+
+  <!-- VFS-22: settings; the language now, more settings join later. -->
+  <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="settings-title" data-s="settingsTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <section class="setting">
+      <label for="language" data-s="languageLabel"></label>
+      <select id="language"></select>
+    </section>
   </dialog>
 
   <dialog id="copies" class="drawer" aria-labelledby="copies-title" closedby="any">
