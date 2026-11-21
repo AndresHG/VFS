@@ -13,7 +13,7 @@
 //   slow                 add 0.4–1.2 s of latency to every search
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
-// opened_parent. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
+// opened_parent, standing in for the rare case the Shell cannot select a long path (VFS-24). Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
 // gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
