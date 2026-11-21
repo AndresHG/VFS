@@ -140,7 +140,7 @@ function mediaBlocks(query) {
   return out.join('\n');
 }
 
-/** VFS-8 AC-11, issue 22: every control has a name a screen reader can read — its text, a
+/** VFS-24 AC-3: every control has a name a screen reader can read — its text, a
  *  visually hidden text, a text span main.js fills, or a label set from the copy table. */
 test('every button and field has an accessible name', () => {
   // Buttons whose whole text main.js sets from the copy table (`$('id').textContent = S.…`,
@@ -165,7 +165,7 @@ test('every button and field has an accessible name', () => {
   }
 });
 
-/** VFS-8 AC-11, issue 22: movement runs only without "reduce motion", except the progress
+/** VFS-24 AC-3: movement runs only without "reduce motion", except the progress
  *  sweep, which slows down instead; Windows high contrast keeps the selected row, the state
  *  dots and the progress bars visible. */
 test('reduced motion and high contrast are honoured', () => {

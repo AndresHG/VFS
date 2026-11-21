@@ -544,7 +544,7 @@ class Journey:
         return mem
 
     def s_memory_minimised(self):
-        """VFS-8 AC-10, VFS-5 AC-12 (issue 48): memory with the window open, minimised
+        """VFS-24 AC-2, VFS-5 AC-12: memory with the window open, minimised
         (WebView2 suspended) and restored."""
         import ctypes
         user32 = ctypes.windll.user32
@@ -565,7 +565,7 @@ class Journey:
         return samples
 
     def s_accessibility(self):
-        """VFS-8 AC-11 (issue 22): names Narrator reads through UI Automation, and the page
+        """VFS-24 AC-3: names Narrator reads through UI Automation, and the page
         following Windows high contrast and "show animations" off."""
         from pywinauto import Desktop
         self.search_ui("notaria valdepenas", self.t[gen_tree.T_NAME]["name"])
