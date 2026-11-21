@@ -110,6 +110,17 @@ fn ac1_each_order_sorts_every_result() {
     );
 }
 
+/// VFS-12 AC-1: by size, folders come after every file, an empty file included, even when
+/// the folder ranks better.
+#[test]
+fn ac1_size_puts_folders_after_empty_files() {
+    let fx = index(&["Factura"], &[file("mi factura vacia.txt", 0, 5)]);
+    let relevance = names(&search(&fx, "factura", SortOrder::Relevance, 0, 10).hits).join(" | ");
+    assert_eq!(relevance, "Factura | mi factura vacia.txt");
+    let size = names(&search(&fx, "factura", SortOrder::Size, 0, 10).hits).join(" | ");
+    assert_eq!(size, "mi factura vacia.txt | Factura");
+}
+
 /// VFS-12 AC-1: paging a sorted list returns the same sequence as one big page.
 #[test]
 fn ac1_pages_keep_the_order() {

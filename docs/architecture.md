@@ -382,8 +382,9 @@ cap: 20,000 broke the AC-9 budget on 2 M files), ranks them, re-sorts them stabl
 ties in relevance order) and only then cuts to 2,000, so the newest file is first even when
 2,000 better-ranked files exist. A filter-only query under relevance still reads up to the
 2,000-hit cap (newest first among those). When a cap or the deadline cut the read of a sorted
-or filter-only query, the response sets `approximateOrder` and the screen says so. `search_sources` passes the order to the core and
-merges bookmarks into the sorted file list (dates saved, titles; no size, so after files).
+or filter-only query, the response sets `approximateOrder` and the screen says so.
+`search_sources` passes the order to the core and merges bookmarks into the sorted file list
+(dates saved, titles; no size, so after files).
 
 ### Deadline
 
@@ -581,8 +582,8 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
   fewer than 20. A folder also needs one term in its own name (VFS-1 D1). The title takes
   the file name's place in the tiers. `search_sources` reads the file list from the core in
   500-hit pages and merges both lists by (tier, folded name or title length, newer first),
-  files first on a tie; `sort: newest` sorts everything by date and `source` puts files
-  first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
+  files first on a tie; any other order is applied by the core first and the bookmarks are
+  merged into it (see "Sort orders (VFS-12)"), and `source` puts files first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
   their ancestors and no files; with no words they come in tree order, Firefox's own. Type
   filters drop bookmarks but keep bookmark folders under "Carpetas"; size and file folder
   filters drop both; a date filter applies to the date an item was saved.

@@ -50,7 +50,7 @@ pub(crate) fn sort_by_order(candidates: &mut [Candidate], order: SortOrder) {
         }
         SortOrder::Oldest => candidates.sort_by_key(|c| (c.hit.modified == 0, c.hit.modified)),
         SortOrder::Name => candidates.sort_by(|a, b| a.name_key.cmp(&b.name_key)),
-        SortOrder::Size => candidates.sort_by_key(|c| Reverse(c.hit.size)),
+        SortOrder::Size => candidates.sort_by_key(|c| (c.hit.is_dir, Reverse(c.hit.size))),
     }
 }
 

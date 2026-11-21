@@ -113,10 +113,11 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
 Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keeps its shape:
 - **Where to search** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") is the
-  first pill in the filter line, and **"Orden"** (relevance, newest, files first) the last;
-  both show only while bookmarks are included. They are native-select pills like date and
-  size rather than the type checklist: each is one choice out of three, and a select also
-  works where the Popover API is missing.
+  first pill in the filter line and shows only while bookmarks are included. **"Orden"** is
+  the last pill and always shows, with five orders (most alike, newest, oldest, name A–Z,
+  largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12).
+  Both are native-select pills like date and size rather than the type checklist: each is
+  one choice, and a select also works where the Popover API is missing.
 - **Bookmark rows** reuse the result row: a bookmark icon, the title as the name, and the
   bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
   same middle truncation, because the folder path matters as much as for files. The date slot
