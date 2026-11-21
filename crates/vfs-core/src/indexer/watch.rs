@@ -36,15 +36,8 @@ impl RootWatcher {
     /// Creates a watcher that reports through `sink` and drops events under `ignore` (the
     /// app's data directory).
     pub(crate) fn start(sink: WatchSink, ignore: PathBuf) -> Result<RootWatcher> {
-        let mut ignore_list = Vec::with_capacity(2);
-        if let Ok(canonical) = dunce::canonicalize(&ignore) {
-            if canonical != ignore {
-                ignore_list.push(canonical);
-            }
-        }
-        ignore_list.push(ignore);
         Ok(RootWatcher {
-            backend: imp::Backend::new(sink, Filter(Arc::new(ignore_list)))?,
+            backend: imp::Backend::new(sink, Filter::new(ignore))?,
         })
     }
 
@@ -61,17 +54,30 @@ impl RootWatcher {
 }
 
 /// Paths whose events are dropped (the app data directory, as given and canonicalized).
+/// Replayed changes go through the same filter (VFS-9 R7).
 #[derive(Clone)]
-struct Filter(Arc<Vec<PathBuf>>);
+pub(crate) struct Filter(Arc<Vec<PathBuf>>);
 
 impl Filter {
+    /// Drops `ignore` (the app data directory) as given and canonicalized.
+    pub(crate) fn new(ignore: PathBuf) -> Filter {
+        let mut ignore_list = Vec::with_capacity(2);
+        if let Ok(canonical) = dunce::canonicalize(&ignore) {
+            if canonical != ignore {
+                ignore_list.push(canonical);
+            }
+        }
+        ignore_list.push(ignore);
+        Filter(Arc::new(ignore_list))
+    }
+
     fn ignored(&self, path: &Path) -> bool {
         self.0.iter().any(|p| path.starts_with(p))
     }
 
     /// Whether events for `path`, under the watched `root`, are dropped: under the app data
     /// directory, or with a component below the root that the walker excludes.
-    fn dropped(&self, path: &Path, root: &Path) -> bool {
+    pub(crate) fn dropped(&self, path: &Path, root: &Path) -> bool {
         self.ignored(path)
             || path.strip_prefix(root).is_ok_and(|rel| {
                 rel.components()

@@ -46,9 +46,10 @@ ordinary or fast machines. The product spec is
   opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
   place, never written, and only bookmark tables are read (no history, passwords or
   cookies).
-- Follows changes: a live watcher while the app runs, a catch-up re-walk of every folder at
-  each start (resumable, and searchable meanwhile), and a re-walk every 7 days while
-  running. Full re-walks run one at a time; a folder that fails to list is retried. System,
+- Follows changes: a live watcher while the app runs; at each start, a replay of what
+  changed while closed from the NTFS change journal (Windows) or FSEvents (macOS), or a
+  catch-up re-walk (resumable, searchable meanwhile) when that history is gone; and a
+  re-walk every 7 days while running. Full re-walks run one at a time; a folder that fails to list is retried. System,
   Synology and temporary files are skipped by both the walker and the watcher.
 
 ## What it deliberately does not do

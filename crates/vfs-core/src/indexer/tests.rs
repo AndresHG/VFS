@@ -103,6 +103,7 @@ impl Fx {
         let mut pass = Pass::default();
         run(
             &mut self.conn,
+            &OsHistory,
             &mut pass,
             retries,
             &|| false,
@@ -130,7 +131,7 @@ fn rewalk_request_never_restarts_a_walk() {
     let mut fx = fixture(&["A/D", "B", "C"]);
     fx.scan();
     fx.set_last_scan(1000);
-    assert!(queue_rewalk(&fx.conn, fx.root_id).unwrap());
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
 
     // List only the root directory, as if an overflow arrived right after it.
     let calls = Cell::new(0);
@@ -141,6 +142,7 @@ fn rewalk_request_never_restarts_a_walk() {
     let mut pass = Pass::default();
     let outcome = run(
         &mut fx.conn,
+        &OsHistory,
         &mut pass,
         &mut Retries::new(),
         &stop,
@@ -152,7 +154,7 @@ fn rewalk_request_never_restarts_a_walk() {
     assert!(matches!(outcome, Outcome::Yielded));
     assert_eq!(fx.dir("").unwrap().1, CLEAN);
 
-    assert!(!queue_rewalk(&fx.conn, fx.root_id).unwrap());
+    assert!(!queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
     assert_eq!(fx.dir("").unwrap().1, CLEAN, "root directory marked again");
     let mut owed = Owed::new();
     request_rewalk(&fx.conn, &mut owed, &[fx.root_id], false).unwrap();
@@ -231,25 +233,25 @@ fn owed_rewalks_start_one_at_a_time_after_cooldown() {
     let mut owed = Owed::new();
     request_rewalk(&fx.conn, &mut owed, &[fx.root_id, other], false).unwrap();
     assert!(owed.values().all(|deferred| !deferred));
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(fx.status(), RootStatus::Scanning);
     assert_eq!(fx.status_of(other), RootStatus::Ready, "one at a time");
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(fx.status_of(other), RootStatus::Ready, "waits for the walk");
 
     // A manual request while the first root is walked: one more pass, deferred.
     request_rewalk(&fx.conn, &mut owed, &[fx.root_id], false).unwrap();
     assert_eq!(owed.get(&fx.root_id), Some(&true));
     fx.scan();
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(fx.status_of(other), RootStatus::Scanning);
     fx.scan();
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(fx.status(), RootStatus::Ready, "cool-down not over");
     assert!(owed.contains_key(&fx.root_id));
 
     fx.set_last_scan(now_secs() + 86_400);
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(
         fx.status(),
         RootStatus::Scanning,
@@ -260,14 +262,14 @@ fn owed_rewalks_start_one_at_a_time_after_cooldown() {
 
     // An overflow right after a walk waits; a manual request then does not.
     request_rewalk(&fx.conn, &mut owed, &[fx.root_id], true).unwrap();
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(
         fx.status(),
         RootStatus::Ready,
         "overflow waits for the cool-down"
     );
     request_rewalk(&fx.conn, &mut owed, &[fx.root_id], false).unwrap();
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert_eq!(
         fx.status(),
         RootStatus::Scanning,
@@ -282,7 +284,7 @@ fn owed_rewalks_start_one_at_a_time_after_cooldown() {
             params![fx.root_id, RootStatus::Removing.code()],
         )
         .unwrap();
-    start_owed(&fx.conn, &mut owed).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
     assert!(owed.is_empty(), "a root being removed is dropped");
 }
 
@@ -341,7 +343,7 @@ fn failed_listing_is_retried_with_growing_delay() {
     let (cerrada, _) = fx.dir("Cerrada").unwrap();
     let mut retries = Retries::new();
 
-    assert!(queue_rewalk(&fx.conn, fx.root_id).unwrap());
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
     let mut last_delay = Duration::ZERO;
     for attempt in 1..=RETRY_ATTEMPTS {
         let before = Instant::now();
@@ -556,6 +558,7 @@ impl Fx {
         let mut pass = Pass::default();
         run(
             &mut self.conn,
+            &OsHistory,
             &mut pass,
             &mut Retries::new(),
             &|| false,
@@ -733,6 +736,10 @@ fn catchup_waits_for_boot_grace_but_manual_rewalk_does_not() {
     fx.conn
         .execute("UPDATE roots SET last_full_scan_at = 1000", [])
         .unwrap();
+    // No change cursors: both roots owe a catch-up walk (VFS-9 R3).
+    fx.conn
+        .execute("DELETE FROM meta WHERE key LIKE 'cursor/%'", [])
+        .unwrap();
 
     let grace = Duration::from_millis(1500);
     let cfg = SchedConfig {
@@ -854,4 +861,271 @@ fn diagnostic_records_never_name_files() {
             assert!(!r.contains(name), "{name} in diagnostic record {r}");
         }
     }
+}
+
+/// A change history that hands out `fake:<n>` cursors and one scripted replay.
+#[derive(Default)]
+struct FakeHistory {
+    next: std::sync::atomic::AtomicU64,
+    replay: Mutex<Option<cursor::Replayed>>,
+}
+
+impl History for FakeHistory {
+    fn current(&self, _root: &Path) -> Option<String> {
+        Some(format!("fake:{}", self.next.fetch_add(1, Ordering::SeqCst)))
+    }
+
+    fn replay(&self, _root: &Path, _cursor: &str) -> cursor::Replayed {
+        self.replay
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| Err("no replay scripted".into()))
+    }
+}
+
+impl Fx {
+    fn cursor(&self) -> Option<String> {
+        cursor::load(&self.conn, self.root_id).unwrap()
+    }
+}
+
+/// VFS-9 AC-4, AC-6 (R2, R7): a replay marks pending shallow exactly the folders it names (an
+/// unindexed one marks its nearest indexed ancestor, never the parent of an indexed one),
+/// drops paths outside the root, excluded names and the data directory, stores the new
+/// cursor, and owes no full walk.
+#[test]
+fn replay_marks_named_folders_and_stores_the_cursor() {
+    let mut fx = fixture(&["A/B", "C", "D"]);
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, Some("fake:old")).unwrap();
+    let root = fx.root();
+    let data = root.join("D");
+    let history = FakeHistory::default();
+    *history.replay.lock().unwrap() = Some(Ok((
+        vec![
+            root.join("A/B"),
+            root.join("C/nueva/sub"),
+            root.join("@eaDir"),
+            data.clone(),
+            PathBuf::from("/fuera/de/la/raiz"),
+        ],
+        "fake:new".into(),
+    )));
+    let owed = catch_up(&mut fx.conn, &history, &watch::Filter::new(data)).unwrap();
+    assert!(owed.is_empty());
+    let shallow = ScanState::PendingShallow as i64;
+    assert_eq!(fx.dir("A/B").unwrap().1, shallow);
+    assert_eq!(fx.dir("C").unwrap().1, shallow, "nearest indexed ancestor");
+    for clean in ["", "A", "D"] {
+        assert_eq!(fx.dir(clean).unwrap().1, CLEAN, "{clean:?}");
+    }
+    assert_eq!(fx.cursor().as_deref(), Some("fake:new"));
+}
+
+/// VFS-9 AC-4 (R3): a lost history, or no cursor at all, owes the root a full walk and keeps
+/// the old cursor until that walk starts, which stores the cursor taken just before it.
+#[test]
+fn lost_history_owes_a_walk_that_stores_a_new_cursor() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, None).unwrap();
+    let history = FakeHistory::default();
+    let filter = watch::Filter::new(PathBuf::new());
+    assert_eq!(
+        catch_up(&mut fx.conn, &history, &filter).unwrap(),
+        vec![fx.root_id]
+    );
+
+    cursor::store(&fx.conn, fx.root_id, Some("fake:old")).unwrap();
+    *history.replay.lock().unwrap() = Some(Err("journal trimmed past the cursor".into()));
+    assert_eq!(
+        catch_up(&mut fx.conn, &history, &filter).unwrap(),
+        vec![fx.root_id]
+    );
+    assert_eq!(fx.cursor().as_deref(), Some("fake:old"));
+    assert_eq!(fx.dir("A").unwrap().1, CLEAN, "nothing marked");
+
+    assert!(queue_rewalk(&fx.conn, &history, fx.root_id).unwrap());
+    assert_eq!(fx.cursor().as_deref(), Some("fake:0"));
+    assert_eq!(fx.dir("").unwrap().1, ScanState::PendingDeep as i64);
+}
+
+/// VFS-9 AC-4 (R1, R8): a first scan stores the cursor taken when it starts, and removing
+/// the root deletes it with the rows.
+#[test]
+fn first_scan_stores_a_cursor_and_removal_deletes_it() {
+    let mut fx = fixture(&["A"]);
+    let history = FakeHistory::default();
+    let mut pass = Pass::default();
+    run(
+        &mut fx.conn,
+        &history,
+        &mut pass,
+        &mut Retries::new(),
+        &|| false,
+        false,
+        &mut Sched::inert(),
+        &mut |_: &Connection, _: &Pass, _: bool| {},
+    )
+    .unwrap();
+    assert_eq!(fx.status(), RootStatus::Ready);
+    assert_eq!(fx.cursor().as_deref(), Some("fake:0"));
+
+    crate::roots::remove_root(&mut fx.conn, fx.root_id).unwrap();
+    assert!(finish_removing(&fx.conn, &|| false).unwrap());
+    assert_eq!(fx.cursor(), None);
+}
+
+/// The stored cursor of `root_id`, read on its own connection.
+fn stored_cursor(db_path: &Path, root_id: i64) -> Option<String> {
+    cursor::load(&db::open_ro(db_path).unwrap(), root_id).unwrap()
+}
+
+/// VFS-9 AC-4 (R6): while watched, a root's cursor advances at each check to the one taken
+/// at the previous check; after a single lost-events report it stays put, check after check,
+/// until a full walk stores a new one; then it advances again.
+#[test]
+fn cursor_holds_after_lost_events_until_a_walk() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, Some("fake:start")).unwrap();
+    // The start-up replay is lost, so an undeferred walk is owed and runs at once.
+    let h = IndexerHandle::spawn_with_history(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        Sched::inert(),
+        None,
+        Box::new(FakeHistory::default()),
+        Duration::from_millis(50),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let cursor = || stored_cursor(&fx.db_path, fx.root_id);
+    let wait_change = |from: Option<String>, what: &str| {
+        while cursor() == from {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    wait_change(
+        Some("fake:start".into()),
+        "the start-up walk stored no cursor",
+    );
+    while fx.status() != RootStatus::Ready {
+        assert!(
+            Instant::now() < deadline,
+            "the start-up walk never finished"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_change(cursor(), "the cursor never advanced");
+
+    h.send(Cmd::Watch(watch::WatchEvent::Rescan(fx.root_id)));
+    std::thread::sleep(Duration::from_millis(150));
+    let held = cursor();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(cursor(), held, "the cursor advanced after lost events");
+    assert_eq!(
+        fx.status(),
+        RootStatus::Ready,
+        "the owed walk waits for its cooldown"
+    );
+
+    // A manual re-walk starts at once and stores its cursor; events lost right after it
+    // hold that new cursor too.
+    h.rescan(Some(fx.root_id));
+    wait_change(held, "the walk stored no cursor");
+    let walked = cursor();
+    h.send(Cmd::Watch(watch::WatchEvent::Rescan(fx.root_id)));
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(
+        cursor(),
+        walked,
+        "the cursor advanced after events lost after the walk"
+    );
+
+    // The next walk releases the hold; advancing resumes after it.
+    h.rescan(Some(fx.root_id));
+    wait_change(walked, "the second walk stored no cursor");
+    while fx.status() != RootStatus::Ready {
+        assert!(Instant::now() < deadline, "the walk never finished");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_change(cursor(), "the cursor never advanced after the walk");
+    drop(h);
+}
+
+/// VFS-9 AC-4 (R3, R6): a root owed a walk at start keeps its cursor through every check
+/// while the walk waits (here for the boot grace), and the walk stores a new one.
+#[test]
+fn owed_walk_holds_the_cursor_until_it_starts() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, Some("fake:start")).unwrap();
+    let cfg = SchedConfig {
+        boot_grace: Duration::from_millis(1500),
+        ..SchedConfig::default()
+    };
+    let sched = Sched::new(
+        cfg,
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        Box::new(|_| {}),
+    );
+    // The scripted replay is lost; booted just now, so the walk waits for the grace.
+    let h = IndexerHandle::spawn_with_history(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        sched,
+        Some(Duration::ZERO),
+        Box::new(FakeHistory::default()),
+        Duration::from_millis(50),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(
+        stored_cursor(&fx.db_path, fx.root_id).as_deref(),
+        Some("fake:start"),
+        "the cursor advanced before the owed walk"
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while stored_cursor(&fx.db_path, fx.root_id).as_deref() == Some("fake:start") {
+        assert!(Instant::now() < deadline, "the owed walk stored no cursor");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(h);
+}
+
+/// VFS-9 AC-5 (R6): on the real change history, a running indexer moves a watched root's
+/// cursor forward from the one its first scan stored.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn os_cursor_advances_while_running() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    let first = fx.cursor().expect("the first scan stores a cursor");
+    let position = |c: &str| -> i128 { c.rsplit(':').next().unwrap().parse().unwrap() };
+    let h = IndexerHandle::spawn_with_history(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        Sched::inert(),
+        None,
+        Box::new(OsHistory),
+        Duration::from_millis(200),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut n = 0;
+    loop {
+        // Every change moves the history forward.
+        n += 1;
+        fs::write(fx.root().join(format!("A/nuevo {n}.txt")), b"x").unwrap();
+        if stored_cursor(&fx.db_path, fx.root_id).is_some_and(|c| position(&c) > position(&first)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the cursor never advanced");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    drop(h);
 }
