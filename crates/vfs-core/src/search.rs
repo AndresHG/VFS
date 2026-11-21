@@ -566,8 +566,17 @@ where
     }
 }
 
+/// An interruption by a newer query or the deadline. One that lands while SQLite opens an
+/// FTS5 table surfaces as a generic "vtable constructor failed" error rather than
+/// `SQLITE_INTERRUPT` (seen on the Windows CI runner); it is an interruption too, so racing
+/// queries still return `Ok` (VFS-3 AC-7).
 fn is_interrupt(e: &rusqlite::Error) -> bool {
-    e.sqlite_error_code() == Some(ErrorCode::OperationInterrupted)
+    match e {
+        rusqlite::Error::SqliteFailure(f, Some(msg)) if f.code == ErrorCode::Unknown => {
+            msg.starts_with("vtable constructor failed")
+        }
+        _ => e.sqlite_error_code() == Some(ErrorCode::OperationInterrupted),
+    }
 }
 
 struct RootRow {
@@ -1740,6 +1749,29 @@ mod tests {
 
     use super::*;
     use crate::db::{self, ingest};
+
+    /// VFS-3 AC-7: an interruption that lands while an FTS5 table is opened counts as one,
+    /// like `SQLITE_INTERRUPT`; other errors do not.
+    #[test]
+    fn vtable_open_cut_short_is_an_interruption() {
+        let failure = |code: i32, msg: &str| {
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), Some(msg.into()))
+        };
+        let ffi = rusqlite::ffi::SQLITE_ERROR;
+        assert!(is_interrupt(&failure(
+            ffi,
+            "vtable constructor failed: files_fts"
+        )));
+        assert!(is_interrupt(&failure(
+            rusqlite::ffi::SQLITE_INTERRUPT,
+            "interrupted"
+        )));
+        assert!(!is_interrupt(&failure(ffi, "no such table: files_fts")));
+        assert!(!is_interrupt(&failure(
+            rusqlite::ffi::SQLITE_CORRUPT,
+            "vtable constructor failed: files_fts"
+        )));
+    }
 
     /// VFS-1 AC-10 (S6), VFS-4 AC-3: a newer query interrupting a running one makes it
     /// return what it has with `truncated_by = deadline` instead of an error, also while it
