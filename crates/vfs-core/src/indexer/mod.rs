@@ -391,6 +391,10 @@ fn scan_root(
         let (added, removed) = (pass.summary.files_added, pass.summary.files_removed);
         let abs = db::join_rel(&root.path, &rel_path);
         let deep = state == ingest::ScanState::PendingDeep as i64;
+        // A first scan's cursor is taken before its first listing: every change from then on
+        // is either listed by it or replayed from this cursor (VFS-9 R1).
+        let first_cursor =
+            (root.status == RootStatus::Pending).then(|| history.current(Path::new(&root.path)));
         let listing = sched.listing(|| {
             if walk::behind_link(Path::new(&root.path), &rel_path) {
                 Err(std::io::Error::from(std::io::ErrorKind::NotFound))
@@ -403,10 +407,7 @@ fn scan_root(
             None => begin(conn)?,
         };
         let t: &Transaction<'_> = tx.insert(open);
-        if root.status == RootStatus::Pending {
-            // A first scan starts: every change from now on is either listed by it or
-            // replayed from this cursor (VFS-9 R1).
-            let now = history.current(Path::new(&root.path));
+        if let Some(now) = first_cursor {
             cursor::store(t, root.id, now.as_deref())?;
             set_root_status(t, root.id, RootStatus::Scanning)?;
             root.status = RootStatus::Scanning;
@@ -1419,6 +1420,12 @@ fn stale_roots(conn: &Connection, age_secs: i64) -> Result<Vec<i64>> {
         |r| r.get(0),
     )?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Deletes `root_id`'s change cursor, for a root deleted outside `finish_removing`
+/// (VFS-9 R8).
+pub(crate) fn forget_cursor(conn: &Connection, root_id: i64) -> Result<()> {
+    cursor::store(conn, root_id, None)
 }
 
 /// Finishes roots left in `removing`, then processes pending directories on the calling

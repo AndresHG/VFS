@@ -668,8 +668,8 @@ mod tests {
         assert_eq!(parent_refs(&bytes, &mut HashSet::new()), Err(3));
     }
 
-    /// VFS-9 AC-6, AC-3: only NTFS on a local drive keeps a usable journal; cursors of the other platform or
-    /// garbled ones do not parse.
+    /// VFS-9 AC-6, AC-3: only NTFS on a local drive keeps a usable journal; cursors of the
+    /// other platform or garbled ones do not parse.
     #[test]
     fn cursor_kinds_and_file_systems() {
         assert!(ntfs("NTFS"));

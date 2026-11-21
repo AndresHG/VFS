@@ -977,6 +977,18 @@ fn first_scan_stores_a_cursor_and_removal_deletes_it() {
     assert_eq!(fx.cursor(), None);
 }
 
+/// VFS-9 AC-4 (R8): a folder added again while its old root is still being removed deletes
+/// the old root's cursor with its rows, so a root that reuses the id starts without it.
+#[test]
+fn readding_a_removing_root_deletes_its_cursor() {
+    let mut fx = fixture(&["A"]);
+    cursor::store(&fx.conn, fx.root_id, Some("fake:old")).unwrap();
+    crate::roots::remove_root(&mut fx.conn, fx.root_id).unwrap();
+    let root = fx.root();
+    crate::roots::add_root(&mut fx.conn, &root).unwrap();
+    assert_eq!(cursor::load(&fx.conn, fx.root_id).unwrap(), None);
+}
+
 /// The stored cursor of `root_id`, read on its own connection.
 fn stored_cursor(db_path: &Path, root_id: i64) -> Option<String> {
     cursor::load(&db::open_ro(db_path).unwrap(), root_id).unwrap()

@@ -100,6 +100,8 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<Root> {
         drop(rows);
         for id in superseded {
             ingest::delete_root(&tx, id)?;
+            // Root ids are reused: the old root's change cursor goes with it (VFS-9 R8).
+            crate::indexer::forget_cursor(&tx, id)?;
         }
     }
     let id = ingest::insert_root(&tx, &platform::volume_key(&canon), &path_str)?;

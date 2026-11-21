@@ -49,8 +49,9 @@ ordinary or fast machines. The product spec is
 - Follows changes: a live watcher while the app runs; at each start, a replay of what
   changed while closed from the NTFS change journal (Windows) or FSEvents (macOS), or a
   catch-up re-walk (resumable, searchable meanwhile) when that history is gone; and a
-  re-walk every 7 days while running. Full re-walks run one at a time; a folder that fails to list is retried. System,
-  Synology and temporary files are skipped by both the walker and the watcher.
+  re-walk every 7 days while running. Full re-walks run one at a time; a folder that fails
+  to list is retried. System, Synology and temporary files are skipped by both the walker
+  and the watcher.
 
 ## What it deliberately does not do
 

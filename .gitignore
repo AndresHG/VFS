@@ -1,5 +1,7 @@
 # Rust
 target/
+# Extra build folders (CARGO_TARGET_DIR=target-…) stay out of commits too.
+/target*/
 **/*.rs.bk
 
 # Node / frontend

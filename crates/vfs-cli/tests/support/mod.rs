@@ -483,7 +483,7 @@ pub fn index(db: &Path, roots: &[&Path]) {
 }
 
 /// Runs `vfs run --until-idle` (the app's background indexer and watcher, with its
-/// catch-up re-walk) and asserts it reaches "up to date" within `timeout`.
+/// start-up catch-up) and asserts it reaches "up to date" within `timeout`.
 pub fn run_until_idle(db: &Path, roots: &[&Path], timeout: Duration) {
     let mut child = Command::new(VFS_BIN)
         .arg("run")

@@ -130,7 +130,7 @@ the real OS in CI (Windows and macOS); AC-4 runs everywhere through a fake histo
 | 1 | Where does the cursor live? | `meta` key `cursor/<root id>`; no schema version | Claude (code: `meta` is unused) | 2026-11-20 |
 | 2 | Windows: map every file id, or key on the parent directory? | Parent directory, resolved by `OpenFileById` at replay; no map, no extra work during the walk | Claude (windows-io §4.2, R5) | 2026-11-20 |
 | 3 | macOS: replace `notify` with an own FSEvents loop? | No: a one-shot history stream at start, `notify` stays the live watcher; the watcher is armed first so there is no gap | Claude | 2026-11-20 |
-| 4 | Do folders synced to a Synology fall back to the full walk? | No. The archive is a local folder on her PC that Synology backs up; local NTFS folders are replayed from the journal. Only network drives (a mapped NAS share), non-NTFS disks and lost history fall back | owner (answered: the big local folder is backed up to the Synology) | 2026-11-20 |
+| 4 | Do folders synced to a Synology fall back to the full walk? | No. The archive is a local folder on the user's PC that Synology backs up; local NTFS folders are replayed from the journal. Only network drives (a mapped NAS share), non-NTFS disks and lost history fall back | owner (answered: the big local folder is backed up to the Synology) | 2026-11-20 |
 | 5 | Approve the spec | Approved; the weekly safety re-walk stays | owner | 2026-11-20 |
 
 ## Open questions
