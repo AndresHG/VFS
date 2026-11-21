@@ -74,6 +74,21 @@ pub fn shell_form(path: &Path) -> PathBuf {
     }
 }
 
+/// The plain form of `path` for the Shell when only its length keeps Explorer from it: over
+/// `MAX_PATH`, with no component ending in a dot or a space. Such names, and short paths that
+/// still need `\\?\`, could name another item without the prefix, so they get `None` and the
+/// nearest folder opens instead (VFS-24 AC-1).
+pub fn long_shell_path(path: &Path) -> Option<PathBuf> {
+    let plain = shell_form(path);
+    let s = plain.to_string_lossy();
+    let long = s.encode_utf16().count() > EXPLORER_MAX_PATH;
+    let lossless = s
+        .split('\\')
+        .skip(1)
+        .all(|c| !c.ends_with('.') && !c.ends_with(' '));
+    (long && lossless).then_some(plain)
+}
+
 /// Explorer's argument for `action`: `/select,"<path>"` or `"<path>"`. A trailing backslash
 /// (a drive root, `C:\`) is doubled, because under the Windows command-line rules
 /// (`CommandLineToArgvW`) a backslash before the closing quote escapes it, so `"C:\"` would
@@ -116,7 +131,10 @@ pub fn reveal(path: &Path) -> io::Result<RevealOutcome> {
             // Past MAX_PATH Explorer's command line fails, but the Shell's ID-list call can
             // still select the item through its plain path (VFS-24 AC-1); only if it cannot
             // is the nearest folder opened instead.
-            match shell_select(&shell_form(path)) {
+            match long_shell_path(path).map_or_else(
+                || Err(io::Error::other("needs its \\\\?\\ form")),
+                |plain| shell_select(&plain),
+            ) {
                 Ok(()) => Ok(RevealOutcome::Revealed),
                 Err(e) => {
                     log::warn!("long path not selectable ({e}); opening {}", p.display());
@@ -358,6 +376,22 @@ mod tests {
         for (from, to) in cases {
             assert_eq!(shell_form(Path::new(from)), PathBuf::from(to));
         }
+    }
+
+    /// VFS-24 AC-1: only a path too long for Explorer, whose plain form names the same item,
+    /// goes to the Shell without its prefix.
+    #[test]
+    fn long_shell_path_only_for_length() {
+        let deep = format!(r"C:\Datos\{}\{}\f.pdf", "x".repeat(200), "y".repeat(100));
+        let want = Some(PathBuf::from(&deep));
+        assert_eq!(long_shell_path(Path::new(&format!(r"\\?\{deep}"))), want);
+        assert_eq!(long_shell_path(Path::new(&deep)), want);
+        assert_eq!(
+            long_shell_path(Path::new(r"\\?\C:\Datos\punto.\f.pdf")),
+            None
+        );
+        let dotted = format!(r"\\?\C:\Datos\{}\fin. \f.pdf", "x".repeat(300));
+        assert_eq!(long_shell_path(Path::new(&dotted)), None);
     }
 
     /// VFS-1 AC-13: the Explorer length limit counts UTF-16 units and rejects `\\?\` paths.
