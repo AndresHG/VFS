@@ -98,7 +98,7 @@ impl Vfs {
         })
     }
 
-    /// Root changes are committed; a failed backup only weakens recovery (VFS-3 AC-11).
+    /// Root changes are committed; a failed backup only weakens recovery (VFS-23 AC-1).
     fn backup_roots(&self, conn: &rusqlite::Connection) {
         if let Err(e) = db::sync_roots_backup(&self.inner.db_path, conn) {
             log::warn!("root list backup not written: {e}");
@@ -448,7 +448,7 @@ mod tests {
         assert!(!vfs.add_root(dir.path()).unwrap_err().is_same_root());
     }
 
-    /// VFS-3 AC-11 (issue 58): the backup root list follows every root change, and an index
+    /// VFS-23 AC-1 (issue 58): the backup root list follows every root change, and an index
     /// whose header is overwritten or which is truncated to nothing (no root readable) is
     /// rebuilt with the roots from that backup.
     #[test]

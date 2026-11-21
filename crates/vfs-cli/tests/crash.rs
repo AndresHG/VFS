@@ -463,7 +463,7 @@ fn torn_writes_are_recovered() {
         let recovered = vfs_core::db::bad_path(&s.db).exists();
         if roots.is_empty() {
             // A recovery takes the roots from the backup list when it cannot read them
-            // (VFS-3 AC-11); only damage SQLite cannot detect may still drop the root row.
+            // (VFS-23 AC-1); only damage SQLite cannot detect may still drop the root row.
             // The user adds the folder again; the index must accept it.
             assert!(!recovered, "{context}: recovery lost the root list");
             index(&s.db, &[&s.tree]);
