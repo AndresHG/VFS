@@ -1030,3 +1030,33 @@ fn vfs19_pages_count_results_and_copies_name_their_folder() {
         "the newer copy, at the top, represents each pair"
     );
 }
+
+/// VFS-25 AC-4: a cloud-only file and a local copy of it are one result; the hit and the
+/// copy each carry their own cloud-only state.
+#[test]
+fn cloud_only_state_travels_with_each_place() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let a = w.dir(root, top, "Nube", 1);
+    let b = w.dir(root, top, "Disco", 1);
+    let cloud = w.file(a, "viaje.mp4", 500, 30);
+    let local = w.file(b, "viaje.mp4", 500, 20);
+    drop(w);
+    let conn = db::open_rw(&fx.path).unwrap();
+    conn.execute(
+        "UPDATE files SET flags = flags | ?2 WHERE id = ?1",
+        [cloud, vfs_core::db::ingest::FLAG_CLOUD_ONLY],
+    )
+    .unwrap();
+    drop(conn);
+
+    let r = fx.text("viaje");
+    assert_eq!(r.hits.len(), 1, "{:?}", r.hits);
+    let hit = &r.hits[0];
+    assert_eq!(hit.id, cloud);
+    assert!(hit.cloud_only);
+    assert_eq!(hit.copies.len(), 1);
+    assert_eq!(hit.copies[0].id, local);
+    assert!(!hit.copies[0].cloud_only);
+}

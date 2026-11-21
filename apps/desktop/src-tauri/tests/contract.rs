@@ -282,6 +282,7 @@ fn source_hit_tags_are_the_source_values() {
         is_dir: false,
         copies: Vec::new(),
         link: None,
+        cloud_only: false,
     });
     let mark = SourceHit::Bookmarks(vfs_bookmarks::BookmarkHit {
         id: 2,

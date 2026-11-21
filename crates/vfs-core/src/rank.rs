@@ -109,6 +109,7 @@ mod tests {
                 is_dir,
                 copies: Vec::new(),
                 link: None,
+                cloud_only: false,
             },
             name_key: fold_key(name),
             dir_id: None,

@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use rusqlite::types::Value;
 use rusqlite::{params_from_iter, Connection, ErrorCode, OptionalExtension, Row};
 
-use crate::db::join_rel;
+use crate::db::{ingest, join_rel};
 use crate::error::{Error, Result};
 use crate::fold::fold_key;
 use crate::fuzzy;
@@ -66,11 +66,12 @@ const PROGRESS_OPS: i32 = 1000;
 /// find the names starting with the term without positions.
 pub(crate) const NAME_START: char = '\u{1}';
 
-const FILE_COLS: &str =
-    "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, d.root_id, d.rel_path, d.path_key";
+/// `f.flags` comes with the row already read, for the cloud-only bit (VFS-25 R4).
+const FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, d.root_id, \
+     d.rel_path, d.path_key, f.flags";
 const DIR_COLS: &str = "d.id, d.root_id, d.rel_path, d.path_key, d.name_key, d.mtime";
 /// File columns without the directory row (`Ctx::lazy_dirs`).
-const LAZY_FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, f.dir_id";
+const LAZY_FILE_COLS: &str = "f.id, f.name, f.name_key, f.kind, f.size, f.mtime, f.dir_id, f.flags";
 
 /// State kept between searches on the search connection: the last ranked list keyed by
 /// (query, filters, `PRAGMA data_version`), so paging is consistent (S7).
@@ -328,6 +329,7 @@ fn group_copies(
                     id: c.hit.id,
                     dir: c.hit.dir,
                     modified: c.hit.modified,
+                    cloud_only: c.hit.cloud_only,
                 });
                 copy_pending[i].push(c.dir_id);
                 continue;
@@ -881,6 +883,7 @@ struct FileRow {
     root_id: i64,
     rel_path: String,
     path_key: String,
+    flags: i64,
 }
 
 impl FileRow {
@@ -895,6 +898,7 @@ impl FileRow {
             root_id: r.get(6)?,
             rel_path: r.get(7)?,
             path_key: r.get(8)?,
+            flags: r.get(9)?,
         })
     }
 }
@@ -938,6 +942,7 @@ impl Ctx {
                 is_dir: false,
                 copies: Vec::new(),
                 link: None,
+                cloud_only: r.flags & ingest::FLAG_CLOUD_ONLY != 0,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -983,6 +988,7 @@ impl Ctx {
                 is_dir: true,
                 copies: Vec::new(),
                 link: None,
+                cloud_only: false,
             },
             name_key: r.name_key,
             dir_id: None,
@@ -1473,6 +1479,7 @@ fn name_matches(
                     is_dir: false,
                     copies: Vec::new(),
                     link: None,
+                    cloud_only: row.get::<_, i64>(7)? & ingest::FLAG_CLOUD_ONLY != 0,
                 },
                 name_key,
                 dir_id: Some(dir_id),
@@ -1657,7 +1664,7 @@ fn link_pass(
     let params = with_params(None, clause);
     let deadline = run.soft;
     each_row(conn, run, &sql, &params, deadline, |run, _, row| {
-        let target: String = row.get(9)?;
+        let target: String = row.get(10)?;
         let r = FileRow::read(row)?;
         let matched = verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy)
             .or_else(|| {
@@ -2026,6 +2033,7 @@ mod tests {
             is_dir: false,
             copies: Vec::new(),
             link: None,
+            cloud_only: false,
         };
         let mut hits = vec![hit(), hit(), hit()];
         let mut pending = vec![Some(top), Some(sub + 1000), Some(sub)];

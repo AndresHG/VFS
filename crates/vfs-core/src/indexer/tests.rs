@@ -1341,3 +1341,113 @@ fn removing_a_root_forgets_its_unreadable_folders() {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+/// The file `name` in the folder `dir` (`/`-separated, below the root) as (id, cloud-only
+/// bit).
+fn cloud_bit(conn: &Connection, dir: &str, name: &str) -> (i64, bool) {
+    conn.query_row(
+        "SELECT f.id, f.flags & ?3 FROM files f JOIN dirs d ON d.id = f.dir_id \
+         WHERE d.rel_path = ?1 AND f.name = ?2",
+        rusqlite::params![dir, name, ingest::FLAG_CLOUD_ONLY],
+        |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)),
+    )
+    .unwrap()
+}
+
+/// VFS-25 AC-3: a cloud-only `.url` is never opened by the link pass (it would get its
+/// address as target if it were): no target, unreadable; once a listing finds it local, its
+/// link row is pending again and the next pass reads the address.
+#[test]
+fn cloud_only_link_is_never_opened() {
+    let mut fx = fixture(&["A"]);
+    fs::write(
+        fx.root().join("A").join("Banco.url"),
+        "[InternetShortcut]\r\nURL=https://example.com/\r\n",
+    )
+    .unwrap();
+    fx.scan();
+    let (id, _) = cloud_bit(&fx.conn, "A", "Banco.url");
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_cloud_only(&tx, id, true).unwrap();
+    tx.commit().unwrap();
+    let link = |conn: &Connection| -> (i64, Option<String>) {
+        conn.query_row(
+            "SELECT state, target FROM links WHERE file_id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        1
+    );
+    assert_eq!(link(&fx.conn), (ingest::LinkState::Unreadable as i64, None));
+
+    // The folder is listed again and the file is local (no placeholder bit here).
+    let hint = fx.root().join("A").join("Banco.url");
+    mark_dirty(&mut fx.conn, &[hint]).unwrap();
+    fx.run_once(&mut Retries::new());
+    assert_eq!(cloud_bit(&fx.conn, "A", "Banco.url"), (id, false));
+    assert_eq!(link(&fx.conn).0, ingest::LinkState::Pending as i64);
+    crate::link::read_pending(&mut fx.conn, &|| false).unwrap();
+    assert_eq!(
+        link(&fx.conn),
+        (
+            ingest::LinkState::Read as i64,
+            Some("https://example.com/".into())
+        )
+    );
+}
+
+/// VFS-25 AC-2 (Windows): a file marked `FILE_ATTRIBUTE_OFFLINE` is indexed cloud-only and its
+/// hit says so, an ordinary file's does not; clearing the attribute with size and time
+/// unchanged clears the flag at the next listing; setting it with a size change sets it again.
+#[cfg(windows)]
+#[test]
+fn offline_attribute_marks_a_file_cloud_only() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        SetFileAttributesW, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_OFFLINE,
+    };
+    let set = |path: &Path, attrs: u32| {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+        assert_ne!(unsafe { SetFileAttributesW(wide.as_ptr(), attrs) }, 0);
+    };
+    let mut fx = fixture(&["A"]);
+    let nube = fx.root().join("A").join("boda.mp4");
+    fs::write(&nube, b"xx").unwrap();
+    set(&nube, FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_ARCHIVE);
+    fx.scan();
+    assert!(cloud_bit(&fx.conn, "A", "boda.mp4").1);
+    assert!(!cloud_bit(&fx.conn, "A", "archivo.txt").1);
+    let vfs = crate::Vfs::open(&fx.db_path).unwrap();
+    let hits = vfs
+        .search(&crate::SearchQuery {
+            text: String::new(),
+            filters: crate::SearchFilters {
+                folder: Some(fx.root().join("A").to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+            limit: 10,
+            offset: 0,
+            sort: Default::default(),
+        })
+        .unwrap()
+        .hits;
+    let by_name = |n: &str| hits.iter().find(|h| h.name == n).unwrap().cloud_only;
+    assert!(by_name("boda.mp4"));
+    assert!(!by_name("archivo.txt"));
+
+    set(&nube, FILE_ATTRIBUTE_ARCHIVE);
+    mark_dirty(&mut fx.conn, std::slice::from_ref(&nube)).unwrap();
+    fx.run_once(&mut Retries::new());
+    assert!(!cloud_bit(&fx.conn, "A", "boda.mp4").1);
+
+    fs::write(&nube, b"xxxx").unwrap();
+    set(&nube, FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_ARCHIVE);
+    mark_dirty(&mut fx.conn, &[nube]).unwrap();
+    fx.run_once(&mut Retries::new());
+    assert!(cloud_bit(&fx.conn, "A", "boda.mp4").1);
+}
