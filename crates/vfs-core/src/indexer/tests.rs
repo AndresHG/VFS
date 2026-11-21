@@ -57,6 +57,16 @@ impl Fx {
         self.status_of(self.root_id)
     }
 
+    /// Directories still waiting to be listed, read on their own connection.
+    fn pending_dirs(&self) -> i64 {
+        db::open_ro(&self.db_path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM dirs WHERE scan_state <> 0", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
     fn last_scan(&self) -> Option<i64> {
         self.conn
             .query_row(
@@ -1476,10 +1486,14 @@ fn offline_attribute_marks_a_file_cloud_only() {
 }
 
 /// An indexer on `fx` with a shared fake history and short clocks: cursor checks every
-/// 50 ms, replays 300 ms after the last overflow and at most 1.5 s after the first. Returns
-/// once the start-up walk (owed: no cursor) has finished and stored a cursor.
-fn overflow_indexer(fx: &Fx) -> (IndexerHandle, Arc<FakeHistory>) {
+/// 50 ms, replays 300 ms after the last overflow and at most 1.5 s after the first. The root
+/// is scanned first and starts with a cursor whose start-up replay is empty, so no walk runs
+/// while a test watches its rows. Returns once that replay is done.
+fn overflow_indexer(fx: &mut Fx) -> (IndexerHandle, Arc<FakeHistory>) {
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, Some("fake:boot")).unwrap();
     let history = Arc::new(FakeHistory::default());
+    *history.replay.lock().unwrap() = Some(Ok((Vec::new(), "fake:started".into())));
     let h = IndexerHandle::spawn_with_history(
         fx.db_path.clone(),
         Arc::new(NullSink),
@@ -1493,9 +1507,9 @@ fn overflow_indexer(fx: &Fx) -> (IndexerHandle, Arc<FakeHistory>) {
         },
     )
     .unwrap();
-    wait_for("the start-up walk", || {
-        fx.status_of(fx.root_id) == RootStatus::Ready
-            && stored_cursor(&fx.db_path, fx.root_id).is_some()
+    wait_for("the start-up replay", || {
+        history.replays.load(Ordering::SeqCst) == 1
+            && stored_cursor(&fx.db_path, fx.root_id).as_deref() != Some("fake:boot")
     });
     (h, history)
 }
@@ -1533,17 +1547,17 @@ fn has_row(fx: &Fx, name: &str) -> bool {
 /// Overflows that keep coming still get their replay by the maximum delay.
 #[test]
 fn overflow_burst_gives_one_replay() {
-    let fx = fixture(&["A", "B", "C"]);
+    let mut fx = fixture(&["A", "B", "C"]);
     for (d, f) in [("A", "a.txt"), ("B", "b.txt"), ("C", "c.txt")] {
         fs::write(fx.root().join(d).join(f), b"x").unwrap();
     }
     // FSEvents assigns ids late: events of these writes could reach the live watcher after
     // it is armed and list C again.
     std::thread::sleep(Duration::from_millis(1100));
-    let (h, history) = overflow_indexer(&fx);
+    let (h, history) = overflow_indexer(&mut fx);
     let checked = fx.last_scan();
     wait_for("the cursor advanced", || {
-        stored_cursor(&fx.db_path, fx.root_id).is_some_and(|c| c != "fake:0")
+        stored_cursor(&fx.db_path, fx.root_id).is_some_and(|c| c != "fake:started")
     });
     for f in ["a.txt", "b.txt", "c.txt"] {
         drop_row(&fx, f);
@@ -1590,8 +1604,8 @@ fn overflow_burst_gives_one_replay() {
 /// earlier walk is still owed (it runs once its cooldown has passed).
 #[test]
 fn replay_on_a_held_root_keeps_the_owed_walk() {
-    let fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&fx);
+    let mut fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&mut fx);
     let checked = fx.last_scan();
     h.send(Cmd::Watch(watch::WatchEvent::Failed(fx.root_id)));
     std::thread::sleep(Duration::from_millis(150));
@@ -1601,7 +1615,7 @@ fn replay_on_a_held_root_keeps_the_owed_walk() {
     *history.replay.lock().unwrap() = Some(Ok((Vec::new(), "fake:replayed".into())));
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
     wait_for("the replay", || {
-        history.replays.load(Ordering::SeqCst) == 1
+        history.replays.load(Ordering::SeqCst) == 2
             && stored_cursor(&fx.db_path, fx.root_id).is_some()
     });
     wait_for("the hold released", || {
@@ -1635,11 +1649,11 @@ fn assert_walk_owed(fx: &Fx) {
 #[test]
 fn overflow_without_usable_history_holds_and_owes_a_walk() {
     // History lost: nothing scripted, so the fake reports it lost.
-    let fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&fx);
+    let mut fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&mut fx);
     let checked = fx.last_scan();
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
-    wait_for("the replay", || history.replays.load(Ordering::SeqCst) == 1);
+    wait_for("the replay", || history.replays.load(Ordering::SeqCst) == 2);
     let held = stored_cursor(&fx.db_path, fx.root_id);
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
@@ -1652,8 +1666,8 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     drop(h);
 
     // No cursor at all: no replay is attempted, none is stored, a walk is owed.
-    let fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&fx);
+    let mut fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&mut fx);
     cursor::store(&db::open_rw(&fx.db_path).unwrap(), fx.root_id, None).unwrap();
     let before = history.replays.load(Ordering::SeqCst);
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
@@ -1668,8 +1682,8 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     drop(h);
 
     // Unreachable when the replay is due: no replay, the cursor holds, a walk is owed.
-    let fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&fx);
+    let mut fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&mut fx);
     let away = fx.root().with_file_name("lejos");
     fs::rename(fx.root(), &away).unwrap();
     let before = history.replays.load(Ordering::SeqCst);
@@ -1689,8 +1703,8 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
 /// before the replay is due never replays either; the cursor holds and a walk is owed.
 #[test]
 fn failed_watch_never_replays() {
-    let fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&fx);
+    let mut fx = fixture(&["A"]);
+    let (h, history) = overflow_indexer(&mut fx);
     *history.replay.lock().unwrap() = Some(Ok((Vec::new(), "fake:replayed".into())));
     h.send(Cmd::Watch(watch::WatchEvent::Failed(fx.root_id)));
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
@@ -1698,7 +1712,11 @@ fn failed_watch_never_replays() {
     std::thread::sleep(Duration::from_millis(150));
     let held = stored_cursor(&fx.db_path, fx.root_id);
     std::thread::sleep(Duration::from_millis(700));
-    assert_eq!(history.replays.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        history.replays.load(Ordering::SeqCst),
+        1,
+        "only the start-up replay"
+    );
     assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held);
     assert_walk_owed(&fx);
     drop(h);
@@ -1711,9 +1729,11 @@ fn failed_watch_never_replays() {
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn overflow_replays_the_real_history() {
-    let fx = fixture(&["A", "Quieta"]);
+    let mut fx = fixture(&["A", "Quieta"]);
     fs::write(fx.root().join("Quieta").join("testigo.txt"), b"x").unwrap();
     std::thread::sleep(Duration::from_millis(1100)); // FSEvents assigns ids late
+                                                     // Scanned with a real cursor first, so the start replays instead of walking.
+    fx.scan();
     let h = IndexerHandle::spawn_with_history(
         fx.db_path.clone(),
         Arc::new(NullSink),
@@ -1727,7 +1747,13 @@ fn overflow_replays_the_real_history() {
         },
     )
     .unwrap();
-    wait_for("the start-up walk", || fx.status() == RootStatus::Ready);
+    // The start-up replay (or, without history, the catch-up walk) is done and listed.
+    // (A replay with nothing new may store the same cursor, so wait for a settled root.)
+    wait_for("the start-up catch-up", || {
+        fx.status() == RootStatus::Ready && fx.pending_dirs() == 0
+    });
+    std::thread::sleep(Duration::from_millis(1500));
+    wait_for("the start-up catch-up listed", || fx.pending_dirs() == 0);
     let stored = stored_cursor(&fx.db_path, fx.root_id);
     let checked = fx.last_scan();
     drop_row(&fx, "testigo.txt");
