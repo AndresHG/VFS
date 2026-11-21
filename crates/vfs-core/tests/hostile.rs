@@ -139,6 +139,7 @@ fn backslash_names_are_found_exactly() {
                 filters: Default::default(),
                 limit: 50,
                 offset: 0,
+                sort: Default::default(),
             })
             .unwrap();
         let hit = r.hits.iter().find(|h| h.id == id);

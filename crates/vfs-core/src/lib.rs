@@ -565,6 +565,7 @@ mod tests {
             filters: SearchFilters::default(),
             limit: 10,
             offset: 0,
+            sort: Default::default(),
         });
         assert!(
             matches!(&r, Err(e) if search::is_table_open_cut(e)),
