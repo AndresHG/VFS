@@ -177,6 +177,9 @@ test('reduced motion and high contrast are honoured', () => {
   assert.match(mediaBlocks('(prefers-reduced-motion: reduce)'), /progress:not\(\[value\]\)/);
   const forced = mediaBlocks('(forced-colors: active)');
   for (const sel of ['.row[aria-selected="true"]', '.root-state::before', 'progress::-webkit-progress-value']) {
-    assert.ok(forced.includes(sel), `${sel} under forced colours`);
+    const at = forced.indexOf(`${sel} {`);
+    assert.ok(at >= 0, `${sel} under forced colours`);
+    const body = forced.slice(at, forced.indexOf('}', at));
+    assert.match(body, /Highlight|CanvasText|outline/, `${sel} drawn with system colours or an outline`);
   }
 });

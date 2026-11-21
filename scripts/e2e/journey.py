@@ -555,6 +555,12 @@ class Journey:
         for at in MINIMISED_SAMPLES_S:
             time.sleep(max(0.0, at - (now() - t0)))
             samples[f"minimised_{at}s"] = self.app.memory()
+        # Only the app's own log proves WebView2 suspended: Windows trims any minimised
+        # process's working set anyway.
+        log = os.path.join(os.environ.get("LOCALAPPDATA", ""), "app.vfs.desktop", "logs",
+                           "vfs.log")
+        with open(log, encoding="utf-8", errors="replace") as f:
+            samples["suspend_log"] = [l.strip() for l in f if "webview suspended" in l][-3:]
         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         time.sleep(10)
         samples["restored_10s"] = self.app.memory()
@@ -562,6 +568,8 @@ class Journey:
         samples["restored_search"] = self.search_ui("notaria valdepenas",
                                                     self.t[gen_tree.T_NAME]["name"])
         self.metrics["memory_minimised"] = samples
+        if not any("webview suspended: true" in l for l in samples["suspend_log"]):
+            raise AssertionError(f"WebView2 did not report a suspend: {samples['suspend_log']}")
         return samples
 
     def s_accessibility(self):
