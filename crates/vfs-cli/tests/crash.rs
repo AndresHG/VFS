@@ -430,7 +430,7 @@ fn tear(db: &Path, rng: &mut Rng) -> (String, bool) {
     )
 }
 
-/// VFS-3 AC-5, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
+/// VFS-3 AC-5, VFS-23 AC-1, VFS-1 AC-6: after a kill leaves a WAL and a stale session marker behind,
 /// the database, the WAL or the marker is truncated or corrupted at a random offset. The
 /// next open never fails, SQLite's check passes, searches never fail and the index
 /// converges to the disk; when SQLite detected the damage (the index was rebuilt from the

@@ -496,6 +496,27 @@ mod tests {
         }
     }
 
+    /// VFS-23 AC-1: a backup that cannot be written never fails the root change, and the next
+    /// open repairs it.
+    #[test]
+    fn failed_backup_write_is_repaired_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let tree = dir.path().join("archivo");
+        std::fs::create_dir(&tree).unwrap();
+        let vfs = Vfs::open(&path).unwrap();
+        // A folder where the backup goes makes its rename fail on every platform.
+        let blocker = db::with_suffix(&path, ".roots");
+        std::fs::remove_file(&blocker).unwrap(); // the open wrote an empty list
+        std::fs::create_dir(&blocker).unwrap();
+        let root = vfs.add_root(&tree).unwrap();
+        assert_eq!(db::read_roots_backup(&path), None);
+        drop(vfs);
+        std::fs::remove_dir(&blocker).unwrap();
+        let _vfs = Vfs::open(&path).unwrap();
+        assert_eq!(db::read_roots_backup(&path), Some(vec![root.path]));
+    }
+
     /// The facade is shareable across threads (Tauri state, indexer callbacks).
     #[test]
     fn vfs_is_send_and_sync() {
