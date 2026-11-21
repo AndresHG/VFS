@@ -269,7 +269,7 @@ Work is tracked as GitHub issues grouped in milestones:
 | [Fase 1 · Búsqueda por nombre y ruta](https://github.com/AndresHG/VFS/milestone/2) | Core, indexer, watcher, app, UI, CI, Windows installer (spec VFS-1). |
 | [Fase 2 · Validación en el PC real](https://github.com/AndresHG/VFS/milestone/3) | Install on the reference machine; measure first scan, cold-cache latency, memory; live alongside Synology sync. |
 | [Fase 3 · Contenido de documentos](https://github.com/AndresHG/VFS/milestone/4) | Text extraction from Word/PDF and Spanish full-text search. |
-| [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Updates, code signing, optional OCR and embeddings. |
+| [Fase 4 · Pulido y distribución](https://github.com/AndresHG/VFS/milestone/5) | Code signing, optional OCR and embeddings (updates shipped in v0.2.0, VFS-21). |
 
 ## FAQ
 

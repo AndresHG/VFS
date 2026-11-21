@@ -5,6 +5,8 @@
 use std::fmt::Display;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use semver::Version;
@@ -104,13 +106,12 @@ impl<T: Clone> CheckOnce<T> {
     }
 }
 
-/// The order is download, verify, stop the indexer, install, relaunch (VFS-21 R3, R5, R8).
-/// `install` verifies the signature before anything else, so a failed download or a bad
-/// signature returns before anything is installed or stopped. On Windows the indexer is
-/// stopped inside `install` (the updater's `on_before_exit` hook, after verifying), and on
-/// success the process exits for the installer; if launching the installer fails, `recover`
-/// restarts the indexer so the app stays usable. On macOS `after_install` stops the indexer
-/// and relaunches.
+/// Download, then `install`, then `after_install`; `recover` runs when `install` fails
+/// (VFS-21 R3, R5, R8). `install` verifies the signature before anything else, so a failed
+/// download or a bad signature returns before anything is installed or stopped. Windows: the
+/// indexer is stopped inside `install` (the updater's `on_before_exit` hook, after verifying)
+/// and on success the process exits for the installer. macOS: `install` replaces the bundle
+/// while the indexer runs, then `after_install` stops it and relaunches.
 pub async fn install_flow<D, DFut, I, A, F, E>(
     download: D,
     install: I,
@@ -137,6 +138,8 @@ where
 pub struct UpdateState {
     settings_path: PathBuf,
     check: CheckOnce<tauri_plugin_updater::Update>,
+    /// Set by the Windows `on_before_exit` hook once the indexer has been stopped.
+    index_stopped: Arc<AtomicBool>,
 }
 
 impl UpdateState {
@@ -144,7 +147,17 @@ impl UpdateState {
         UpdateState {
             settings_path: local_data.join(SETTINGS_FILE),
             check: CheckOnce::default(),
+            index_stopped: Arc::default(),
         }
+    }
+}
+
+/// After a failed install: if the indexer was already stopped (the Windows installer could
+/// not start), relaunch the current version so the index session and the window come back
+/// whole; otherwise nothing was touched and the app simply carries on (VFS-21 R5).
+pub fn recover_after_failed_install(index_stopped: &AtomicBool, relaunch: impl FnOnce()) {
+    if index_stopped.load(Ordering::SeqCst) {
+        relaunch();
     }
 }
 
@@ -174,16 +187,18 @@ fn shutdown_index<R: Runtime>(app: &AppHandle<R>) {
 
 async fn fetch_update<R: Runtime>(
     app: &AppHandle<R>,
+    index_stopped: Arc<AtomicBool>,
 ) -> tauri_plugin_updater::Result<Option<tauri_plugin_updater::Update>> {
     use tauri_plugin_updater::UpdaterExt;
     let exiting = app.clone();
     app.updater_builder()
         .version_comparator(|current, release| is_newer(&current, &release.version))
         .timeout(CHECK_TIMEOUT)
-        // Replaces the plugin's default hook, so it also runs the app's own cleanup.
+        // Replaces the plugin's default hook (`cleanup_before_exit`, which hides the windows):
+        // if the installer then fails to start, the app must still be usable.
         .on_before_exit(move || {
             shutdown_index(&exiting);
-            exiting.cleanup_before_exit();
+            index_stopped.store(true, Ordering::SeqCst);
         })
         .build()?
         .check()
@@ -217,13 +232,16 @@ pub async fn check_for_update<R: Runtime>(
     if !load_settings(&state.settings_path).check_on_open {
         return Ok(None);
     }
-    let found = state.check.get_or_check(|| fetch_update(&app)).await;
+    let stopped = state.index_stopped.clone();
+    let found = state
+        .check
+        .get_or_check(|| fetch_update(&app, stopped))
+        .await;
     Ok(found.map(|u| UpdateInfo { version: u.version }))
 }
 
 /// "Actualizar": download with progress events, verify, install and relaunch. Rejects, with
-/// nothing installed and the indexer running, when the download, the signature or the
-/// install step fails (VFS-21 R5).
+/// nothing installed, when the download, the signature or the install step fails (VFS-21 R5).
 #[tauri::command]
 pub async fn install_update<R: Runtime>(
     app: AppHandle<R>,
@@ -234,12 +252,15 @@ pub async fn install_update<R: Runtime>(
     };
     update.timeout = Some(DOWNLOAD_TIMEOUT);
     let events = app.clone();
-    let mut downloaded = 0u64;
+    let finished = app.clone();
+    let counter = AtomicU64::new(0);
+    let downloaded = &counter;
     let mut last_percent = None;
     let download = || {
         update.download(
             move |chunk, total| {
-                downloaded += chunk as u64;
+                let downloaded =
+                    downloaded.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
                 // One event per percent at most: a 10 MB download comes in ~1000 chunks.
                 let percent = total.map(|t| downloaded * 100 / t.max(1));
                 if percent.is_none() || percent != last_percent {
@@ -248,7 +269,12 @@ pub async fn install_update<R: Runtime>(
                         events.emit(EVENT_UPDATE_PROGRESS, UpdateProgress { downloaded, total });
                 }
             },
-            || {},
+            // Also when the server sent no size: the UI switches to "Instalando…" on this.
+            move || {
+                let downloaded = downloaded.load(Ordering::Relaxed);
+                let total = Some(downloaded);
+                let _ = finished.emit(EVENT_UPDATE_PROGRESS, UpdateProgress { downloaded, total });
+            },
         )
     };
     let result = install_flow(
@@ -259,7 +285,7 @@ pub async fn install_update<R: Runtime>(
             shutdown_index(&app);
             app.restart();
         },
-        || crate::restart_indexer(&app),
+        || recover_after_failed_install(&state.index_stopped, || app.restart()),
     )
     .await;
     result.map_err(|e| {
@@ -272,7 +298,7 @@ pub async fn install_update<R: Runtime>(
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     fn v(s: &str) -> Version {
         Version::parse(s.trim_start_matches('v')).unwrap()
@@ -382,7 +408,7 @@ mod tests {
                 }
             },
             || steps.borrow_mut().push("shutdown+relaunch"),
-            || steps.borrow_mut().push("restart indexer"),
+            || steps.borrow_mut().push("recover"),
         ));
         (result, steps.into_inner())
     }
@@ -396,13 +422,27 @@ mod tests {
         assert_eq!(steps, ["download"]);
     }
 
-    /// VFS-21 AC-12: a bad signature or an installer that cannot run (possibly after the
-    /// indexer was stopped) rejects, never relaunches, and restarts the indexer.
+    /// VFS-21 AC-12: a bad signature or an installer that cannot run rejects, skips the
+    /// post-install relaunch and runs the recovery step.
     #[test]
-    fn failed_install_restarts_the_indexer() {
+    fn failed_install_runs_recovery() {
         let (result, steps) = run_flow(true, false);
         assert_eq!(result.unwrap_err(), "signature mismatch");
-        assert_eq!(steps, ["download", "install", "restart indexer"]);
+        assert_eq!(steps, ["download", "install", "recover"]);
+    }
+
+    /// VFS-21 AC-12: recovery relaunches the current version only when the indexer was
+    /// already stopped (Windows installer failed to start); otherwise the app carries on.
+    #[test]
+    fn recovery_relaunches_only_after_the_index_stopped() {
+        let relaunched = AtomicUsize::new(0);
+        let relaunch = || {
+            relaunched.fetch_add(1, Ordering::SeqCst);
+        };
+        recover_after_failed_install(&AtomicBool::new(false), relaunch);
+        assert_eq!(relaunched.load(Ordering::SeqCst), 0);
+        recover_after_failed_install(&AtomicBool::new(true), relaunch);
+        assert_eq!(relaunched.load(Ordering::SeqCst), 1);
     }
 
     /// VFS-21 AC-8: the index is shut down only after the update is installed and before the

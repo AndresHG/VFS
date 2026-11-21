@@ -52,18 +52,20 @@ because it is the app's only network connection the UI and the README say so.
   non-modal notice "Hay una versión nueva de VFS (x.y.z)" with "Actualizar" and "Ahora no".
   A pre-release version is offered only to a pre-release build (a comparator rule; the
   endpoint itself never serves pre-releases, D7).
-- R3. WHEN the user clicks "Actualizar", THE app SHALL, in this order, download the update
-  showing progress, verify its signature, stop the indexer, install the update and relaunch
-  on the new version. On Windows the NSIS installer shows its passive progress window and
-  reopens VFS itself; on macOS the app relaunches itself.
+- R3. WHEN the user clicks "Actualizar", THE app SHALL download the update showing progress
+  and verify its signature before stopping or replacing anything, then install it and run
+  the new version. Windows: stop the indexer, start the NSIS installer (passive progress
+  window), exit; the installer reopens VFS. macOS: replace the bundle, stop the indexer,
+  relaunch.
 - R4. IF the network is unavailable, blocked, slow (no answer within 20 s) or the manifest is
   invalid, THEN THE app SHALL show nothing, log the cause, and try again on the next launch.
 - R5. IF the download fails or is interrupted, THEN THE app SHALL install nothing, keep running
   normally, and show "No se ha podido descargar la actualización" with "Reintentar" in the
   same notice. IF the signature does not verify or the install step fails (installer cannot
-  start, bundle not writable), THEN THE app SHALL restart the indexer if it was stopped, keep
-  running on the current version, and show "No se ha podido instalar la actualización" with
-  "Reintentar".
+  start, bundle not writable), THEN THE app SHALL keep running on the current version and show
+  "No se ha podido instalar la actualización" with "Reintentar"; if the indexer had already
+  been stopped (the Windows installer failed to start), it SHALL instead relaunch the current
+  version, so the index session and the window come back whole.
 - R6. WHERE the user turns off "Buscar actualizaciones al abrir", THE app SHALL make no network
   connection at all; the setting persists across launches and defaults to on.
 - R7. THE settings panel and the README SHALL say that the update check is the app's only
@@ -109,8 +111,9 @@ Tests cite these ids (`VFS-21 AC-<m>`) in their doc comments.
   the Windows check is the documented manual step in `docs/updates.md`.
 - AC-11 (R2, R7) The notice and the setting copy come from the text catalog, in Spanish.
 - AC-12 (R5) Given the download completed, When the signature check or the installer fails,
-  Then the install command rejects, the indexer is restarted, the app never relaunches, and
-  the notice shows "No se ha podido instalar la actualización" with "Reintentar".
+  Then the install command rejects and the notice shows "No se ha podido instalar la
+  actualización" with "Reintentar" (also when the server sent no download size); the current
+  version is relaunched only if the indexer had already been stopped.
 - AC-13 (R3) Given a download in progress, When progress events arrive, Then the notice shows
   the percentage and a progress bar, and "Instalando…" once the download completes.
 
