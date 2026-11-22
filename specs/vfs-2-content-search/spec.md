@@ -69,8 +69,10 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
 - R3. WHEN a file has failed or been skipped, THE content indexer SHALL not read it again until
   its size or modification time changes, except that a file that failed by timeout SHALL be
   tried once more on a later run (a background-priority worker on a busy disk can be starved
-  past the limit); WHEN an indexed file's size or modification time changes, THE content
-  indexer SHALL extract it again; WHEN neither changed, it SHALL not read the file.
+  past the limit), and a file skipped as `too_large` SHALL be queued again when the size
+  limit is raised above its size (VFS-34 R6); WHEN an indexed file's size or modification
+  time changes, THE content indexer SHALL extract it again; WHEN neither changed, it SHALL
+  not read the file.
 - R4. IF the content indexer is interrupted, THEN the next run SHALL continue from the files
   not yet processed, without redoing finished ones.
 - R5. WHILE extracting, THE worker SHALL run at the lowest CPU and I/O priority the OS offers
@@ -158,6 +160,10 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
 - R20. THE content indexer SHALL write only `files.content_state` in `index.db`, in short
   transactions with a busy timeout. The name indexer remains the only writer of every other
   column, and of the schema.
+- R21. WHEN a content run starts, and WHEN it meets a document whose file id is no longer in
+  `index.db`, THE content indexer SHALL delete that document's rows (text, chunks, FTS keys,
+  metadata) from `content.db`. The input-size budget SHALL be read from `index.db` `meta`
+  key `content_max_mb` (VFS-34 R6); when the key is absent, it is 100 MB.
 
 ## Acceptance scenarios
 
@@ -175,9 +181,6 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   worker hang), When the content indexer runs, Then the worker is killed within the limit plus
   one second, the file is marked `failed`, and the next file is still indexed; the next run
   tries that file once more, and the run after that does not open it.
-- AC-23 (R5) Given a content run, When the worker's priority is read from the OS, Then it is
-  the idle priority class with background mode on Windows, or `PRIO_DARWIN_BG` on macOS. At
-  most one document is open at a time: the test's file-open hook never sees two.
 - AC-4 (R2) Given truncated, randomly corrupted, password-protected, zero-byte and zip-bomb
   documents, When the content indexer runs, Then the run completes, each such file ends
   `failed` or `skipped` (password-protected and empty-text files `skipped`), and the valid
@@ -260,6 +263,13 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   `retrieve({all: [alquiler], any: [fianza]}, …)` runs, Then only A comes back. Given 30
   hits, When `retrieve(q, f, 20, 20)` runs, Then the last 10 come back, `total` is 30, and
   the order matches the first page's.
+- AC-23 (R5) Given a content run, When the worker's priority is read from the OS, Then it is
+  the idle priority class with background mode on Windows, or `PRIO_DARWIN_BG` on macOS. At
+  most one document is open at a time: the test's file-open hook never sees two.
+- AC-24 (R21, R3) Given an indexed document removed from `index.db` by the name indexer, When
+  the next content run starts, Then its rows are gone from `content.db` and `retrieve` never
+  returns it. Given a 150 MB document skipped as `too_large` and `content_max_mb` raised to
+  200, When the next run starts, Then it is extracted.
 
 ## Phased PRs
 
@@ -267,7 +277,7 @@ Each PR leaves `main` releasable, and the `content` feature stays off by default
 
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
-| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures, the worker's lifetime, the store version and the `content_state` writes (R17–R20), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20, AC-21, AC-23 | 2–3 days **[estimate]** |
+| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures, the worker's lifetime, the store version, the `content_state` writes, the sweep of removed files and the size setting (R17–R21), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20, AC-21, AC-23, AC-24 | 2–3 days **[estimate]** |
 | 2b | Query semantics and the engine calls: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` with structured queries and paging, `passage_text` and `unread` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-19, AC-22 | 2–3 days **[estimate]** |
 
 ## Budgets
