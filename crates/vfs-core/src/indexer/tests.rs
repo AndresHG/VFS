@@ -1519,6 +1519,27 @@ fn overflow_indexer_with(fx: &mut Fx, sched: Sched) -> (IndexerHandle, Arc<FakeH
     (h, history)
 }
 
+/// The stored cursor once it stops changing: unchanged for six cursor checks (50 ms each in
+/// `overflow_indexer`), which happens only once the indexer has frozen or held it. Waiting on
+/// that condition, not a fixed sleep, keeps a slow indexer thread from storing one more
+/// cursor after the test has read the held one (VFS-26 AC-2, AC-3, AC-4).
+fn settled_cursor(fx: &Fx) -> Option<String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut last = stored_cursor(&fx.db_path, fx.root_id);
+    let mut since = Instant::now();
+    loop {
+        std::thread::sleep(Duration::from_millis(25));
+        let now = stored_cursor(&fx.db_path, fx.root_id);
+        if now != last {
+            last = now;
+            since = Instant::now();
+        } else if since.elapsed() >= Duration::from_millis(300) {
+            return last;
+        }
+        assert!(Instant::now() < deadline, "the cursor never settled");
+    }
+}
+
 fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !done() {
@@ -1613,8 +1634,7 @@ fn replay_on_a_held_root_keeps_the_owed_walk() {
     let (h, history) = overflow_indexer(&mut fx);
     let checked = fx.last_scan();
     h.send(Cmd::Watch(watch::WatchEvent::Failed(fx.root_id)));
-    std::thread::sleep(Duration::from_millis(150));
-    let held = stored_cursor(&fx.db_path, fx.root_id);
+    let held = settled_cursor(&fx);
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held, "not held");
     *history.replay.lock().unwrap() = Some(Ok((Vec::new(), "fake:replayed".into())));
@@ -1694,12 +1714,13 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     let before = history.replays.load(Ordering::SeqCst);
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
     // Read once the overflow froze the cursor: a check before it may still store one.
-    std::thread::sleep(Duration::from_millis(100));
-    let held = stored_cursor(&fx.db_path, fx.root_id);
-    std::thread::sleep(Duration::from_millis(500));
-    fs::rename(&away, fx.tree.path()).unwrap();
+    let held = settled_cursor(&fx);
+    // Still away long after the replay was due (300 ms after the overflow): no replay ran
+    // and the cursor holds. Back in place only to show the walk is owed.
+    std::thread::sleep(Duration::from_millis(1000));
     assert_eq!(history.replays.load(Ordering::SeqCst), before);
     assert_eq!(stored_cursor(&fx.db_path, fx.root_id), held);
+    fs::rename(&away, fx.tree.path()).unwrap();
     assert_walk_owed(&fx);
     drop(h);
 }
@@ -1714,8 +1735,7 @@ fn failed_watch_never_replays() {
     h.send(Cmd::Watch(watch::WatchEvent::Failed(fx.root_id)));
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
     h.send(Cmd::Watch(watch::WatchEvent::Failed(fx.root_id)));
-    std::thread::sleep(Duration::from_millis(150));
-    let held = stored_cursor(&fx.db_path, fx.root_id);
+    let held = settled_cursor(&fx);
     std::thread::sleep(Duration::from_millis(700));
     assert_eq!(
         history.replays.load(Ordering::SeqCst),
