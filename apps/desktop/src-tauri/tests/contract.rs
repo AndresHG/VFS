@@ -207,6 +207,7 @@ fn all_error_codes() -> Vec<String> {
         },
         Error::Unavailable(String::new()),
         Error::SchemaTooNew,
+        Error::InvalidPattern(vfs_core::PatternError::Empty),
         Error::Db(rusqlite::Error::InvalidQuery),
         Error::Io(std::io::Error::other("x")),
     ];
@@ -217,6 +218,7 @@ fn all_error_codes() -> Vec<String> {
             | Error::OverlappingRoot { .. }
             | Error::Unavailable(_)
             | Error::SchemaTooNew
+            | Error::InvalidPattern(_)
             | Error::Db(_)
             | Error::Io(_) => {}
         }

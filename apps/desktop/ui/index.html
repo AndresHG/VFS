@@ -22,6 +22,7 @@
     <symbol id="i-bookmark-folder" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12.75 9.75h4.5v7.5l-2.25-1.6-2.25 1.6Z" fill="currentColor"/></symbol>
     <symbol id="i-open" viewBox="0 0 24 24"><path d="M13.5 4.75h5.75v5.75M19 5l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.25 13.5v5a1.75 1.75 0 0 1-1.75 1.75h-10A1.75 1.75 0 0 1 3.75 18.5v-10A1.75 1.75 0 0 1 5.5 6.75h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 13.5h5.5m-2.25-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-target" viewBox="0 0 24 24"><rect x="3.75" y="3.75" width="16.5" height="16.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 16.5v-2.25a4 4 0 0 1 4-4h4m-2.5-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -202,6 +203,28 @@
       <summary data-s="advancedTitle"></summary>
       <label class="toggle"><input type="checkbox" id="include-all"> <span data-s="includeAllToggle"></span></label>
       <p class="bookmarks-intro bookmarks-status" data-s="includeAllIntro"></p>
+      <!-- VFS-34: «Filtro de archivos», global for every folder. -->
+      <section class="file-filter" aria-labelledby="file-filter-title">
+        <h3 id="file-filter-title" data-s="fileFilterTitle"></h3>
+        <p class="bookmarks-intro" data-s="fileFilterIntro"></p>
+        <ul id="file-filter-list" class="file-filter-list"></ul>
+        <form id="file-filter-form" class="file-filter-add">
+          <label for="file-filter-pattern" class="visually-hidden" data-s="fileFilterPlaceholder"></label>
+          <input id="file-filter-pattern" type="text" autocomplete="off" spellcheck="false">
+          <button id="file-filter-add" class="btn" type="submit">
+            <svg aria-hidden="true"><use href="#i-plus"/></svg><span class="visually-hidden" data-s="fileFilterAdd"></span>
+          </button>
+        </form>
+        <p id="file-filter-msg" class="bookmarks-intro" role="status"></p>
+        <button id="file-filter-reset" class="btn btn-quiet" type="button" data-s="fileFilterReset"></button>
+        <p class="bookmarks-intro" data-s="fileFilterBuiltIn"></p>
+        <!-- Shown only while content search is on (VFS-27). -->
+        <div id="content-max-row" class="file-filter-limit" hidden>
+          <label for="content-max-mb" data-s="contentMaxLabel"></label>
+          <input id="content-max-mb" type="number" min="0" max="100000" step="1" inputmode="numeric">
+          <p class="bookmarks-intro" data-s="contentMaxHint"></p>
+        </div>
+      </section>
     </details>
   </dialog>
 
@@ -263,6 +286,16 @@
       <button id="feedback-github" class="btn btn-primary" type="button" data-s="feedbackGithub"></button>
       <button id="feedback-export" class="btn btn-quiet" type="button" data-s="feedbackExport"></button>
     </div>
+  </dialog>
+
+  <!-- VFS-34 R2: adding a pattern that hides more than 1,000 files asks first. -->
+  <dialog id="confirm-filter" class="confirm" aria-labelledby="confirm-filter-title" aria-describedby="confirm-filter-desc">
+    <h2 id="confirm-filter-title" data-s="fileFilterConfirmTitle"></h2>
+    <p id="confirm-filter-desc"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-primary" value="add" data-s="fileFilterConfirmAdd"></button>
+    </form>
   </dialog>
 
   <dialog id="confirm-remove" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-desc">

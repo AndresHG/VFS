@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::Serialize;
 use vfs_core::content::ContentState;
 use vfs_core::db::ingest::FLAG_CLOUD_ONLY;
@@ -33,13 +33,10 @@ const UNSTABLE_CRASHES: u32 = 5;
 
 /// `index.db` `meta` key holding the input-size budget in MB (VFS-2 R21; written by
 /// VFS-34's setting).
-pub const CONTENT_MAX_MB_KEY: &str = "content_max_mb";
+pub use vfs_core::content::CONTENT_MAX_MB_KEY;
 
 /// File ids per `mirror` transaction (R20: short transactions on `index.db`).
 const MIRROR_WINDOW: i64 = 5_000;
-
-/// Input-size budget when `index.db` has no `content_max_mb` (VFS-2 R21).
-const DEFAULT_MAX_INPUT_MB: u64 = 100;
 
 /// Limits and pacing of one indexing run.
 #[derive(Debug, Clone)]
@@ -217,19 +214,11 @@ fn supported_sql() -> String {
 }
 
 /// The input-size budget: `meta` key `content_max_mb` of `index.db` (written by VFS-34's
-/// setting), else 100 MB (VFS-2 R21).
+/// setting), else 100 MB (VFS-2 R21); 0 is no limit (VFS-34 R6).
 fn input_budget(conn: &Connection) -> Result<u64> {
-    let mb: Option<String> = conn
-        .query_row(
-            "SELECT value FROM meta WHERE key = ?1",
-            [CONTENT_MAX_MB_KEY],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(mb
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MAX_INPUT_MB)
-        << 20)
+    Ok(vfs_core::content::content_max_bytes(
+        vfs_core::content::content_max_mb(conn)?,
+    ))
 }
 
 /// Root folders of the index with their paths, and the ids of those whose folder cannot be

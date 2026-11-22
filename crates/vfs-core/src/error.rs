@@ -17,6 +17,9 @@ pub enum Error {
     Unavailable(String),
     #[error("index was created by a newer version")]
     SchemaTooNew,
+    /// The message is the [`PatternError`] code, which the UI words (VFS-34 R2).
+    #[error("{0}")]
+    InvalidPattern(PatternError),
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -25,7 +28,8 @@ pub enum Error {
 
 impl Error {
     /// One of `not_found`, `not_a_directory`, `overlapping_root`, `unavailable`,
-    /// `schema_too_new`, `db`, `io` (the `ErrorCode` type of the UI contract).
+    /// `schema_too_new`, `invalid_pattern`, `db`, `io` (the `ErrorCode` type of the UI
+    /// contract).
     pub fn code(&self) -> &'static str {
         match self {
             Error::NotFound(_) => "not_found",
@@ -33,9 +37,32 @@ impl Error {
             Error::OverlappingRoot { .. } => "overlapping_root",
             Error::Unavailable(_) => "unavailable",
             Error::SchemaTooNew => "schema_too_new",
+            Error::InvalidPattern(_) => "invalid_pattern",
             Error::Db(_) => "db",
             Error::Io(_) => "io",
         }
+    }
+}
+
+/// Why a file-filter pattern is refused (VFS-34 R2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatternError {
+    Empty,
+    /// It holds `/` or `\`: a pattern matches a name, never a path.
+    Separator,
+    /// Only `*`, `?` and `.`, so it would hide (nearly) every file.
+    NoLiteral,
+    Duplicate,
+}
+
+impl std::fmt::Display for PatternError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PatternError::Empty => "empty",
+            PatternError::Separator => "separator",
+            PatternError::NoLiteral => "no_literal",
+            PatternError::Duplicate => "duplicate",
+        })
     }
 }
 

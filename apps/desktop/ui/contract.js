@@ -81,6 +81,7 @@ export const ErrorCode = Object.freeze({
   OVERLAPPING_ROOT: 'overlapping_root',
   UNAVAILABLE: 'unavailable',
   SCHEMA_TOO_NEW: 'schema_too_new',
+  INVALID_PATTERN: 'invalid_pattern', // VFS-34: the message is the reason
   DB: 'db',
   IO: 'io',
 });

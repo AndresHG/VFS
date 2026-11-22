@@ -10,9 +10,11 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use rusqlite::{Connection, OptionalExtension};
 
+use super::patterns::FilePatterns;
 use crate::error::Result;
 
 /// Version of [`LIST`]. Each root records the version and setting of its last full walk; a
@@ -35,8 +37,20 @@ fn stamp_key(root_id: i64) -> String {
     format!("exclusions/{root_id}")
 }
 
-fn stamp_value(include_all: bool) -> String {
-    format!("{VERSION}:{}", u8::from(include_all))
+/// `VERSION:include:gen`: the list version, the switch, and the generation of the user's
+/// file filter (VFS-34 R5).
+fn stamp_value(conn: &Connection) -> Result<String> {
+    Ok(format!(
+        "{VERSION}:{}:{}",
+        u8::from(include_all(conn)?),
+        super::patterns::generation(conn)?
+    ))
+}
+
+/// Whether a stored stamp is `want`. A stamp from before VFS-34, `VERSION:include`, reads as
+/// generation 0, so upgrading leaves every root current (VFS-34 R5).
+fn current(stored: &str, want: &str) -> bool {
+    stored == want || want.strip_suffix(":0") == Some(stored)
 }
 
 fn walk_key(root_id: i64) -> String {
@@ -45,7 +59,7 @@ fn walk_key(root_id: i64) -> String {
 
 /// Records the list version and setting a full walk of `root_id` starts under.
 pub(crate) fn begin_walk(conn: &Connection, root_id: i64) -> Result<()> {
-    let value = stamp_value(include_all(conn)?);
+    let value = stamp_value(conn)?;
     set_meta(conn, &walk_key(root_id), &value)
 }
 
@@ -54,7 +68,7 @@ pub(crate) fn begin_walk(conn: &Connection, root_id: i64) -> Result<()> {
 pub(crate) fn stamp(conn: &Connection, root_id: i64) -> Result<()> {
     let value = match meta(conn, &walk_key(root_id))? {
         Some(v) => v,
-        None => stamp_value(include_all(conn)?),
+        None => stamp_value(conn)?,
     };
     set_meta(conn, &stamp_key(root_id), &value)
 }
@@ -67,16 +81,17 @@ pub(crate) fn forget(conn: &Connection, root_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Roots that finished a full walk under another list version or setting than now.
+/// Roots that finished a full walk under another list version, setting or file-filter
+/// generation than now.
 pub(crate) fn stale_roots(conn: &Connection) -> Result<Vec<i64>> {
-    let want = stamp_value(include_all(conn)?);
+    let want = stamp_value(conn)?;
     let ids: Vec<i64> = conn
         .prepare("SELECT id FROM roots WHERE last_full_scan_at IS NOT NULL ORDER BY id")?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let mut out = Vec::new();
     for id in ids {
-        if meta(conn, &stamp_key(id))?.as_deref() != Some(want.as_str()) {
+        if !meta(conn, &stamp_key(id))?.is_some_and(|s| current(&s, &want)) {
             out.push(id);
         }
     }
@@ -242,6 +257,8 @@ pub(crate) struct Exclusions {
     marker_children: Vec<(&'static str, &'static [&'static str])>,
     by_parent: HashMap<String, ChildRule>,
     root: PathBuf,
+    /// The user's file filter (VFS-34 R3), which applies whether or not the folder rules do.
+    files: Arc<FilePatterns>,
 }
 
 /// The key a folder path is compared by: as is, or on Windows lowercased with `/` read as
@@ -283,7 +300,14 @@ impl Exclusions {
             marker_children: Vec::new(),
             by_parent: HashMap::new(),
             root: root.to_path_buf(),
+            files: Arc::default(),
         }
+    }
+
+    /// The same rules, with the user's file filter (VFS-34 R3).
+    pub(crate) fn with_files(mut self, files: Arc<FilePatterns>) -> Exclusions {
+        self.files = files;
+        self
     }
 
     /// The rules of [`LIST`] for this system that apply below `root`. A path rule whose folder
@@ -402,6 +426,12 @@ impl Children<'_> {
                 Some(ChildRule::KeepOnly(keep)) => !keep.iter().any(eq),
                 None => false,
             }
+    }
+
+    /// Whether the file `name` matches the user's file filter (VFS-34 R3). Called for files
+    /// only: a pattern never matches a folder.
+    pub(crate) fn skips_file(&self, name: &str) -> bool {
+        self.excl.files.matches(name)
     }
 
     /// Whether the entry `name` marks the folder's contents as not indexed.

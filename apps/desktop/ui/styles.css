@@ -870,6 +870,31 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; accent-color: var(--accent); }
 .bookmarks-status { margin: var(--s1) 0 var(--s4); color: var(--ink-2); }
 
+/* VFS-34: «Filtro de archivos», inside «Avanzado». */
+.file-filter { display: grid; grid-template-columns: minmax(0, 1fr); min-inline-size: 0; gap: var(--s2); padding-block-start: var(--s3); border-block-start: 1px solid var(--line); }
+.file-filter h3 { margin: 0; font-size: 1rem; }
+.file-filter-list { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0; padding: 0; list-style: none; }
+.file-filter-list li {
+  display: inline-flex; align-items: center; gap: var(--s1); min-inline-size: 0; max-inline-size: 100%;
+  padding-inline-start: var(--s3); border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+}
+.file-filter-list code { overflow-wrap: anywhere; font: inherit; }
+.file-filter-list .icon-btn { inline-size: 2rem; block-size: 2rem; }
+.file-filter-add { display: flex; gap: var(--s2); }
+.file-filter-add input, .file-filter-limit input {
+  flex: 1; inline-size: 100%; min-inline-size: 0; min-block-size: 2.5rem; padding: 0 var(--s3);
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit;
+}
+.file-filter-add .btn { min-inline-size: 2.5rem; padding-inline: var(--s2); }
+.file-filter-add .btn svg { inline-size: 1.25rem; block-size: 1.25rem; }
+#file-filter-msg:empty { display: none; }
+#file-filter-msg[data-error] { color: var(--danger); }
+.file-filter > .btn-quiet { justify-self: start; }
+.file-filter-limit { display: grid; gap: var(--s1); }
+.file-filter-limit[hidden] { display: none; }
+.file-filter-limit label { font-weight: 700; }
+.file-filter-limit input { flex: none; inline-size: 8rem; }
+
 /* VFS-20: "Enviar comentarios". */
 .feedback-body { display: flex; flex-direction: column; gap: var(--s2); padding: 0 var(--s5) var(--s4); overflow-y: auto; flex: 1; }
 .feedback-body > * { flex-shrink: 0; }

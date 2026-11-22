@@ -1740,3 +1740,62 @@ fn mirror_spans_windows_and_respects_offline_roots() {
     assert_eq!(count(QUEUED, true), 0, "the offline folder keeps its state");
     assert_eq!(count(NONE, true), 4_000 + 1);
 }
+
+/// A file of `mb` MB at `rel`, sparse where the file system allows, so the test writes
+/// almost nothing.
+fn big_file(s: &Setup, rel: &str, mb: u64) -> PathBuf {
+    let p = s.write(rel, b"%PDF-1.4\n");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&p)
+        .unwrap()
+        .set_len(mb << 20)
+        .unwrap();
+    p
+}
+
+/// VFS-34 AC-5, R6: a 150 MB PDF under the default limit (100 MB) is never opened, keeps
+/// its name in the index, and reads as `too_large`; raised to 200 MB, it is queued and
+/// read. With the limit at 0, no document is skipped for size.
+#[test]
+fn ac5_content_size_limit_from_the_file_filter() {
+    let s = setup();
+    big_file(&s, "grande.pdf", 150);
+    s.scan();
+    assert_eq!(
+        s.vfs.content_max_mb().unwrap(),
+        vfs_core::content::DEFAULT_CONTENT_MAX_MB
+    );
+    let first = s.run(&s.opts());
+    assert_eq!(first.files_opened, 0, "{first:?}");
+    assert_eq!(s.state("grande.pdf").2, reason(SkipReason::TooLarge));
+    let by_name = s
+        .vfs
+        .search(&vfs_core::SearchQuery {
+            text: "grande".into(),
+            filters: Default::default(),
+            limit: 10,
+            offset: 0,
+            sort: Default::default(),
+        })
+        .unwrap();
+    assert_eq!(by_name.hits.len(), 1, "its name is found");
+
+    s.vfs.set_content_max_mb(200).unwrap();
+    let second = s.run(&s.opts());
+    assert_eq!(second.files_opened, 1, "{second:?}");
+    assert_ne!(s.state("grande.pdf").2, reason(SkipReason::TooLarge));
+
+    // Lowered again, a new 120 MB document is too large; at 0 it is read.
+    s.vfs.set_content_max_mb(100).unwrap();
+    let p = big_file(&s, "enorme.pdf", 120);
+    s.vfs.mark_dirty(&[p.canonicalize().unwrap()]).unwrap();
+    s.scan();
+    let third = s.run(&s.opts());
+    assert_eq!(third.files_opened, 0, "{third:?}");
+    assert_eq!(s.state("enorme.pdf").2, reason(SkipReason::TooLarge));
+    s.vfs.set_content_max_mb(0).unwrap();
+    let fourth = s.run(&s.opts());
+    assert_eq!(fourth.files_opened, 1, "{fourth:?}");
+    assert_ne!(s.state("enorme.pdf").2, reason(SkipReason::TooLarge));
+}

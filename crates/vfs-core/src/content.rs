@@ -3,7 +3,47 @@
 
 use std::path::Path;
 
+use rusqlite::{Connection, OptionalExtension};
+
 use crate::error::Result;
+
+/// `index.db` `meta` key of «Tamaño máximo para leer el contenido (MB)»: documents larger
+/// than this are not opened by the content indexer; 0 means no limit (VFS-34 R6, VFS-2 R21).
+pub const CONTENT_MAX_MB_KEY: &str = "content_max_mb";
+
+/// The limit when none is stored: VFS-2's input budget (VFS-34 R6).
+pub const DEFAULT_CONTENT_MAX_MB: u64 = 100;
+
+/// The stored limit in MB, or [`DEFAULT_CONTENT_MAX_MB`]; 0 means no limit (VFS-34 R6).
+pub fn content_max_mb(conn: &Connection) -> Result<u64> {
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [CONTENT_MAX_MB_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.and_then(|v| v.trim().parse().ok())
+        .unwrap_or(DEFAULT_CONTENT_MAX_MB))
+}
+
+/// The limit in bytes for `mb`: 0 is no limit, and the value stays within `i64` for SQL.
+pub fn content_max_bytes(mb: u64) -> u64 {
+    let max = i64::MAX as u64;
+    if mb == 0 {
+        max
+    } else {
+        mb.saturating_mul(1 << 20).min(max)
+    }
+}
+
+pub(crate) fn set_content_max_mb(conn: &Connection, mb: u64) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
+        rusqlite::params![CONTENT_MAX_MB_KEY, mb.to_string()],
+    )?;
+    Ok(())
+}
 
 /// Value of `files.content_state`. v1 writes `None` (0) only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

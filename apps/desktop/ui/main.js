@@ -12,6 +12,7 @@ import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js
 import { setupFeedback } from './feedback.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
+import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
   Source, TruncatedBy, UiErrorCode,
@@ -1336,6 +1337,77 @@ function main(L) {
       includeAll.checked = !includeAll.checked;
       showError(errorText(err));
     }
+  });
+
+  // VFS-34: «Filtro de archivos». Adding a pattern hides its files at once (no walk);
+  // removing one or restoring the list brings files back after a full check.
+  const filterList = $('file-filter-list');
+  const filterInput = $('file-filter-pattern');
+  filterInput.placeholder = S.fileFilterPlaceholder;
+  function filterMessage(text, error = false) {
+    const msg = $('file-filter-msg');
+    msg.textContent = text;
+    msg.toggleAttribute('data-error', error);
+  }
+  function renderFilter(list) {
+    filterList.replaceChildren(...list.map((p) => {
+      const remove = el('button', 'icon-btn');
+      remove.type = 'button';
+      remove.append(icon('close'), el('span', 'visually-hidden', S.fileFilterRemove(p)));
+      remove.addEventListener('click', async () => {
+        try {
+          renderFilter(await api.removeFileExclusion(p));
+          filterMessage(S.fileFilterComeBack);
+        } catch (err) { filterMessage(errorText(err), true); }
+      });
+      const item = el('li');
+      item.append(el('code', null, p), remove);
+      return item;
+    }));
+  }
+  const confirmFilter = $('confirm-filter');
+  function askFilter(pattern, count) {
+    $('confirm-filter-desc').textContent = S.fileFilterConfirmBody(pattern, N.count(count));
+    confirmFilter.returnValue = '';
+    confirmFilter.showModal();
+    return new Promise((resolve) => {
+      confirmFilter.addEventListener('close', () => resolve(confirmFilter.returnValue === 'add'), { once: true });
+    });
+  }
+  $('file-filter-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pattern = filterInput.value.trim();
+    try {
+      const r = await addPattern(api, pattern, (n) => askFilter(pattern, n));
+      if (r.cancelled) return;
+      renderFilter(r.list);
+      filterInput.value = '';
+      filterMessage(S.fileFilterAdded(pattern, N.count(r.count)));
+    } catch (err) {
+      filterMessage(patternErrorText(err, S) ?? errorText(err), true);
+    }
+    filterInput.focus();
+  });
+  $('file-filter-reset').addEventListener('click', async () => {
+    try {
+      renderFilter(await api.resetFileExclusions());
+      filterMessage(S.fileFilterComeBack);
+    } catch (err) { filterMessage(errorText(err), true); }
+  });
+  api.getFileExclusions().then(renderFilter, () => {});
+
+  // VFS-34 R6: the content size limit, shown only while content search is on (VFS-27
+  // calls showContentLimit from its switch).
+  const contentMax = $('content-max-mb');
+  showContentLimit($('content-max-row'), false);
+  api.getContentMaxMb().then((mb) => { contentMax.value = String(mb); }, () => {});
+  contentMax.addEventListener('change', async () => {
+    const mb = parseLimit(contentMax.value);
+    if (mb == null) { filterMessage(S.contentMaxInvalid, true); return; }
+    try {
+      contentMax.value = String(await api.setContentMaxMb(mb));
+      filterMessage('');
+    } catch (err) { filterMessage(errorText(err), true); }
   });
 
   async function startUpdates() {
