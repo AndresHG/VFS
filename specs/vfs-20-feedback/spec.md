@@ -1,6 +1,7 @@
 # VFS-20 — "Enviar comentarios" with a diagnostic report, sent by the user
 
-- **Status**: implemented (PR #130)
+- **Status**: implemented (PR #130); redaction and preview hardened before release, after an
+  independent review found names in panic payloads
 - **Size**: M (one desktop feature: a dialog, three commands, a report builder; log retention
   and a panic hook in the shell; no index schema change, nothing sent automatically)
 - **Links**: VFS-5 (R7 diagnostic log, R8 no names in it), VFS-1 C7 (log file), VFS-22
@@ -41,8 +42,9 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
 
 - R1. THE app SHALL show an "Enviar comentarios" button in the bottom bar, which opens a
   dialog with: a free-text box ("¿Qué ha pasado o qué le gustaría?"), an unticked box to
-  include folder and file names, a "Ver el informe" disclosure showing the exact report text,
-  and two actions: "Enviar por GitHub" and "Exportar diagnóstico (.zip)"; a line says the
+  include folder and file names, a "Ver el informe" disclosure showing the report text with
+  only its newest 200 KB of log lines (a line says the `.zip` holds everything; it is built
+  when opened or when the names box changes, never on typing), and two actions: "Enviar por GitHub" and "Exportar diagnóstico (.zip)"; a line says the
   GitHub page is public and that folder names go only in the `.zip`.
 - R2. THE report SHALL be plain UTF-8 text holding: the user's text; app version; OS name,
   version and architecture; per root folder its number, drive kind (local, network,
@@ -52,13 +54,18 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
   of warnings, errors and panics in the log; and every kept log file, oldest first.
 - R3. WHILE the names box is unticked, THE report SHALL contain no root path, no file or
   folder name and no path: diagnostic-target lines are kept as written (VFS-5 R8 guarantees
-  them free of names), and in every other log line each root path, the user's home folder
-  and anything that reads as a path is replaced with `<ruta>`. No search text is ever
-  recorded, so none can be in the report.
+  them free of names); a panic record keeps only `panic at <file>:<line>` and its message
+  becomes `<omitido>` (a payload is free text: Rust quotes names in backticks, a search term
+  can be in it); a continuation line (no log prefix) is kept only after a diagnostic record
+  and is otherwise `<omitido>` whole (a macOS name can hold a line break); and in every other
+  log line each root path, the user's home folder and anything that reads as a path (after a
+  space, tab, quote, backtick, `(`, `[`, `{`, `<`, `|`, `=`, `:` or `,`) is replaced with
+  `<ruta>`.
 - R4. WHEN the names box is ticked, THE report SHALL also list each root's path and keep the
   log lines unredacted.
 - R5. WHEN "Exportar diagnóstico (.zip)" is pressed, THE app SHALL write
-  `vfs-informe-<AAAA-MM-DD-HHMM>.zip` (holding `informe.txt`, the same text as the preview) to
+  `vfs-informe-<AAAA-MM-DD-HHMM>.zip` (holding `informe.txt`, the whole report: the preview's
+  text with every log line) to
   the user's Downloads folder (Desktop, then home, when it does not exist), reveal it
   selected in Explorer/Finder, and say where it is and to send it to whoever installed VFS
   for them or attach it on GitHub.
@@ -81,13 +88,16 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
   settings, the log-level counts and the log lines, oldest file first.
 - AC-2 (R3) Given log warnings in every format the code writes today (a root path, a folder
   under a root, a Windows path with spaces, a UNC path, a macOS path, a Firefox profile
-  folder, a path inside an error message) and a panic message naming a file, When the report
-  is built with the box unticked, Then no root path, file name or folder name from them
-  appears, `<ruta>` takes their place, and diagnostic lines are byte-for-byte unchanged.
+  folder, a path inside an error message, a path after a backtick or `<`), panic messages
+  naming a file (a slicing panic quoting a path in backticks, a bare search term) and a
+  macOS name holding a line break, When the report is built with the box unticked, Then no
+  root path, file name or folder name from them appears, `<ruta>` or `<omitido>` takes their
+  place, a panic keeps its location, and diagnostic lines are byte-for-byte unchanged; the
+  parser reads the lines the real logger writes.
 - AC-3 (R4) Given the same log, When the box is ticked, Then the root paths and the original
   lines appear.
 - AC-4 (R5) Given a downloads folder, When the report is exported, Then a `.zip` named by the
-  date and time exists there whose `informe.txt` equals the previewed text; and the folder
+  date and time exists there whose `informe.txt` equals the whole report text; and the folder
   falls back to Desktop, then home, when missing.
 - AC-5 (R6) Given a user text of 20,000 characters, When the GitHub URL is built, Then it
   points to `issues/new?template=comentarios.yml`, carries the text (shortened) and the
@@ -98,7 +108,9 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
   file holds an error naming the panic and its location; and the logger rotates at 2 MB
   keeping 10 old files.
 - AC-7 (R1) Given the app, When "Enviar comentarios" is pressed, Then the dialog opens with
-  the box unticked, "Ver el informe" shows the report text, and ticking the box refreshes it.
+  the box unticked, "Ver el informe" shows the report text, ticking the box refreshes it and
+  typing does not; given 20 MB of log, the preview holds the summary and at most 200 KB of
+  the newest log lines, while its counts cover every line.
 
 ## Non-goals
 
@@ -112,7 +124,8 @@ summary prefilled into a GitHub issue form plus a `.zip` attachment for the full
 ## Pre-mortem
 
 - Slow PC / HDD: the report is built only on demand, reads at most 22 MB of log once, and
-  compresses it; the dialog's preview loads off the main thread (async command).
+  compresses it; the dialog's preview loads off the main thread (async command), carries at
+  most 200 KB of log lines into the page, and is never rebuilt on typing.
 - Long paths, Unicode, NFC/NFD: redaction works on the text of each line; a root path is
   matched as written in the log and in the index (both come from the same `Path`), and the
   generic path rule catches the rest.

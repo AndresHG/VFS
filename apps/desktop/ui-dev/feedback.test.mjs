@@ -27,6 +27,14 @@ test('feedback dialog markup and copy', () => {
   assert.match(S.feedbackExport, /Exportar diagnóstico/);
 });
 
+/** VFS-20 R1: "Ver el informe" says it shows only the newest log lines and the .zip holds
+ * all, in both catalogs. */
+test('the preview says the .zip holds the whole log', () => {
+  assert.match(html, /<details id="feedback-details">[\s\S]*data-s="feedbackPreviewNote"[\s\S]*<\/details>/);
+  assert.match(S.feedbackPreviewNote, /\.zip/);
+  assert.match(EN.feedbackPreviewNote, /\.zip/);
+});
+
 /** VFS-20 R6: the dialog says the GitHub issue is public, in both catalogs. */
 test('feedback dialog warns that the GitHub page is public', () => {
   assert.match(html, /data-s="feedbackPublic"/);
@@ -96,9 +104,14 @@ test('dialog asks for the report and refreshes it when the names box changes', a
   await $('feedback-names').fire('change');
   assert.equal($('feedback-report').value, 'informe true');
   assert.deepEqual(calls, [['report', 'Va lento', false], ['report', 'Va lento', true]]);
+  // Editing the text never rebuilds the report (it reads the whole log on a slow PC).
+  $('feedback-text').value = 'Va muy lento';
+  await $('feedback-text').fire('input');
+  await $('feedback-text').fire('change');
+  assert.equal(calls.length, 2);
 
   await $('feedback-github').fire('click');
-  assert.deepEqual(calls.at(-1), ['save', 'Va lento', true, true]);
+  assert.deepEqual(calls.at(-1), ['save', 'Va muy lento', true, true]);
   assert.equal($('feedback-msg').hidden, false);
   assert.ok($('feedback-msg-text').textContent.includes('vfs-informe-x.zip'));
   assert.equal($('feedback-github').disabled, false);

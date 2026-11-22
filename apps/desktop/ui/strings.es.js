@@ -235,6 +235,7 @@ export const es = {
   feedbackNames: 'Incluir en el informe los nombres de carpetas y archivos',
   feedbackNamesHint: 'Ayuda a encontrar algunos fallos. Sin marcar, el informe no lleva ningún nombre de carpeta ni de archivo.',
   feedbackPreview: 'Ver el informe',
+  feedbackPreviewNote: 'Aquí se ven las últimas líneas del registro; el archivo .zip lleva el informe completo. Para ver su texto actualizado, cierre y abra esta sección.',
   feedbackLoading: 'Preparando el informe…',
   feedbackHowTo: '«Enviar por GitHub» guarda el informe y abre una página de GitHub (hace falta una cuenta gratuita) donde arrastrarlo. Si no tiene cuenta, use «Exportar diagnóstico» y envíe el archivo a quien le instaló el programa.',
   feedbackPublic: 'La página de GitHub es pública: cualquiera puede ver lo que escriba y el archivo que adjunte. Los nombres de carpetas y archivos nunca van en el texto de la página; solo en el .zip, si marcó la casilla.',
