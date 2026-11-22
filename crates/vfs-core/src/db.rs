@@ -27,8 +27,8 @@ const MIGRATIONS: [&str; 7] = [
 
 /// An index migrated from a version below this one is compacted afterwards: the migrations
 /// to versions 3 and 4 free about a fifth of the file. Later ones (5: `links`, 6:
-/// `dirs.error`, 7: VFS-37 counts) free nothing, and a `VACUUM` rewrites the whole index: minutes on the
-/// target HDD right after an update, for nothing.
+/// `dirs.error`, 7: VFS-37 counts) free nothing, and a `VACUUM` rewrites the whole index:
+/// minutes on the target HDD right after an update, for nothing.
 const COMPACT_FROM_BELOW: u32 = 4;
 
 /// Page size of a new index, and of an existing index compacted after a migration.

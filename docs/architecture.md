@@ -62,12 +62,12 @@ peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Reade
 
 `core/schema.sql` is schema version 1, `core/schema_v2.sql` version 2,
 `core/schema_v3.sql` version 3, `core/schema_v4.sql` version 4, `core/schema_v5.sql`
-version 5 and `core/schema_v6.sql` version 6 (`PRAGMA user_version`). `db::open_rw` runs the missing
+version 5, `core/schema_v6.sql` version 6 and `core/schema_v7.sql` version 7 (`PRAGMA user_version`). `db::open_rw` runs the missing
 migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
 of them, and an older index is migrated from the rows already there, so no rescan is
 needed. After migrating an existing index from below version 4 (the migrations to 3 and 4
 free about a fifth of the file) it compacts the file once (`VACUUM`, at `PAGE_SIZE`, 16 KB;
-a new index is created at that size); versions 5 and 6 free nothing, so an index from 0.1.1
+a new index is created at that size); versions 5, 6 and 7 free nothing, so an index from 0.1.1
 (version 4) is not rewritten. If another connection holds the index, it stays valid and
 uncompacted. An index from a newer build fails with
 `schema_too_new` and is never discarded.
@@ -76,8 +76,8 @@ uncompacted. An index from a newer build fails with
 |---|---|
 | `meta` | key/value pairs: each root's change cursor, `cursor/<root id>` (VFS-9), and `paused/<root id>` while a root is paused (VFS-32) |
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
-| `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
-| `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`) |
+| `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts; `cloud_only_count` and `links_count` (version 7, VFS-37: cloud-only files and links at the end of the last full walk, NULL before one) |
+| `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`), `unpopulated` (version 7, VFS-37: 1 when the folder last listed empty on Windows while still marked `RECALL_ON_DATA_ACCESS`, a cloud placeholder never filled in; else NULL; partial index `dirs_unpopulated ON dirs(root_id) WHERE unpopulated IS NOT NULL`) |
 | `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18; bit 2: cloud-only, a placeholder whose data reading would download, VFS-25), `content_state` (document content search, VFS-2: 0 unless the content indexer of `crates/vfs-content` has run; it then mirrors `content.db`, a separate store next to `index.db`) |
 | `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
@@ -549,7 +549,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 |---|---|---|
 | `system_locale` | — | `string`: the OS locale as BCP 47, `""` when unknown; the UI picks its language from it (VFS-22) |
 | `set_language` | `lang` (`"es"` or `"en"`; anything else is ignored) | `null`; window title, macOS menu and folder picker follow it (VFS-22) |
-| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`, `unreadable`: its number of folders that could not be listed, VFS-10, and `paused`, VFS-32) |
+| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`, `unreadable`: its number of folders that could not be listed, VFS-10, `paused`, VFS-32, and `unpopulated`, `cloudOnly`, `links`, VFS-37, the last two `null` before a full walk) |
 | `list_unreadable` | `rootId` | `UnreadableDir[]` (`{ id, path, reason }`, `reason`: `no_permission`, `unavailable`, `cloud_only`, `disk_error`; `id` is a `dirs.id`), at most 500 in path order |
 | `pick_folder` | — | `string \| null` (native folder dialog) |
 | `add_root` | `path` | `Root` |

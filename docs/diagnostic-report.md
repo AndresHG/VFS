@@ -24,7 +24,7 @@ every log line. This page says what is in it and how to analyse it in a session 
 |---|---|
 | `## What happened` | The user's own words. |
 | `## App` | Version, OS (`windows 10.0.<build> <release>`; a build ≥ 22000 is Windows 11), local time it was made, whether names are included. |
-| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, time since the last full walk. The path only with names included, and never in the GitHub issue's prefilled summary. |
+| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, `cloud_only` and `links` (at the last full walk, `?` before one), `unreadable` and `unpopulated` folders (cloud placeholders that listed empty, Windows; VFS-37), time since the last full walk. Counts carry no name, so they go into the summary too. The path only with names included, and never in the GitHub issue's prefilled summary. |
 | `## Index` | Files, folders, roots, index size, WAL size (MB), schema version. |
 | `## Settings` | Indexer state (idle/scanning/paused), Firefox bookmarks on/off with profiles and count. |
 | `## Log` | Number of log files and lines; warnings, errors and panics in them. |
