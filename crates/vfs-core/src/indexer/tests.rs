@@ -1995,3 +1995,91 @@ fn verbatim_replayed_paths_are_matched_to_the_plain_root() {
         PathBuf::from(r"C:\Archivo")
     );
 }
+
+/// A history whose first `current` adds `parent` as a root on its own connection: that call
+/// sits between the indexer reading a folder and applying its listing, so the parent's
+/// take-in commits exactly in that gap (VFS-31 R2a).
+struct TakeInMidListing {
+    db_path: PathBuf,
+    parent: PathBuf,
+    done: Cell<bool>,
+}
+
+impl History for TakeInMidListing {
+    fn current(&self, _root: &Path) -> Option<String> {
+        if !self.done.replace(true) {
+            let mut conn = db::open_rw(&self.db_path).unwrap();
+            crate::roots::add_root(&mut conn, &self.parent).unwrap();
+        }
+        None
+    }
+
+    fn replay(&self, _root: &Path, _cursor: &str) -> cursor::Replayed {
+        Err("no replay".into())
+    }
+}
+
+/// VFS-31 AC-2, R2a: a parent folder added while the indexer lists a folder of the inner
+/// root takes that root in; the listing read under the old root is dropped, so no row lands
+/// under the deleted root id, and the next run indexes every file once under the parent.
+#[test]
+fn a_take_in_during_a_listing_drops_that_listing() {
+    let db_dir = tempfile::tempdir().unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    let parent = dunce::canonicalize(tree.path()).unwrap();
+    let inner = parent.join("Fotos");
+    fs::create_dir_all(inner.join("2019")).unwrap();
+    fs::write(inner.join("2019").join("playa.jpg"), b"x").unwrap();
+    fs::write(inner.join("verano.jpg"), b"x").unwrap();
+    fs::write(parent.join("raiz.txt"), b"x").unwrap();
+    let db_path = db_dir.path().join("index.db");
+    let mut conn = db::open_rw(&db_path).unwrap();
+    let tx = conn.transaction().unwrap();
+    let inner_id = ingest::insert_root(&tx, "test", inner.to_str().unwrap()).unwrap();
+    tx.commit().unwrap();
+    let history = TakeInMidListing {
+        db_path: db_path.clone(),
+        parent: parent.clone(),
+        done: Cell::new(false),
+    };
+    let mut retries = Retries::new();
+    for _ in 0..2 {
+        run(
+            &mut conn,
+            &history,
+            &mut Pass::default(),
+            &mut retries,
+            &|| false,
+            false,
+            &mut Sched::inert(),
+            &mut |_: &Connection, _: &Pass, _: bool| {},
+        )
+        .unwrap();
+    }
+    assert!(history.done.get());
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [inner_id], |r| r.get(0)).unwrap() };
+    assert_eq!(count("SELECT COUNT(*) FROM dirs WHERE root_id = ?1"), 0);
+    assert_eq!(count("SELECT COUNT(*) FROM roots WHERE id = ?1"), 0);
+    let files: Vec<String> = conn
+        .prepare(
+            "SELECT CASE d.rel_path WHEN '' THEN f.name ELSE d.rel_path || '/' || f.name END p \
+             FROM files f JOIN dirs d ON d.id = f.dir_id ORDER BY p",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        files,
+        ["Fotos/2019/playa.jpg", "Fotos/verano.jpg", "raiz.txt"]
+    );
+    let dup: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM dirs GROUP BY root_id, rel_path HAVING COUNT(*) > 1)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(dup, 0);
+}

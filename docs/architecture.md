@@ -135,15 +135,25 @@ literal (VFS-23 D3). Original names are stored untouched and are the only thing 
 ### Adding and removing a root
 
 `roots::add_root` (`core/roots.rs`) canonicalises the path (`dunce`), rejects a missing path
-(`not_found`), a file (`not_a_directory`) and a path that is the same as, inside, or contains
-an existing root (`overlapping_root`, message `"<same|inside|contains> <root path>"`).
-Comparison uses folded keys. It then inserts the root with its volume key
-(`platform::volume_key`) and a root directory row pending deep, in one transaction, and the
-facade wakes the indexer.
+(`not_found`), a file (`not_a_directory`) and a path that is the same as or inside an
+existing root (`overlapping_root`, message `"<same|inside> <root path>"`). Comparison uses
+folded keys. It then inserts the root with its volume key (`platform::volume_key`) and a
+root directory row pending deep, in one transaction, and the facade wakes the indexer.
+
+A path that contains existing roots takes them in, in that same transaction (`take_in`,
+VFS-31): the folders between the new root and each inner one are created pending deep, the
+inner folders and files move to the new root with their ids (paths, `dirs_fts` and the
+files' `file_paths_fts` rows rewritten, the latter deleted by their old value first), the
+inner root rows and change cursors are deleted, and the new root starts with the taken-in
+counts. Its first walk re-lists them. The indexer re-checks inside its write transaction
+that a folder it listed still belongs to the root and path it read, and drops the listing
+otherwise, so a take-in committed during a listing never lands rows under the old root.
 
 `roots::remove_root` only sets `status = removing`; search and the watcher ignore the root
 from that moment. The indexer deletes its rows in batches (`finish_removing` in
-`core/indexer/mod.rs`), also on the next start if the app closed half-way (I6). Adding the
+`core/indexer/mod.rs`), also on the next start if the app closed half-way (I6). A root
+change makes the indexer send its next idle snapshot even if it was idle before, which is
+how the UI learns the removed root is gone (VFS-31 R1). Adding the
 same folder while it is still being removed deletes the old rows at once and adds it anew.
 
 ### Listing a directory
@@ -585,9 +595,9 @@ file is opened with its application.
 
 Warnings and errors go to `<local app data dir>/logs/vfs.log` (`install_logger`, the Tauri
 log plugin), rotated at 2 MB with ten old files kept (22 MB, several weeks; VFS-20). Below
-warning level only the indexer's diagnostic records (target `vfs::diag`, VFS-5) are written:
-per-minute walk rates, back-off, commit and checkpoint durations, overflows and memory, never
-a file name. A panic hook writes every panic as an error (target `vfs::panic`) with its source
+warning level only the diagnostic records (target `vfs::diag`, VFS-5) are written: the
+indexer's per-minute walk rates, back-off, commit and checkpoint durations, overflows and
+memory, and root additions and removals (VFS-31), never a file name. A panic hook writes every panic as an error (target `vfs::panic`) with its source
 location.
 
 "Enviar comentarios" (VFS-20, `feedback.rs`) builds a plain-text report on demand: version,

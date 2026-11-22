@@ -10,6 +10,7 @@ import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
+import { takenInBy, newestOnly } from './folders.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
   Source, TruncatedBy, UiErrorCode,
@@ -1195,10 +1196,7 @@ function main(L) {
       path = await api.pickFolder();
     } catch (err) { showError(errorText(err)); return; }
     if (!path) return;
-    // Listed folders inside the new one are taken in by it (VFS-31 R2, R4).
-    const takenIn = state.roots
-      .filter((r) => r.status !== RootStatus.REMOVING && F.isUnder(r.path, path))
-      .map((r) => r.path);
+    const takenIn = takenInBy(state.roots, path);
     try {
       const root = await api.addRoot(path);
       await refreshRoots();
@@ -1322,20 +1320,17 @@ function main(L) {
 
   /* ---------------------------------------------------------------- live data */
 
-  // Only the newest list counts: an older reply arriving last would bring back a folder
-  // whose removal already finished (VFS-31 R1).
-  let rootsAsked = 0;
+  const listRoots = newestOnly(() => api.listRoots());
   async function refreshRoots() {
-    const asked = ++rootsAsked;
-    let roots;
+    let reply;
     try {
-      roots = await api.listRoots();
+      reply = await listRoots();
     } catch (err) {
-      if (!api.missing && asked === rootsAsked) showError(errorText(err));
+      if (!api.missing) showError(errorText(err));
       return;
     }
-    if (asked !== rootsAsked) return;
-    state.roots = roots;
+    if (reply.stale) return;
+    state.roots = reply.value;
     state.rootsLoaded = true;
     renderFolderSelect();
     renderClearButton();

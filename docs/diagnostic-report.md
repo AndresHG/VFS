@@ -32,12 +32,14 @@ every log line. This page says what is in it and how to analyse it in a session 
 
 Log lines are `[date][time UTC][target][LEVEL] message`. Targets worth knowing:
 
-- `vfs::diag` (INFO): the indexer's records (VFS-5 R7), never redacted because they hold only
-  numbers. `start` at each launch (uptime, deferred catch-up, disk-load probe, index folder in a
+- `vfs::diag` (INFO): the indexer's and the root changes' records (VFS-5 R7, VFS-31 R5),
+  never redacted because they hold only numbers. `start` at each launch (uptime, deferred catch-up, disk-load probe, index folder in a
   sync root); `pass` every minute of a walk and `pass_end` per walk (mode, dirs and files per
   minute, `backoff_s` spent waiting for a busy disk, commit and checkpoint ms, retries,
   errors); `memory` every 10 min (working set, WAL and index MB); `watch_overflow` when a
-  watcher lost events and a re-walk was queued.
+  watcher lost events and a re-walk was queued; `root_add` (root id, roots, folders and files
+  taken in, ms), `root_remove` (root id, ms) and `root_removed` when the indexer has deleted
+  a removed root's rows (root id, folders, files, ms).
 - `vfs::panic` (ERROR): a panic, with the source location in this repo. Without names only
   `panic at <file>:<line>: <omitido>` is kept: the payload is free text and can name files.
 - Any other target (WARN/ERROR): problems such as unreadable folders or watcher failures.
