@@ -104,15 +104,34 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
 - R14. WHEN a query word occurs in more than 5 % of the indexed documents (counted with
   `fts5vocab`), THE content search SHALL use that word to filter but not to rank. IF every word
   is that common, THEN it SHALL rank by BM25 over at most the first 1,000 candidates.
-- R15. THE `vfs-content` crate SHALL expose one retrieval call, `retrieve(query, filters, k)`.
+- R15. THE `vfs-content` crate SHALL expose the retrieval call `retrieve(query, filters, k)`.
   It returns ranked documents, each with its best passages: file id, chunk ordinal, character
-  range, page, BM25 score, and a snippet with highlight offsets. The CLI, the app (VFS-27),
+  range, page, BM25 score, and a snippet with highlight offsets. A second call,
+  `passage_text(file_id, ordinal, before, after)`, returns the full text of that chunk joined
+  with up to `before` preceding and `after` following chunks of the same document, with the
+  joined character range. A third call, `unread(file_ids)`, returns each file's unread
+  reason, and `unread_counts()` returns the count per reason. The reasons are:
+  - `cloud` (R12);
+  - `scanned`: a PDF whose pages have no text layer;
+  - `password`;
+  - `too_large`;
+  - `failed`: any other error or an empty text.
+  The CLI, the app (VFS-27),
   the questions (VFS-28) and hybrid search (VFS-29) SHALL all use this call. None of them
   SHALL query `content.db` directly.
 - R16. WHEN a document's format carries metadata, THE content store SHALL keep its title, its
   author(s), and its creation date as reported by the extractor, next to the document row.
   It SHALL return them with each `retrieve` hit, for VFS-28's bibliography. Formats without
   metadata store none; nothing is guessed from the text.
+- R17. IF the worker cannot be started (binary missing or blocked, version mismatch), or the
+  document's root folder is offline, or `content.db` cannot be written (disk full, I/O
+  error), THEN THE content indexer SHALL stop the run with that reason and leave every
+  file's state unchanged. Only a failure caused by the document itself marks it failed.
+  After 5 worker crashes in a row on 5 different files, the run SHALL stop with the reason
+  "worker unstable".
+- R18. THE worker SHALL exit when its parent's pipe closes. On Windows, the parent SHALL put
+  the worker in a Job Object with kill-on-close and a committed-memory limit equal to the
+  worker cap.
 
 ## Acceptance scenarios
 
@@ -181,7 +200,9 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
 - AC-16 (R15) Given an indexed folder, When `retrieve("contrato de alquiler", filters, 10)`
   is called, Then it returns the same documents in the same order as `vfs content-search`.
   Each returned passage's character range, read from the stored text, contains a matched
-  word. A test asserts that no crate other than `vfs-content` opens `content.db`.
+  word. `passage_text(file, ordinal, 1, 1)` returns the text of chunks ordinal−1 to
+  ordinal+1 joined in order, and for the first chunk it returns only chunks 0–1. A test
+  asserts that no crate other than `vfs-content` opens `content.db`.
 - AC-17 (R6, R13, R14) Given the content golden set, ~40 labelled Spanish queries over the
   public-domain test corpus in `bench/` (see D17), When the golden test runs in CI, Then the
   expected document is in the top 5 for at least the share recorded in the test file. That
@@ -189,6 +210,14 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
 - AC-18 (R16) Given a PDF and a DOCX whose metadata holds a title, an author and a creation
   date, and a TXT, When they are content-indexed and retrieved, Then the PDF and DOCX hits
   carry those three values and the TXT hit carries none.
+- AC-19 (R15) Given a scanned PDF, a password-protected PDF, an empty DOCX and a cloud-only
+  file, When they are content-indexed, Then `unread` returns `scanned`, `password`,
+  `failed` and `cloud` for them, and `unread_counts` returns one of each.
+- AC-20 (R17, R18) Given the worker binary removed, When the content indexer runs, Then the
+  run stops with "worker cannot start" and no file changes state. Given a store write made
+  to fail with a full disk, Then the run stops and the document being written stays queued.
+  Given 5 consecutive files whose extraction crashes the worker, Then the run stops with
+  "worker unstable". Given the parent killed mid-run, Then the worker exits within 2 s.
 
 ## Phased PRs
 
@@ -196,8 +225,8 @@ Each PR leaves `main` releasable, and the `content` feature stays off by default
 
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
-| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), and pin the toolchain for the extractor (D16). | AC-1–AC-13 | 2–3 days **[estimate]** |
-| 2b | Query semantics and the retrieval API: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-18 | 2–3 days **[estimate]** |
+| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures and the worker's lifetime (R17, R18), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20 | 2–3 days **[estimate]** |
+| 2b | Query semantics and the engine calls: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve`, `passage_text` and `unread` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-19 | 2–3 days **[estimate]** |
 
 ## Budgets
 
@@ -227,8 +256,8 @@ tuned on the real PC.
 - Automatic queueing on the name indexer's insert/update (`ingest::update_file`); this step
   detects changes itself by comparing size and mtime (see Decisions).
 - Duplicate detection by content hash.
-- A Windows Job Object memory limit (the prototype uses an allocator cap that works on both
-  platforms; a Job Object is the hardening step once native code is involved).
+- An OS memory limit on macOS. macOS has no working per-process limit, so the allocator cap
+  (D6) is the cap on both platforms, and Windows adds a Job Object (R18).
 
 ## Pre-mortem
 
@@ -271,6 +300,7 @@ tuned on the real PC.
 | D13 | Q5: OCR | A later, optional step: off by default, per folder, after normal extraction. Scanned PDFs are marked "no text (scanned)". | owner | 2026-11-21 |
 | D14 | Q6: chunk size | Keep chunks of ~2,000 characters (≈ 450–550 Spanish tokens), tiling, never crossing a page, without stored overlap; neighbours are joined at retrieval time. Fixed now, before any vector exists. | agent (owner delegated) | 2026-11-21 |
 | D15 | Embeddings and AI (for the later phases) | BM25 by default and offline. Hybrid search is opt-in, using an embedding API key (OpenAI or Voyage, separate from the answer key) or a local model downloaded from Settings. Without a connection, search falls back to BM25. Per question, only the passages used leave the PC, visibly. | owner | 2026-11-21 |
+| D16 | Extractor toolchain, size and packaging | The workspace `rust-version` rises to 1.99 (Xberg's minimum). `rust-toolchain.toml` already pins 1.100.0, and Xberg stays pinned `=1.4.2` with `--locked`. `vfs-extract` is built with `opt-level="s"`, `lto="fat"` and `codegen-units=1`, keeping unwinding panics: 22.2 MB raw, 6.6 MB xz-compressed, against 34.2 / 8.9 MB with the current profile **[measured, macOS arm64, 2026-11-22]**. It ships as a Tauri sidecar (VFS-27 D1). | agent | 2026-11-22 |
 | D17 | Content golden set | About 40 Spanish queries over committed public documents: BOE PDFs (free reuse with attribution), Spanish Wikipedia rendered to PDF/DOCX (CC BY-SA), and the synthetic personal documents of `bench/content-corpus/make_corpus.py`. The format and the per-case contract follow VFS-11. The corpus is shared with VFS-28's RAG golden set (D9 there). | agent | 2026-11-22 |
 
 ## Owner answers (former open questions Q1–Q6)

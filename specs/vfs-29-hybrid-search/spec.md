@@ -36,9 +36,11 @@ an embedding API key or a local model downloaded from Ajustes (VFS-2 D15).
 - **Storage.** Vector sets in `content.db`, keyed by (provider, model, dimension): one 1-bit
   row per chunk for the scan and int8 for the rescore. There is no vector database and no ANN
   index below ~3–5 M chunks (research §3). Changing the model builds a new set beside the old
-  one, and the old set is dropped once the new one is complete.
+  one, and the old set is dropped once the new one is complete. A new set is built only
+  after a free-space check like VFS-27 R6.
 - **Search.** `retrieve` runs BM25 and the vector scan, then fuses them with RRF (k = 60).
-  The query is embedded once per search, by API or locally. Offline, without a key, or
+  The query is embedded once per search, by API or locally. With an API, every content
+  query therefore leaves the PC; it is recorded in «Qué se ha enviado» like a question. Offline, without a key, or
   before the vectors are complete, `retrieve` falls back to BM25 and the section says so.
 - **Background.** The same pace rules as VFS-27 R6. API embedding runs in batches, with
   retries and cost metering. Local embedding runs in a child process with its own memory cap.
@@ -51,11 +53,19 @@ an embedding API key or a local model downloaded from Ajustes (VFS-2 D15).
 
 ## Gate before approval
 
-- The content golden set (VFS-2 AC-17), run with vectors from at least one API model, shows
-  that hybrid beats BM25 on Spanish content queries (recall@5). The margin needed is set
-  when the full spec is written. If it does not, hybrid search is not built.
-- The real-PC measurement (VFS-27 27m) gives the document count, which turns the local
-  model's hours into a real number.
+The margin is fixed here, before any run:
+- **Meaning-only subset.** The content golden set (VFS-2 AC-17) gains at least 15 labelled
+  meaning-only queries, where the document shares no keyword with the query («gastos
+  médicos» → «factura del dentista»). Hybrid search must put the expected document in the
+  top 5 for at least 3 more of them than BM25 does.
+- **Keyword subset.** On the existing keyword queries, hybrid search must not lose any query
+  that BM25 has in its top 5.
+- **Which models.** The gate is run first with at least one API model, which decides 29a.
+  The chosen local model must pass the same gate before 29c ships.
+- **Count.** The real-PC measurement (VFS-27 27m) gives the document count, which turns the
+  local model's hours into a real number.
+
+If the API model fails the gate, hybrid search is not built.
 
 ## Non-goals (already decided)
 
