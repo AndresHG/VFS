@@ -1,6 +1,7 @@
 # VFS-38 — «Buscar en» and a shorter filter line
 
-- **Status**: draft
+- **Status**: approved. The owner decided D1–D3. Two independent critic passes asked for
+  revisions; all of them are made here.
 - **Size**: L. It is multi-PR, and two of its pieces ride with other specs' PRs (VFS-27 27c,
   VFS-29). It touches the search request in `vfs-core` and `vfs-bookmarks`, the filter line,
   the result rows, and both string catalogs. It has no index schema change, no new store, and
@@ -31,8 +32,9 @@
   scrolling sideways (VFS-35 R2). Research puts the comfortable limit of a horizontal filter
   row at 6–8 controls, and finds that older users struggle with drop-downs (research doc).
   One more pill would make it worse.
-- **Nothing says why a row is there.** A row found through its folder shows nothing to
-  explain it.
+- **Why a row is there.** The query words are already highlighted in the name and folder
+  line (#61, `format.js`). The open question was whether to add a "matched in" label as
+  well; D3 says no.
 
 ## Requirements (EARS)
 
@@ -64,9 +66,11 @@ Scope
     does not apply: every term must be in the name.
   - **What does not run.** The path tier of VFS-1 S2 does not run. Where the search scans
     instead of using the trigram index (terms under 3 characters, S5), and inside a
-    «Carpeta» filter, terms are checked against the name only. The S8 probe still runs
-    unchanged: it checks path and name, a superset of names, so when it finds nothing, no
-    name can match either. The content section does not run.
+    «Carpeta» filter, terms are checked against the name only. The content section does
+    not run.
+  - **Early exit.** The VFS-1 S8 probe SHALL check the name indexes only (file names and
+    `dirs_fts` names), with the same one-edit alternatives. So a query found only in
+    folder paths skips both typo passes, as it does under «Todo» today.
   - **Filter-only queries.** A query with no terms lists exactly what «Todo» lists, since
     there is nothing to match.
   - **Filters.** The type, date, size and folder filters apply as before.
@@ -98,16 +102,20 @@ Filter line
   3. a button «Más filtros», which reads «Más filtros (N)» when N of the filters behind it
      are active.
   «Más filtros» holds «Tamaño», «Carpeta» and, while bookmarks are included, the source
-  choice («Archivos y marcadores», «Archivos», «Marcadores»).
+  choice («Archivos y marcadores», «Archivos», «Marcadores»). The source choice is labelled
+  «Origen» («Source»), so that «Buscar en» names only the scope group.
   - It SHALL open a popover anchored to it, not a dialog.
   - WHERE the Popover API is missing (macOS 11–12 WebKit), it SHALL instead unfold an
     inline row below the filter line, as the type checklist does (`TypeChecklist.INLINE`).
   - A filter changed there applies at once, as on the line today; there is no apply button.
-- R8. WHILE any filter is active (type, date, size, folder, a source other than the default,
-  or a scope other than «Todo»), THE app SHALL show a line below the filter line. It holds:
-  - a removable chip for each active filter behind «Más filtros», such as «Carpeta: Fotos ×»
-    or «Solo marcadores ×»;
-  - «Quitar filtros (N)» at its end.
+- R8. WHILE any filter is active, THE app SHALL show a line below the filter line. A filter
+  is active when it is a type, a date, a size, a folder, a source other than the default, or
+  a scope other than «Todo». A remembered «Solo nombres» therefore keeps the line visible.
+  The line holds:
+  - a removable chip for each active filter behind «Más filtros»: «Tamaño: <choice> ×»,
+    «Carpeta: <folder name> ×», «Solo archivos ×» or «Solo marcadores ×»;
+  - «Quitar filtros (N)» at its end, where N counts every active filter, the scope
+    included.
   «Quitar filtros» therefore leaves the filter line, which keeps a constant width.
   - Removing a chip clears that filter only.
   - «Quitar filtros» clears everything that narrows the results: type, date, size and
@@ -121,26 +129,18 @@ Filter line
   three scope buttons present.
   - IF it does not fit at that viewport, THEN the visible «Buscar en» label is hidden
     first, kept for assistive technology. No other control may shrink.
+  - IF it still does not fit, THEN 38b stops and goes back to the owner with the
+    measurements before building further.
   - At smaller windows or with large text, VFS-35's behaviour stays: one row scrolling
     sideways on short windows, wrapping on tall narrow ones, and never a page wider than
     the window (VFS-35 R5).
 
 Why a result matched
 
-- R11. Each query term found literally SHALL be highlighted in bold with the highlight
-  background, wherever it appears:
-  - in the file or folder name and in the folder line of each visible result row;
-  - for a bookmark, in its title and its folder path.
-  The rules:
-  - The terms are those the core used, after VFS-1 S9's limits and dedup, returned as
-    `terms` in the search response, so the screen never re-parses the query.
-  - The screen folds the displayed string as `fold_key` does, keeping a map from folded
-    offsets back to the displayed characters, so «penalara» highlights «Peñalara» in NFC
-    or NFD.
-  - Terms under 3 characters are not highlighted.
-  - A term matched only within one edit is not highlighted.
-  - In a folder line shortened in the middle, only the visible parts are highlighted.
-  - Highlighting runs for the rows on screen only. No row SHALL carry a "matched in" label.
+- R11. THE result rows SHALL keep today's highlighting of the query words in the name and
+  the folder line (#61: `format.js` `matchRanges`, terms of 2 or more characters, accent-
+  and case-folded). They SHALL carry no "matched in" label (D3). Under «Solo nombres» the
+  folder line is still highlighted where a word happens to occur.
 - R12. Content hits keep their fragment with the words highlighted (VFS-27 R12). A content
   hit that VFS-29 found by meaning alone, with none of the query terms in its fragment,
   SHALL carry the small label «relacionado por tema».
@@ -151,7 +151,8 @@ No hits
   scope, «Buscando solo en los nombres». The VFS-13 suggestion SHALL count the scope among
   the filters: `dropFilters` is offered when «Todo», with no type, date, size or folder
   filter, would find files. Pressing it applies «Quitar filtros», except that it keeps the
-  bookmark folder (VFS-13). The «Solo documentos» case is R4's button.
+  bookmark folder (VFS-13). The `spelling` and `dropTerm` suggestions keep the scope
+  «Solo nombres». The «Solo documentos» case is R4's button.
 
 Interface
 
@@ -160,13 +161,14 @@ Interface
   - It reaches every path that builds or runs a query: `search`, `search::count`,
     `suggest` (the struct literals in `suggest.rs` included), `search_sources` (VFS-6) and
     the search cache key (VFS-1 S7).
-  - `SearchResponse` and the `search_sources` response SHALL gain `terms`, the folded terms
-    used (R11).
   - `vfs search --names-only` maps to `"names"`.
-  - The `Scope` values SHALL be in `contract.js` and checked against the Rust enum by
-    `apps/desktop/src-tauri/tests/contract.rs`, as VFS-6 AC-11 does for sources.
-  - «Solo documentos» is a screen choice that calls `retrieve` only, so the core needs no
-    third value.
+  - The `Scope` values (`all`, `names`) SHALL be in `contract.js` and checked against the
+    Rust enum by `apps/desktop/src-tauri/tests/contract.rs`, as VFS-6 AC-11 does for
+    sources.
+  - The screen's three choices are a UI-only `ScopeChoice` (`all`, `names`, `documents`) in
+    `choices.js`, like `SourceChoice`. It maps to `Scope`, and R6 validates `vfs.scope`
+    against it. «Solo documentos» calls `retrieve` only, so the core needs no third
+    value.
 
 ## Acceptance scenarios
 
@@ -185,8 +187,8 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
   bookmark are not. With «Todo», all five are hits. `penalra` with «Solo nombres» finds the
   .docx through one edit.
 - AC-3 (R3, R14) Given `scope: "names"`:
-  - a query whose only match is in folder paths returns nothing. The path tier does not run
-    and the S8 probe does (both counted by a test hook).
+  - a query whose only match is in folder paths returns nothing, and neither the path tier
+    nor either typo pass runs. They are counted by a test hook, which is new.
   - The query `cv` finds `cv.pdf` and not `x.pdf` in a folder `cv`.
   - A filter-only query (type «Fotos», empty box) returns the same hits as «Todo».
   - With the «Carpeta» filter on `D:\Fotos`, `julio` does not find `IMG_0412.jpg`.
@@ -216,8 +218,9 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
     the button reads «Más filtros (2)», and the chip line shows «Carpeta: Fotos ×»,
     «Solo marcadores ×» and «Quitar filtros (2)».
   - Removing the folder chip leaves the source.
-  - Given also «Solo nombres» and sort «Por nombre», «Quitar filtros» clears the folder,
-    the source and the scope, and keeps the sort.
+  - Given also «Solo nombres» and sort «Por nombre», the button reads «Quitar filtros (3)».
+    Pressing it clears the folder, the source and the scope, and keeps the sort.
+  - Given only «Solo nombres», the chip line shows just «Quitar filtros (1)».
   - With the Popover API stubbed out, «Más filtros» unfolds the inline row and the same
     filters work.
 - AC-8 (R9, R10) Given the VFS-35 viewport harness at 1280×720 and 1366×768 at 125 %, and
@@ -230,13 +233,8 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
   - every filter set.
   At the minimum window (720×480) and with large text, nothing overflows the page
   (VFS-35 R5).
-- AC-9 (R11) Given results for `penalara julio`, with accents and case differing and one
-  name in NFD, Then «Peñalara» and «julio» are highlighted in the name or folder line where
-  they occur, nothing else is, and no row has a match label.
-  - Given a hit found only by typo, or a query `a julio`, Then the typo and «a» are not
-    highlighted.
-  - A shared JSON fixture of fold cases (NFD, «ﬁ», «İ», «℡») gives the same folded string
-    in Rust's `fold_key` and in the JS fold.
+- AC-9 (R11) Given results for `peñalara` under «Todo» and under «Solo nombres», Then the
+  word is highlighted as today in names and folder lines, and no row has a match label.
 - AC-10 (R12) Given a VFS-29 meaning-only content hit and a keyword content hit, Then only
   the first carries «relacionado por tema». Built in the VFS-29 PR that shows meaning hits
   in the app.
@@ -258,15 +256,15 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
   name hits (VFS-1 S2).
 - Removing duplicates between the name list and the content section (VFS-27 R12 is
   unchanged).
-- Highlighting typo matches, terms under 3 characters, or rows that are not on screen.
+- Any change to today's highlighting (#61).
 - Bookmark tags, keywords and addresses under «Solo nombres» (D5).
 
 ## Pre-mortem
 
 - **Slow PC and HDD.**
-  - «Solo nombres» skips the path tier. It keeps the S8 probe, so a names-only search with
-    no hits never falls through to the typo scans (VFS-1 AC-9).
-  - Highlighting runs only for the rows on screen, in JS, with no extra IPC.
+  - «Solo nombres» skips the path tier. Its S8 probe looks at names only, so a query found
+    only in paths never falls through to the typo scans or reaches the deadline, which
+    would hide R13's suggestion (VFS-13 skips deadline results).
   - Each arrow-key press on the scope group re-runs the search, and the newer query
     interrupts the older (VFS-1 S6).
   - A remembered non-relevance sort makes every search read up to the VFS-12 sort cap. That
@@ -278,10 +276,9 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
   - 38b starts with the AC-8 harness run as a prototype. R10's label rule is the planned
     fallback.
   - The popover has an inline fallback for macOS 11–12 (R7).
-- **Paths over 260 characters.** n/a: no new file access. Highlighting works on the
-  strings the row already shows.
-- **NFC/NFD.** Highlighting folds the displayed string the way the search does, checked by a
-  shared fixture (AC-9).
+- **Paths over 260 characters.** n/a: no new file access.
+- **NFC/NFD.** Matching under «Solo nombres» uses the same folded keys as today.
+  Highlighting is unchanged.
 - **Antivirus.** n/a: no file is opened or written. The choices live in `localStorage`.
 - **Kill or power cut.** A lost or damaged `localStorage` value falls back to the defaults
   (AC-6).
@@ -300,12 +297,12 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
 
 | PR | Scope | Rides with | Proves |
 |---|---|---|---|
-| 38a | Core `scope` across `search`, `count`, `suggest` and `vfs-bookmarks` matching; `terms` in the responses; cache key; Tauri arguments; `contract.js` and `contract.rs`; CLI `vfs search --names-only` | v0.3, independent: any time, before 38b | AC-1–AC-3, AC-11 (core part) |
-| 38b | Filter line: scope group («Todo», «Solo nombres»), «Más filtros» popover and its inline fallback, the chip line with «Quitar filtros», «Orden» in the results header, remembered choices, highlighting with the shared fold fixture, the empty-view wording; both catalogs; viewport and UI tests | v0.3, after 38a and before VFS-27 27c, so that 27c builds its section into the new line | AC-5–AC-9, AC-11 |
+| 38a | Core `scope` across `search`, `count`, `suggest` and `vfs-bookmarks` matching; the names-only S8 probe; cache key; Tauri arguments; `contract.js` and `contract.rs`; CLI `vfs search --names-only` | v0.3, independent: any time, before 38b | AC-1–AC-3, AC-11 (core part) |
+| 38b | Filter line: scope group («Todo», «Solo nombres»), «Más filtros» popover and its inline fallback, the chip line with «Quitar filtros», «Orden» in the results header, remembered choices (`ScopeChoice`), the «Origen» label, the empty-view wording; both catalogs; viewport and UI tests | v0.3, after 38a and before VFS-27 27c, so that 27c builds its section into the new line | AC-5–AC-9, AC-11 |
 | (27c) | «Solo documentos» button and R4–R5, AC-8 re-run with three buttons: built inside VFS-27 27c | VFS-27 27c | AC-4 |
 | (29) | «relacionado por tema» label | the VFS-29 PR that shows meaning hits in the app (VFS-29 is an outline; its UI PR is named when it is completed) | AC-10 |
 
-Effort: 38a 1–2 days, 38b 3–5 days, the 27c part about 1 day inside 27c **[estimate]**.
+Effort: 38a 1–2 days, 38b 2–4 days, the 27c part about 1 day inside 27c **[estimate]**.
 
 ## Decisions
 
@@ -313,7 +310,7 @@ Effort: 38a 1–2 days, 38b 3–5 days, the 27c part about 1 day inside 27c **[e
 |---|----------|--------|-----|------|
 | D1 | Which control chooses the match kinds? | Layout A: a three-button scope group («Todo», «Solo nombres», «Solo documentos») with no drop-down; «Tipo» and «Fecha» visible; the rest behind «Más filtros (N)» with removable chips; «Orden» in the results header. This was chosen over one more pill (past the 6–8 control limit, and still scrolling) and over a Drive-style line (scope hidden before the first search). | owner | 2026-11-22 |
 | D2 | Remember the choice across restarts? | Yes, for scope, source and sort. This changes VFS-6 D7. Filters still start empty. | owner | 2026-11-22 |
-| D3 | How is the reason for a match shown? | Highlighted words in the name and folder line, and the fragment for content hits. There is no per-row badge: no tool or guideline examined uses one. «relacionado por tema» appears only for meaning-only hits. | owner | 2026-11-22 |
+| D3 | How is the reason for a match shown? | Highlighted words in the name and folder line (already shipped in #61), and the fragment for content hits. There is no per-row badge: no tool or guideline examined uses one. «relacionado por tema» appears only for meaning-only hits. | owner | 2026-11-22 |
 | D4 | Single choice or checkboxes? | Single choice. The cases the owner named are "only names" and "never content", the second handled by the Ajustes switch. Checkboxes would allow empty and odd combinations (path without name) that need explaining. | agent | 2026-11-22 |
 | D5 | What does «Solo nombres» mean for bookmarks? | The title only, which plays the part of the name (VFS-6 "Matching"). Tags and keywords are user-written but not names; under «Todo» they still match. | agent | 2026-11-22 |
 | D6 | Where does the source choice go? | Inside «Más filtros», so the line stays at five controls. It shows as a chip when it is not the default. | agent | 2026-11-22 |

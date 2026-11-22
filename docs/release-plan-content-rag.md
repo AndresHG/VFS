@@ -16,7 +16,7 @@ The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The 
 - **Pending measurement.** The document count and Defender's cost per file (VFS-27 27m) set
   the offer's estimates, and possibly a Tantivy step. They are unknown until the field
   visit.
-- **Size.** v0.3 is about 18–25 days (22–31 with VFS-38), v0.4 about 14–19. Together they would be one
+- **Size.** v0.3 is about 18–25 days (21–31 with VFS-38), v0.4 about 14–19. Together they would be one
   six-week release.
 
 ## v0.3: content search
@@ -29,7 +29,7 @@ The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The 
 | 4 | VFS-27 27a | Sidecar packaging, version handshake, stopping the worker before an update | 2–3 |
 | 5 | VFS-27 27b | Background content indexer: pace, probes, pause, progress, damage, diagnostics | 5–7 |
 | 5a | VFS-38 38a | «Buscar en» scope in the core (`scope: names`), CLI `--names-only`; independent, any time | 1–2 |
-| 5b | VFS-38 38b | New filter line: scope group, «Más filtros», chips, sort in the results header, highlighting | 3–4 |
+| 5b | VFS-38 38b | New filter line: scope group, «Más filtros», chips, sort in the results header, remembered choices | 2–4 |
 | 6 | VFS-27 27c | Offer, Ajustes, content section, unread labels, e2e; adds the «Solo documentos» button on 38b's line | 4–5 |
 | any time | VFS-27 27m | Real-PC measurement; must land before 27c ships | 1 + visit |
 

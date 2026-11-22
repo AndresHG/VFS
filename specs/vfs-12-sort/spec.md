@@ -48,7 +48,8 @@ Tests cite these ids (`VFS-12 AC-<m>`).
 - An index on `mtime` or `size`: that would be a schema change. The read cap and the
   deadline bound the cost instead.
 - Clicking column headers, and an ascending/descending toggle per order.
-- Remembering the order between sessions: it resets to relevance at start (issue 82).
+- Remembering the order between sessions: it reset to relevance at start (issue 82) until
+  VFS-38 D2 (owner), which keeps it across restarts.
 - Publication dates, NTFS creation dates and EXIF dates (issue 82 "Fuera de este paso").
 - Per-row source labels («Archivo», «Marcador»), which issue 82 suggests. The owner chose to
   keep "by source" as an order.

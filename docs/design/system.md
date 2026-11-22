@@ -8,7 +8,9 @@ and the problems listed in [audit.md](audit.md).
 
 1. **The results are the interface.** Chrome takes the least space that keeps it usable.
 2. **One volume.** Ink for content, muted ink for context, accent for the one thing to do now.
-3. **Visible, not loud.** Filters and status are always on screen (spec R9) but quiet until used.
+3. **Visible, not loud.** Filters and status are always on screen (spec R9) but quiet until
+   used; since VFS-38 the less-used filters are one click away behind «Más filtros» and show as
+   chips while active.
 4. **Big by default, bigger on request.** Sizes in `rem`; the layout survives 200 % text.
 5. **Nothing moves unless the person moved it.**
 
@@ -77,7 +79,7 @@ Implementation: raw values as custom properties, switched under
 | Search box | surface, 1.5px `--line-strong`, radius 0.875rem | — | 3px `--focus` ring, 2px offset | — | — |
 | Primary button | accent fill, on-accent text | 8 % darker | ring | 2 % darker | 55 % opacity, no pointer |
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
-| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all, on the chip line below the filters (VFS-38 R8) | — |
+| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all, on the chip line (VFS-38 R8) | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
@@ -117,8 +119,8 @@ Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keep
   filter line starts with the «Buscar en» scope group. **"Orden"** moves to the results
   header (VFS-38 R9) and shows whenever there are results, with five orders (most alike, newest, oldest, name A–Z,
   largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12).
-  Both are native-select pills like date and size rather than the type checklist: each is
-  one choice, and a select also works where the Popover API is missing.
+  Both are native selects rather than checklists: each is one choice, and a select also
+  works where the Popover API is missing.
 - **Bookmark rows** reuse the result row: a bookmark icon, the title as the name, and the
   bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
   same middle truncation, because the folder path matters as much as for files. The date slot

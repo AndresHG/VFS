@@ -116,7 +116,8 @@ Background pace (owner decision T1)
 Search
 
 - R12. WHEN the user searches with content search on and the scope «Todo» (VFS-38 R2), THE
-  app SHALL show the name and path hits first, without waiting for content. It SHALL then show, in a separate section «En el
+  app SHALL show the name and path hits first (under «Solo documentos», VFS-38 R4, only the
+  section below is shown, with the same rules), without waiting for content. It SHALL then show, in a separate section «En el
   contenido de los documentos» below them, up to 20 content hits from `retrieve`.
   - Each hit shows the file name, the folder, the highlighted fragment, the page when known,
     and «Mostrar en carpeta».
