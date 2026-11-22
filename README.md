@@ -219,7 +219,8 @@ multi-GB index must not travel to the NAS. An index that an earlier build left i
 
 Next to it are SQLite's `index.db-wal` and `index.db-shm`, the `index.db.session/` folder
 that marks an open session, `logs/vfs.log` (warnings, errors and the indexer's diagnostic
-records without file names, at most about 5 MB),
+records without file names, at most about 22 MB; "Enviar comentarios" packs it into a
+report, see `docs/diagnostic-report.md`),
 and, after a recovery, `index.db.bad` until the rebuild has finished (and `index.db.new` while a recovery runs).
 With Firefox bookmarks
 included, `bookmarks.db` (with its `-wal` and `-shm`) holds the setting and the bookmarks

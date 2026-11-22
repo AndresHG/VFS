@@ -4,6 +4,7 @@
 
 pub mod bookmarks;
 pub mod commands;
+pub mod feedback;
 pub mod i18n;
 pub mod reveal;
 pub mod splash;
@@ -83,10 +84,10 @@ impl<R: Runtime> ProgressSink for EventSink<R> {
 }
 
 /// Largest log file before it rotates...
-const LOG_MAX_BYTES: u128 = 1024 * 1024;
-/// ...and old files kept: at most 5 MB, about two weeks of mostly idle use or three days of
-/// continuous indexing at one diagnostic record per minute (VFS-5 R7).
-const LOG_KEEP: usize = 4;
+pub const LOG_MAX_BYTES: u128 = 2 * 1024 * 1024;
+/// ...and old files kept: at most 22 MB, several weeks of history for a diagnostic report
+/// (VFS-20 R7, superseding VFS-5's 5 MB).
+pub const LOG_KEEP: usize = 10;
 
 /// Writes warnings, errors and the indexer's diagnostic records to
 /// `<local_data>/logs/vfs.log`, rotating at [`LOG_MAX_BYTES`], so the reference machine can be
@@ -100,7 +101,7 @@ pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> taur
             .clear_targets()
             .target(Target::new(TargetKind::Folder {
                 path: local_data.join("logs"),
-                file_name: Some("vfs".into()),
+                file_name: Some(feedback::LOG_BASE.into()),
             }))
             .level(log::LevelFilter::Warn)
             .level_for(vfs_core::DIAG_TARGET, log::LevelFilter::Info)
@@ -393,6 +394,7 @@ pub fn run() {
                     if let Err(e) = install_logger(&handle, &dir) {
                         eprintln!("VFS: log file unavailable: {e}");
                     }
+                    feedback::install_panic_hook();
                     if let Ok(old_dir) = app.path().app_data_dir() {
                         if let Err(e) = move_legacy_index(&old_dir, &dir) {
                             log::warn!("index not moved from {}: {e}", old_dir.display());
