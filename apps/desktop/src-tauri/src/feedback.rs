@@ -441,8 +441,8 @@ pub fn build_report(
             continue;
         }
         // Start at the first whole line after the bytes skipped.
-        let start = if skip == 0 {
-            0
+        let start = if skip == 0 || file.text.as_bytes()[skip - 1] == b'\n' {
+            skip
         } else {
             file.text.as_bytes()[skip..]
                 .iter()
@@ -1292,6 +1292,11 @@ mod tests {
         assert!(!preview.text.contains("--- vfs_2026-11-01"));
         let first_kept = preview.text.lines().find(|l| l.contains("[WARN]")).unwrap();
         assert!(first_kept.starts_with("[2026-11-21]"), "{first_kept}");
+
+        // A budget that ends exactly at a line start keeps that whole line.
+        let one = build_report(&env, "", false, &logs, line(0).len() + 1);
+        let kept: Vec<&str> = one.text.lines().filter(|l| l.contains("[WARN]")).collect();
+        assert_eq!(kept, [line(59_999)]);
 
         let full = build_report(&env, "", false, &logs, usize::MAX);
         assert!(full.text.contains(&line(0)));

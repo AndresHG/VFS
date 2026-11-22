@@ -37,7 +37,7 @@ from; they are stack-agnostic.
 - **R8. Redaction tests feed free text, not only the formats the code writes**: panic
   payloads (Rust's own messages quote values in backticks), bare names and search terms, and
   names holding delimiters or line breaks; a fixture of today's `warn!` formats alone misses
-  them (VFS-20).
+  them (VFS-30).
 
 ## Worth flagging — not blocking
 
