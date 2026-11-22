@@ -16,6 +16,17 @@ pub const SUPPORTED: &[&str] = &[
     "odp",
 ];
 
+/// Document metadata as the extractor reports it, beyond the title (VFS-2 R16). Nothing is
+/// guessed from the text.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DocMeta {
+    #[serde(default)]
+    pub authors: Vec<String>,
+    /// Creation date as reported (ISO 8601 where the format has it).
+    #[serde(default)]
+    pub created: Option<String>,
+}
+
 /// What the extractor made of one file's bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Extracted {
@@ -25,6 +36,7 @@ pub enum Extracted {
         title: Option<String>,
         body: String,
         page_starts: Vec<usize>,
+        meta: DocMeta,
     },
     Skipped(SkipReason),
     Failed(String),
@@ -100,12 +112,34 @@ pub fn extract_bytes(ext: &str, bytes: Vec<u8>) -> Extracted {
         };
     }
     let mut title = None;
+    let mut meta = DocMeta::default();
     let mut body = String::new();
     let mut page_starts = Vec::new();
+    let mut pages_seen = 0u32;
     for d in res.results {
         if title.is_none() {
             title = d.metadata.title.filter(|t| !t.trim().is_empty());
         }
+        if meta.authors.is_empty() {
+            meta.authors = d
+                .metadata
+                .authors
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty())
+                .collect();
+        }
+        if meta.created.is_none() {
+            meta.created = d.metadata.created_at.filter(|c| !c.trim().is_empty());
+        }
+        pages_seen += d
+            .metadata
+            .pages
+            .as_ref()
+            .map(|p| p.total_count)
+            .unwrap_or(0)
+            .max(d.pages.as_ref().map_or(0, |p| p.len() as u32));
         if !body.is_empty() {
             body.push('\n');
         }
@@ -124,12 +158,18 @@ pub fn extract_bytes(ext: &str, bytes: Vec<u8>) -> Extracted {
         }
     }
     if body.trim().is_empty() {
-        return Extracted::Skipped(SkipReason::NoText);
+        // A PDF with pages but no text layer is a scan (VFS-2 R15, D13).
+        return Extracted::Skipped(if ext == "pdf" && pages_seen > 0 {
+            SkipReason::Scanned
+        } else {
+            SkipReason::NoText
+        });
     }
     Extracted::Text {
         title,
         body,
         page_starts,
+        meta,
     }
 }
 

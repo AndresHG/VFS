@@ -43,8 +43,10 @@ pub struct Request {
 pub enum SkipReason {
     /// Password-protected / encrypted.
     Password,
-    /// Opened fine but holds no text (empty file, scanned PDF without a text layer).
+    /// Opened fine but holds no text (an empty file).
     NoText,
+    /// A PDF with at least one page and no text layer: a scan (VFS-2 R15).
+    Scanned,
     /// Larger than `max_input_bytes`; not read.
     TooLarge,
     /// The extension is not a supported document format.
@@ -81,6 +83,9 @@ pub enum Outcome {
         /// pages (VFS-2 R11).
         #[serde(default)]
         page_starts: Vec<usize>,
+        /// Authors and creation date, when the format carries them (VFS-2 R16).
+        #[serde(default)]
+        meta: crate::extract::DocMeta,
     },
     Skipped(SkipReason),
     Failed {

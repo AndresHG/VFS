@@ -10,6 +10,7 @@ use vfs_content::indexer::{OutcomeKind, StopReason};
 use vfs_content::protocol::{FailReason, SkipReason};
 use vfs_content::{store, IndexOptions};
 use vfs_core::content::ContentState;
+use vfs_core::db::ingest::FLAG_CLOUD_ONLY;
 use vfs_core::{FileKind, SearchFilters, SearchQuery, Vfs};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
@@ -277,7 +278,7 @@ fn ac4_hostile_documents_never_stop_the_run() {
     assert_eq!(s.state("vacio.pdf").0, SKIPPED);
     assert_eq!(
         s.state("escaneado.pdf"),
-        (SKIPPED, Some(SKIPPED), reason(SkipReason::NoText))
+        (SKIPPED, Some(SKIPPED), reason(SkipReason::Scanned))
     );
     assert_eq!(s.names("cigüeña"), vec!["bueno.docx", "bueno.pdf"]);
 }
@@ -649,18 +650,20 @@ fn ac12_passages_are_addressable() {
 
 impl Setup {
     /// Runs SQL on `index.db` directly, as the name indexer or the settings would.
+    /// `?1` is the file name, `?2` the index's cloud-only flag bit.
     fn index_sql(&self, sql: &str, name: &str) {
         let conn = Connection::open(&self.db).unwrap();
         conn.busy_timeout(Duration::from_secs(10)).unwrap();
-        conn.execute(sql, [name]).unwrap();
+        conn.execute(sql, rusqlite::params![name, FLAG_CLOUD_ONLY])
+            .unwrap();
     }
 
     fn content_states(&self) -> Vec<(String, i64)> {
         let conn = Connection::open(&self.db).unwrap();
         let mut st = conn
-            .prepare("SELECT name, content_state FROM files WHERE kind = 1 ORDER BY name")
+            .prepare("SELECT name, content_state FROM files WHERE kind = ?1 ORDER BY name")
             .unwrap();
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        st.query_map([FileKind::Document.code()], |r| Ok((r.get(0)?, r.get(1)?)))
             .unwrap()
             .map(Result::unwrap)
             .collect()
@@ -692,7 +695,7 @@ fn ac13_cloud_only_documents_are_never_opened() {
     s.copy_fixture("muestra_docx.docx", "a/local.docx");
     s.scan();
     s.index_sql(
-        "UPDATE files SET flags = flags | 4 WHERE name = ?1",
+        "UPDATE files SET flags = flags | ?2 WHERE name = ?1",
         "nube.docx",
     );
     let mut o = s.opts();
@@ -724,7 +727,7 @@ fn ac13_cloud_only_documents_are_never_opened() {
     // The sync client downloads it: the name indexer clears the flag and records the new
     // mtime.
     s.index_sql(
-        "UPDATE files SET flags = flags & ~4, mtime = mtime + 10 WHERE name = ?1",
+        "UPDATE files SET flags = flags & ~?2, mtime = mtime + 10 WHERE name = ?1",
         "nube.docx",
     );
     s.run(&o);
@@ -1141,8 +1144,8 @@ fn ac24_raised_size_budget_requeues_too_large() {
     let set_mb = |mb: &str| {
         let conn = Connection::open(&s.db).unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES ('content_max_mb', ?1)",
-            [mb],
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
+            [vfs_content::indexer::CONTENT_MAX_MB_KEY, mb],
         )
         .unwrap();
     };
@@ -1166,4 +1169,341 @@ fn ac24_raised_size_budget_requeues_too_large() {
     let second = s.run(&s.opts());
     assert_eq!(second.files_opened, 1, "{second:?}");
     assert_eq!(s.state("grande.txt").0, INDEXED);
+}
+
+// ---- PR 2b: query semantics and the engine calls (R13–R16) ----
+
+use vfs_content::{Query, Searcher, StructuredQuery, UnreadReason};
+
+impl Setup {
+    fn searcher(&self) -> Searcher {
+        Searcher::open(&self.db).unwrap()
+    }
+
+    fn retrieve(&self, q: Query, k: u32, offset: u32) -> vfs_content::ContentResponse {
+        self.searcher()
+            .retrieve(&q, &SearchFilters::default(), k, offset)
+            .unwrap()
+    }
+
+    fn file_id(&self, name: &str) -> i64 {
+        Connection::open(&self.db)
+            .unwrap()
+            .query_row("SELECT id FROM files WHERE name = ?1", [name], |r| r.get(0))
+            .unwrap()
+    }
+}
+
+fn text(q: &str) -> Query {
+    Query::Text(q.into())
+}
+
+fn structured(all: &[&str], any: &[&str]) -> Query {
+    Query::Structured(StructuredQuery {
+        all: all.iter().map(|s| s.to_string()).collect(),
+        any: any.iter().map(|s| s.to_string()).collect(),
+        phrases: Vec::new(),
+    })
+}
+
+fn hit_names(r: &vfs_content::ContentResponse) -> Vec<String> {
+    r.hits.iter().map(|h| h.name.clone()).collect()
+}
+
+/// VFS-2 AC-14: two words find only documents with both; when none has both, documents
+/// with any of them come back, marked partial.
+#[test]
+fn ac14_and_by_default_with_partial_or_fallback() {
+    let s = setup();
+    s.write(
+        "a/a.txt",
+        "El contrato de alquiler exige una fianza de dos meses.",
+    );
+    s.write(
+        "a/b.txt",
+        "El alquiler del piso de la playa sube en verano.",
+    );
+    s.scan();
+    s.run(&s.opts());
+    let both = s.retrieve(text("alquiler fianza"), 10, 0);
+    assert_eq!(hit_names(&both), vec!["a.txt"]);
+    assert!(!both.partial);
+    let either = s.retrieve(text("alquiler zapatilla"), 10, 0);
+    assert!(
+        hit_names(&either).contains(&"b.txt".to_string()),
+        "{either:?}"
+    );
+    assert!(either.partial);
+}
+
+/// VFS-2 AC-15: a word in every document filters but does not rank, so `documento
+/// Peñalara` ranks by `Peñalara`; `documento` alone returns at most `limit` hits within the
+/// query budget.
+#[test]
+fn ac15_common_words_filter_but_do_not_rank() {
+    let s = setup();
+    for i in 0..2000 {
+        let extra = match i {
+            100 => " Peñalara.",
+            700 => " Peñalara Peñalara Peñalara.",
+            1500 => " Peñalara Peñalara.",
+            _ => "",
+        };
+        s.write(
+            &format!("d{:02}/doc{i:04}.txt", i / 100),
+            format!("Este documento número {i} trata de cosas varias.{extra}"),
+        );
+    }
+    s.scan();
+    let sum = s.run(&s.opts());
+    assert_eq!(sum.indexed, 2000, "{sum:?}");
+    let r = s.retrieve(text("documento Peñalara"), 10, 0);
+    assert_eq!(
+        hit_names(&r),
+        vec!["doc0700.txt", "doc1500.txt", "doc0100.txt"],
+        "{r:?}"
+    );
+    assert!(!r.partial);
+
+    let searcher = s.searcher();
+    let mut ms = Vec::new();
+    for _ in 0..20 {
+        let t = std::time::Instant::now();
+        let r = searcher
+            .retrieve(&text("documento"), &SearchFilters::default(), 20, 0)
+            .unwrap();
+        ms.push(t.elapsed().as_millis());
+        assert_eq!(r.hits.len(), 20);
+        assert_eq!(r.total, 1000);
+        assert!(r.total_capped);
+    }
+    ms.sort();
+    // The VFS-2 query budget: p95 < 150 ms.
+    assert!(ms[18] < 150, "p95 {} ms: {ms:?}", ms[18]);
+
+    // A common word inside a folder whose documents come after the first 1,000 matches:
+    // the filter, not the candidate cap, bounds the result (R7).
+    let root = PathBuf::from(&s.vfs.list_roots().unwrap()[0].path);
+    let filters = SearchFilters {
+        folder: Some(root.join("d19").to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let r = searcher
+        .retrieve(&text("documento"), &filters, 20, 0)
+        .unwrap();
+    assert_eq!((r.hits.len(), r.total), (20, 100), "{:?}", r.total);
+    assert!(r.hits.iter().all(|h| h.name.starts_with("doc19")));
+}
+
+/// VFS-2 AC-16: `retrieve` returns what `vfs content-search` shows, each passage's range
+/// holds a matched word, and `passage_text` joins neighbouring chunks in order.
+#[test]
+fn ac16_retrieve_and_passage_text() {
+    let s = setup();
+    let filler = "La comunidad revisó las cuentas del portal y del jardín. ".repeat(60);
+    s.write(
+        "a/largo.txt",
+        format!("{filler}Al final se firmó el contrato de alquiler del local. {filler}"),
+    );
+    s.write("a/corto.txt", "Un contrato de alquiler sencillo.");
+    s.write(
+        "b/otro.txt",
+        "El alquiler de la casa subió; el contrato sigue igual.",
+    );
+    s.scan();
+    s.run(&s.opts());
+    let searcher = s.searcher();
+    let filters = SearchFilters::default();
+    let r = searcher
+        .retrieve(&text("contrato de alquiler"), &filters, 10, 0)
+        .unwrap();
+    let cli = s.search("contrato de alquiler");
+    assert_eq!(
+        r.hits.iter().map(|h| h.id).collect::<Vec<_>>(),
+        cli.hits.iter().map(|h| h.id).collect::<Vec<_>>()
+    );
+    assert_eq!(r.hits.len(), 3);
+    for h in &r.hits {
+        assert!(!h.passages.is_empty(), "{h:?}");
+        for p in &h.passages {
+            assert_eq!(p.file_id, h.id);
+            let t = searcher
+                .passage_text(h.id, p.ordinal, 0, 0)
+                .unwrap()
+                .unwrap();
+            assert_eq!((t.start_char, t.end_char), (p.start_char, p.end_char));
+            let folded = vfs_core::fold_key(&t.text);
+            assert!(
+                ["contrat", "alquil"].iter().any(|w| folded.contains(w)),
+                "{t:?}"
+            );
+        }
+    }
+
+    let id = s.file_id("largo.txt");
+    let all = searcher.passage_text(id, 0, 0, 100).unwrap().unwrap();
+    assert!(all.last_ordinal >= 2, "{all:?}");
+    let mid = searcher.passage_text(id, 1, 1, 1).unwrap().unwrap();
+    assert_eq!((mid.first_ordinal, mid.last_ordinal), (0, 2));
+    let parts: String = (0..=2)
+        .map(|o| searcher.passage_text(id, o, 0, 0).unwrap().unwrap().text)
+        .collect();
+    assert_eq!(mid.text, parts);
+    let first = searcher.passage_text(id, 0, 1, 1).unwrap().unwrap();
+    assert_eq!((first.first_ordinal, first.last_ordinal), (0, 1));
+    assert!(searcher.passage_text(id, 999, 0, 0).unwrap().is_none());
+}
+
+/// VFS-2 AC-16: no crate other than `vfs-content` opens `content.db`; the others go through
+/// its calls.
+#[test]
+fn ac16_only_vfs_content_opens_the_store() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut offenders = Vec::new();
+    let mut stack = vec![repo.join("crates"), repo.join("apps")];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                if !["target", "node_modules", "vfs-content"].contains(&name.as_str()) {
+                    stack.push(p);
+                }
+            } else if name.ends_with(".rs") {
+                // Code only: a comment may name the store without opening it.
+                let src = std::fs::read_to_string(&p).unwrap_or_default();
+                let opens = src
+                    .lines()
+                    .filter(|l| !l.trim_start().starts_with("//"))
+                    .any(|l| l.contains("content.db") || l.contains("vfs_content::store"));
+                if opens {
+                    offenders.push(p);
+                }
+            }
+        }
+    }
+    assert!(offenders.is_empty(), "{offenders:?}");
+}
+
+/// VFS-2 AC-18: PDF and DOCX hits carry the title, author and creation date of their
+/// metadata; a TXT hit carries none.
+#[test]
+fn ac18_hits_carry_document_metadata() {
+    let s = setup();
+    s.copy_fixture("meta_pdf.pdf", "a/informe.pdf");
+    s.copy_fixture("meta_docx.docx", "a/inventario.docx");
+    s.write("a/nota.txt", "Nota sobre el ascensor y la cómoda.");
+    s.scan();
+    s.run(&s.opts());
+    let get = |q: &str, name: &str| {
+        s.retrieve(text(q), 10, 0)
+            .hits
+            .into_iter()
+            .find(|h| h.name == name)
+            .unwrap_or_else(|| panic!("{name} not found for «{q}»"))
+    };
+    let pdf = get("ascensor", "informe.pdf");
+    assert_eq!(pdf.title.as_deref(), Some("Informe de la comunidad"));
+    assert_eq!(pdf.authors, vec!["Luis Pérez"]);
+    assert!(pdf
+        .created
+        .as_deref()
+        .unwrap_or("")
+        .starts_with("2019-03-03"));
+    let docx = get("cómoda", "inventario.docx");
+    assert_eq!(docx.title.as_deref(), Some("Inventario de la casa"));
+    assert_eq!(docx.authors, vec!["Carmen Muñoz"]);
+    assert!(docx
+        .created
+        .as_deref()
+        .unwrap_or("")
+        .starts_with("2019-03-03"));
+    let txt = get("ascensor", "nota.txt");
+    assert_eq!((txt.title, txt.authors.len(), txt.created), (None, 0, None));
+}
+
+/// VFS-2 AC-19: `unread` names why a scanned PDF, a password-protected PDF, an empty DOCX,
+/// a cloud-only file and a `.pages` file were not read, and `unread_counts` counts one of
+/// each.
+#[test]
+fn ac19_unread_reasons() {
+    let s = setup();
+    s.copy_fixture("escaneado.pdf", "a/escaneado.pdf");
+    s.copy_fixture("con_clave.pdf", "a/con_clave.pdf");
+    s.copy_fixture("vacio.docx", "a/vacio.docx");
+    s.copy_fixture("muestra_docx.docx", "a/nube.docx");
+    s.write("a/presupuesto.pages", b"not really a Pages file");
+    s.write("a/leido.txt", "texto leído");
+    s.scan();
+    s.index_sql(
+        "UPDATE files SET flags = flags | ?2 WHERE name = ?1",
+        "nube.docx",
+    );
+    s.run(&s.opts());
+    let searcher = s.searcher();
+    let names = [
+        "escaneado.pdf",
+        "con_clave.pdf",
+        "vacio.docx",
+        "nube.docx",
+        "presupuesto.pages",
+        "leido.txt",
+    ];
+    let ids: Vec<i64> = names.iter().map(|n| s.file_id(n)).collect();
+    let got: Vec<Option<UnreadReason>> = searcher
+        .unread(&ids)
+        .unwrap()
+        .into_iter()
+        .map(|(_, r)| r)
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            Some(UnreadReason::Scanned),
+            Some(UnreadReason::Password),
+            Some(UnreadReason::Failed),
+            Some(UnreadReason::Cloud),
+            Some(UnreadReason::Unsupported),
+            None,
+        ]
+    );
+    let counts = searcher.unread_counts().unwrap();
+    assert_eq!(counts.len(), 5, "{counts:?}");
+    assert!(counts.values().all(|n| *n == 1), "{counts:?}");
+}
+
+/// VFS-2 AC-22: structured queries (`any` ranks and is optional when `all` is given) and
+/// stable paging with the total.
+#[test]
+fn ac22_structured_queries_and_paging() {
+    let s = setup();
+    s.write("a/a.txt", "Contrato de alquiler con fianza depositada.");
+    s.write("a/b.txt", "La fianza se devuelve al final.");
+    for i in 0..28 {
+        s.write(
+            &format!("c/relleno{i:02}.txt"),
+            format!("Documento de relleno número {i}."),
+        );
+    }
+    s.scan();
+    s.run(&s.opts());
+    let any = s.retrieve(structured(&[], &["alquiler", "fianza"]), 10, 0);
+    assert_eq!(hit_names(&any), vec!["a.txt", "b.txt"]);
+    let all_any = s.retrieve(structured(&["alquiler"], &["fianza"]), 10, 0);
+    assert_eq!(hit_names(&all_any), vec!["a.txt"]);
+
+    // 30 documents contain «número» or «fianza»: page through them.
+    let q = structured(&[], &["número", "fianza"]);
+    let whole = s.retrieve(q.clone(), 30, 0);
+    assert_eq!((whole.hits.len(), whole.total), (30, 30));
+    let first = s.retrieve(q.clone(), 20, 0);
+    let second = s.retrieve(q, 20, 20);
+    assert_eq!((second.hits.len(), second.total), (10, 30));
+    let paged: Vec<i64> = first
+        .hits
+        .iter()
+        .chain(&second.hits)
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(paged, whole.hits.iter().map(|h| h.id).collect::<Vec<_>>());
 }

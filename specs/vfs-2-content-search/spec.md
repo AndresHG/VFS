@@ -4,7 +4,7 @@
   the open questions on 2026-11-21 (D9–D15). R12–R20 and the phased PRs were added on
   2026-11-22 to close the engine before the app step. Two independent critic rounds
   reviewed it, and a final verification pass checked the fixes. PR 2a is implemented in
-  PR #98; PR 2b is next.
+  PR #98, PR 2b in the PR that follows it.
 - **Size**: L. The engine opens user files for the first time, adds an on-disk store next to
   the index, and adds a child process with platform-specific limits. It spans several
   components.
@@ -237,7 +237,8 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   ordinal+1 joined in order, and for the first chunk it returns only chunks 0–1. A test
   asserts that no crate other than `vfs-content` opens `content.db`.
 - AC-17 (R6, R13, R14) Given the content golden set, ~40 labelled Spanish queries over the
-  public-domain test corpus in `bench/` (see D17), When the golden test runs in CI, Then the
+  committed test corpus in `crates/vfs-content/tests/golden` (built by
+  `bench/content-corpus/make_golden.py`; sources and licences in its NOTICE.md, see D17), When the golden test runs in CI, Then the
   expected document is in the top 5 for at least the share recorded in the test file. That
   share is fixed by the first run, and it can only go up.
 - AC-18 (R16) Given a PDF and a DOCX whose metadata holds a title, an author and a creation

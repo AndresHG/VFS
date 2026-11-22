@@ -17,7 +17,10 @@ pub mod supervisor;
 pub mod worker;
 
 pub use indexer::{run as index, IndexOptions, RunSummary, StoreStats};
-pub use search::{search, ContentHit, ContentResponse, Passage, Searcher};
+pub use search::{
+    retrieve, search, ContentHit, ContentResponse, Passage, PassageText, Query, Searcher,
+    StructuredQuery, UnreadReason,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

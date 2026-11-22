@@ -32,6 +32,10 @@ const TIMEOUT_ATTEMPTS: i64 = 2;
 /// Worker crashes in a row (each on a different file) that end a run (VFS-2 R17).
 const UNSTABLE_CRASHES: u32 = 5;
 
+/// `index.db` `meta` key holding the input-size budget in MB (VFS-2 R21; written by
+/// VFS-34's setting).
+pub const CONTENT_MAX_MB_KEY: &str = "content_max_mb";
+
 /// Input-size budget when `index.db` has no `content_max_mb` (VFS-2 R21).
 const DEFAULT_MAX_INPUT_MB: u64 = 100;
 
@@ -214,8 +218,8 @@ fn supported_sql() -> String {
 fn input_budget(conn: &Connection) -> Result<u64> {
     let mb: Option<String> = conn
         .query_row(
-            "SELECT value FROM meta WHERE key = 'content_max_mb'",
-            [],
+            "SELECT value FROM meta WHERE key = ?1",
+            [CONTENT_MAX_MB_KEY],
             |r| r.get(0),
         )
         .optional()?;
@@ -273,6 +277,9 @@ fn enqueue(
 ) -> Result<(u64, Vec<(SkipReason, u64)>)> {
     let doc = FileKind::Document.code();
     let skipped = ContentState::Skipped as i64;
+    // Deferred on purpose: it only reads `index.db` and writes `content.db`, which no other
+    // connection writes, while `Immediate` would hold `index.db`'s write lock for the whole
+    // rebuild (R20).
     let tx = conn.transaction()?;
     // Rows whose file left the index or changed identity, size or mtime are stale: drop
     // their text and keys so the file is processed again (R3, R21) and old text is not
@@ -419,8 +426,8 @@ fn write_store(
     {
         let mut ins_doc = tx.prepare_cached(
             "INSERT OR REPLACE INTO c.docs(file_id, dir_id, name, size, mtime, state, reason,
-                 bytes_read, extract_ms, truncated, title, text, attempts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                 bytes_read, extract_ms, truncated, title, text, authors, created, attempts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
                  COALESCE((SELECT attempts FROM c.docs WHERE file_id = ?1), 0) + 1)",
         )?;
         let mut del_fts = tx.prepare_cached("DELETE FROM c.content_fts WHERE rowid = ?1")?;
@@ -434,13 +441,16 @@ fn write_store(
         let mut del_q = tx.prepare_cached("DELETE FROM c.queue WHERE file_id = ?1")?;
         for d in batch.iter() {
             del_chunks.execute([d.file_id])?;
+            let mut meta = None;
             let (state, reason, truncated, title, blob) = match &d.resp.outcome {
                 Outcome::Text {
                     title,
                     body,
                     truncated,
                     page_starts,
+                    meta: m,
                 } => {
+                    meta = Some(m);
                     for c in chunks(body, page_starts) {
                         ins_chunk.execute(params![
                             d.file_id,
@@ -498,7 +508,10 @@ fn write_store(
                 d.resp.ms as i64,
                 truncated,
                 title,
-                blob
+                blob,
+                meta.filter(|m| !m.authors.is_empty())
+                    .map(|m| serde_json::to_string(&m.authors).expect("authors serialize")),
+                meta.and_then(|m| m.created.clone())
             ])?;
             del_q.execute([d.file_id])?;
         }
