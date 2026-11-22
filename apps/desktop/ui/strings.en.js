@@ -165,6 +165,9 @@ export const en = {
   addFolder: 'Add folder…',
   rescanAll: 'Look for changes now',
   rescan: 'Check again',
+  rootPause: 'Pause',
+  rootResume: 'Resume',
+  rootPaused: 'Paused',
   remove: 'Remove',
   close: 'Close',
   rootStatus: {

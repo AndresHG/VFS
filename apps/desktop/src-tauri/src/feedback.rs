@@ -951,6 +951,7 @@ mod tests {
             last_full_scan: Some(1_000_000 - 3 * 86_400),
             drive: DriveKind::Local,
             unreadable: 0,
+            paused: false,
         }
     }
 

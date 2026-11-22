@@ -9,7 +9,7 @@ import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
-import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
+import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
@@ -1095,8 +1095,8 @@ function main(L) {
     unreadable.hidden = true;
     const actions = el('div', 'root-actions');
     const name = F.baseName(r.path);
-    const rescan = button(S.rescan, 'btn', () => rescanRoot(r.id));
-    rescan.setAttribute('aria-label', `${S.rescan}: ${name}`);
+    // VFS-32 R8: "Pausar" / "Reanudar" / "Volver a revisar", set by renderRoots.
+    const rescan = button(S.rescan, 'btn', () => rootActionClicked(r.id, rescan.dataset.action));
     const remove = button(S.remove, 'btn btn-quiet', () => {
       const current = state.roots.find((x) => x.id === r.id);
       if (current) confirmRemove(current);
@@ -1104,7 +1104,7 @@ function main(L) {
     remove.setAttribute('aria-label', `${S.remove}: ${name}`);
     actions.append(rescan, remove);
     li.append(path, meta, unreadable, actions);
-    return { li, st, files, checked, rescan, remove, unreadable, unreadableText };
+    return { li, st, files, checked, rescan, remove, unreadable, unreadableText, name };
   }
 
   function renderRoots() {
@@ -1130,14 +1130,20 @@ function main(L) {
       if (!item) { item = buildRootItem(r); rootItems.set(r.id, item); }
       if (!item.li.isConnected) ul.append(item.li);
       const status = r.status === RootStatus.REMOVING ? r.status : progressById.get(r.id)?.status ?? r.status;
-      item.st.textContent = S.rootStatus[status] || status;
-      item.st.dataset.status = status;
+      const paused = r.paused && status !== RootStatus.REMOVING;
+      item.st.textContent = paused ? S.rootPaused : S.rootStatus[status] || status;
+      item.st.dataset.status = paused ? 'paused' : status;
       item.files.textContent = S.rootFiles(N.count(progressById.get(r.id)?.filesIndexed ?? r.files));
       item.checked.textContent = r.lastFullScan ? S.rootChecked(N.date(r.lastFullScan)) : S.rootNeverChecked;
       const unreadable = S.unreadableLine(r.unreadable || 0, N.count(r.unreadable || 0));
       item.unreadable.hidden = !unreadable;
       item.unreadableText.textContent = unreadable;
-      item.rescan.disabled = status !== RootStatus.READY && status !== RootStatus.UNAVAILABLE;
+      const action = rootAction(r, status);
+      const label = { [RootAction.PAUSE]: S.rootPause, [RootAction.RESUME]: S.rootResume, [RootAction.RESCAN]: S.rescan }[action];
+      item.rescan.dataset.action = action;
+      item.rescan.textContent = label;
+      item.rescan.setAttribute('aria-label', `${label}: ${item.name}`);
+      item.rescan.disabled = action === RootAction.RESCAN && status !== RootStatus.READY && status !== RootStatus.UNAVAILABLE;
       item.remove.disabled = status === RootStatus.REMOVING;
     }
   }
@@ -1165,6 +1171,14 @@ function main(L) {
     $('unreadable-more').textContent = more ? S.unreadableMore(N.count(more)) : '';
     unreadableDialog.showModal();
     $('unreadable-list').querySelector('button')?.focus();
+  }
+
+  async function rootActionClicked(id, action) {
+    if (action === RootAction.RESCAN) { rescanRoot(id); return; }
+    try {
+      await api.setRootPaused(id, action === RootAction.PAUSE);
+      await refreshRoots();
+    } catch (err) { showError(errorText(err)); }
   }
 
   async function rescanRoot(id) {

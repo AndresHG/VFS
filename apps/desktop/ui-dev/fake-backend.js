@@ -248,11 +248,11 @@ export function createFakeBackend(params) {
 
   function rootView(r) {
     const n = done.get(r.id) || 0;
-    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? DriveKind.LOCAL, unreadable: unreadableOf(r).length };
+    return { id: r.id, path: r.path, status: r.status, files: n, dirs: Math.round(n / 22), lastFullScan: r.lastFullScan, drive: r.drive ?? DriveKind.LOCAL, unreadable: unreadableOf(r).length, paused: !!r.paused };
   }
 
   function progress() {
-    const scanning = roots.some((r) => r.status === RootStatus.SCANNING || r.status === RootStatus.PENDING);
+    const scanning = roots.some((r) => !r.paused && (r.status === RootStatus.SCANNING || r.status === RootStatus.PENDING));
     return {
       state: paused && scanning ? IndexerState.PAUSED : scanning ? IndexerState.SCANNING : IndexerState.IDLE,
       filesIndexed: roots.reduce((s, r) => s + (done.get(r.id) || 0), 0),
@@ -269,6 +269,7 @@ export function createFakeBackend(params) {
     let changed = false;
     if (!paused) {
       for (const r of roots) {
+        if (r.paused) continue; // VFS-32: a paused folder keeps its place
         if (r.status === RootStatus.PENDING) { r.status = RootStatus.SCANNING; changed = true; }
         if (r.status !== RootStatus.SCANNING) continue;
         const total = totalOf(r.id) || 4000;
@@ -521,6 +522,11 @@ export function createFakeBackend(params) {
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {
       for (const r of roots) if ((id == null || r.id === id) && r.status === RootStatus.READY) { r.status = RootStatus.SCANNING; pending.set(r.id, 30); }
+    },
+    async setRootPaused(id, p) {
+      const r = roots.find((x) => x.id === id && x.status !== RootStatus.REMOVING);
+      if (!r) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${id}` };
+      r.paused = p;
     },
     async setPaused(p) { paused = p; },
     async onProgress(cb) { progressCbs.add(cb); return () => progressCbs.delete(cb); },

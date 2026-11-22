@@ -125,6 +125,18 @@ fn pending_condition() -> String {
     format!("scan_state <> {}", ScanState::Clean as i64)
 }
 
+/// SQL condition, on `roots`, of a root that is not paused (VFS-32 R1: key `paused/<id>`).
+const NOT_PAUSED: &str = concat!("NOT EXISTS ", crate::roots::paused_key_sql!("roots.id"));
+
+fn is_paused(conn: &Connection, root_id: i64) -> Result<bool> {
+    Ok(conn
+        .prepare_cached(concat!(
+            "SELECT EXISTS ",
+            crate::roots::paused_key_sql!("?1")
+        ))?
+        .query_row([root_id], |r| r.get(0))?)
+}
+
 fn now_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -186,9 +198,12 @@ fn pass_mode(conn: &Connection, cfg: &SchedConfig) -> Result<Mode> {
     if !walking(conn)?.is_empty() {
         return Ok(Mode::Walk);
     }
+    // A paused root's pending folders are not work (VFS-32 R2): seeking by root id skips
+    // them without reading them.
     let pending: i64 = conn
         .prepare_cached(&format!(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM dirs INDEXED BY dirs_pending WHERE {} LIMIT ?1)",
+            "SELECT COUNT(*) FROM (SELECT 1 FROM dirs INDEXED BY dirs_pending WHERE root_id IN \
+             (SELECT id FROM roots WHERE {NOT_PAUSED}) AND {} LIMIT ?1)",
             pending_condition()
         ))?
         .query_row([cfg.incremental_max_dirs as i64 + 1], |r| r.get(0))?;
@@ -268,8 +283,10 @@ fn run(
     sched.mode = pass_mode(conn, &sched.cfg)?;
     let skip = data_dir(conn);
     let roots: Vec<ActiveRoot> = {
-        let mut stmt =
-            conn.prepare("SELECT id, path, status FROM roots WHERE status <> ?1 ORDER BY id")?;
+        // A paused root is left as it is: its pending folders wait (VFS-32 R2).
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, path, status FROM roots WHERE status <> ?1 AND {NOT_PAUSED} ORDER BY id"
+        ))?;
         let rows = stmt.query_map([RootStatus::Removing.code()], |r| {
             Ok(ActiveRoot {
                 id: r.get(0)?,
@@ -600,8 +617,20 @@ fn set_root_status(conn: &Connection, root_id: i64, status: RootStatus) -> Resul
 }
 
 /// Ids of the roots being walked in full: a first scan (`pending`) or a re-walk (`scanning`).
+/// A paused root is not being walked: the others' walks may start (VFS-32 R3).
 fn walking(conn: &Connection) -> Result<HashSet<i64>> {
-    let mut stmt = conn.prepare_cached("SELECT id FROM roots WHERE status IN (?1, ?2)")?;
+    walking_where(conn, NOT_PAUSED)
+}
+
+/// [`walking`], paused roots included.
+fn walking_or_paused(conn: &Connection) -> Result<HashSet<i64>> {
+    walking_where(conn, "1")
+}
+
+fn walking_where(conn: &Connection, cond: &str) -> Result<HashSet<i64>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT id FROM roots WHERE status IN (?1, ?2) AND {cond}"
+    ))?;
     let rows = stmt.query_map(
         [RootStatus::Pending.code(), RootStatus::Scanning.code()],
         |r| r.get(0),
@@ -644,6 +673,34 @@ fn queue_rewalk(conn: &Connection, history: &dyn History, root_id: i64) -> Resul
     Ok(true)
 }
 
+/// Restarts the walk of `root_id` from its root folder when it is being walked (pending or
+/// scanning), storing the cursor of now with the mark; false otherwise (VFS-32 R5).
+fn restart_walk(conn: &Connection, history: &dyn History, root_id: i64) -> Result<bool> {
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM roots WHERE id = ?1 AND status IN (?2, ?3)",
+            params![
+                root_id,
+                RootStatus::Pending.code(),
+                RootStatus::Scanning.code()
+            ],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(path) = path else {
+        return Ok(false);
+    };
+    let now = history.current(Path::new(&path));
+    let tx = begin(conn)?;
+    tx.execute(
+        "UPDATE dirs SET scan_state = ?2 WHERE root_id = ?1 AND rel_path = ''",
+        params![root_id, ScanState::PendingDeep as i64],
+    )?;
+    cursor::store(&tx, root_id, now.as_deref())?;
+    tx.commit()?;
+    Ok(true)
+}
+
 /// Re-walks owed, by root id: `true` when deferred, so it waits until the root's last full
 /// scan is `OWED_COOLDOWN_SECS` old (VFS-1 I10).
 type Owed = BTreeMap<i64, bool>;
@@ -660,7 +717,8 @@ fn request_rewalk(
     ids: &[i64],
     lost_events: bool,
 ) -> Result<()> {
-    let busy = walking(conn)?;
+    // A paused walk will resume: a request for it waits for the cooldown (VFS-32 R2).
+    let busy = walking_or_paused(conn)?;
     for &id in ids {
         let deferred = lost_events || busy.contains(&id);
         owed.entry(id)
@@ -681,18 +739,22 @@ fn start_owed(conn: &Connection, history: &dyn History, owed: &mut Owed) -> Resu
     let mut start = None;
     let mut gone = Vec::new();
     for (&id, &deferred) in owed.iter() {
-        let row: Option<(i64, Option<i64>)> = conn
+        let row: Option<(i64, Option<i64>, bool)> = conn
             .query_row(
-                "SELECT status, last_full_scan_at FROM roots WHERE id = ?1",
+                &format!(
+                    "SELECT status, last_full_scan_at, NOT {NOT_PAUSED} FROM roots WHERE id = ?1"
+                ),
                 [id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
         match row {
             None => gone.push(id),
-            Some((status, _)) if status == RootStatus::Removing.code() => gone.push(id),
-            Some((_, Some(last))) if deferred && last <= now && now - last < OWED_COOLDOWN_SECS => {
-            }
+            Some((status, _, _)) if status == RootStatus::Removing.code() => gone.push(id),
+            // Owed walks of a paused root stay owed (VFS-32 R2).
+            Some((_, _, true)) => {}
+            Some((_, Some(last), _))
+                if deferred && last <= now && now - last < OWED_COOLDOWN_SECS => {}
             Some(_) => {
                 start = Some(id);
                 break;
@@ -740,6 +802,7 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
             if dirs.is_empty() {
                 tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
                 cursor::store(&tx, root_id, None)?;
+                crate::roots::set_paused_key(&tx, root_id, false)?;
                 tx.commit()?;
                 // Counts and time of this run; a removal resumed after a stop counts from
                 // the resume (VFS-31 R5).
@@ -827,6 +890,8 @@ fn idle_progress() -> IndexProgress {
 enum Cmd {
     Wake,
     RootsChanged,
+    /// A root was paused (`true`) or resumed; its key is already written (VFS-32).
+    RootPaused(i64, bool),
     Rescan(Option<i64>),
     Watch(watch::WatchEvent),
 }
@@ -966,6 +1031,10 @@ impl IndexerHandle {
     /// Makes the thread look for pending directories now (after `mark_dirty`).
     pub(crate) fn wake(&self) {
         self.send(Cmd::Wake);
+    }
+
+    pub(crate) fn root_paused(&self, root_id: i64, paused: bool) {
+        self.send(Cmd::RootPaused(root_id, paused));
     }
 
     pub(crate) fn rescan(&self, root_id: Option<i64>) {
@@ -1372,6 +1441,9 @@ impl Worker {
             .collect();
         for id in due {
             self.replay_due.remove(&id);
+            if is_paused(&self.conn, id).unwrap_or(false) {
+                continue;
+            }
             let started = Instant::now();
             let outcome = self.replay_root(id);
             let ms = started.elapsed().as_millis();
@@ -1435,6 +1507,46 @@ impl Worker {
         Ok(Some(changed.len()))
     }
 
+    /// A root was paused (VFS-32 R2): its watch is dropped, so its cursor stays where it is
+    /// (a walk stores one when it starts) and the resume replays from there. The walk
+    /// already yielded: the command interrupted it.
+    fn root_paused(&mut self, root_id: i64) {
+        self.replay_due.remove(&root_id);
+        self.sync_watches();
+        self.sched.diag.emit(&format!("root_pause root={root_id}"));
+    }
+
+    /// A root was resumed (VFS-32 R5): watched again, its history replayed from the stored
+    /// cursor. When that cannot run, a root being walked restarts its walk in place (one
+    /// walk, not the rest of it and then another); any other root holds its cursor and owes
+    /// the lost-events walk (VFS-26 R4).
+    fn root_resumed(&mut self, root_id: i64) {
+        self.sync_watches();
+        let outcome = self.replay_root(root_id);
+        let result = match outcome {
+            Ok(Some(folders)) => format!("folders={folders} result=replayed"),
+            Ok(None) | Err(_) => {
+                if let Err(e) = outcome {
+                    log::warn!("indexer: replay of root {root_id}: {e}");
+                }
+                match restart_walk(&self.conn, &*self.history, root_id) {
+                    Ok(true) => "folders=0 result=rewalk".to_owned(),
+                    r => {
+                        if let Err(e) = r {
+                            log::warn!("indexer: {e}");
+                        }
+                        self.events_lost(root_id);
+                        self.request(&[root_id], true);
+                        "folders=0 result=lost".to_owned()
+                    }
+                }
+            }
+        };
+        self.sched
+            .diag
+            .emit(&format!("root_resume root={root_id} {result}"));
+    }
+
     fn request(&mut self, ids: &[i64], lost_events: bool) {
         let r = request_rewalk(&self.conn, &mut self.owed, ids, lost_events);
         self.log_err(r);
@@ -1457,6 +1569,8 @@ impl Worker {
                 // the UI learns a removed root is gone (VFS-31 R1).
                 self.published = None;
             }
+            Cmd::RootPaused(root_id, true) => self.root_paused(root_id),
+            Cmd::RootPaused(root_id, false) => self.root_resumed(root_id),
             Cmd::Rescan(Some(root_id)) => {
                 self.catchup.retain(|&id| id != root_id);
                 self.request(&[root_id], false)
@@ -1472,6 +1586,10 @@ impl Worker {
                 self.dirty.push(path);
                 self.dirty_since.get_or_insert_with(Instant::now);
             }
+            // Queued before the pause dropped the watch: the resume replays (VFS-32 R2).
+            Cmd::Watch(
+                watch::WatchEvent::Overflow(root_id) | watch::WatchEvent::Failed(root_id),
+            ) if is_paused(&self.conn, root_id).unwrap_or(false) => {}
             Cmd::Watch(watch::WatchEvent::Overflow(root_id)) => {
                 // Events were dropped but the watch is armed: replay the history once the
                 // burst is over, with the cursor frozen until then (VFS-26 R2).
@@ -1533,9 +1651,9 @@ impl Worker {
         }
     }
 
-    /// Watches every root not being removed and unwatches the others. A root that cannot be
-    /// watched is retried later (`watch_failed`); once watched after a failure, it owes a
-    /// re-walk for the changes nobody saw meanwhile (VFS-1 I12).
+    /// Watches every root not being removed or paused (VFS-32 R2), unwatches the others. A
+    /// root that cannot be watched is retried later (`watch_failed`); once watched after a
+    /// failure, it owes a re-walk for the changes nobody saw meanwhile (VFS-1 I12).
     fn sync_watches(&mut self) {
         self.last_watch_try = Instant::now();
         let Some(watcher) = self.watcher.as_mut() else {
@@ -1543,7 +1661,9 @@ impl Worker {
         };
         let roots: rusqlite::Result<Vec<(i64, String)>> = self
             .conn
-            .prepare("SELECT id, path FROM roots WHERE status <> ?1")
+            .prepare(&format!(
+                "SELECT id, path FROM roots WHERE status <> ?1 AND {NOT_PAUSED}"
+            ))
             .and_then(|mut s| {
                 s.query_map([RootStatus::Removing.code()], |r| {
                     Ok((r.get(0)?, r.get(1)?))
@@ -1871,6 +1991,10 @@ fn catch_up(
 ) -> Result<Vec<i64>> {
     let mut owed = Vec::new();
     for (id, root) in root_paths(conn)? {
+        // A paused root's history is replayed when it is resumed (VFS-32 R2, R5).
+        if is_paused(conn, id)? {
+            continue;
+        }
         let Some(stored) = cursor::load(conn, id)? else {
             owed.push(id);
             continue;

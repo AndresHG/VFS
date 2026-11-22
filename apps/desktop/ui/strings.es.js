@@ -167,6 +167,9 @@ export const es = {
   addFolder: 'Añadir carpeta…',
   rescanAll: 'Buscar cambios ahora',
   rescan: 'Volver a revisar',
+  rootPause: 'Pausar',
+  rootResume: 'Reanudar',
+  rootPaused: 'En pausa',
   remove: 'Quitar',
   close: 'Cerrar',
   rootStatus: {

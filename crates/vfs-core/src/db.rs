@@ -854,13 +854,16 @@ pub mod ingest {
     }
 
     /// Up to `limit` links waiting for the deferred pass, in id order: (file id, kind,
-    /// cloud-only).
+    /// cloud-only). Links of a paused root wait (VFS-32 R2).
     pub fn pending_links(conn: &Connection, limit: usize) -> Result<Vec<(i64, LinkKind, bool)>> {
         let mut stmt = conn.prepare_cached(&format!(
             "SELECT l.file_id, l.kind, COALESCE(f.flags, 0) FROM links l \
              LEFT JOIN files f ON f.id = l.file_id \
-             WHERE l.state = {} ORDER BY l.file_id LIMIT ?1",
-            LinkState::Pending as i64
+             WHERE l.state = {} AND NOT EXISTS (SELECT 1 FROM dirs d \
+               WHERE d.id = f.dir_id AND EXISTS {}) \
+             ORDER BY l.file_id LIMIT ?1",
+            LinkState::Pending as i64,
+            crate::roots::paused_key_sql!("d.root_id")
         ))?;
         let rows = stmt
             .query_map([limit as i64], |r| {

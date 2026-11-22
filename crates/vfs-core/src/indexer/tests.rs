@@ -2083,3 +2083,234 @@ fn a_take_in_during_a_listing_drops_that_listing() {
         .unwrap();
     assert_eq!(dup, 0);
 }
+
+fn pause(conn: &Connection, root_id: i64, paused: bool) {
+    crate::roots::set_root_paused(conn, root_id, paused).unwrap();
+}
+
+/// One `run` that yields after `dirs` directories, or runs to the end with `None`.
+fn run_for(fx: &mut Fx, dirs: Option<usize>) -> ScanSummary {
+    let calls = Cell::new(0usize);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        dirs.is_some_and(|n| calls.get() > n)
+    };
+    let mut pass = Pass::default();
+    run(
+        &mut fx.conn,
+        &OsHistory,
+        &mut pass,
+        &mut Retries::new(),
+        &stop,
+        false,
+        &mut Sched::inert(),
+        &mut |_: &Connection, _: &Pass, _: bool| {},
+    )
+    .unwrap();
+    pass.summary
+}
+
+/// VFS-32 AC-1 (R2, R5): a root paused mid first walk lists nothing while paused and keeps
+/// its pending folders; resumed, its walk continues where it stopped and finishes, each
+/// folder listed once.
+#[test]
+fn paused_walk_waits_and_resumes_where_it_stopped() {
+    let mut fx = fixture(&["A", "B", "C", "D"]);
+    let first = run_for(&mut fx, Some(2)).dirs_listed;
+    assert!(first > 0);
+    let pending = fx.pending_dirs();
+    assert!(pending > 0, "the walk is not done yet");
+    let status = fx.status();
+
+    pause(&fx.conn, fx.root_id, true);
+    assert_eq!(
+        run_for(&mut fx, None).dirs_listed,
+        0,
+        "nothing listed while paused"
+    );
+    assert_eq!(fx.pending_dirs(), pending);
+    assert_eq!(fx.status(), status, "still the walk it was");
+    assert!(
+        walking(&fx.conn).unwrap().is_empty(),
+        "a paused root is not walked"
+    );
+
+    pause(&fx.conn, fx.root_id, false);
+    let rest = run_for(&mut fx, None).dirs_listed;
+    assert_eq!(fx.status(), RootStatus::Ready);
+    assert_eq!(
+        first + rest,
+        5,
+        "the root and its four folders, each listed once"
+    );
+    assert_eq!(fx.files().len(), 4);
+}
+
+/// VFS-32 AC-3 (R3): with root A paused mid walk, root B's first walk runs to the end and
+/// B's owed re-walk starts; A keeps its place.
+#[test]
+fn other_roots_index_while_one_is_paused() {
+    let mut fx = fixture(&["A", "B", "C"]);
+    run_for(&mut fx, Some(1));
+    pause(&fx.conn, fx.root_id, true);
+    let pending = fx.pending_dirs();
+    let tree2 = tempfile::tempdir().unwrap();
+    let root2 = dunce::canonicalize(tree2.path()).unwrap();
+    fs::create_dir(root2.join("X")).unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    let id2 = ingest::insert_root(&tx, "dos", root2.to_str().unwrap()).unwrap();
+    tx.commit().unwrap();
+
+    run_for(&mut fx, None);
+    assert_eq!(fx.status_of(id2), RootStatus::Ready);
+    assert_ne!(fx.status(), RootStatus::Ready);
+    assert_eq!(fx.pending_dirs(), pending, "A kept its place");
+
+    let mut owed = Owed::new();
+    request_rewalk(&fx.conn, &mut owed, &[fx.root_id, id2], false).unwrap();
+    start_owed(&fx.conn, &OsHistory, &mut owed).unwrap();
+    assert_eq!(
+        fx.status_of(id2),
+        RootStatus::Scanning,
+        "B's re-walk started"
+    );
+    assert!(owed.contains_key(&fx.root_id), "A's owed walk stays owed");
+}
+
+/// VFS-32 AC-7 (R2, R5, R7): the running indexer does not replay a paused root's history at
+/// start; pausing and resuming each write a diagnostic line with the root id only, and the
+/// resume replays the history from the stored cursor, marks the folders it names and stores
+/// the new cursor.
+#[test]
+fn resume_replays_history_and_both_write_a_diagnostic() {
+    let mut fx = fixture(&["A", "B"]);
+    fx.scan();
+    cursor::store(&fx.conn, fx.root_id, Some("fake:old")).unwrap();
+    pause(&fx.conn, fx.root_id, true);
+    let history = Arc::new(FakeHistory::default());
+    *history.replay.lock().unwrap() = Some(Ok((vec![fx.root().join("A")], "fake:new".into())));
+    let (records, sink) = capture();
+    let sched = Sched::new(
+        SchedConfig::default(),
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        sink,
+    );
+    let h = IndexerHandle::spawn_with_history(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        sched,
+        None,
+        Box::new(Arc::clone(&history)),
+        Timing::default(),
+    )
+    .unwrap();
+    let id = fx.root_id;
+    let has = |line: &str| records.lock().unwrap().iter().any(|r| r.starts_with(line));
+    h.root_paused(id, true);
+    wait_until("the pause record", Duration::from_secs(10), || {
+        has(&format!("root_pause root={id}"))
+    });
+    // Watch events queued before the watch was dropped change nothing (R2).
+    h.send(Cmd::Watch(watch::WatchEvent::Overflow(id)));
+    h.send(Cmd::Watch(watch::WatchEvent::Failed(id)));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        !has("watch_overflow"),
+        "a queued watch event acted on the paused root"
+    );
+    assert_eq!(
+        history.replays.load(Ordering::SeqCst),
+        0,
+        "no replay while paused"
+    );
+
+    pause(&fx.conn, id, false);
+    h.root_paused(id, false);
+    let line = format!("root_resume root={id} folders=1 result=replayed");
+    wait_until("the resume record", Duration::from_secs(10), || has(&line));
+    wait_until("the new cursor", Duration::from_secs(10), || {
+        stored_cursor(&fx.db_path, id).as_deref() == Some("fake:new")
+    });
+    drop(h);
+    for r in records.lock().unwrap().iter() {
+        assert!(!r.contains(&*fx.root().to_string_lossy()), "{r}");
+    }
+}
+
+/// VFS-32 AC-8 (R2): a paused root's pending folders do not make the other roots' small changes a
+/// walk: with A paused and more than `incremental_max_dirs` folders pending, a change in B
+/// runs in incremental mode.
+#[test]
+fn paused_backlog_leaves_other_roots_incremental() {
+    let names: Vec<String> = (0..70).map(|i| format!("d{i}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut fx = fixture(&refs);
+    run_for(&mut fx, Some(1));
+    let cfg = SchedConfig::default();
+    assert!(fx.pending_dirs() as u64 > cfg.incremental_max_dirs);
+    pause(&fx.conn, fx.root_id, true);
+    assert_eq!(pass_mode(&fx.conn, &cfg).unwrap(), Mode::Incremental);
+    pause(&fx.conn, fx.root_id, false);
+    assert_eq!(pass_mode(&fx.conn, &cfg).unwrap(), Mode::Walk);
+}
+
+/// VFS-32 AC-9 (R5): when the resume cannot replay, a root being walked restarts its walk in place
+/// (its root folder pending deep, the cursor of now stored); a ready root does not.
+#[test]
+fn unreplayable_resume_restarts_a_walk_in_place() {
+    let mut fx = fixture(&["A", "B"]);
+    run_for(&mut fx, Some(2));
+    let history = FakeHistory::default();
+    assert!(restart_walk(&fx.conn, &history, fx.root_id).unwrap());
+    assert_eq!(fx.dir("").unwrap().1, ScanState::PendingDeep as i64);
+    assert_eq!(fx.cursor().as_deref(), Some("fake:0"));
+    fx.scan();
+    assert_eq!(fx.status(), RootStatus::Ready);
+    assert!(!restart_walk(&fx.conn, &history, fx.root_id).unwrap());
+    assert_eq!(fx.dir("").unwrap().1, CLEAN);
+}
+
+/// VFS-32 R1 with VFS-31 R2: a parent folder that takes in a paused root deletes that root's
+/// pause key with the root, so a reused id is never born paused.
+#[test]
+fn taken_in_paused_root_loses_its_pause() {
+    let mut fx = fixture(&["A"]);
+    pause(&fx.conn, fx.root_id, true);
+    let parent = tempfile::tempdir().unwrap();
+    let parent_path = dunce::canonicalize(parent.path()).unwrap();
+    let inner = parent_path.join("dentro");
+    fs::create_dir(&inner).unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    let inner_id = ingest::insert_root(&tx, "test", inner.to_str().unwrap()).unwrap();
+    tx.commit().unwrap();
+    pause(&fx.conn, inner_id, true);
+    crate::roots::add_root(&mut fx.conn, &parent_path).unwrap();
+    assert!(
+        !is_paused(&fx.conn, inner_id).unwrap(),
+        "the taken-in root's pause is gone"
+    );
+    assert!(
+        is_paused(&fx.conn, fx.root_id).unwrap(),
+        "other pauses stay"
+    );
+}
+
+/// VFS-32 R2: the shortcut pass leaves a paused root's links pending and finds them again
+/// once it is resumed.
+#[test]
+fn paused_root_links_wait_for_the_resume() {
+    let mut fx = fixture(&["A"]);
+    let url = fx.root().join("A").join("Banco.url");
+    fs::write(&url, "[InternetShortcut]\r\nURL=https://example.com/\r\n").unwrap();
+    fx.scan();
+    assert_eq!(ingest::pending_links(&fx.conn, 10).unwrap().len(), 1);
+    pause(&fx.conn, fx.root_id, true);
+    assert!(ingest::pending_links(&fx.conn, 10).unwrap().is_empty());
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        0
+    );
+    pause(&fx.conn, fx.root_id, false);
+    assert_eq!(ingest::pending_links(&fx.conn, 10).unwrap().len(), 1);
+}

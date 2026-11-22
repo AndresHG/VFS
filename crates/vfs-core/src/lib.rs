@@ -157,6 +157,18 @@ impl Vfs {
         Ok(())
     }
 
+    /// Pauses or resumes indexing of one root (VFS-32): stored, so it survives a restart;
+    /// the running indexer leaves it at once. `NotFound` for an unknown root or one being
+    /// removed.
+    pub fn set_root_paused(&self, root_id: i64, paused: bool) -> Result<()> {
+        let conn = db::open_rw(&self.inner.db_path)?;
+        roots::set_root_paused(&conn, root_id, paused)?;
+        if let Some(h) = lock(&self.inner.indexer).as_ref() {
+            h.root_paused(root_id, paused);
+        }
+        Ok(())
+    }
+
     /// Runs a query; a query still running on another thread is interrupted first.
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
         let this = self.inner.searches.fetch_add(1, Ordering::SeqCst) + 1;
@@ -662,6 +674,70 @@ mod tests {
             matches!(&r, Err(e) if search::is_table_open_cut(e)),
             "{r:?}"
         );
+    }
+
+    /// VFS-32 AC-2, AC-4, AC-5: a pause survives closing and reopening the index and holds
+    /// the walk until resumed; files already indexed stay searchable while paused; an
+    /// unknown root is `NotFound`, and removing a paused root deletes its pause key.
+    #[test]
+    fn root_pause_persists_and_keeps_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tree.path().join("A")).unwrap();
+        std::fs::write(tree.path().join("A/notaria.pdf"), b"x").unwrap();
+        let path = dir.path().join("index.db");
+        let cancel = AtomicBool::new(false);
+        let vfs = Vfs::open(&path).unwrap();
+        let id = vfs.add_root(tree.path()).unwrap().id;
+        assert!(matches!(
+            vfs.set_root_paused(id + 1, true),
+            Err(Error::NotFound(_))
+        ));
+        vfs.set_root_paused(id, true).unwrap();
+        vfs.shutdown();
+        drop(vfs);
+
+        let vfs = Vfs::open(&path).unwrap();
+        assert!(vfs.list_roots().unwrap()[0].paused, "paused after reopen");
+        vfs.scan_to_completion(&cancel).unwrap();
+        let root = &vfs.list_roots().unwrap()[0];
+        assert_eq!((root.status, root.files), (RootStatus::Pending, 0));
+
+        vfs.set_root_paused(id, false).unwrap();
+        vfs.scan_to_completion(&cancel).unwrap();
+        let root = &vfs.list_roots().unwrap()[0];
+        assert_eq!((root.status, root.paused), (RootStatus::Ready, false));
+
+        vfs.set_root_paused(id, true).unwrap();
+        let q = SearchQuery {
+            text: "notaria".into(),
+            filters: SearchFilters::default(),
+            limit: 10,
+            offset: 0,
+            sort: Default::default(),
+        };
+        assert_eq!(
+            vfs.search(&q).unwrap().hits.len(),
+            1,
+            "searchable while paused"
+        );
+
+        vfs.remove_root(id).unwrap();
+        vfs.scan_to_completion(&cancel).unwrap();
+        let conn = db::open_ro(&path).unwrap();
+        let keys: i64 = conn
+            .query_row(
+                concat!(
+                    "SELECT COUNT(*) FROM meta WHERE key LIKE '",
+                    crate::roots::paused_prefix!(),
+                    "%'"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(keys, 0, "the pause key went with the root");
+        vfs.shutdown();
     }
 
     /// The facade is shareable across threads (Tauri state, indexer callbacks).

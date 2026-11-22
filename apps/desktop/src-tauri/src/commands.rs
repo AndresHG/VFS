@@ -30,6 +30,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         pick_folder,
         add_root,
         remove_root,
+        set_root_paused,
         search,
         suggest,
         reveal,
@@ -110,6 +111,12 @@ pub fn add_root(state: State<'_, AppState>, path: String) -> CmdResult<Root> {
 #[tauri::command(async)]
 pub fn remove_root(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
     Ok(state.vfs.remove_root(id)?)
+}
+
+/// Pauses or resumes indexing of one folder (VFS-32).
+#[tauri::command(async)]
+pub fn set_root_paused(state: State<'_, AppState>, id: i64, paused: bool) -> CmdResult<()> {
+    Ok(state.vfs.set_root_paused(id, paused)?)
 }
 
 #[tauri::command(async)]
