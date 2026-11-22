@@ -178,6 +178,27 @@ pub(crate) fn working_set_bytes() -> Option<u64> {
 
 /// Windows: sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `dir`, so Windows Search does not
 /// re-index the index's WAL churn (VFS-5 R9). Elsewhere nothing.
+/// The Windows attributes of `path`, read by name (`GetFileAttributesW`: no handle is
+/// opened, so a cloud placeholder is not downloaded); `None` elsewhere or when unreadable.
+#[cfg(windows)]
+pub(crate) fn file_attributes(path: &Path) -> Option<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+    let wide: Vec<u16> = long_path(path)
+        .as_os_str()
+        .encode_wide()
+        .chain([0])
+        .collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };
+    (attrs != INVALID_FILE_ATTRIBUTES).then_some(attrs)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn file_attributes(_path: &Path) -> Option<u32> {
+    None
+}
+
 pub(crate) fn exclude_from_content_index(dir: &Path) -> std::io::Result<()> {
     imp::exclude_from_content_index(dir)
 }

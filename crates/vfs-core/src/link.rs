@@ -103,6 +103,7 @@ pub(crate) fn read_pending(
             return Ok(done);
         }
         let mut read = Vec::with_capacity(batch.len());
+        let mut found_cloud_only = Vec::new();
         for (id, kind, cloud_only) in batch {
             if stop() {
                 break;
@@ -123,6 +124,18 @@ pub(crate) fn read_pending(
                     continue;
                 }
             };
+            // The stored bit can lag the disk: shortcuts migrated from an older index are
+            // queued before any listing has recorded the bit. The attributes are read by
+            // name, which downloads nothing, right before the file would be opened (VFS-25
+            // R3).
+            if kind != LinkKind::Symlink
+                && crate::platform::file_attributes(&path)
+                    .is_some_and(crate::indexer::cloud_only_attributes)
+            {
+                found_cloud_only.push(id);
+                read.push((id, Err(())));
+                continue;
+            }
             let target = match kind {
                 LinkKind::Shortcut => read_target(&path, LinkFileKind::Lnk),
                 LinkKind::Internet => read_target(&path, LinkFileKind::Url),
@@ -136,6 +149,9 @@ pub(crate) fn read_pending(
         let tx = conn.transaction()?;
         for (id, t) in &read {
             ingest::set_link_target(&tx, *id, t.as_ref().map(|o| o.as_deref()).map_err(|_| ()))?;
+        }
+        for id in &found_cloud_only {
+            ingest::set_cloud_only(&tx, *id, true)?;
         }
         tx.commit()?;
         done += read.len();

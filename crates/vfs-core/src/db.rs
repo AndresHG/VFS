@@ -24,6 +24,12 @@ const MIGRATIONS: [&str; 6] = [
     include_str!("schema_v6.sql"),
 ];
 
+/// An index migrated from a version below this one is compacted afterwards: the migrations
+/// to versions 3 and 4 free about a fifth of the file. Later ones (5: `links`, 6:
+/// `dirs.error`) free nothing, and a `VACUUM` rewrites the whole index: minutes on the
+/// target HDD right after an update, for nothing.
+const COMPACT_FROM_BELOW: u32 = 4;
+
 /// Page size of a new index, and of an existing index compacted after a migration.
 /// A cold spinning disk pays about one seek per page read: larger pages read fewer pages
 /// per query (docs/research/index-footprint.md, VFS-4).
@@ -124,8 +130,9 @@ pub fn open_rw(db_path: &Path) -> Result<Connection> {
         }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
-        // A migrated index (not a new one) gets the pages its migrations freed back.
-        if version > 0 {
+        // A migrated index (not a new one) gets back the pages its migrations freed, when
+        // one of them freed any.
+        if version > 0 && version < COMPACT_FROM_BELOW {
             if let Err(e) = compact(&conn) {
                 // Still a valid index: the freed pages are reused as it grows. WAL is
                 // required, so a failure to return to it is an error.
@@ -1254,6 +1261,38 @@ mod tests {
             )
             .unwrap();
         assert!(plan.contains("files_dir"), "{plan}");
+    }
+
+    /// VFS-10 R6, VFS-25: an index at version 4 (as 0.1.1 wrote it) is migrated to the
+    /// current version without a `VACUUM`: its free pages stay, nothing is rewritten.
+    #[test]
+    fn version_4_index_is_migrated_without_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        {
+            let conn = open_rw(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE junk(x);
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+                   INSERT INTO junk SELECT randomblob(1000) FROM n;
+                 DROP TABLE junk;
+                 DROP TABLE links;
+                 DROP INDEX dirs_unreadable;
+                 ALTER TABLE dirs DROP COLUMN error;
+                 PRAGMA user_version = 4;
+                 PRAGMA wal_checkpoint(TRUNCATE);",
+            )
+            .unwrap();
+            assert!(pragma(&conn, "freelist_count") > 0);
+        }
+        let conn = open_rw(&path).unwrap();
+        assert_eq!(schema_version(&conn).unwrap(), SCHEMA_VERSION);
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        assert!(
+            pragma(&conn, "freelist_count") > 0,
+            "the index was compacted"
+        );
     }
 
     /// VFS-4 AC-2 (R2): when the compaction after migrating cannot run, because another

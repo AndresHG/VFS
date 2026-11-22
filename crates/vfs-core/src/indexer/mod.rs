@@ -25,6 +25,7 @@ mod walk;
 mod watch;
 
 pub use sched::DIAG_TARGET;
+pub(crate) use walk::cloud_only_attributes;
 
 /// Options of the background indexer.
 #[derive(Clone, Debug)]
@@ -1393,11 +1394,15 @@ impl Worker {
         }
         let history = &*self.history;
         let replayed = self.sched.listing(|| history.replay(&root, &stored));
-        let Ok((mut changed, next)) = replayed else {
+        let Ok((changed, next)) = replayed else {
             return Ok(None);
         };
         let filter = watch::Filter::new(self.ignore.clone());
-        changed.retain(|p| p.starts_with(&root) && !filter.dropped(p, &root));
+        let changed: Vec<PathBuf> = changed
+            .iter()
+            .filter_map(|p| under_root(p, &root, cfg!(windows)))
+            .filter(|p| !filter.dropped(p, &root))
+            .collect();
         let tx = begin(&self.conn)?;
         mark_paths(&tx, &[(root_id, root)], &changed, true)?;
         cursor::store(&tx, root_id, Some(&next))?;
@@ -1734,6 +1739,28 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
 /// The marking of `mark_dirty`. With `dirs_only`, each path is a directory whose entries
 /// changed (a replayed change, VFS-9 R2): it is marked, or its nearest indexed ancestor when
 /// it is not indexed, and its parent is left alone.
+/// `path` spelled under `root` as stored, when it lies below `root`; compared ignoring case
+/// when `ignore_case` (Windows: the change journal names folders as they are now, so a root
+/// renamed only in case would otherwise match no replayed path, VFS-9 R7). `None` outside.
+fn under_root(path: &Path, root: &Path, ignore_case: bool) -> Option<PathBuf> {
+    if path.starts_with(root) {
+        return Some(path.to_path_buf());
+    }
+    if !ignore_case {
+        return None;
+    }
+    let fold = |c: std::path::Component<'_>| c.as_os_str().to_string_lossy().to_lowercase();
+    let mut rest = path.components();
+    for want in root.components() {
+        if rest.next().map(fold) != Some(fold(want)) {
+            return None;
+        }
+    }
+    let mut out = root.to_path_buf();
+    out.extend(rest);
+    Some(out)
+}
+
 fn mark_paths(
     tx: &Connection,
     roots: &[(i64, PathBuf)],
@@ -1803,8 +1830,12 @@ fn catch_up(
             continue;
         }
         match history.replay(&root, &stored) {
-            Ok((mut paths, next)) => {
-                paths.retain(|p| p.starts_with(&root) && !filter.dropped(p, &root));
+            Ok((paths, next)) => {
+                let paths: Vec<PathBuf> = paths
+                    .iter()
+                    .filter_map(|p| under_root(p, &root, cfg!(windows)))
+                    .filter(|p| !filter.dropped(p, &root))
+                    .collect();
                 let tx = begin(conn)?;
                 mark_paths(&tx, &[(id, root.clone())], &paths, true)?;
                 cursor::store(&tx, id, Some(&next))?;
