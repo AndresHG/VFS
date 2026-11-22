@@ -1,0 +1,3 @@
+Factura de electricidad. Periodo de facturación: junio de 2020. Potencia contratada 4,6 kW.
+
+Consumo de 312 kWh. Importe total 68,40 euros, domiciliado en la cuenta del Banco Sabadell.

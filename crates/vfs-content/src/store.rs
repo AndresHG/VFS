@@ -12,7 +12,7 @@ use crate::Result;
 
 /// Version of the content store schema (`PRAGMA user_version`). A store with another
 /// version is deleted and rebuilt: it holds nothing that cannot be re-extracted.
-pub const STORE_VERSION: i64 = 1;
+pub const STORE_VERSION: i64 = 2;
 
 const SCHEMA: &str = r#"
 -- One row per document the content indexer has processed. file_id = files.id in index.db;
@@ -31,6 +31,8 @@ CREATE TABLE docs(
   truncated   INTEGER NOT NULL DEFAULT 0,
   attempts    INTEGER NOT NULL DEFAULT 1,  -- extractions of this version of the file
   title       TEXT,
+  authors     TEXT,                   -- JSON array of the extractor's authors (VFS-2 R16); NULL when none
+  created     TEXT,                   -- creation date as the extractor reports it; NULL when none
   text        BLOB                    -- deflate-compressed UTF-8 text, for snippets; NULL unless indexed
 );
 -- Addressable pieces of docs.text (VFS-2 R11): they tile the text, never cross a page,
@@ -58,6 +60,8 @@ CREATE INDEX queue_order ON queue(dir_id, name);
 CREATE VIRTUAL TABLE content_fts USING fts5(
   title, body, content='', contentless_delete=1,
   tokenize='unicode61 remove_diacritics 0');
+-- Documents per key, for the frequency guard (VFS-2 R14).
+CREATE VIRTUAL TABLE content_vocab USING fts5vocab(content_fts, row);
 "#;
 
 /// Path of the content store for an index: `content.db` next to `index.db`.

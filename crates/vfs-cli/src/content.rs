@@ -229,6 +229,9 @@ pub fn search(db: &Path, q: &SearchQuery, layout: Layout, runs: u32, json: bool)
         }
         _ => print_content(&content, &[]),
     }
+    if content.partial {
+        println!("(no document has every word: these have some of them)");
+    }
     let more = if content.total_capped { "+" } else { "" };
     println!(
         "{} of {}{more} content hits; {} ms in the engine, {wall:.1} ms wall",

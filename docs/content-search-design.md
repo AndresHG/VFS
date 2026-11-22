@@ -137,6 +137,20 @@ The first shippable step is lexical: no model, no download.
   `arrendador`), and an exact-word boost is the open fix.
 - **Ranking**: BM25. SQLite FTS5 has a built-in `bm25()` function **[published: SQLite
   documentation]**.
+- **Query semantics** (VFS-2 R13, R14): words are AND-ed; when no document has them all,
+  documents with any of them come back, marked `partial`. A word in more than 5 % of the
+  indexed documents (`fts5vocab`) filters but does not rank: the filter expression decides
+  the matches and a second MATCH over the rare words scores them. When every word is that
+  common, BM25 ranks only the first 1,000 candidates.
+- **Engine calls** (VFS-2 R15): `retrieve` (text or structured `{all, any, phrases}`
+  queries, paging, `partial`, `total` up to 1,000), `passage_text` (a chunk with its
+  neighbours) and `unread` / `unread_counts`. Hits carry title, authors and creation date
+  from the extractor (R16); passages carry a BM25 score computed over the chunk. No other
+  crate opens `content.db`.
+- **Golden set** (VFS-2 AC-17, D17): about 45 Spanish queries over a committed corpus of
+  synthetic household documents, BOE PDFs and Wikipedia excerpts (`crates/vfs-content/tests/
+  golden`, sources and licences in its NOTICE.md); the share found in the top 5 may only go
+  up.
 - **Engine**: the prototype measured both options on 20,000 documents and chose FTS5, in a
   separate `content.db` rather than `index.db`, with keys analysed in Rust before insertion
   instead of a custom tokenizer (measurements doc). The options as first considered:

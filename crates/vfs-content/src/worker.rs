@@ -330,6 +330,7 @@ pub fn handle(req: &Request) -> Response {
             title,
             body,
             page_starts,
+            meta,
         }) => {
             let (mut body, mut page_starts) = normalize_pages(&body, &page_starts);
             let truncated = cap_text(&mut body, req.max_text_bytes);
@@ -342,6 +343,7 @@ pub fn handle(req: &Request) -> Response {
                     body,
                     truncated,
                     page_starts,
+                    meta,
                 }
             }
         }
