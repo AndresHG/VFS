@@ -319,7 +319,8 @@ fn make_v1(src: &Path, dst: &Path) {
     conn.execute_batch(
         "INSERT INTO meta SELECT * FROM cur.meta;
          INSERT INTO volumes SELECT * FROM cur.volumes;
-         INSERT INTO roots SELECT * FROM cur.roots;
+         INSERT INTO roots SELECT id, volume_id, path, path_key, status, last_full_scan_at,
+           files_count, dirs_count, added_at FROM cur.roots;
          INSERT INTO dirs SELECT id, root_id, parent_id, rel_path, path_key, name_key, mtime,
            scan_state FROM cur.dirs;
          INSERT INTO files SELECT * FROM cur.files;
