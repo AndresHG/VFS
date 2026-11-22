@@ -244,13 +244,13 @@ pub(crate) struct Exclusions {
     root: PathBuf,
 }
 
-/// The key a folder path is compared by: as is, or lowercased on Windows, without a trailing
-/// separator.
+/// The key a folder path is compared by: as is, or on Windows lowercased with `/` read as
+/// `\\`, without a trailing separator.
 fn key(path: &Path) -> String {
     let s = path.to_string_lossy();
     let s = s.trim_end_matches(['/', '\\']);
     if cfg!(windows) {
-        s.to_lowercase()
+        s.to_lowercase().replace('/', "\\")
     } else {
         s.to_owned()
     }
