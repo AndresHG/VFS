@@ -71,7 +71,11 @@ Tests cite these ids (`VFS-39 AC-<m>`) in their doc comments.
   written.
 - A stop that interrupts a normal commit: the batch rolls back and is listed again next time.
 - An exit while the index is still opening: there is no indexer to stop yet. The open
-  thread ends with the process, and the next open runs the integrity check again.
+  thread ends with the process, and the next open runs the integrity check again. The same
+  holds for an update installed while the index is opening: the relaunch replaces the
+  process.
+- A search typed while the index opens waits for it and runs once it is open; a panic on
+  the open thread rejects `wait_core` and shows the startup error.
 - Windows and macOS: the same code on both; SQLite's interrupt is portable.
 - Copy: the UI never says «índice» (existing test); the new status line avoids it.
 

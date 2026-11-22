@@ -216,7 +216,16 @@ pub fn open_core<R: Runtime>(app: &AppHandle<R>, db_path: PathBuf) -> std::io::R
     std::thread::Builder::new()
         .name("vfs-open".into())
         .spawn(move || {
-            if let Err(detail) = init_core(&app, &db_path) {
+            // A panic must not leave `wait_core` waiting forever.
+            let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                init_core(&app, &db_path)
+            }))
+            .unwrap_or_else(|_| {
+                let why = "the index could not be opened (internal error)".to_owned();
+                app.state::<AppState>().set(Core::Failed(why.clone()));
+                Err(why)
+            });
+            if let Err(detail) = opened {
                 let handle = app.clone();
                 if let Err(e) = app.run_on_main_thread(move || fail_startup(&handle, &detail)) {
                     log::error!("startup failed, and its dialog too: {e}");

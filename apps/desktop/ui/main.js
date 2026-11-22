@@ -90,6 +90,7 @@ function main(L) {
   const { S, N } = L;
   document.documentElement.lang = L.lang;
   const state = {
+    coreReady: false, // VFS-39 R2: false until wait_core resolves; searches wait for it
     text: '',
     kinds: new Set(),
     date: DateChoice.ANY,
@@ -390,6 +391,8 @@ function main(L) {
       setResults(0, null, new Map());
       return;
     }
+    // A query typed while the search is getting ready runs once it is (start()).
+    if (!state.coreReady && !api.missing) return;
     state.terms = F.terms(state.text);
     if (!quiet) {
       // Only say "Buscando…" if the answer is slow; fast answers should not flicker.
@@ -1397,6 +1400,7 @@ function main(L) {
     // VFS-39 R2: the index opens off the main thread, which can take minutes after an unclean
     // exit; the status says «Preparando la búsqueda…» until it is open.
     try { await api.waitCore(); } catch (err) { showError(errorText(err)); return; }
+    state.coreReady = true;
     api.getIncludeAllFolders().then((on) => { includeAll.checked = on; }, () => {});
     await api.onProgress(onProgress);
     await api.onIndexChanged(onIndexChanged);
@@ -1405,6 +1409,7 @@ function main(L) {
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
+    if (hasQuery()) runSearch();
   }
 
   start();
