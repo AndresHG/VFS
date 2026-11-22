@@ -2,6 +2,7 @@
 
 use std::io::ErrorKind;
 use std::path::Path;
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 
@@ -81,6 +82,30 @@ pub(crate) struct TakenIn {
     pub roots: u64,
     pub dirs: u64,
     pub files: u64,
+}
+
+/// The diagnostic record of a root added (VFS-31 R5): ids, counts and milliseconds only.
+pub(crate) fn add_record(id: i64, taken: TakenIn, took: Duration) -> String {
+    format!(
+        "root_add id={id} taken_roots={} taken_dirs={} taken_files={} ms={}",
+        taken.roots,
+        taken.dirs,
+        taken.files,
+        took.as_millis()
+    )
+}
+
+/// The diagnostic record of a root marked for removal (VFS-31 R5).
+pub(crate) fn remove_record(id: i64, took: Duration) -> String {
+    format!("root_remove id={id} ms={}", took.as_millis())
+}
+
+/// The diagnostic record of a removal the indexer finished (VFS-31 R5).
+pub(crate) fn removed_record(id: i64, dirs: u64, files: u64, took: Duration) -> String {
+    format!(
+        "root_removed id={id} dirs={dirs} files={files} ms={}",
+        took.as_millis()
+    )
 }
 
 /// Canonicalizes `path` (`dunce`), rejects a missing path (`NotFound`), a file
@@ -233,11 +258,12 @@ fn take_in(
         let mut fts_insert = tx.prepare_cached(
             "INSERT INTO dirs_fts(rowid, path_key, name_key) VALUES (?1, ?2, ?3)",
         )?;
-        // A moved folder's path is never empty, so every row is "folder path_key/name_key".
-        let mut file_paths_insert = tx.prepare_cached(
-            "INSERT INTO file_paths_fts(rowid, path) \
-             SELECT id, ?2 || '/' || name_key FROM files WHERE dir_id = ?1",
-        )?;
+        // Built after the folder's row is updated, from the same value `ingest` indexes.
+        let mut file_paths_insert = tx.prepare_cached(&format!(
+            "INSERT INTO file_paths_fts(rowid, path) SELECT f.id, {} \
+             FROM files f JOIN dirs d ON d.id = f.dir_id WHERE f.dir_id = ?1",
+            ingest::FILE_PATH_SQL
+        ))?;
         for (id, old_rel, name_key) in moved {
             let new_rel = if old_rel.is_empty() {
                 rel.to_string()
@@ -248,7 +274,7 @@ fn take_in(
             update.execute(params![id, root_id, new_rel, path_key, parent])?;
             fts_delete.execute([id])?;
             fts_insert.execute(params![id, path_key, name_key])?;
-            taken.files += file_paths_insert.execute(params![id, path_key])? as u64;
+            taken.files += file_paths_insert.execute([id])? as u64;
             taken.dirs += 1;
         }
     }
@@ -283,5 +309,61 @@ mod tests {
         assert!(!is_below("/a/fotos", "/a/fotos"));
         assert!(is_below("/a", "/"));
         assert!(is_below("c:/datos", "c:/"));
+    }
+
+    /// VFS-31 AC-5: a take-in reports what it moved, and the add, remove and removed records
+    /// are `key=number` pairs with no folder or file name.
+    #[test]
+    fn root_records_hold_numbers_only() {
+        use super::*;
+        let tmp = tempfile::tempdir().unwrap();
+        let secreto = dunce::canonicalize(tmp.path()).unwrap().join("Secreto");
+        std::fs::create_dir_all(secreto.join("Fotos")).unwrap();
+        let mut conn = crate::db::open_rw(&tmp.path().join("index.db")).unwrap();
+        let (inner, _) = add_root(&mut conn, &secreto.join("Fotos")).unwrap();
+        let tx = conn.transaction().unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [inner.id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let boda = ingest::NewFile {
+            name: "boda.jpg",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        ingest::insert_file(&tx, top, &boda).unwrap();
+        tx.commit().unwrap();
+        let (root, taken) = add_root(&mut conn, &secreto).unwrap();
+        assert_eq!(
+            taken,
+            TakenIn {
+                roots: 1,
+                dirs: 1,
+                files: 1
+            }
+        );
+        let ms = Duration::from_millis(7);
+        let lines = [
+            add_record(root.id, taken, ms),
+            remove_record(root.id, ms),
+            removed_record(root.id, 2, 1, ms),
+        ];
+        assert_eq!(
+            lines[0],
+            format!(
+                "root_add id={} taken_roots=1 taken_dirs=1 taken_files=1 ms=7",
+                root.id
+            )
+        );
+        for line in &lines {
+            let mut words = line.split(' ');
+            assert!(words.next().unwrap().starts_with("root_"));
+            for pair in words {
+                let (key, value) = pair.split_once('=').expect(line);
+                assert!(!key.is_empty() && value.parse::<u64>().is_ok(), "{line}");
+            }
+        }
     }
 }

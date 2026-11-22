@@ -1,45 +1,13 @@
 //! Adding a folder that contains listed roots takes them in (VFS-31 R2, R3), and root
-//! changes leave diagnostic records with no names (R5).
+//! changes leave diagnostic records with no names (R5, tested in `roots.rs`).
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, Once};
-use std::thread::ThreadId;
 
 use rusqlite::Connection;
-use vfs_core::{
-    db, Error, OverlapRelation, SearchFilters, SearchQuery, SearchResponse, Vfs, DIAG_TARGET,
-};
-
-/// Keeps every diagnostic record logged in this test binary, with the thread that logged it
-/// (tests run in parallel; here every record comes from the calling thread).
-struct Capture;
-static RECORDS: Mutex<Vec<(ThreadId, String)>> = Mutex::new(Vec::new());
-
-impl log::Log for Capture {
-    fn enabled(&self, m: &log::Metadata) -> bool {
-        m.target() == DIAG_TARGET
-    }
-    fn log(&self, r: &log::Record) {
-        if self.enabled(r.metadata()) {
-            RECORDS
-                .lock()
-                .unwrap()
-                .push((std::thread::current().id(), r.args().to_string()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-fn capture() {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        log::set_logger(&Capture).unwrap();
-        log::set_max_level(log::LevelFilter::Info);
-    });
-}
+use vfs_core::{db, Error, OverlapRelation, SearchFilters, SearchQuery, SearchResponse, Vfs};
 
 struct Env {
     tmp: tempfile::TempDir,
@@ -210,53 +178,4 @@ fn same_and_inside_are_still_refused() {
     let roots = env.vfs.list_roots().unwrap();
     assert_eq!(roots.len(), 1);
     assert_eq!(roots[0].id, root.id);
-}
-
-/// VFS-31 AC-5: adding, removing and finishing a removal each leave a diagnostic record of
-/// `key=number` pairs, with no folder or file name.
-#[test]
-fn root_changes_leave_records_without_names() {
-    capture();
-    let env = Env::new();
-    env.file("Secreto/Fotos/boda.jpg");
-    let fotos = env.vfs.add_root(&env.dir("Secreto/Fotos")).unwrap();
-    env.scan();
-    let root = env.vfs.add_root(&env.dir("Secreto")).unwrap();
-    env.vfs.remove_root(root.id).unwrap();
-    env.scan();
-    let me = std::thread::current().id();
-    let records: Vec<String> = RECORDS
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(t, _)| *t == me)
-        .map(|(_, r)| r.clone())
-        .collect();
-    let of = |event: &str, id: i64| {
-        records
-            .iter()
-            .find(|r| r.starts_with(&format!("{event} id={id} ")))
-            .unwrap_or_else(|| panic!("no {event} record for root {id} in {records:?}"))
-            .clone()
-    };
-    let lines = [
-        of("root_add", fotos.id),
-        of("root_add", root.id),
-        of("root_remove", root.id),
-        of("root_removed", root.id),
-    ];
-    assert!(lines[1].contains(" taken_roots=1 taken_dirs=1 taken_files=1 "));
-    assert!(lines[3].contains(" dirs=2 files=1 "), "{}", lines[3]);
-    for line in &lines {
-        let mut words = line.split(' ');
-        words.next();
-        for pair in words {
-            let (key, value) = pair.split_once('=').expect(line);
-            assert!(!key.is_empty() && value.parse::<u64>().is_ok(), "{line}");
-        }
-        assert!(
-            !line.contains("Secreto") && !line.contains("boda"),
-            "{line}"
-        );
-    }
 }

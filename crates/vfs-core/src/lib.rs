@@ -141,14 +141,7 @@ impl Vfs {
         let (root, taken) = roots::add_root(&mut conn, path)?;
         self.backup_roots(&conn);
         self.notify_roots_changed();
-        diag(&format!(
-            "root_add id={} taken_roots={} taken_dirs={} taken_files={} ms={}",
-            root.id,
-            taken.roots,
-            taken.dirs,
-            taken.files,
-            started.elapsed().as_millis()
-        ));
+        diag(&roots::add_record(root.id, taken, started.elapsed()));
         Ok(root)
     }
 
@@ -160,10 +153,7 @@ impl Vfs {
         roots::remove_root(&mut conn, root_id)?;
         self.backup_roots(&conn);
         self.notify_roots_changed();
-        diag(&format!(
-            "root_remove id={root_id} ms={}",
-            started.elapsed().as_millis()
-        ));
+        diag(&roots::remove_record(root_id, started.elapsed()));
         Ok(())
     }
 

@@ -745,8 +745,8 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
                 // the resume (VFS-31 R5).
                 log::info!(
                     target: DIAG_TARGET,
-                    "root_removed id={root_id} dirs={dirs_gone} files={files_gone} ms={}",
-                    started.elapsed().as_millis()
+                    "{}",
+                    crate::roots::removed_record(root_id, dirs_gone, files_gone, started.elapsed())
                 );
                 break;
             }
