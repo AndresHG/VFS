@@ -196,6 +196,19 @@ fn add_root_search_progress_end_to_end() {
     assert_eq!(hit["isDir"], json!(false));
     assert!(hit["dir"].as_str().unwrap().ends_with("Año 2019"));
 
+    // VFS-38 R14: `scope` travels in the query of `search` and `suggest`. Under names only,
+    // `gestoria notaria` finds nothing (the words are only together in the path), and the
+    // suggestion drops the scope with the «Todo» count.
+    let names = json!({ "query": { "text": "gestoria notaria", "scope": "names" } });
+    let res = invoke(&webview, "search", names.clone()).expect("search");
+    assert_eq!(res["total"], json!(0), "{res}");
+    let all = json!({ "query": { "text": "gestoria notaria", "scope": "all" } });
+    let res = invoke(&webview, "search", all).expect("search");
+    assert_eq!(res["hits"][0]["name"], json!("Notaría Pérez escritura.pdf"));
+    let s = invoke(&webview, "suggest", names).expect("suggest");
+    assert_eq!(s["kind"], json!("dropFilters"));
+    assert_eq!(s["count"], json!(1));
+
     // VFS-13 AC-7: `suggest` answers a search with no hits with the contract's shape, or null.
     let photos = json!({ "query": { "text": "notaria", "filters": { "kinds": ["photo"] } } });
     let s = invoke(&webview, "suggest", photos).expect("suggest");

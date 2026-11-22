@@ -8,6 +8,9 @@
 //! its name. Terms already contained in a root's `path_key` are ignored for that root,
 //! unless that would leave no term (S1). Folders are results; empty folders included.
 //! NUL is read as whitespace; typo tolerance covers terms of 6 to 64 folded characters.
+//! Under `Scope::Names` (VFS-38 R3) every term must be in the file's or folder's own name (a
+//! link's: or its target's name): S1 does not apply, the path tier does not run, and the S8
+//! probe reads the name indexes only.
 //!
 //! Evaluation is candidate generation in SQL plus verification in Rust, in ranking-tier
 //! order (S2) so that a full list never pushes out a better tier: names starting with the
@@ -200,7 +203,7 @@ fn count_snapshot(
         limit: MAX_HITS,
         cancel: Some(cancel.clone()),
     };
-    let outcome = run_query(conn, &mut run, &terms, f, false);
+    let outcome = run_query(conn, &mut run, &terms, f, false, names_only(query));
     conn.progress_handler(0, None::<fn() -> bool>)?;
     match outcome {
         Err(Error::Db(e)) if is_interrupt(&e) => return Ok(None),
@@ -213,6 +216,27 @@ fn count_snapshot(
     let capped = shown > MAX_HITS || run.truncated == Some(TruncatedBy::Cap);
     Ok(Some((shown.min(MAX_HITS), capped)))
 }
+
+/// The query matches names only (VFS-38 R3).
+fn names_only(query: &SearchQuery) -> bool {
+    query.scope == crate::types::Scope::Names
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook (VFS-38 AC-3): the stages a search ran on this thread, in order: `"path"`
+    /// (the path tier), `"near"` (near-spelling typo tier), `"split"` (split-term typo pass).
+    static STAGES: std::cell::RefCell<Vec<&'static str>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn ran(stage: &'static str) {
+    STAGES.with(|s| s.borrow_mut().push(stage));
+}
+
+#[cfg(not(test))]
+fn ran(_: &'static str) {}
 
 /// Any type, date, size or folder filter.
 pub(crate) fn has_filter(f: &SearchFilters) -> bool {
@@ -239,7 +263,10 @@ fn search_snapshot(
         return Ok(respond(&[], None, false, offset, limit, start));
     }
 
-    let key = format!("{folded}\u{1f}{f:?}\u{1f}{:?}", query.sort);
+    let key = format!(
+        "{folded}\u{1f}{f:?}\u{1f}{:?}\u{1f}{:?}",
+        query.sort, query.scope
+    );
     let data_version: i64 = match conn.query_row("PRAGMA data_version", [], |r| r.get(0)) {
         Ok(v) => v,
         Err(e) if is_interrupt(&e) => return Ok(interrupted(offset, limit, start)),
@@ -282,7 +309,7 @@ fn search_snapshot(
     // them all before the cut. A filter-only query under relevance keeps the hit cap (its
     // scan has no index to stop early; S6 lists newest first among what it read).
     let sorted = query.sort != SortOrder::Relevance;
-    let outcome = run_query(conn, &mut run, &terms, f, sorted);
+    let outcome = run_query(conn, &mut run, &terms, f, sorted, names_only(query));
     conn.progress_handler(0, None::<fn() -> bool>)?;
     match outcome {
         // Statements outside `each_row` (roots, folder lookup) can be interrupted too.
@@ -907,6 +934,8 @@ struct Ctx {
     scoped: bool,
     /// No root is being removed: every directory belongs to a root in `roots`.
     all_roots_active: bool,
+    /// Terms are matched against names only (VFS-38 R3).
+    names: bool,
 }
 
 struct FileRow {
@@ -962,6 +991,15 @@ impl DirRow {
 }
 
 impl Ctx {
+    /// The folder path a file's terms may also be found in: none under names only.
+    fn path<'a>(&self, path_key: &'a str) -> &'a str {
+        if self.names {
+            ""
+        } else {
+            path_key
+        }
+    }
+
     fn file_hit(&self, r: FileRow, matched: MatchKind) -> Option<Candidate> {
         let root = self.roots.get(&r.root_id)?;
         Some(Candidate {
@@ -1064,10 +1102,11 @@ fn verify_file(terms: &[String], name: &str, path: &str, fuzzy: bool) -> Option<
     })
 }
 
-/// Folder verification (D1): every term in the folder's own path (the root directory: its
-/// name) and, unless the query is filter-only, at least one term in its name.
-fn verify_dir(terms: &[String], d: &DirRow, fuzzy: bool) -> Option<MatchKind> {
-    let hay = if d.rel_path.is_empty() {
+/// Folder verification (D1): every term in the folder's own path (the root directory, or
+/// with `names` every folder: its name) and, unless the query is filter-only, at least one
+/// term in its name.
+fn verify_dir(terms: &[String], d: &DirRow, fuzzy: bool, names: bool) -> Option<MatchKind> {
+    let hay = if names || d.rel_path.is_empty() {
         &d.name_key
     } else {
         &d.path_key
@@ -1123,6 +1162,7 @@ fn run_query(
     terms: &[String],
     f: &SearchFilters,
     sorted: bool,
+    names: bool,
 ) -> Result<()> {
     let roots: Vec<RootRow> = {
         let mut stmt = conn.prepare_cached(
@@ -1151,12 +1191,13 @@ fn run_query(
             .is_none_or(|s| s.iter().any(|s| s.root_id == id))
     };
 
-    // S1: per root, drop terms its own path already satisfies, unless none would remain.
+    // S1: per root, drop terms its own path already satisfies, unless none would remain;
+    // never under names only, where every term must be in the name (VFS-38 R3, D8).
     let mut by_terms: BTreeMap<Vec<String>, Vec<i64>> = BTreeMap::new();
     for r in roots.iter().filter(|r| in_scope(r.id)) {
         let mut effective: Vec<String> = terms
             .iter()
-            .filter(|t| !r.path_key.contains(t.as_str()))
+            .filter(|t| names || !r.path_key.contains(t.as_str()))
             .cloned()
             .collect();
         if effective.is_empty() {
@@ -1183,6 +1224,7 @@ fn run_query(
         scope_grams,
         scoped: scopes.is_some(),
         all_roots_active,
+        names,
     };
     // Retrieval in ranking-tier order (rank.rs), so a filled list never pushes out a better
     // tier: names starting with the first term, then names holding every term (both read up
@@ -1226,11 +1268,12 @@ fn run_query(
         }
     }
     // S8: with nothing found yet, both typo tiers would run to exhaustion; one probe of the
-    // path index proves first whether any file or folder could match at all.
+    // path index (under names only, of the name indexes, VFS-38 R3) proves first whether any
+    // file or folder could match at all.
     if !terms.is_empty() && !run.stopped && run.hits.is_empty() {
         let mut possible = false;
         for g in &groups {
-            if may_match(conn, g)? {
+            if may_match(conn, g, names)? {
                 possible = true;
                 break;
             }
@@ -1240,6 +1283,7 @@ fn run_query(
         }
     }
     if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
+        ran("near");
         for prefix in [true, false] {
             for g in &groups {
                 fuzzy_variants(conn, run, &ctx, g, prefix)?;
@@ -1249,6 +1293,7 @@ fn run_query(
     // The split-term pass reads many candidates per term: only when nothing matched at all
     // (substitutions and missing letters, which the near spellings do not cover).
     if !terms.is_empty() && !run.stopped && run.hits.is_empty() {
+        ran("split");
         fuzzy_pass(conn, run, &ctx, &groups)?;
     }
     Ok(())
@@ -1259,8 +1304,9 @@ fn run_query(
 /// one edit, one alternative of `fuzzy::candidate_parts` (each contains the term too). One
 /// probe of those alternatives, ORed per term and ANDed across terms, in `file_paths_fts`
 /// (as trigrams) and in `dirs_fts`, ignoring filters and roots, so a row found proves
-/// nothing and none found proves there is no hit.
-fn may_match(conn: &Connection, g: &Group) -> Result<bool> {
+/// nothing and none found proves there is no hit. With `names` (VFS-38 R3) a hit holds them
+/// in its name: the probe reads `files_fts` and the `name_key` column of `dirs_fts`.
+fn may_match(conn: &Connection, g: &Group, names: bool) -> Result<bool> {
     let mut paths = Vec::new();
     let mut dirs = Vec::new();
     for t in g.terms.iter().filter(|t| t.chars().count() >= 3) {
@@ -1284,9 +1330,14 @@ fn may_match(conn: &Connection, g: &Group) -> Result<bool> {
     if paths.is_empty() {
         return Ok(true);
     }
-    for (table, expr) in [("file_paths_fts", paths), ("dirs_fts", dirs)] {
+    let (files, dirs) = if names {
+        ("files_fts", format!("name_key : ({})", dirs.join(" AND ")))
+    } else {
+        ("file_paths_fts", dirs.join(" AND "))
+    };
+    for (table, expr) in [(files, paths.join(" AND ")), ("dirs_fts", dirs)] {
         let sql = format!("SELECT 1 FROM {table} WHERE {table} MATCH ?1 LIMIT 1");
-        if conn.prepare_cached(&sql)?.exists([expr.join(" AND ")])? {
+        if conn.prepare_cached(&sql)?.exists([expr])? {
             return Ok(true);
         }
     }
@@ -1391,7 +1442,7 @@ fn scoped_files(
     each_row(conn, run, &sql, &params, deadline, |run, _, row| {
         let r = FileRow::read(row)?;
         Ok(
-            match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
+            match verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), false) {
                 Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
                 None => true,
             },
@@ -1494,6 +1545,8 @@ fn name_matches(
             }
             let matched = if g.terms.iter().all(|t| name_key.contains(t.as_str())) {
                 Some(MatchKind::Name)
+            } else if ctx.names {
+                verify_file(&g.terms, &name_key, "", fuzzy)
             } else {
                 let path: String = conn
                     .prepare_cached("SELECT path_key FROM dirs WHERE id = ?1")?
@@ -1534,7 +1587,7 @@ fn name_matches(
                 return Ok(true);
             }
             Ok(
-                match verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy) {
+                match verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), fuzzy) {
                     Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
                     None => true,
                 },
@@ -1553,7 +1606,7 @@ fn name_matches(
         );
         each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
-            Ok(match verify_dir(&g.terms, &d, fuzzy) {
+            Ok(match verify_dir(&g.terms, &d, fuzzy, ctx.names) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
                 None => true,
             })
@@ -1596,11 +1649,16 @@ fn all_trigrams<S: AsRef<str>>(terms: &[S]) -> String {
 /// more characters, as one intersection in `file_paths_fts` (no table row is read before
 /// the intersection), and folders whose path holds every term with one in their own name.
 /// Groups whose terms are all shorter than 3 characters are a filtered scan instead.
+/// Under names only the path tier does not run; the scan still does (VFS-38 R3).
 fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Result<()> {
     let long: Vec<&String> = g.terms.iter().filter(|t| t.chars().count() >= 3).collect();
     if long.is_empty() {
         return scan_group(conn, run, ctx, g);
     }
+    if ctx.names {
+        return Ok(());
+    }
+    ran("path");
     let roots = g.roots_sql();
     // S3: FTS-driven generation is bounded by the hit cap, not by the configured deadline.
     let deadline = run.hard;
@@ -1636,7 +1694,7 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
         each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let r = FileRow::read(row)?;
             Ok(
-                match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
+                match verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), false) {
                     Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
                     None => true,
                 },
@@ -1666,7 +1724,7 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
         let params = with_params(Some(Value::Text(expr)), clause);
         each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
-            Ok(match verify_dir(&g.terms, &d, false) {
+            Ok(match verify_dir(&g.terms, &d, false, ctx.names) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
                 None => true,
             })
@@ -1702,9 +1760,15 @@ fn link_pass(
     each_row(conn, run, &sql, &params, deadline, |run, _, row| {
         let target: String = row.get(10)?;
         let r = FileRow::read(row)?;
-        let matched = verify_file(&g.terms, &r.name_key, &r.path_key, fuzzy)
+        let matched = verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), fuzzy)
             .or_else(|| {
-                let own = format!("{}/{}", r.path_key, r.name_key);
+                // Under names only, the target's own name alone (VFS-38 R3).
+                let (target, own) = if ctx.names {
+                    let name = target.trim_end_matches('/').rsplit('/').next();
+                    (name.unwrap_or_default().to_string(), String::new())
+                } else {
+                    (target, format!("{}/{}", r.path_key, r.name_key))
+                };
                 verify_file(&g.terms, &target, &own, fuzzy).map(|m| match m {
                     MatchKind::Fuzzy => MatchKind::Fuzzy,
                     _ => MatchKind::Target,
@@ -1730,13 +1794,18 @@ fn scan_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Res
         );
         let mut params = with_params(None, clause);
         for t in &g.terms {
-            sql.push_str(" AND (instr(f.name_key, ?) > 0 OR instr(d.path_key, ?) > 0)");
-            params.extend([Value::Text(t.clone()), Value::Text(t.clone())]);
+            if ctx.names {
+                sql.push_str(" AND instr(f.name_key, ?) > 0");
+                params.push(Value::Text(t.clone()));
+            } else {
+                sql.push_str(" AND (instr(f.name_key, ?) > 0 OR instr(d.path_key, ?) > 0)");
+                params.extend([Value::Text(t.clone()), Value::Text(t.clone())]);
+            }
         }
         each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let r = FileRow::read(row)?;
             Ok(
-                match verify_file(&g.terms, &r.name_key, &r.path_key, false) {
+                match verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), false) {
                     Some(m) => ctx.file_hit(r, m).is_none_or(|c| run.accept(c)),
                     None => true,
                 },
@@ -1747,14 +1816,16 @@ fn scan_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Res
         let mut sql = format!("SELECT {DIR_COLS} FROM dirs d WHERE 1{roots}{}", clause.sql);
         let mut params = with_params(None, clause);
         for t in &g.terms {
-            sql.push_str(
-                " AND instr(CASE WHEN d.rel_path = '' THEN d.name_key ELSE d.path_key END, ?) > 0",
-            );
+            sql.push_str(if ctx.names {
+                " AND instr(d.name_key, ?) > 0"
+            } else {
+                " AND instr(CASE WHEN d.rel_path = '' THEN d.name_key ELSE d.path_key END, ?) > 0"
+            });
             params.push(Value::Text(t.clone()));
         }
         each_row(conn, run, &sql, &params, deadline, |run, _, row| {
             let d = DirRow::read(row)?;
-            Ok(match verify_dir(&g.terms, &d, false) {
+            Ok(match verify_dir(&g.terms, &d, false, ctx.names) {
                 Some(m) => ctx.dir_hit(d, m).is_none_or(|c| run.accept(c)),
                 None => true,
             })
@@ -1812,7 +1883,8 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                             Source::Dirs,
                         )
                     }),
-                    ctx.files.as_ref().map(|c| {
+                    // Files found through their folder's path: not under names only.
+                    ctx.files.as_ref().filter(|_| !ctx.names).map(|c| {
                         (
                             format!(
                                 "SELECT {FILE_COLS} FROM {matching_dirs} CROSS JOIN files f \
@@ -1827,6 +1899,7 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                 for (sql, clause, source) in queries.into_iter().flatten() {
                     let text = match source {
                         Source::FileNames => grams.clone(),
+                        Source::Dirs if ctx.names => format!("name_key : ({expr})"),
                         Source::Dirs | Source::DirFiles => expr.clone(),
                     };
                     let params = with_params(Some(Value::Text(text)), clause);
@@ -1840,10 +1913,11 @@ fn fuzzy_pass(conn: &mut Connection, run: &mut Run, ctx: &Ctx, groups: &[Group])
                         budget = budget.saturating_sub(1);
                         let hit = if source == Source::Dirs {
                             let d = DirRow::read(row)?;
-                            verify_dir(&g.terms, &d, true).and_then(|m| ctx.dir_hit(d, m))
+                            verify_dir(&g.terms, &d, true, ctx.names)
+                                .and_then(|m| ctx.dir_hit(d, m))
                         } else {
                             let r = FileRow::read(row)?;
-                            verify_file(&g.terms, &r.name_key, &r.path_key, true)
+                            verify_file(&g.terms, &r.name_key, ctx.path(&r.path_key), true)
                                 .and_then(|m| ctx.file_hit(r, m))
                         };
                         Ok(hit.is_none_or(|c| run.accept(c)) && budget > 0)
@@ -1942,6 +2016,7 @@ mod tests {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         };
         for _ in 0..200 {
             search(&mut conn, &mut SearchState::default(), &config, &text).unwrap();
@@ -1957,6 +2032,7 @@ mod tests {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         };
         let mut state = SearchState::default();
         let mut cut = None;
@@ -2015,7 +2091,7 @@ mod tests {
                 terms: q.split(' ').map(str::to_string).collect(),
                 root_ids: vec![root],
             };
-            may_match(&conn, &g).unwrap()
+            may_match(&conn, &g, false).unwrap()
         };
         // Exact, split between folder and name, typos, folder only, short terms only.
         for q in [
@@ -2039,6 +2115,85 @@ mod tests {
         ] {
             assert!(!possible(q), "{q}");
         }
+    }
+
+    /// VFS-38 AC-3 (R3): under names only, a query whose words are together only in a folder
+    /// path finds nothing, and neither the path tier nor either typo pass runs: the names-only
+    /// S8 probe (file names and `dirs_fts` names, with the one-edit alternatives) rules every
+    /// hit out. Under «Todo» the same query runs the path tier and finds the folder and photo.
+    #[test]
+    fn names_only_skips_the_path_tier_and_both_typo_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut w = db::open_rw(&path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let sierra = ingest::insert_dir(&tx, root, top, "Sierra", 0).unwrap();
+        let trip = ingest::insert_dir(&tx, root, sierra, "Sierra/Excursión", 0).unwrap();
+        let file = ingest::NewFile {
+            name: "IMG_0412.jpg",
+            size: 1,
+            mtime: 1,
+            lossy: false,
+        };
+        ingest::insert_file(&tx, trip, &file).unwrap();
+        tx.commit().unwrap();
+        drop(w);
+
+        let mut conn = db::open_ro(&path).unwrap();
+        let config = SearchConfig {
+            deadline: Duration::from_secs(60),
+            ..SearchConfig::default()
+        };
+        let mut run = |text: &str, scope: crate::types::Scope| {
+            STAGES.with(|s| s.borrow_mut().clear());
+            let q = SearchQuery {
+                text: text.into(),
+                filters: SearchFilters::default(),
+                limit: 50,
+                offset: 0,
+                sort: Default::default(),
+                scope,
+            };
+            let r = search(&mut conn, &mut SearchState::default(), &config, &q).unwrap();
+            (r.total, STAGES.with(|s| s.borrow().clone()))
+        };
+        let (total, stages) = run("sierra excursion", crate::types::Scope::Names);
+        assert_eq!(total, 0);
+        assert!(stages.is_empty(), "{stages:?}");
+        let (total, stages) = run("sierra excursion", crate::types::Scope::All);
+        assert_eq!(total, 2);
+        assert!(stages.contains(&"path"), "{stages:?}");
+        // A name within one edit is still possible: the typo passes run under names too.
+        let (total, stages) = run("excursoin", crate::types::Scope::Names);
+        assert_eq!(total, 1);
+        assert!(!stages.contains(&"path"), "{stages:?}");
+        assert!(stages.contains(&"near"), "{stages:?}");
+
+        let possible = |q: &str, names: bool| {
+            let g = Group {
+                terms: q.split(' ').map(str::to_string).collect(),
+                root_ids: vec![root],
+            };
+            may_match(&conn, &g, names).unwrap()
+        };
+        assert!(possible("sierra excursion", false));
+        assert!(!possible("sierra excursion", true));
+        for q in [
+            "excursion",
+            "excursoin",
+            "img_0412",
+            "img_0412 jpg",
+            "sierr",
+        ] {
+            assert!(possible(q, true), "{q}");
+        }
+        assert!(!possible("sierra img_0412", true));
     }
 
     /// VFS-4 AC-3: a folder lookup that fails (an interruption, here a missing row) keeps
@@ -2124,6 +2279,7 @@ mod tests {
             limit: 1,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         };
         let searches = Arc::new(AtomicU64::new(7));
         let waiting = Arc::new(AtomicU64::new(0));
@@ -2384,13 +2540,22 @@ mod tests {
             mtime: 0,
         };
         assert_eq!(
-            verify_dir(&t(&["gestoria", "2019"]), &d, false),
+            verify_dir(&t(&["gestoria", "2019"]), &d, false, false),
             Some(MatchKind::Path)
         );
-        assert_eq!(verify_dir(&t(&["2019"]), &d, false), Some(MatchKind::Name));
+        assert_eq!(
+            verify_dir(&t(&["2019"]), &d, false, false),
+            Some(MatchKind::Name)
+        );
         // A subfolder of a matching folder is not a hit unless a term is in its own name.
-        assert_eq!(verify_dir(&t(&["gestoria"]), &d, false), None);
-        assert_eq!(verify_dir(&[], &d, false), Some(MatchKind::Name));
+        assert_eq!(verify_dir(&t(&["gestoria"]), &d, false, false), None);
+        assert_eq!(verify_dir(&[], &d, false, false), Some(MatchKind::Name));
+        // VFS-38 R3: under names only, a folder needs every term in its own name.
+        assert_eq!(verify_dir(&t(&["gestoria", "2019"]), &d, false, true), None);
+        assert_eq!(
+            verify_dir(&t(&["ano", "2019"]), &d, false, true),
+            Some(MatchKind::Name)
+        );
         assert_eq!(phrase("a\"b"), "\"a\"\"b\"");
     }
 }

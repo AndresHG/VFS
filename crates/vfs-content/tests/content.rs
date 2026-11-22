@@ -80,6 +80,7 @@ impl Setup {
                 limit: 100,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             },
         )
         .unwrap()
@@ -559,6 +560,7 @@ fn ac10_off_by_default_and_deletable() {
         limit: 10,
         offset: 0,
         sort: Default::default(),
+        scope: Default::default(),
     };
     let before = s.vfs.search(&q).unwrap();
     assert_eq!(before.hits.len(), 1);
@@ -720,6 +722,7 @@ fn ac13_cloud_only_documents_are_never_opened() {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         })
         .unwrap();
     assert_eq!(by_name.hits.len(), 1);

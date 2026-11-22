@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    FileKind, SearchConfig, SearchFilters, SearchQuery, SortOrder, Suggestion, SuggestionKind,
-    TruncatedBy, Vfs,
+    FileKind, Scope, SearchConfig, SearchFilters, SearchQuery, SortOrder, Suggestion,
+    SuggestionKind, TruncatedBy, Vfs,
 };
 
 struct Fx {
@@ -78,6 +78,7 @@ fn query(text: &str, filters: SearchFilters) -> SearchQuery {
         limit: 50,
         offset: 0,
         sort: SortOrder::Relevance,
+        scope: Default::default(),
     }
 }
 
@@ -89,6 +90,61 @@ fn suggest(fx: &Fx, text: &str, filters: SearchFilters) -> Option<Suggestion> {
         "{text} must find nothing"
     );
     fx.vfs.suggest(&q).unwrap()
+}
+
+/// `suggest` for a names-only query (VFS-38).
+fn suggest_names(fx: &Fx, text: &str) -> Option<Suggestion> {
+    let q = SearchQuery {
+        scope: Scope::Names,
+        ..query(text, SearchFilters::default())
+    };
+    assert_eq!(
+        fx.vfs.search(&q).unwrap().total,
+        0,
+        "{text} must find nothing"
+    );
+    fx.vfs.suggest(&q).unwrap()
+}
+
+/// VFS-38 AC-11 (R13), core part: `sierra excursión` under names only, where only the folder
+/// path `Sierra/Excursión` holds both words, finds nothing; with no other filter, dropping
+/// the filters is offered with the «Todo» count, and that search shows the folder's photo.
+#[test]
+fn vfs38_ac11_names_only_suggests_dropping_the_scope() {
+    let fx = index(
+        &["Sierra", "Sierra/Excursión"],
+        &[(Some(1), "IMG_0412.jpg".into(), 1, 1)],
+    );
+    let s = suggest_names(&fx, "sierra excursión").unwrap();
+    assert_eq!(s.kind, SuggestionKind::DropFilters);
+    assert!(s.clear_filters);
+    let all = fx
+        .vfs
+        .search(&query("sierra excursión", SearchFilters::default()))
+        .unwrap();
+    assert_eq!((s.count, s.capped), (all.total, false));
+    assert!(all.hits.iter().any(|h| h.name == "IMG_0412.jpg"));
+}
+
+/// VFS-38 R13: the spelling and drop-a-word suggestions keep the names-only scope: their
+/// counts leave out `x.jpg`, found under «Todo» only through its folder `Bodas viejas`.
+#[test]
+fn vfs38_spelling_and_drop_term_keep_names_only() {
+    let fx = index(
+        &["Bodas viejas"],
+        &[file("boda Ana.mp4"), (Some(0), "x.jpg".into(), 1, 1)],
+    );
+    let s = suggest_names(&fx, "Bdoa").unwrap();
+    assert_eq!(s.kind, SuggestionKind::Spelling);
+    assert_eq!((s.text.as_str(), s.count), ("boda", 2));
+    let s = suggest_names(&fx, "boda zzzz").unwrap();
+    assert_eq!(s.kind, SuggestionKind::DropTerm);
+    assert_eq!((s.text.as_str(), s.count), ("boda", 2));
+    let all = fx
+        .vfs
+        .search(&query("boda", SearchFilters::default()))
+        .unwrap();
+    assert_eq!(all.total, 3);
 }
 
 fn photos() -> SearchFilters {

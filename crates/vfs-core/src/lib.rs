@@ -466,6 +466,7 @@ mod tests {
             limit: 1,
             offset: 0,
             sort: SortOrder::Relevance,
+            scope: Default::default(),
         };
         let mut guard = lock(&vfs.inner.searcher);
         let (conn, _) = &mut *guard;
@@ -765,6 +766,7 @@ mod tests {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         });
         assert!(
             matches!(&r, Err(e) if search::is_table_open_cut(e)),
@@ -811,6 +813,7 @@ mod tests {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         };
         assert_eq!(
             vfs.search(&q).unwrap().hits.len(),

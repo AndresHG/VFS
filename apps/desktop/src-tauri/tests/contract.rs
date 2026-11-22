@@ -8,8 +8,8 @@ use serde::Serialize;
 use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
 use vfs_core::api::RevealOutcome;
 use vfs_core::{
-    DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, SuggestionKind,
-    TruncatedBy, UnreadableReason,
+    DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, Scope,
+    SuggestionKind, TruncatedBy, UnreadableReason,
 };
 
 /// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
@@ -153,6 +153,17 @@ fn all_sources() -> Vec<Source> {
     all
 }
 
+fn all_scopes() -> Vec<Scope> {
+    use Scope::*;
+    let all = vec![All, Names];
+    for s in &all {
+        match s {
+            All | Names => {}
+        }
+    }
+    all
+}
+
 fn all_sort_orders() -> Vec<SortOrder> {
     use SortOrder::*;
     let all = vec![Relevance, Newest, Oldest, Name, Size, Source];
@@ -241,6 +252,7 @@ fn all_error_codes() -> Vec<String> {
 
 /// VFS-1 X1, AC-12: every set of contract.js equals the serde values of its Rust enum, and
 /// contract.js has no set this test does not check (besides the UI's own `UiErrorCode`).
+/// VFS-38 R14: `Scope` is checked like VFS-6 AC-11's `Source`.
 #[test]
 fn contract_js_matches_the_rust_enums() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/contract.js");
@@ -262,6 +274,7 @@ fn contract_js_matches_the_rust_enums() {
         ("SuggestionKind", serde_names(&all_suggestion_kinds())),
         ("SortOrder", serde_names(&all_sort_orders())),
         ("PatternReason", serde_names(&all_pattern_reasons())),
+        ("Scope", serde_names(&all_scopes())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

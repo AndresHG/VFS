@@ -66,6 +66,7 @@ fn search(fx: &Fx, text: &str, sort: SortOrder, offset: u32, limit: u32) -> Sear
             limit,
             offset,
             sort,
+            scope: Default::default(),
         })
         .unwrap()
 }

@@ -5,7 +5,8 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    FileKind, LinkKind, MatchKind, SearchFilters, SearchHit, SearchQuery, SearchResponse, Vfs,
+    FileKind, LinkKind, MatchKind, Scope, SearchFilters, SearchHit, SearchQuery, SearchResponse,
+    Vfs,
 };
 
 struct Fixture {
@@ -73,6 +74,10 @@ impl Fixture {
     }
 
     fn search(&self, text: &str, filters: SearchFilters) -> SearchResponse {
+        self.scoped(text, filters, Scope::All)
+    }
+
+    fn scoped(&self, text: &str, filters: SearchFilters, scope: Scope) -> SearchResponse {
         self.vfs
             .search(&SearchQuery {
                 text: text.into(),
@@ -80,16 +85,39 @@ impl Fixture {
                 limit: 500,
                 offset: 0,
                 sort: Default::default(),
+                scope,
             })
             .unwrap()
     }
 
     fn hit(&self, text: &str, id: i64) -> Option<SearchHit> {
-        self.search(text, SearchFilters::default())
+        self.hit_in(text, id, Scope::All)
+    }
+
+    fn hit_in(&self, text: &str, id: i64, scope: Scope) -> Option<SearchHit> {
+        self.scoped(text, SearchFilters::default(), scope)
             .hits
             .into_iter()
             .find(|h| !h.is_dir && h.id == id)
     }
+}
+
+/// VFS-38 R3 (VFS-18 R4): under names only, a link is found through its target when every
+/// term is in the target's own name, never through the target's folders or its own folder.
+#[test]
+fn names_only_links_match_the_target_name() {
+    let mut f = fixture();
+    let (root, top) = f.root("/archivo");
+    let familia = f.dir(root, top, "Familia");
+    let lnk = f.file(familia, "Fotos.lnk");
+    f.target(lnk, Some(r"D:\Boda 2003\Álbum"));
+    let names = |text: &str| f.hit_in(text, lnk, Scope::Names);
+    assert_eq!(names("album").map(|h| h.matched), Some(MatchKind::Target));
+    assert_eq!(names("fotos").map(|h| h.matched), Some(MatchKind::Name));
+    assert!(names("boda").is_none());
+    assert!(names("familia album").is_none());
+    assert!(f.hit("boda", lnk).is_some());
+    assert!(f.hit("familia album", lnk).is_some());
 }
 
 /// VFS-18 AC-4: a shortcut is found by its target, by its own folder and its target

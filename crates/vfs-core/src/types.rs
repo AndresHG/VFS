@@ -82,6 +82,17 @@ pub enum SortOrder {
     Size,
 }
 
+/// What a query's words are matched against (VFS-38 R2, R3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// Names and folder paths, with the VFS-1 tiers.
+    #[default]
+    All,
+    /// Names only: a file's name, a folder's own name, a bookmark's title (VFS-38 R3).
+    Names,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchQuery {
@@ -96,6 +107,9 @@ pub struct SearchQuery {
     /// Default `Relevance` (VFS-12).
     #[serde(default)]
     pub sort: SortOrder,
+    /// Default `All` (VFS-38 R14).
+    #[serde(default)]
+    pub scope: Scope,
 }
 
 /// Why a hit matched. Document content search (VFS-1 AC-15) adds its own variant.
@@ -295,7 +309,7 @@ impl Default for SearchConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SuggestionKind {
-    /// The same text without the type, date, size and folder filters.
+    /// The same text without the type, date, size and folder filters, under `Scope::All`.
     DropFilters,
     /// A short word with two adjacent letters swapped or one letter removed.
     Spelling,
@@ -310,7 +324,8 @@ pub struct Suggestion {
     pub kind: SuggestionKind,
     /// The search-box text to run: the typed text with the word replaced or removed.
     pub text: String,
-    /// True only for `DropFilters`; sources and the bookmark folder are not filters here.
+    /// True only for `DropFilters`: its count is without filters and under `Scope::All`
+    /// (VFS-38 R13); sources and the bookmark folder are not filters here.
     pub clear_filters: bool,
     /// The typed word that changes (`Spelling`, `DropTerm`).
     pub term: Option<String>,
@@ -469,6 +484,21 @@ mod tests {
 
         let bare: SearchQuery = serde_json::from_value(json!({ "text": "" })).unwrap();
         assert!(bare.filters.kinds.is_empty());
+    }
+
+    /// VFS-38 R14: `scope` is optional, defaults to `all`, and reads `names`; an unknown
+    /// value is refused.
+    #[test]
+    fn search_query_scope_defaults_to_all() {
+        let bare: SearchQuery = serde_json::from_value(json!({ "text": "a" })).unwrap();
+        assert_eq!(bare.scope, Scope::All);
+        let names: SearchQuery =
+            serde_json::from_value(json!({ "text": "a", "scope": "names" })).unwrap();
+        assert_eq!(names.scope, Scope::Names);
+        assert_eq!(serde_json::to_value(Scope::All).unwrap(), json!("all"));
+        assert!(
+            serde_json::from_value::<SearchQuery>(json!({ "text": "a", "scope": "x" })).is_err()
+        );
     }
 
     /// Responses serialize with the field and enum spellings of the command contract

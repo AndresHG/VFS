@@ -106,6 +106,7 @@ pub fn query_set(order: SortOrder) -> Vec<BenchQuery> {
                 limit: 100,
                 offset: 0,
                 sort: order,
+                scope: Default::default(),
             },
             canary,
         });
@@ -684,6 +685,7 @@ mod tests {
             limit: 1,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         };
         let page = 10;
         assert_eq!(
