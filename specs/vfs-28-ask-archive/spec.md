@@ -148,7 +148,9 @@ Bibliography
 Errors and diagnostics
 
 - R13. THE app SHALL map provider errors to plain messages. The codes below come from the
-  providers' docs as read on 2026-11-22 **[published, to be re-checked when 28b is built]**:
+  providers' docs, re-checked when 28b was built (2026-11-22) **[published]**. OpenAI also
+  sends `credit_balance_exhausted` (no credit) and `organization_spend_limit_exceeded`,
+  `project_spend_limit_exceeded` or `organization_usage_limit_exceeded` (quota) as 429s:
   - invalid or forbidden key: «La clave no es válida»;
   - billing or no credit: a 402, an Anthropic `billing_error`, or a 400 whose message reports a credit
     balance too low: «Su cuenta de <proveedor> no tiene saldo»;

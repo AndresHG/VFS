@@ -1,0 +1,37 @@
+[package]
+name = "vfs-ai"
+description = "Ask your archive (VFS-28): model providers, API keys, error mapping, cost metering, ai.db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+# VFS-28 D10: the reqwest already in the desktop binary (through tauri-plugin-updater), with the
+# same rustls + ring setup; `blocking` keeps `ChatModel` a plain dyn-compatible trait.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# VFS-28 R10: the month total is per calendar month in local time.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# VFS-28 R2 / D6: keys live in the OS credential store.
+keyring-core = "1.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1.1"
+windows-sys = { workspace = true, features = ["Win32_Security_Cryptography"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0", default-features = false, features = ["keychain"] }
+
+[features]
+# The local mock provider server, for this crate's tests and for 28c's.
+test-support = []
+
+[dev-dependencies]
+vfs-ai = { path = ".", features = ["test-support"] }
+tempfile.workspace = true

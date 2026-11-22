@@ -89,6 +89,7 @@ in [`docs/vision.md`](docs/vision.md).
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
+| `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`. Not yet wired into the app. |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
 | `apps/desktop/ui` | The screen, in Spanish and English (`strings.es.js`, `strings.en.js`): static HTML, CSS and JavaScript, no npm build. |

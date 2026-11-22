@@ -1,0 +1,18 @@
+{
+  "_source": "Error bodies in the shapes of Anthropic's errors page (platform.claude.com/docs/en/api/errors) and OpenAI's error-codes guide (developers.openai.com/api/docs/guides/error-codes), read 2026-11-22 (VFS-28 R13, AC-4). Messages are representative, not live captures.",
+  "anthropic_401": {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}, "request_id": "req_011CTest401"},
+  "anthropic_402": {"type": "error", "error": {"type": "billing_error", "message": "There is an issue with your account's billing. Please check your payment details."}, "request_id": "req_011CTest402"},
+  "anthropic_400_credit": {"type": "error", "error": {"type": "invalid_request_error", "message": "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}, "request_id": "req_011CTest400"},
+  "anthropic_429": {"type": "error", "error": {"type": "rate_limit_error", "message": "This request would exceed the rate limit for your organization of 50 requests per minute."}, "request_id": "req_011CTest429"},
+  "anthropic_429_spend_cap": {"type": "error", "error": {"type": "rate_limit_error", "message": "You have reached your monthly spend cap.", "details": {"error_code": "enforced_spend_limit_reached"}}, "request_id": "req_011CTest429c"},
+  "anthropic_404": {"type": "error", "error": {"type": "not_found_error", "message": "model: claude-retired-model"}, "request_id": "req_011CTest404"},
+  "anthropic_529": {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}, "request_id": "req_011CTest529"},
+  "anthropic_500": {"type": "error", "error": {"type": "api_error", "message": "Internal server error"}, "request_id": "req_011CTest500"},
+  "openai_401": {"error": {"message": "Incorrect API key provided. You can find your API key at https://platform.openai.com/account/api-keys.", "type": "invalid_request_error", "param": null, "code": "invalid_api_key"}},
+  "openai_429_rate": {"error": {"message": "Rate limit reached for gpt-6-luna on requests per min (RPM): Limit 500, Used 500, Requested 1.", "type": "requests", "param": null, "code": "rate_limit_exceeded"}},
+  "openai_429_quota": {"error": {"message": "You exceeded your current quota, please check your plan and billing details.", "type": "insufficient_quota", "param": null, "code": "insufficient_quota"}},
+  "openai_429_credit": {"error": {"message": "Your organization has no prepaid credits left.", "type": "insufficient_quota", "param": null, "code": "credit_balance_exhausted"}},
+  "openai_429_unknown": {"error": {"message": "Too many requests.", "type": "requests", "param": null, "code": null}},
+  "openai_404": {"error": {"message": "The model `gpt-retired` does not exist or you do not have access to it.", "type": "invalid_request_error", "param": null, "code": "model_not_found"}},
+  "openai_503": {"error": {"message": "The server is overloaded.", "type": "server_error", "param": null, "code": "server_is_overloaded"}}
+}
