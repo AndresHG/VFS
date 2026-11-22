@@ -605,4 +605,105 @@ mod cloud_probe {
         out.push_str(&format!("unregister hr={hr:#x}\n"));
         panic!("PROBE\n{out}");
     }
+
+    unsafe extern "system" fn fail_fetch(
+        info: *const CF_CALLBACK_INFO,
+        _params: *const CF_CALLBACK_PARAMETERS,
+    ) {
+        // SAFETY: the filter passes a valid info for the callback's duration.
+        let info = unsafe { &*info };
+        let op = CF_OPERATION_INFO {
+            StructSize: size_of::<CF_OPERATION_INFO>() as u32,
+            Type: CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS,
+            ConnectionKey: info.ConnectionKey,
+            TransferKey: info.TransferKey,
+            CorrelationVector: std::ptr::null(),
+            SyncStatus: std::ptr::null(),
+            RequestKey: info.RequestKey,
+        };
+        let mut p: CF_OPERATION_PARAMETERS = unsafe { std::mem::zeroed() };
+        p.ParamSize = size_of::<CF_OPERATION_PARAMETERS>() as u32;
+        p.Anonymous.TransferPlaceholders = CF_OPERATION_PARAMETERS_0_4 {
+            Flags: CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE,
+            CompletionStatus: 0xC000_0001u32 as i32,
+            PlaceholderTotalCount: 0,
+            PlaceholderArray: std::ptr::null_mut(),
+            PlaceholderCount: 0,
+            EntriesProcessed: 0,
+        };
+        // SAFETY: valid op and params.
+        unsafe { CfExecute(&op, &mut p) };
+    }
+
+    #[test]
+    fn probe_connected_fail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap().join("SyncRoot2");
+        fs::create_dir(&root).unwrap();
+        let mut out = String::new();
+        let name = wide(Path::new("VfsProbe2"));
+        let ver = wide(Path::new("1.0"));
+        let id = b"root";
+        let reg = CF_SYNC_REGISTRATION {
+            StructSize: size_of::<CF_SYNC_REGISTRATION>() as u32,
+            ProviderName: name.as_ptr(),
+            ProviderVersion: ver.as_ptr(),
+            SyncRootIdentity: id.as_ptr().cast(),
+            SyncRootIdentityLength: 4,
+            ProviderId: windows_sys::core::GUID::from_u128(
+                0x5f1a_77c2_0b3e_4d6a_9e21_7c55_aa10_0171,
+            ),
+            ..Default::default()
+        };
+        let pol = CF_SYNC_POLICIES {
+            StructSize: size_of::<CF_SYNC_POLICIES>() as u32,
+            Hydration: CF_HYDRATION_POLICY {
+                Primary: CF_HYDRATION_POLICY_FULL,
+                Modifier: 0,
+            },
+            Population: CF_POPULATION_POLICY {
+                Primary: CF_POPULATION_POLICY_FULL,
+                Modifier: 0,
+            },
+            InSync: CF_INSYNC_POLICY_NONE,
+            HardLink: CF_HARDLINK_POLICY_NONE,
+            PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
+        };
+        let r = wide(&root);
+        let hr = unsafe { CfRegisterSyncRoot(r.as_ptr(), &reg, &pol, CF_REGISTER_FLAG_NONE) };
+        out.push_str(&format!("register hr={hr:#x}\n"));
+        let insync = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
+        place(&root, "Falla", true, insync, &mut out);
+        place(&root, "FallaConHijo", true, insync, &mut out);
+        place(&root.join("FallaConHijo"), "a.txt", false, insync, &mut out);
+        place(&root.join("FallaConHijo"), "b.txt", false, insync, &mut out);
+        let table = [
+            CF_CALLBACK_REGISTRATION {
+                Type: CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS,
+                Callback: Some(fail_fetch),
+            },
+            CF_CALLBACK_REGISTRATION {
+                Type: CF_CALLBACK_TYPE_NONE,
+                Callback: None,
+            },
+        ];
+        let mut key: CF_CONNECTION_KEY = 0;
+        let hr = unsafe {
+            CfConnectSyncRoot(
+                r.as_ptr(),
+                table.as_ptr(),
+                std::ptr::null(),
+                CF_CONNECT_FLAG_NONE,
+                &mut key,
+            )
+        };
+        out.push_str(&format!("connect hr={hr:#x}\n"));
+        dump(&root, "root", &mut out);
+        dump(&root.join("Falla"), "Falla", &mut out);
+        dump(&root.join("FallaConHijo"), "FallaConHijo", &mut out);
+        unsafe { CfDisconnectSyncRoot(key) };
+        let hr = unsafe { CfUnregisterSyncRoot(r.as_ptr()) };
+        out.push_str(&format!("unregister hr={hr:#x}\n"));
+        panic!("PROBE2\n{out}");
+    }
 }
