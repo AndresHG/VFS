@@ -41,6 +41,11 @@ pub fn lower_thread_priority() {
     platform::OsThreadPriority::default().walk_profile();
 }
 
+/// A diagnostic record (VFS-5 R7): ids, counts and durations only, never a name (R8).
+fn diag(line: &str) {
+    log::info!(target: DIAG_TARGET, "{line}");
+}
+
 /// Receives indexer progress; implemented by the app (Tauri events) and the CLI.
 pub trait ProgressSink: Send + Sync + 'static {
     fn on_progress(&self, progress: &IndexProgress);
@@ -128,20 +133,37 @@ impl Vfs {
         roots::unreadable_dirs(&lock(&self.inner.reader), root_id)
     }
 
-    /// `path` must be an existing directory that neither contains nor is inside another root.
+    /// `path` must be an existing directory that is not inside another root; roots inside
+    /// it are taken in (VFS-31 R2).
     pub fn add_root(&self, path: &Path) -> Result<Root> {
+        let started = std::time::Instant::now();
         let mut conn = db::open_rw(&self.inner.db_path)?;
-        let root = roots::add_root(&mut conn, path)?;
+        let (root, taken) = roots::add_root(&mut conn, path)?;
         self.backup_roots(&conn);
         self.notify_roots_changed();
+        diag(&format!(
+            "root_add id={} taken_roots={} taken_dirs={} taken_files={} ms={}",
+            root.id,
+            taken.roots,
+            taken.dirs,
+            taken.files,
+            started.elapsed().as_millis()
+        ));
         Ok(root)
     }
 
+    /// Marks the root `removing` (search ignores it at once); the indexer deletes its rows
+    /// and then sends a progress snapshot without it (VFS-31 R1).
     pub fn remove_root(&self, root_id: i64) -> Result<()> {
+        let started = std::time::Instant::now();
         let mut conn = db::open_rw(&self.inner.db_path)?;
         roots::remove_root(&mut conn, root_id)?;
         self.backup_roots(&conn);
         self.notify_roots_changed();
+        diag(&format!(
+            "root_remove id={root_id} ms={}",
+            started.elapsed().as_millis()
+        ));
         Ok(())
     }
 
@@ -541,7 +563,7 @@ mod tests {
         let inside = vfs.add_root(&tree.join("sub")).unwrap_err();
         assert_eq!(inside.code(), "overlapping_root");
         assert!(!inside.is_same_root());
-        assert!(!vfs.add_root(dir.path()).unwrap_err().is_same_root());
+        // A containing folder is not an overlap: it takes the root in (VFS-31 R2).
     }
 
     /// VFS-23 AC-1 (issue 58): the backup root list follows every root change, and an index

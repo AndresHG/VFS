@@ -935,8 +935,9 @@ fn overlap(r: vfs_core::Result<vfs_core::Root>) -> OverlapRelation {
     }
 }
 
-/// VFS-1 AC-4: `add_root` refuses a folder inside, containing, or equal to an existing
-/// root, including spellings that differ by case, trailing separator or normalization.
+/// VFS-1 AC-4: `add_root` refuses a folder inside or equal to an existing root, including
+/// spellings that differ by case, trailing separator or normalization. A containing folder
+/// takes the root in (VFS-31 AC-2).
 #[test]
 fn nested_roots_are_refused() {
     let env = Env::new();
@@ -945,10 +946,6 @@ fn nested_roots_are_refused() {
     assert_eq!(
         overlap(env.vfs.add_root(&root.join("dentro/mas"))),
         OverlapRelation::Inside
-    );
-    assert_eq!(
-        overlap(env.vfs.add_root(&env.base())),
-        OverlapRelation::Contains
     );
     let mut trailing = root.clone().into_os_string();
     trailing.push(std::path::MAIN_SEPARATOR_STR);

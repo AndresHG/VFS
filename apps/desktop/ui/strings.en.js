@@ -188,6 +188,7 @@ export const en = {
   rootNeverChecked: 'Not fully checked yet',
   rescanStarted: 'Changes will be looked for in the background. You can keep searching meanwhile.',
   rootAdded: (p) => `“${p}” was added. It is being checked; you can search in the meantime.`,
+  rootTakesIn: (p, inner) => { const l = [].concat(inner); return `“${p}” was added. It includes ${l.map((x) => `“${x}”`).join(', ')}, which ${l.length > 1 ? 'were' : 'was'} already in the list; ${l.length > 1 ? 'their' : 'its'} files still appear in searches while it is checked.`; },
   remoteWarning: 'This folder is on a network or removable drive. If it is disconnected, its files will be marked “Unavailable”.',
   bookmarksTitle: 'Firefox bookmarks',
   bookmarksToggle: 'Include Firefox bookmarks',
@@ -244,7 +245,6 @@ export const en = {
 
   revealedParent: 'The folder opened, but the file could not be selected.',
   overlapInside: (p) => `That folder is already included, because it is inside “${p}”.`,
-  overlapParent: (p) => `That folder contains “${p}”, which is already in the list. Remove “${p}” first and then add the larger folder again.`,
   overlapGeneric: 'That folder is already in the list or inside another folder in the list.',
 
   errors: {

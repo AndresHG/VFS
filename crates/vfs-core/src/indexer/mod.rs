@@ -440,6 +440,19 @@ fn scan_root(
             None => begin(conn)?,
         };
         let t: &Transaction<'_> = tx.insert(open);
+        // The folder was read before the listing, outside this transaction: if a parent
+        // folder added meanwhile took its root in (VFS-31 R2), it now belongs to another
+        // root under another path, and this listing must not be applied under the old one.
+        let moved = t
+            .prepare_cached("SELECT 1 FROM dirs WHERE id = ?1 AND root_id = ?2 AND rel_path = ?3")?
+            .query_row(params![dir_id, root.id, rel_path], |_| Ok(()))
+            .optional()?
+            .is_none();
+        if moved {
+            commit(&mut tx, sched)?;
+            pass.current = None;
+            return Ok(RootOutcome::Yielded);
+        }
         if let Some(now) = first_cursor {
             cursor::store(t, root.id, now.as_deref())?;
             set_root_status(t, root.id, RootStatus::Scanning)?;
@@ -712,6 +725,8 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
         rows.collect::<rusqlite::Result<_>>()?
     };
     for root_id in ids {
+        let started = Instant::now();
+        let (mut dirs_gone, mut files_gone) = (0u64, 0u64);
         loop {
             if stop() {
                 return Ok(false);
@@ -726,11 +741,21 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
                 tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
                 cursor::store(&tx, root_id, None)?;
                 tx.commit()?;
+                // Counts and time of this run; a removal resumed after a stop counts from
+                // the resume (VFS-31 R5).
+                log::info!(
+                    target: DIAG_TARGET,
+                    "root_removed id={root_id} dirs={dirs_gone} files={files_gone} ms={}",
+                    started.elapsed().as_millis()
+                );
                 break;
             }
             let mut rows = 0u64;
             for dir_id in dirs {
-                rows += ingest::delete_files_fts(&tx, "f.dir_id = ?1", [dir_id])? as u64;
+                let files = ingest::delete_files_fts(&tx, "f.dir_id = ?1", [dir_id])? as u64;
+                files_gone += files;
+                dirs_gone += 1;
+                rows += files;
                 tx.execute(
                     "DELETE FROM links WHERE file_id IN (SELECT id FROM files WHERE dir_id = ?1)",
                     [dir_id],
@@ -1426,7 +1451,12 @@ impl Worker {
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Wake => {}
-            Cmd::RootsChanged => self.sync_watches(),
+            Cmd::RootsChanged => {
+                self.sync_watches();
+                // The next idle snapshot is sent even if idle was the last one: it is how
+                // the UI learns a removed root is gone (VFS-31 R1).
+                self.published = None;
+            }
             Cmd::Rescan(Some(root_id)) => {
                 self.catchup.retain(|&id| id != root_id);
                 self.request(&[root_id], false)

@@ -1177,12 +1177,11 @@ function main(L) {
   $('rescan-now').addEventListener('click', () => rescanRoot(null));
   $('add-folder').addEventListener('click', () => addFolder());
 
-  /** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows. */
+  /** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows: the
+   * core refuses only the same folder or one inside a listed folder (VFS-31 R3). */
   function overlapText(path) {
     const inside = state.roots.find((r) => F.isUnder(path, r.path));
     if (inside) return S.overlapInside(inside.path);
-    const contains = state.roots.find((r) => F.isUnder(r.path, path));
-    if (contains) return S.overlapParent(contains.path);
     return S.overlapGeneric;
   }
 
@@ -1196,10 +1195,14 @@ function main(L) {
       path = await api.pickFolder();
     } catch (err) { showError(errorText(err)); return; }
     if (!path) return;
+    // Listed folders inside the new one are taken in by it (VFS-31 R2, R4).
+    const takenIn = state.roots
+      .filter((r) => r.status !== RootStatus.REMOVING && F.isUnder(r.path, path))
+      .map((r) => r.path);
     try {
       const root = await api.addRoot(path);
       await refreshRoots();
-      const msg = S.rootAdded(path);
+      const msg = takenIn.length ? S.rootTakesIn(path, takenIn) : S.rootAdded(path);
       const remote = REMOTE_DRIVES.has(root.drive);
       if (foldersDialog.open) {
         folderMessage(remote ? `${msg} ${S.remoteWarning}` : msg, remote ? Notice.WARN : Notice.INFO);
@@ -1319,14 +1322,21 @@ function main(L) {
 
   /* ---------------------------------------------------------------- live data */
 
+  // Only the newest list counts: an older reply arriving last would bring back a folder
+  // whose removal already finished (VFS-31 R1).
+  let rootsAsked = 0;
   async function refreshRoots() {
+    const asked = ++rootsAsked;
+    let roots;
     try {
-      state.roots = await api.listRoots();
-      state.rootsLoaded = true;
+      roots = await api.listRoots();
     } catch (err) {
-      if (!api.missing) showError(errorText(err));
+      if (!api.missing && asked === rootsAsked) showError(errorText(err));
       return;
     }
+    if (asked !== rootsAsked) return;
+    state.roots = roots;
+    state.rootsLoaded = true;
     renderFolderSelect();
     renderClearButton();
     renderUnavailableBanner();
