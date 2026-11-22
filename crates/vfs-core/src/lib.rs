@@ -12,6 +12,7 @@ mod kind;
 pub mod link;
 pub mod matching;
 mod platform;
+pub mod probes;
 mod rank;
 mod roots;
 mod search;

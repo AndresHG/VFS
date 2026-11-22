@@ -267,8 +267,8 @@ fn forget(conn: &Connection, file_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Rebuilds the queue in `content.db` from `files` and `c.docs`. Documents of offline roots
-/// are left out and keep their state. Returns the files queued and the counts of documents
+/// Rebuilds the queue in `content.db` from `files` and `c.docs`. Documents of offline or
+/// paused roots (`offline`) are left out and keep their state. Returns the files queued and the counts of documents
 /// skipped without reading, by reason.
 fn enqueue(
     conn: &mut Connection,
@@ -392,8 +392,8 @@ fn mirror(conn: &mut Connection, offline: &HashSet<i64>) -> Result<()> {
          WHERE id IN (SELECT file_id FROM c.queue) AND content_state <> ?1",
         [ContentState::Queued as i64],
     )?;
-    // Documents the store has no word on go back to `none`, except on offline roots,
-    // whose documents keep their state (R17).
+    // Documents the store has no word on go back to `none`, except on offline or paused
+    // roots, whose documents keep their state (R17; VFS-27 R8).
     tx.execute(
         &format!(
             "UPDATE files SET content_state = ?1 WHERE kind = ?2 AND content_state <> ?1
@@ -555,12 +555,51 @@ fn commit_batch(
     Ok(())
 }
 
+/// What the caller decides before each document (VFS-27 R7, R8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admit {
+    /// Read the document now.
+    Read,
+    /// End the run here; the document and the rest stay queued.
+    Stop,
+}
+
+/// The caller's hooks into a run, called between documents only, so the worker's own read
+/// never counts against the pace (VFS-27 R7). The app paces and counts progress through it;
+/// [`run`] uses one that admits every document.
+pub trait Gate {
+    /// Before the next document. May wait (checking `stop`) before answering.
+    fn before_document(&mut self, stop: &AtomicBool) -> Admit;
+    /// After a document was processed, with its outcome and the worker's time on it.
+    fn after_document(&mut self, outcome: OutcomeKind, worker_ms: u64);
+}
+
+/// The gate of [`run`]: reads every document as soon as the last one is done.
+pub struct NoGate;
+
+impl Gate for NoGate {
+    fn before_document(&mut self, _stop: &AtomicBool) -> Admit {
+        Admit::Read
+    }
+    fn after_document(&mut self, _outcome: OutcomeKind, _worker_ms: u64) {}
+}
+
 /// Runs the content indexer over `index_db` until the queue is empty, `stop` is set, or
 /// `opts.max_files` extractions are done. Creates the content store if needed (this is what
 /// switches content search on). A run that cannot go on (no worker, a store write failing,
 /// an unstable worker) ends with `stopped` set and leaves the unprocessed files as they were
 /// (VFS-2 R17).
 pub fn run(index_db: &Path, opts: &IndexOptions, stop: &AtomicBool) -> Result<RunSummary> {
+    run_with(index_db, opts, stop, &mut NoGate)
+}
+
+/// [`run`] with the caller's [`Gate`] consulted between documents.
+pub fn run_with(
+    index_db: &Path,
+    opts: &IndexOptions,
+    stop: &AtomicBool,
+    gate: &mut dyn Gate,
+) -> Result<RunSummary> {
     let started = Instant::now();
     drop(store::open_or_create(index_db)?);
     let mut conn = store::open_index_rw(index_db)?;
@@ -572,6 +611,8 @@ pub fn run(index_db: &Path, opts: &IndexOptions, stop: &AtomicBool) -> Result<Ru
         None => input_budget(&conn)?,
     };
     let (root_paths, mut offline) = roots(&conn)?;
+    // Paused folders are passed over like offline ones and keep their state (VFS-27 R8).
+    offline.extend(vfs_core::db::paused_root_ids(&conn)?);
     let (queued, unread) = enqueue(&mut conn, max_input, &offline)?;
     let unread_total = unread.iter().map(|(_, n)| n).sum();
     let mut sum = RunSummary {
@@ -652,6 +693,10 @@ pub fn run(index_db: &Path, opts: &IndexOptions, stop: &AtomicBool) -> Result<Ru
                     ms: 0,
                 }
             } else {
+                // The gate paces reads only: a cloud placeholder, never opened, costs no slot.
+                if gate.before_document(stop) == Admit::Stop || stop.load(Ordering::Relaxed) {
+                    break 'outer;
+                }
                 let req = Request {
                     path,
                     max_input_bytes: max_input,
@@ -691,6 +736,7 @@ pub fn run(index_db: &Path, opts: &IndexOptions, stop: &AtomicBool) -> Result<Ru
                 _ => 0,
             };
             sum.count(&resp);
+            gate.after_document((&resp.outcome).into(), resp.ms);
             batch.push(Done {
                 file_id,
                 dir_id,

@@ -1576,3 +1576,102 @@ fn stop_mid_document_kills_the_worker_within_the_grace() {
     assert_eq!((sum.failed, sum.remaining), (0, 1), "{sum:?}");
     assert_eq!(s.state("lento.txt"), (QUEUED, None, None));
 }
+
+// ---- VFS-27 PR 27b-1: the engine side of the background indexer ----
+
+/// VFS-27 AC-8 (R8): a folder paused through VFS-32 has none of its documents read and keeps
+/// their state; once resumed, they are read.
+#[test]
+fn paused_folder_is_not_read() {
+    let s = setup();
+    s.write("a/leido.txt", "la cigüeña");
+    let other = s._tmp.path().join("Pausada");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("en_pausa.txt"), "el señor Muñoz").unwrap();
+    s.scan();
+    let paused = s.vfs.add_root(&other).unwrap();
+    s.scan();
+    s.vfs.set_root_paused(paused.id, true).unwrap();
+    s.run(&s.opts());
+    assert_eq!(s.state("leido.txt").0, INDEXED);
+    assert_eq!(s.state("en_pausa.txt"), (NONE, None, None));
+    s.vfs.set_root_paused(paused.id, false).unwrap();
+    s.run(&s.opts());
+    assert_eq!(s.state("en_pausa.txt").0, INDEXED);
+}
+
+/// A gate that admits `budget` documents, then pauses the run, recording each outcome.
+struct Budget {
+    budget: usize,
+    seen: Vec<vfs_content::indexer::OutcomeKind>,
+}
+
+impl vfs_content::Gate for Budget {
+    fn before_document(&mut self, _stop: &AtomicBool) -> vfs_content::Admit {
+        if self.seen.len() < self.budget {
+            vfs_content::Admit::Read
+        } else {
+            vfs_content::Admit::Stop
+        }
+    }
+    fn after_document(&mut self, outcome: vfs_content::indexer::OutcomeKind, _worker_ms: u64) {
+        self.seen.push(outcome);
+    }
+}
+
+/// VFS-27 AC-8 (R8, R9): a run paused between documents after 3 of 10 leaves 7 queued and
+/// reports each document it read; resumed, it reads only the 7 left.
+#[test]
+fn paused_run_resumes_with_the_rest() {
+    let s = setup();
+    for i in 0..10 {
+        s.write(&format!("a/doc{i}.txt"), format!("documento número {i}"));
+    }
+    s.scan();
+    let mut gate = Budget {
+        budget: 3,
+        seen: Vec::new(),
+    };
+    let first =
+        vfs_content::index_with(&s.db, &s.opts(), &AtomicBool::new(false), &mut gate).unwrap();
+    assert_eq!((first.indexed, first.remaining), (3, 7), "{first:?}");
+    assert_eq!(gate.seen, vec![OutcomeKind::Indexed; 3]);
+    let rest = s.run(&s.opts());
+    assert_eq!(
+        (rest.queued, rest.indexed, rest.files_opened),
+        (7, 7, 7),
+        "{rest:?}"
+    );
+}
+
+/// VFS-2 AC-15 (R14): a long-lived `Searcher` opened before any document was read does not
+/// keep its empty count, which would make every word "common": once documents are indexed,
+/// a rare word still ranks.
+#[test]
+fn searcher_opened_on_an_empty_store_ranks_new_documents() {
+    let s = setup();
+    s.scan();
+    s.run(&s.opts()); // creates the empty store
+    let searcher = s.searcher();
+    let filters = SearchFilters::default();
+    assert!(searcher
+        .retrieve(&text("documento"), &filters, 10, 0)
+        .unwrap()
+        .hits
+        .is_empty());
+    for i in 0..40 {
+        let extra = if i == 7 { " Peñalara Peñalara" } else { "" };
+        s.write(
+            &format!("a/doc{i:02}.txt"),
+            format!("Este documento número {i}.{extra}"),
+        );
+    }
+    let root = PathBuf::from(&s.vfs.list_roots().unwrap()[0].path);
+    s.vfs.mark_dirty(std::slice::from_ref(&root)).unwrap();
+    s.scan();
+    s.run(&s.opts());
+    let r = searcher
+        .retrieve(&text("documento Peñalara"), &filters, 10, 0)
+        .unwrap();
+    assert_eq!(hit_names(&r), vec!["doc07.txt"], "{r:?}");
+}

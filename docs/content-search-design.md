@@ -108,6 +108,13 @@ search: name/path pass as today, plus a content pass; results merged
 - Cloud-only placeholders are never opened (VFS-2 R12): the index flag, then the file's
   attributes just before the open (Windows recall-on-open, recall-on-data-access or offline;
   macOS `SF_DATALESS`). They are `skipped` as `cloud` and read once they are local.
+- Background pace (VFS-27 R6–R8): the app calls the run with a `Gate` consulted between
+  documents only. `vfs_content::pace` decides from probe readings, in order: low space on the
+  app-data drive pauses (below 1 GB, resumed above 2 GB or by the user), a name walk or large
+  name pass waits, a busy disk waits under VFS-5's back-off (Windows; never more than
+  `max_backoff` without `min_work` of reading), and input within 60 s spaces documents 15 s
+  apart. The probes are `vfs_core::probes`. Paused folders (VFS-32) are passed over and keep
+  their state; time asleep does not count against a document's limit.
 - Worker lifetime (VFS-2 R17, R18): the worker says hello with its version and whether the
   OS reports it at background priority; another version or no hello stops the run before
   any state changes. It exits as soon as its stdin closes. On Windows it runs in a Job

@@ -578,6 +578,17 @@ pub fn dir_abs_path(conn: &Connection, dir_id: i64) -> Result<PathBuf> {
     Ok(join_rel(&root, &rel))
 }
 
+/// Ids of the roots the user paused (VFS-32 R1), for other readers of the index such as the
+/// content indexer, which skips their documents (VFS-27 R8).
+pub fn paused_root_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut st = conn.prepare(concat!(
+        "SELECT id FROM roots WHERE EXISTS ",
+        crate::roots::paused_key_sql!("roots.id")
+    ))?;
+    let ids = st.query_map([], |r| r.get(0))?;
+    Ok(ids.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Absolute path of a file, built from the original names.
 pub fn file_abs_path(conn: &Connection, file_id: i64) -> Result<PathBuf> {
     let (root, rel, name): (String, String, String) = conn
