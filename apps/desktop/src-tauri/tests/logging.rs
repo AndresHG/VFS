@@ -2,7 +2,9 @@
 //! binary, because the logger is process-wide and can be installed once.
 
 use tauri::test::{mock_builder, mock_context, noop_assets};
-use vfs_desktop_lib::feedback::{install_panic_hook, read_logs, PANIC_TARGET};
+use vfs_desktop_lib::feedback::{
+    install_panic_hook, parse_line, read_logs, redact_line, OMITTED, PANIC_TARGET,
+};
 use vfs_desktop_lib::{install_logger, LOG_KEEP, LOG_MAX_BYTES};
 
 /// VFS-1 C7: warnings and errors reach `<local data>/logs/vfs.log`; info-level messages,
@@ -11,6 +13,8 @@ use vfs_desktop_lib::{install_logger, LOG_KEEP, LOG_MAX_BYTES};
 /// target is not.
 /// VFS-20 AC-6: a panic is written as an error with its location; the file rotates at
 /// `LOG_MAX_BYTES`, keeps `LOG_KEEP` old files, and they hold at least 20 MB (several weeks).
+/// VFS-30 AC-4: the report's parser reads the lines this logger writes (target, level,
+/// message), so a diagnostic record is kept and a panic loses its message.
 #[test]
 fn warnings_go_to_the_log_file_and_info_does_not() {
     let app = mock_builder()
@@ -29,6 +33,17 @@ fn warnings_go_to_the_log_file_and_info_does_not() {
     assert!(!text.contains("Notaría"), "{text}");
     assert!(!text.contains("Herencia"), "{text}");
 
+    let warn = text
+        .lines()
+        .find(|l| l.contains("cannot list a folder"))
+        .unwrap();
+    let (target, level, start) = parse_line(warn).unwrap_or_else(|| panic!("unparsed {warn}"));
+    assert_eq!((target, level), ("logging", "WARN"), "{warn}");
+    assert_eq!(&warn[start..], "cannot list a folder: permission denied");
+    let diag = text.lines().find(|l| l.contains("pass mode=walk")).unwrap();
+    assert_eq!(parse_line(diag).map(|p| p.0), Some(vfs_core::DIAG_TARGET));
+    assert_eq!(redact_line(diag, &[], false), diag);
+
     install_panic_hook();
     let panicked = std::thread::spawn(|| panic!("simulated failure 42")).join();
     assert!(panicked.is_err());
@@ -40,6 +55,11 @@ fn warnings_go_to_the_log_file_and_info_does_not() {
     assert!(line.contains("[ERROR]"), "{line}");
     assert!(line.contains("simulated failure 42"), "{line}");
     assert!(line.contains("logging.rs:"), "{line}");
+    let redacted = redact_line(line, &[], false);
+    assert!(redacted.ends_with(&format!(": {OMITTED}")), "{redacted}");
+    assert!(redacted.contains("[ERROR] panic at "), "{redacted}");
+    assert!(redacted.contains("logging.rs:"), "{redacted}");
+    assert!(!redacted.contains("simulated failure"), "{redacted}");
 
     // Enough warnings for two more rotations than are kept: exactly LOG_KEEP old files plus
     // the active one remain, together holding at least 20 MB of history.

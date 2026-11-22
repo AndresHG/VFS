@@ -34,6 +34,10 @@ from; they are stack-agnostic.
 - **R7. A change to how much a search reads** (read caps, extra tiers or queries per search)
   carries `vfs bench` numbers on 2 M synthetic files for every affected order
   (`--sort`), before and after, in the spec or PR body (VFS-12).
+- **R8. Redaction tests feed free text, not only the formats the code writes**: panic
+  payloads (Rust's own messages quote values in backticks), bare names and search terms, and
+  names holding delimiters or line breaks; a fixture of today's `warn!` formats alone misses
+  them (VFS-30).
 
 ## Worth flagging — not blocking
 

@@ -21,8 +21,19 @@ use crate::AppState;
 /// Log target of panic records written by [`install_panic_hook`].
 pub const PANIC_TARGET: &str = "vfs::panic";
 
+/// How a panic record's message starts: `panic at <file>:<line>: <payload>`.
+const PANIC_PREFIX: &str = "panic at ";
+
 /// What replaces a path in a redacted line.
 pub const REDACTED: &str = "<ruta>";
+
+/// What replaces a panic's message, or a whole continuation line, when names are left out
+/// (VFS-30 R1, R3).
+pub const OMITTED: &str = "<omitido>";
+
+/// Most bytes of log lines "Ver el informe" shows: the newest ones (VFS-30 R4). The `.zip`
+/// holds all.
+pub const PREVIEW_LOG_BYTES: usize = 200 * 1024;
 
 /// New-issue page of the project; the `comentarios` form lives in `.github/ISSUE_TEMPLATE/`.
 pub const ISSUE_URL: &str = "https://github.com/AndresHG/VFS/issues/new";
@@ -94,8 +105,8 @@ pub struct LogFile {
 }
 
 /// The report: `summary` is everything but the user's text, the log lines and the root paths
-/// (what the public issue URL carries), `text` the whole report (what the `.zip` holds and the
-/// preview shows).
+/// (what the public issue URL carries), `text` the report with the log lines its budget allows
+/// (all of them for the `.zip`, the newest [`PREVIEW_LOG_BYTES`] for the preview).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub summary: String,
@@ -116,7 +127,7 @@ pub fn install_panic_hook() {
             .map(|s| (*s).to_owned())
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "?".to_owned());
-        log::error!(target: PANIC_TARGET, "panic at {location}: {message}");
+        log::error!(target: PANIC_TARGET, "{PANIC_PREFIX}{location}: {message}");
         log::logger().flush();
         previous(info);
     }));
@@ -146,8 +157,9 @@ pub fn read_logs(dir: &Path) -> Vec<LogFile> {
 }
 
 /// The parts of a log line written by `tauri-plugin-log`: `[date][time][target][LEVEL] msg`.
-/// `None` for a line without that prefix (the continuation of a multi-line message).
-fn parse_line(line: &str) -> Option<(&str, &str, usize)> {
+/// `None` for a line without that prefix (the continuation of a multi-line message). Returns
+/// the target, the level and where the message starts.
+pub fn parse_line(line: &str) -> Option<(&str, &str, usize)> {
     let mut rest = line;
     let mut fields = [""; 4];
     for field in &mut fields {
@@ -171,7 +183,18 @@ fn path_starts_at(s: &str, i: usize, private: &[String]) -> bool {
     let word_start = i == 0
         || matches!(
             s.as_bytes()[i - 1],
-            b' ' | b'\t' | b'"' | b'\'' | b'(' | b'[' | b'=' | b':' | b','
+            b' ' | b'\t'
+                | b'"'
+                | b'\''
+                | b'`'
+                | b'('
+                | b'['
+                | b'{'
+                | b'<'
+                | b'|'
+                | b'='
+                | b':'
+                | b','
         );
     if !word_start {
         return false;
@@ -222,11 +245,37 @@ pub fn redact_message(message: &str, private: &[String]) -> String {
     out
 }
 
-/// One log line as the report shows it with names left out (R3): diagnostic records verbatim,
-/// any other line with its prefix kept and its message redacted.
-pub fn redact_line(line: &str, private: &[String]) -> String {
+/// A panic record's message with names left out (VFS-30 R1): its payload is free text (Rust's own
+/// messages quote names in backticks, a search term can be in it), so only the location is
+/// kept: `panic at <file>:<line>: <omitido>`.
+fn redact_panic(message: &str) -> String {
+    // Only the text before the first `": "` can be the location (a source path never holds
+    // one); the `?` written when std gives no location is not one either.
+    let location = message
+        .strip_prefix(PANIC_PREFIX)
+        .and_then(|rest| rest.split_once(": "))
+        .map(|(loc, _)| loc)
+        .filter(|loc| {
+            loc.rsplit_once(':')
+                .is_some_and(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        });
+    match location {
+        Some(loc) => format!("{PANIC_PREFIX}{loc}: {OMITTED}"),
+        None => OMITTED.to_owned(),
+    }
+}
+
+/// One log line as the report shows it with names left out (VFS-20 R3, VFS-30 R1–R3):
+/// diagnostic records verbatim, a panic record with only its location, any other line with
+/// its prefix kept and its message redacted. A continuation line (no prefix) is kept as written only when the record
+/// it continues is a diagnostic one (`after_diag`); any other is replaced whole, since a name
+/// holding a line break leaves its tail there.
+pub fn redact_line(line: &str, private: &[String], after_diag: bool) -> String {
     match parse_line(line) {
         Some((target, _, _)) if target == vfs_core::DIAG_TARGET => line.to_owned(),
+        Some((target, _, start)) if target == PANIC_TARGET => {
+            format!("{}{}", &line[..start], redact_panic(&line[start..]))
+        }
         Some((_, _, start)) => {
             format!(
                 "{}{}",
@@ -234,7 +283,8 @@ pub fn redact_line(line: &str, private: &[String]) -> String {
                 redact_message(&line[start..], private)
             )
         }
-        None => redact_message(line, private),
+        None if after_diag => line.to_owned(),
+        None => OMITTED.to_owned(),
     }
 }
 
@@ -284,12 +334,15 @@ fn mb(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / (1024.0 * 1024.0))
 }
 
-/// Builds the report (R2–R4). Its labels are English: it is read by maintainers.
+/// Builds the report (VFS-20 R2–R4). Its labels are English: it is read by maintainers. Only
+/// the newest `log_budget` bytes of log lines are included, whole lines only (the preview passes
+/// [`PREVIEW_LOG_BYTES`], the `.zip` `usize::MAX`); the counts always cover every line.
 pub fn build_report(
     env: &Environment,
     description: &str,
     include_names: bool,
     logs: &[LogFile],
+    log_budget: usize,
 ) -> Report {
     let mut s = String::new();
     let yes_no = |b: bool| if b { "yes" } else { "no" };
@@ -368,9 +421,9 @@ pub fn build_report(
     );
     let summary = s;
 
-    let mut text = String::with_capacity(
-        summary.len() + logs.iter().map(|f| f.text.len()).sum::<usize>() + 256,
-    );
+    let total: usize = logs.iter().map(|f| f.text.len()).sum();
+    let mut skip = total.saturating_sub(log_budget);
+    let mut text = String::with_capacity(summary.len() + total.min(log_budget) + 512);
     text.push_str("VFS diagnostic report\n\n## What happened\n");
     let description = description.trim();
     text.push_str(if description.is_empty() {
@@ -383,15 +436,36 @@ pub fn build_report(
     text.push_str(&named_roots);
     text.push_str(&summary[roots_end..]);
     text.push_str("\n## Log lines\n");
+    if skip > 0 {
+        text.push_str("(older lines are left out of this preview; the .zip holds them all)\n");
+    }
     for file in logs {
+        if skip >= file.text.len() {
+            skip -= file.text.len();
+            continue;
+        }
+        // Start at the first whole line after the bytes skipped.
+        let start = if skip == 0 || file.text.as_bytes()[skip - 1] == b'\n' {
+            skip
+        } else {
+            file.text.as_bytes()[skip..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(file.text.len(), |p| skip + p + 1)
+        };
+        skip = 0;
         let _ = writeln!(text, "--- {} ---", file.name);
-        for line in file.text.lines() {
+        let mut after_diag = false;
+        for line in file.text[start..].lines() {
             if include_names {
                 text.push_str(line);
             } else {
-                text.push_str(&redact_line(line, &env.private));
+                text.push_str(&redact_line(line, &env.private, after_diag));
             }
             text.push('\n');
+            if let Some((target, _, _)) = parse_line(line) {
+                after_diag = target == vfs_core::DIAG_TARGET;
+            }
         }
     }
     Report { summary, text }
@@ -790,16 +864,24 @@ fn current_report<R: Runtime>(
     state: &AppState,
     description: &str,
     include_names: bool,
+    log_budget: usize,
 ) -> Report {
     let logs = app
         .path()
         .app_local_data_dir()
         .map(|d| read_logs(&d.join("logs")))
         .unwrap_or_default();
-    build_report(&gather(app, state), description, include_names, &logs)
+    build_report(
+        &gather(app, state),
+        description,
+        include_names,
+        &logs,
+        log_budget,
+    )
 }
 
-/// The report text exactly as it would be saved ("Ver el informe", R1).
+/// "Ver el informe" (VFS-20 R1, VFS-30 R4): the report as it would be saved, with only the newest
+/// [`PREVIEW_LOG_BYTES`] of log lines, so a slow PC never loads the whole log into the page.
 #[tauri::command(async)]
 pub fn feedback_report<R: Runtime>(
     app: AppHandle<R>,
@@ -807,7 +889,7 @@ pub fn feedback_report<R: Runtime>(
     description: String,
     include_names: bool,
 ) -> Result<String, ApiError> {
-    Ok(current_report(&app, &state, &description, include_names).text)
+    Ok(current_report(&app, &state, &description, include_names, PREVIEW_LOG_BYTES).text)
 }
 
 /// Where the report was saved.
@@ -829,7 +911,7 @@ pub fn feedback_save<R: Runtime>(
     include_names: bool,
     github: bool,
 ) -> Result<FeedbackSaved, ApiError> {
-    let report = current_report(&app, &state, &description, include_names);
+    let report = current_report(&app, &state, &description, include_names, usize::MAX);
     let p = app.path();
     let dir = export_dir(&[
         p.download_dir().ok(),
@@ -908,7 +990,9 @@ mod tests {
     const DIAG: &str = "[2026-11-21][09:00:00][vfs::diag][INFO] pass mode=walk period_s=60 dirs=120 files_added=3000 errors=0";
 
     /// Every warning format the code writes today that can carry a path or a name (VFS-5 R8
-    /// kept info lines out; warnings and errors still name folders).
+    /// kept info lines out; warnings and errors still name folders), plus free-text panic
+    /// payloads (a slicing panic quoting a path in backticks, a bare search term), paths after
+    /// a backtick or `<`, and a macOS name holding a line break.
     fn hostile_log() -> String {
         [
             DIAG,
@@ -923,6 +1007,11 @@ mod tests {
             r"[2026-11-21][09:00:08][vfs_core::indexer][WARN] cannot list E:\Archivo (2019)\Nueva carpeta (2)\Casa d'Ana: Acceso denegado. (os error 5)",
             r"[2026-11-21][09:00:08][vfs_core::indexer][WARN] root E:\Archivo (2019) became unreachable",
             r"[2026-11-21][09:00:09][vfs::panic][ERROR] panic at crates/vfs-core/src/x.rs:10: called `Result::unwrap()` on an `Err` value: NotFound(D:\Fotos familia\Boda Laura.jpg)",
+            r"[2026-11-21][09:00:09][vfs::panic][ERROR] panic at library/core/src/str/mod.rs:68: byte index 9 is not a char boundary; it is inside 'ñ' (bytes 8..10) of `D:\Archivo\Boda año.jpg`",
+            "[2026-11-21][09:00:09][vfs::panic][ERROR] panic at crates/vfs-core/src/search.rs:40: no match for `Bautizo Leo`",
+            r"[2026-11-21][09:00:09][vfs_core::indexer][WARN] skipped `F:\Recuerdos\Cumple Marta.png`: locked",
+            r"[2026-11-21][09:00:09][vfs_core::indexer][WARN] open <G:\Escaneos\Contrato alquiler.pdf> failed",
+            "[2026-11-21][09:00:09][vfs_core::indexer][WARN] cannot list /Volumes/Archivo/Nota\nsecreta banco: Permission denied",
             r#"[2026-11-21][09:00:10][vfs_core::indexer][ERROR] indexer: not a directory: "/Users/ana/Documentos/Declaración renta.pdf""#,
             "continuation line ~/Escritorio/Carta al banco.odt",
         ]
@@ -947,6 +1036,13 @@ mod tests {
         "(2019)",
         "Nueva carpeta",
         "Casa d'Ana",
+        "Boda año",
+        "Bautizo Leo",
+        "Recuerdos",
+        "Cumple Marta",
+        "Escaneos",
+        "Contrato alquiler",
+        "secreta banco",
     ];
 
     fn logs() -> Vec<LogFile> {
@@ -967,7 +1063,13 @@ mod tests {
     /// file first.
     #[test]
     fn report_holds_every_section() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "Va lento", false, &logs());
+        let r = build_report(
+            &env(&[r"D:\Fotos familia"]),
+            "Va lento",
+            false,
+            &logs(),
+            usize::MAX,
+        );
         for want in [
             "## What happened\nVa lento",
             "version: 0.2.0",
@@ -976,7 +1078,7 @@ mod tests {
             "files: 1200\nfolders: 80\nroots: 1\nsize_mb: 5.0\nwal_mb: 1.0\nschema: 4",
             "indexer: idle",
             "firefox_bookmarks: on (profiles=1 bookmarks=230)",
-            "files: 2\nlines: 15\nwarnings: 10\nerrors: 2\npanics: 1",
+            "files: 2\nlines: 21\nwarnings: 13\nerrors: 4\npanics: 3",
             "names_included: no",
         ] {
             assert!(r.text.contains(want), "missing {want:?} in\n{}", r.text);
@@ -993,6 +1095,8 @@ mod tests {
 
     /// VFS-20 AC-2: with the box unticked no root path, file or folder name survives in any
     /// warning format, `<ruta>` takes their place, and diagnostic lines are unchanged.
+    /// VFS-30 AC-1: nor in a panic payload or a name's tail after a line break; each panic
+    /// keeps only its location.
     #[test]
     fn report_without_names_redacts_every_path() {
         let r = build_report(
@@ -1000,6 +1104,7 @@ mod tests {
             "",
             false,
             &logs(),
+            usize::MAX,
         );
         for secret in SECRETS {
             assert!(!r.text.contains(secret), "{secret:?} leaked in\n{}", r.text);
@@ -1012,12 +1117,22 @@ mod tests {
             .text
             .lines()
             .any(|l| l.ends_with("[vfs_bookmarks][WARN] Firefox profile <ruta>")));
-        assert!(r.text.contains("panic at crates/vfs-core/src/x.rs:10"));
+        for panic in [
+            "panic at crates/vfs-core/src/x.rs:10: <omitido>",
+            "panic at library/core/src/str/mod.rs:68: <omitido>",
+            "panic at crates/vfs-core/src/search.rs:40: <omitido>",
+        ] {
+            assert!(r.text.lines().any(|l| l.ends_with(panic)), "{panic}");
+        }
+        assert!(r.text.contains("[WARN] skipped `<ruta>: locked"));
+        assert!(r.text.contains("[WARN] open <<ruta>"));
+        assert_eq!(r.text.lines().filter(|l| *l == OMITTED).count(), 2);
         assert!(!r.text.contains("path: "));
     }
 
     /// VFS-20 AC-2: the generic rule alone (no root given) still catches Windows, UNC, macOS
     /// and home-relative paths, and leaves ordinary words and our own source paths alone.
+    /// VFS-30 AC-2: also after a backtick, `<`, `{` or `|`.
     #[test]
     fn generic_rule_redacts_paths_without_known_roots() {
         let none: &[String] = &[];
@@ -1041,6 +1156,14 @@ mod tests {
             r#"not a dir: "<ruta>" (x)"#
         );
         assert_eq!(redact_message(r"open \\srv\a\b", none), "open <ruta>");
+        // A path after a backtick, `<`, `{` or `|` (Rust's messages, Debug output, tables).
+        assert_eq!(redact_message(r"of `C:\a\Boda.jpg`", none), "of `<ruta>");
+        assert_eq!(
+            redact_message("open </a/Boda.jpg> failed", none),
+            "open <<ruta>"
+        );
+        assert_eq!(redact_message("Entry {/a/Boda.jpg}", none), "Entry {<ruta>");
+        assert_eq!(redact_message(r"x |D:\Boda.jpg| y", none), "x |<ruta>");
         assert_eq!(redact_message("at ~/Docs/x", none), "at <ruta>");
         assert_eq!(
             redact_message("km/h and a/b at src/x.rs:3", none),
@@ -1090,10 +1213,108 @@ mod tests {
         );
     }
 
+    /// VFS-30 AC-3: a panic keeps only its location, whatever its payload; a continuation line
+    /// is kept only after a diagnostic record, any other is replaced whole (a macOS name can
+    /// hold a line break).
+    #[test]
+    fn panics_and_continuations_keep_no_free_text() {
+        let none: &[String] = &[];
+        let panic = |m: &str| format!("[2026-11-21][09:00:09][vfs::panic][ERROR] {m}");
+        assert_eq!(
+            redact_line(
+                &panic(r"panic at C:\src\x.rs:5: of `Declaración renta`"),
+                none,
+                false
+            ),
+            panic(r"panic at C:\src\x.rs:5: <omitido>")
+        );
+        assert_eq!(
+            redact_line(&panic("panic at x.rs: 3: Boda: y"), none, false),
+            panic(OMITTED)
+        );
+        assert_eq!(
+            redact_line(&panic("panic at ?: open Boda.jpg:3: y"), none, false),
+            panic(OMITTED)
+        );
+        assert_eq!(redact_line("Boda Laura.jpg", none, false), OMITTED);
+        assert_eq!(redact_line("dirs=3 files=9", none, true), "dirs=3 files=9");
+
+        let mut env = env(&[]);
+        env.private.clear();
+        let log = |text: &str| {
+            vec![LogFile {
+                name: "vfs.log".into(),
+                text: text.into(),
+            }]
+        };
+        let text = build_report(
+            &env,
+            "",
+            false,
+            &log("[d][t][vfs_core::indexer][WARN] cannot list /a/Nota\nsecreta banco: denied\n"),
+            usize::MAX,
+        )
+        .text;
+        assert!(!text.contains("secreta"), "{text}");
+        assert!(text.ends_with("cannot list <ruta>\n<omitido>\n"), "{text}");
+        let text = build_report(
+            &env,
+            "",
+            false,
+            &log(&format!("{DIAG}\n  dirs=3\n")),
+            usize::MAX,
+        )
+        .text;
+        assert!(text.ends_with(&format!("{DIAG}\n  dirs=3\n")), "{text}");
+    }
+
+    /// VFS-30 AC-5: the preview holds the summary and only the newest
+    /// [`PREVIEW_LOG_BYTES`] of log lines, whole lines, and says the rest is in the `.zip`;
+    /// the counts still cover every line.
+    #[test]
+    fn preview_stays_bounded() {
+        let line =
+            |i: usize| format!("[2026-11-21][09:00:00][vfs_core::indexer][WARN] warning {i:07}");
+        let big: String = (0..60_000).map(|i| line(i) + "\n").collect();
+        assert!(big.len() > 10 * PREVIEW_LOG_BYTES);
+        let logs = vec![
+            LogFile {
+                name: "vfs_2026-11-01_00-00-00.log".into(),
+                text: big.clone(),
+            },
+            LogFile {
+                name: "vfs.log".into(),
+                text: big,
+            },
+        ];
+        let env = env(&[]);
+        let preview = build_report(&env, "", false, &logs, PREVIEW_LOG_BYTES);
+        assert!(
+            preview.text.len() <= preview.summary.len() + PREVIEW_LOG_BYTES + 1024,
+            "{}",
+            preview.text.len()
+        );
+        assert!(preview.text.contains("lines: 120000\nwarnings: 120000"));
+        assert!(preview.text.contains("the .zip holds them all"));
+        assert!(preview.text.ends_with(&(line(59_999) + "\n")));
+        assert!(!preview.text.contains("--- vfs_2026-11-01"));
+        let first_kept = preview.text.lines().find(|l| l.contains("[WARN]")).unwrap();
+        assert!(first_kept.starts_with("[2026-11-21]"), "{first_kept}");
+
+        // A budget that ends exactly at a line start keeps that whole line.
+        let one = build_report(&env, "", false, &logs, line(0).len() + 1);
+        let kept: Vec<&str> = one.text.lines().filter(|l| l.contains("[WARN]")).collect();
+        assert_eq!(kept, [line(59_999)]);
+
+        let full = build_report(&env, "", false, &logs, usize::MAX);
+        assert!(full.text.contains(&line(0)));
+        assert!(!full.text.contains("the .zip holds them all"));
+    }
+
     /// VFS-20 AC-3: with the box ticked the root paths and the original lines appear.
     #[test]
     fn report_with_names_keeps_them() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "", true, &logs());
+        let r = build_report(&env(&[r"D:\Fotos familia"]), "", true, &logs(), usize::MAX);
         assert!(r.text.contains(r"path: D:\Fotos familia"));
         assert!(r.text.contains(&hostile_log()));
         assert!(r.text.contains("names_included: yes"));
@@ -1105,7 +1326,7 @@ mod tests {
     #[test]
     fn report_zip_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
-        let text = build_report(&env(&[]), "Hola ñandú", false, &logs()).text;
+        let text = build_report(&env(&[]), "Hola ñandú", false, &logs(), usize::MAX).text;
         let path = report_path(tmp.path(), "2026-11-21-1030");
         assert_eq!(path.file_name().unwrap(), "vfs-informe-2026-11-21-1030.zip");
         write_zip(&path, &text).unwrap();
@@ -1148,7 +1369,7 @@ mod tests {
     /// the form declares the fields the URL fills.
     #[test]
     fn github_url_is_short_and_encoded() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "", false, &logs());
+        let r = build_report(&env(&[r"D:\Fotos familia"]), "", false, &logs(), usize::MAX);
         let long = "No encuentra la escritura & <otras> cosas ñ ".repeat(500);
         let url = github_url(&long, &r.summary);
         assert!(
@@ -1187,7 +1408,7 @@ mod tests {
     #[test]
     fn github_url_never_holds_root_paths() {
         let roots = [r"D:\Fotos familia", "/Volumes/Archivo/Notaría"];
-        let r = build_report(&env(&roots), "Va lento", true, &logs());
+        let r = build_report(&env(&roots), "Va lento", true, &logs(), usize::MAX);
         let url = github_url("Va lento", &r.summary);
         for root in roots {
             assert!(r.text.contains(&format!("path: {root}")), "{}", r.text);

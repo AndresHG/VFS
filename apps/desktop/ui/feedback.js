@@ -25,7 +25,8 @@ export function setupFeedback({ api, S, $, errorText }) {
   }
 
   // The preview is built only while "Ver el informe" is open, and again when the names box
-  // changes; a slower, older answer never overwrites a newer one.
+  // changes or it is opened again, never on typing (the shell reads the whole log for it); a
+  // slower, older answer never overwrites a newer one.
   async function refreshPreview() {
     if (!details.open) return;
     const token = ++previewToken;
@@ -61,7 +62,6 @@ export function setupFeedback({ api, S, $, errorText }) {
   });
   details.addEventListener('toggle', refreshPreview);
   names.addEventListener('change', refreshPreview);
-  text.addEventListener('change', refreshPreview);
   $('feedback-github').addEventListener('click', () => save(true));
   $('feedback-export').addEventListener('click', () => save(false));
 }

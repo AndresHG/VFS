@@ -1,8 +1,9 @@
 # Reading a VFS diagnostic report
 
 "Enviar comentarios" (VFS-20) saves `vfs-informe-<AAAA-MM-DD-HHMM>.zip` in the user's
-Downloads folder. It holds one file, `informe.txt`, exactly the text the dialog's "Ver el
-informe" shows. This page says what is in it and how to analyse it in a session on this repo.
+Downloads folder. It holds one file, `informe.txt`, the whole report: the text the dialog's
+"Ver el informe" shows, which carries only the newest ~200 KB of log lines (VFS-30), with
+every log line. This page says what is in it and how to analyse it in a session on this repo.
 
 ## Getting a report
 
@@ -37,11 +38,14 @@ Log lines are `[date][time UTC][target][LEVEL] message`. Targets worth knowing:
   minute, `backoff_s` spent waiting for a busy disk, commit and checkpoint ms, retries,
   errors); `memory` every 10 min (working set, WAL and index MB); `watch_overflow` when a
   watcher lost events and a re-walk was queued.
-- `vfs::panic` (ERROR): a panic, with the source location in this repo.
+- `vfs::panic` (ERROR): a panic, with the source location in this repo. Without names only
+  `panic at <file>:<line>: <omitido>` is kept: the payload is free text and can name files.
 - Any other target (WARN/ERROR): problems such as unreadable folders or watcher failures.
   Without names, every path in them reads `<ruta>`, and the redaction may swallow the rest of
   the clause (`root <ruta>` for "root … became unreachable"); after a macOS path (`/…`, `~/…`)
   it swallows the rest of the line, error text included, since a macOS name can hold `": "`.
+  A continuation line (no `[date]…` prefix) reads `<omitido>` unless it follows a `vfs::diag`
+  record.
 
 ## Analysing it in a Claude session
 
