@@ -181,7 +181,7 @@ followed, and a root that has become a link is unavailable. It skips:
   `Scripts`, `include`). `Exclusions::for_root` drops the path rules that are the root or
   contain it, so a folder added as a root is indexed; per listing it costs one map lookup
   and a name scan per subfolder. The watcher filter and replays drop changes inside them.
-  Each root records the list version and setting of its last full walk (`meta`
+  Each root records the list version and setting its last full walk started under (`meta`
   `exclusions/<id>`); a mismatch at start owes a full walk;
 - the app's own data directory;
 - entries that vanish, or fail with an error other than permission denied, while being

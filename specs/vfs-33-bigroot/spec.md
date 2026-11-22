@@ -135,7 +135,9 @@ a root is still indexed.
 
 - R5. WHILE the setting «Incluir carpetas del sistema y de programas» is off (the default),
   THE walker SHALL skip every folder below a root that a rule of the exclusion list matches,
-  and the watcher and replays (VFS-9, VFS-26) SHALL drop changes inside such folders. The
+  and the watcher and replays (VFS-9, VFS-26) SHALL drop changes inside folders matched by
+  a name or path rule. Markers need the folder's entries, so changes inside a marked folder
+  still re-list it, and the listing comes back empty or filtered. The
   list is one data table (`crates/vfs-core/src/indexer/exclude.rs`, `LIST`), in four
   categories: system, app data, development, other programs. A rule has one of these forms:
   - a folder name anywhere, ignoring ASCII case;
@@ -152,10 +154,13 @@ a root is still indexed.
   rules and markers in its subfolders.
 - R7. Matching SHALL cost one map lookup per listed folder plus a scan of the name list per
   subfolder, and no file-system call beyond the listing.
-- R8. WHEN the setting changes, or WHEN an index made under an older exclusion list
-  (`meta` key `exclusions`, a version number) is opened, THE indexer SHALL owe a full walk
-  of every root (never deferred, VFS-1 I10). The walk removes newly excluded folders or adds
-  newly included ones.
+- R8. Each root SHALL record, in its `meta` key `exclusions/<id>`, the list version and the
+  setting its last full walk started under. WHEN the setting changes, THE indexer SHALL
+  request a full walk of every root (VFS-1 I10: deferred for a root being walked). WHEN the
+  indexer starts, every root whose record differs from the current version and setting
+  SHALL owe a full walk, never deferred. A walk during which the switch changed keeps the
+  setting it started under, so it stays stale. The walk removes newly excluded folders or
+  adds newly included ones.
 - R9. THE settings panel SHALL show, under a collapsed «Avanzado» section, one switch (off
   by default) and a short text that names the categories with examples and says that adding
   such a folder to the list indexes it. Both catalogs carry the copy (VFS-22).
@@ -177,8 +182,10 @@ a root is still indexed.
   only the plain files, the marked folders' own names and `notas.txt` are indexed. When the
   setting is turned on and the root is walked again, everything is indexed. When the setting
   is turned off again and the root is walked, the excluded files are gone.
-- AC-9 (R8) Given an index without the current `exclusions` version, When the indexer
-  starts, Then every root owes a full walk, and the version is stored.
+- AC-9 (R8) Given a root without the current `exclusions/<id>` record, When the indexer
+  starts, Then it owes a full walk, and the record is stored when that walk ends. Given a
+  walk during which the switch changed, When it ends, Then the root is still stale; the
+  next walk clears it.
 - AC-10 (R9) UI test: the switch exists, is off by default, sits in a collapsed «Avanzado»
   section, and its copy exists in both catalogs.
 

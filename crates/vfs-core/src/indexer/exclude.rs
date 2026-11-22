@@ -39,16 +39,31 @@ fn stamp_value(include_all: bool) -> String {
     format!("{VERSION}:{}", u8::from(include_all))
 }
 
-/// Records that `root_id`'s full walk just ended under the current list and setting.
-pub(crate) fn stamp(conn: &Connection, root_id: i64) -> Result<()> {
+fn walk_key(root_id: i64) -> String {
+    format!("exclusions/{root_id}/walk")
+}
+
+/// Records the list version and setting a full walk of `root_id` starts under.
+pub(crate) fn begin_walk(conn: &Connection, root_id: i64) -> Result<()> {
     let value = stamp_value(include_all(conn)?);
+    set_meta(conn, &walk_key(root_id), &value)
+}
+
+/// Records that `root_id`'s full walk just ended, under the version and setting it started
+/// with: a walk the switch changed halfway is stale, and owes another (VFS-33 R8).
+pub(crate) fn stamp(conn: &Connection, root_id: i64) -> Result<()> {
+    let value = match meta(conn, &walk_key(root_id))? {
+        Some(v) => v,
+        None => stamp_value(include_all(conn)?),
+    };
     set_meta(conn, &stamp_key(root_id), &value)
 }
 
-/// Forgets `root_id`'s record (its root is removed).
+/// Forgets `root_id`'s records (its root is removed).
 pub(crate) fn forget(conn: &Connection, root_id: i64) -> Result<()> {
-    conn.prepare_cached("DELETE FROM meta WHERE key = ?1")?
-        .execute([stamp_key(root_id)])?;
+    let mut stmt = conn.prepare_cached("DELETE FROM meta WHERE key = ?1")?;
+    stmt.execute([stamp_key(root_id)])?;
+    stmt.execute([walk_key(root_id)])?;
     Ok(())
 }
 

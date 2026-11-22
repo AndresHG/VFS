@@ -492,6 +492,7 @@ fn scan_root(
         }
         if let Some(now) = first_cursor {
             cursor::store(t, root.id, now.as_deref())?;
+            exclude::begin_walk(t, root.id)?;
             set_root_status(t, root.id, RootStatus::Scanning)?;
             root.status = RootStatus::Scanning;
         }
@@ -696,6 +697,7 @@ fn queue_rewalk(conn: &Connection, history: &dyn History, root_id: i64) -> Resul
             params![root_id, ScanState::PendingDeep as i64],
         )?;
         cursor::store(&tx, root_id, now.as_deref())?;
+        exclude::begin_walk(&tx, root_id)?;
     }
     tx.commit()?;
     Ok(true)
@@ -725,6 +727,7 @@ fn restart_walk(conn: &Connection, history: &dyn History, root_id: i64) -> Resul
         params![root_id, ScanState::PendingDeep as i64],
     )?;
     cursor::store(&tx, root_id, now.as_deref())?;
+    exclude::begin_walk(&tx, root_id)?;
     tx.commit()?;
     Ok(true)
 }

@@ -2588,3 +2588,18 @@ fn an_older_exclusion_list_owes_a_walk() {
     drop(h);
     assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
 }
+
+/// VFS-33 AC-9: a walk during which the switch changed records the setting it started
+/// under, so the root is still stale afterwards and owes another walk.
+#[test]
+fn a_walk_the_switch_changed_halfway_stays_stale() {
+    let mut fx = fixture(&["A", "B"]);
+    fx.scan();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    exclude::set_include_all(&fx.conn, true).unwrap();
+    fx.scan();
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+}
