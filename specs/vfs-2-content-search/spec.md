@@ -39,7 +39,8 @@ the command line only.
   (`crates/vfs-core/src/kind.rs`). v1 writes `content_state = 0` only and never resets it
   when a file changes.
 - Name search keeps its own page caches (up to 224 MiB) and must stay under 300 MB of RAM
-  with the index open (VFS-1 AC-9). The name indexer is the only writer of `index.db`.
+  with the index open (VFS-1 AC-9). The name indexer owns `index.db`. The content indexer
+  writes only `files.content_state` (R20).
 - Other work runs in parallel on the schema and search internals of `vfs-core`; this step
   must not change `vfs-core`'s schema, its `SCHEMA_VERSION` or its search code.
 - Assumptions: an older 4-core x86 CPU and 8 GB of RAM on the target PC; 60,000–500,000
@@ -104,34 +105,58 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
 - R14. WHEN a query word occurs in more than 5 % of the indexed documents (counted with
   `fts5vocab`), THE content search SHALL use that word to filter but not to rank. IF every word
   is that common, THEN it SHALL rank by BM25 over at most the first 1,000 candidates.
-- R15. THE `vfs-content` crate SHALL expose the retrieval call `retrieve(query, filters, k)`.
-  It returns ranked documents, each with its best passages: file id, chunk ordinal, character
-  range, page, BM25 score, and a snippet with highlight offsets. A second call,
-  `passage_text(file_id, ordinal, before, after)`, returns the full text of that chunk joined
-  with up to `before` preceding and `after` following chunks of the same document, with the
-  joined character range. A third call, `unread(file_ids)`, returns each file's unread
-  reason, and `unread_counts()` returns the count per reason. The reasons are:
-  - `cloud` (R12);
-  - `scanned`: a PDF whose pages have no text layer;
-  - `password`;
-  - `too_large`;
-  - `failed`: any other error or an empty text.
-  The CLI, the app (VFS-27),
-  the questions (VFS-28) and hybrid search (VFS-29) SHALL all use this call. None of them
-  SHALL query `content.db` directly.
+- R15. THE `vfs-content` crate SHALL expose these calls, and the CLI, the app (VFS-27), the
+  questions (VFS-28) and hybrid search (VFS-29) SHALL use only them. None of them SHALL query
+  `content.db` directly.
+  - `retrieve(query, filters, k, offset) -> {hits, partial, total}`. `query` is either the
+    user's text, parsed as in R6 and R13, or a structured query
+    `{all: [words], any: [words], phrases: [text]}`:
+    - every `all` word and every phrase must match;
+    - `any` words are optional, and a document needs at least one `any` word only when
+      `all` and `phrases` are empty;
+    - all of them rank.
+    `hits` are ranked documents, from `offset`, at most `k`. Each hit has its R16 metadata
+    and its best passages: file id, chunk ordinal, character range, page, BM25 score, and a
+    snippet with highlight offsets. Passages are ranked within the document. `partial` is
+    R13's flag. `total` is the number of matching documents, counted up to 1,000.
+  - `passage_text(file_id, ordinal, before, after)` returns the full text of that chunk,
+    joined with up to `before` preceding and `after` following chunks of the same document,
+    and the joined character range.
+  - `unread(file_ids)` returns each file's unread reason, and `unread_counts()` returns the
+    count per reason, following the table below.
+
+  | Indexer outcome | Unread reason |
+  |---|---|
+  | `indexed` | none |
+  | `queued`, or not yet seen | none; counted as "not yet read" by VFS-27 |
+  | `skipped`, cloud-only (R12) | `cloud` |
+  | `skipped`, a PDF with at least one page and zero extracted text bytes | `scanned` |
+  | `skipped`, encrypted or password-protected | `password` |
+  | `skipped`, over the input size budget | `too_large` |
+  | `skipped`, a kind not extracted in this step (iWork, EPUB) | `unsupported` |
+  | `skipped`, any other empty text | `failed` |
+  | `failed`, any reason | `failed` |
 - R16. WHEN a document's format carries metadata, THE content store SHALL keep its title, its
   author(s), and its creation date as reported by the extractor, next to the document row.
   It SHALL return them with each `retrieve` hit, for VFS-28's bibliography. Formats without
   metadata store none; nothing is guessed from the text.
-- R17. IF the worker cannot be started (binary missing or blocked, version mismatch), or the
-  document's root folder is offline, or `content.db` cannot be written (disk full, I/O
-  error), THEN THE content indexer SHALL stop the run with that reason and leave every
-  file's state unchanged. Only a failure caused by the document itself marks it failed.
-  After 5 worker crashes in a row on 5 different files, the run SHALL stop with the reason
-  "worker unstable".
+- R17. IF the worker cannot be started (binary missing or blocked, version mismatch), or
+  `content.db` cannot be written (disk full, I/O error), THEN THE content indexer SHALL stop
+  the run with that reason and leave every file's state unchanged. IF a document's root
+  folder is offline, THEN it SHALL skip that root's documents without changing their state,
+  and SHALL go on with the other roots. Only a failure caused by the document itself marks
+  it failed. A worker that dies without an answer counts as a crash. A timeout or a memory
+  abort counts as the document's own failure, not as a crash. After 5 crashes in a row on 5
+  different files, the run SHALL stop with the reason "worker unstable".
 - R18. THE worker SHALL exit when its parent's pipe closes. On Windows, the parent SHALL put
-  the worker in a Job Object with kill-on-close and a committed-memory limit equal to the
-  worker cap.
+  the worker in a Job Object with kill-on-close and a committed-memory limit of the
+  allocator cap plus 128 MB, so the allocator's abort (D6) fires first.
+- R19. THE content store SHALL carry a schema version in SQLite's `user_version`. IF the
+  version on disk differs from the app's, THEN THE content indexer SHALL rebuild the store
+  from scratch rather than read it. VFS-27 asks the user first.
+- R20. THE content indexer SHALL write only `files.content_state` in `index.db`, in short
+  transactions with a busy timeout. The name indexer remains the only writer of every other
+  column, and of the schema.
 
 ## Acceptance scenarios
 
@@ -210,14 +235,27 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
 - AC-18 (R16) Given a PDF and a DOCX whose metadata holds a title, an author and a creation
   date, and a TXT, When they are content-indexed and retrieved, Then the PDF and DOCX hits
   carry those three values and the TXT hit carries none.
-- AC-19 (R15) Given a scanned PDF, a password-protected PDF, an empty DOCX and a cloud-only
-  file, When they are content-indexed, Then `unread` returns `scanned`, `password`,
-  `failed` and `cloud` for them, and `unread_counts` returns one of each.
+- AC-19 (R15) Given a scanned PDF, a password-protected PDF, an empty DOCX, a cloud-only file
+  and a `.pages` file, When they are content-indexed, Then `unread` returns `scanned`,
+  `password`, `failed`, `cloud` and `unsupported` for them, and `unread_counts` returns one
+  of each.
 - AC-20 (R17, R18) Given the worker binary removed, When the content indexer runs, Then the
   run stops with "worker cannot start" and no file changes state. Given a store write made
   to fail with a full disk, Then the run stops and the document being written stays queued.
   Given 5 consecutive files whose extraction crashes the worker, Then the run stops with
-  "worker unstable". Given the parent killed mid-run, Then the worker exits within 2 s.
+  "worker unstable". Given 5 consecutive timeouts, Then the run does not stop. Given a worker
+  reporting another version, Then the run stops with "version mismatch". Given one of two
+  roots offline, Then the other root's documents are read and the offline root's keep their
+  state. Given the parent killed mid-run, Then the worker exits within 2 s.
+- AC-21 (R19, R20) Given a store whose `user_version` is older than the app's, When the
+  content indexer opens it, Then it rebuilds it and never reads the old rows. Given a
+  content run concurrent with a name pass, When both write, Then neither fails with "database
+  is locked", and the content indexer changes no column other than `content_state`.
+- AC-22 (R15) Given documents A (has `alquiler` and `fianza`) and B (only `fianza`), When
+  `retrieve({any: [alquiler, fianza]}, …)` runs, Then both come back with A first. When
+  `retrieve({all: [alquiler], any: [fianza]}, …)` runs, Then only A comes back. Given 30
+  hits, When `retrieve(q, f, 20, 20)` runs, Then the last 10 come back, `total` is 30, and
+  the order matches the first page's.
 
 ## Phased PRs
 
@@ -225,8 +263,8 @@ Each PR leaves `main` releasable, and the `content` feature stays off by default
 
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
-| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures and the worker's lifetime (R17, R18), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20 | 2–3 days **[estimate]** |
-| 2b | Query semantics and the engine calls: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve`, `passage_text` and `unread` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-19 | 2–3 days **[estimate]** |
+| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures, the worker's lifetime, the store version and the `content_state` writes (R17–R20), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20, AC-21 | 2–3 days **[estimate]** |
+| 2b | Query semantics and the engine calls: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` with structured queries and paging, `passage_text` and `unread` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-19, AC-22 | 2–3 days **[estimate]** |
 
 ## Budgets
 
@@ -285,7 +323,7 @@ tuned on the real PC.
 
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
-| D1 | Where does the content index live? | A separate `content.db` next to `index.db`, attached read-only to `index.db` for filters. Keeps the name indexer the only writer of `index.db` (no lock contention), is deletable as a whole (R9), and leaves `vfs-core`'s schema untouched. | agent (prototype) | 2026-11-20 |
+| D1 | Where does the content index live? | A separate `content.db` next to `index.db`, attached read-only to `index.db` for filters. Keeps the content indexer's writes to `index.db` down to `content_state` (R20), is deletable as a whole (R9), and leaves `vfs-core`'s schema untouched. | agent (prototype) | 2026-11-20 |
 | D2 | How is `content_state` driven without changing `vfs-core`? | The content indexer sets `content_state` itself: `queued` when it enqueues, `indexed`/`failed`/`skipped` when it finishes. `content.db` keeps the size and mtime each file had when it was processed; a mismatch re-queues the file. | agent | 2026-11-20 |
 | D3 | Extraction library | Xberg 1.4.2 (MIT). It is the only candidate covering every format in scope, DOC, PPT and RTF included. It costs +32–34 MB of binary, kept out of the app in the `vfs-extract` executable (measurements document, "Choice: Xberg"). | agent | 2026-11-20 |
 | D4 | Full-text engine | SQLite FTS5, contentless, BM25 (p95 18 ms on 20,000 documents, no added binary). Above ~100,000 real documents, Tantivy becomes a derived index behind `retrieve` (research §2). | agent | 2026-11-20, threshold 2026-11-22 |

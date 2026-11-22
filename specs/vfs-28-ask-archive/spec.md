@@ -79,13 +79,18 @@ Asking
      folders, and only if it intersects the folder filter active on screen. Otherwise drop
      it. Every other filter from the rewrite is intersected with the filters on screen, and
      a filter whose intersection is empty is dropped.
-  3. Call `retrieve` (VFS-2 R15) with the keywords and phrases. IF fewer than 10 passages
-     come back, THEN run a second round with the keywords and synonyms alone, no phrases. IF
-     that still returns fewer than 10, THEN run a third round without the rewrite's filters,
-     keeping those on screen. There is no model call between rounds, and at most 3 rounds in
-     all.
-  4. Take the 10 best passages. Expand each with `passage_text(file, ordinal, 1, 1)`, its
-     chunk plus the previous and next one, and send them to the answer model.
+  3. Call `retrieve` (VFS-2 R15) with `k` = 20 and the structured query `{all: keywords,
+     phrases}`.
+     - IF it returns fewer than 5 documents, THEN run a second round with `{any: keywords +
+       synonyms}`.
+     - IF that still returns fewer than 5, THEN run a third round with the same query,
+       without the rewrite's filters but keeping those on screen.
+     There is no model call between rounds, and at most 3 rounds in all.
+  4. Pick 10 passages from the last round's documents: first the best passage of each
+     document, in document order; then each document's second passage, in the same order;
+     and so on until there are 10. Expand each with `passage_text(file, ordinal, 1, 1)`, its
+     chunk plus the previous and next one. Merge passages of one document whose ranges
+     overlap or touch into a single passage. Send the result to the answer model.
   Only the question and those passages leave the PC. A passage is sent with the file name and
   page, never the folder path.
 - R7. THE answer model SHALL be asked to answer in the interface language, using only the
@@ -143,14 +148,15 @@ Errors and diagnostics
 
 - R13. THE app SHALL map provider errors to plain messages:
   - invalid or forbidden key: «La clave no es válida»;
-  - billing or no credit: «Su cuenta de <proveedor> no tiene saldo»;
-  - spend limit reached at the provider: «Ha llegado al límite de gasto de su cuenta»;
+  - billing or no credit: an Anthropic `billing_error`, or a 400 whose message reports a credit
+    balance too low: «Su cuenta de <proveedor> no tiene saldo»;
   - rate limited: an Anthropic 429 with `retry-after`, or an OpenAI 429 with code
     `rate_limit_exceeded`. Also overloaded (529, 503) or another 5xx. Retry at most twice,
     honouring `retry-after` or `x-ratelimit-reset-*`, else waiting 2 s then 8 s. After that,
     show «<Proveedor> está saturado; pruebe en un momento»;
-  - quota: an Anthropic 429 with no `retry-after`, or an OpenAI `insufficient_quota`: «Ha
-    llegado al límite de gasto de su cuenta»;
+  - quota: an OpenAI `insufficient_quota`, or an error whose type or message reports a spend
+    limit: «Ha llegado al límite de gasto de su cuenta». A 429 that matches no known code
+    is treated as a rate limit;
   - model not found (404) or unknown model: «Este modelo ya no está disponible; actualice
     VFS»;
   - connect or DNS failure: «Sin conexión».
@@ -186,20 +192,25 @@ local mock server that replays recorded responses. No test needs a real key.
   - 200;
   - 401;
   - 402;
-  - an Anthropic 429 with and without `retry-after`;
+  - an Anthropic 429 with and without `retry-after`, and an Anthropic 400 reporting a credit
+    balance too low;
   - OpenAI 429s with `rate_limit_exceeded` and with `insufficient_quota`;
   - 404 for the model;
   - 529;
   - a refused connection.
-  The rate-limited and 529 cases are retried at most twice. The 402, quota and 404 cases
-  are not retried.
+  The rate-limited cases (an unmatched 429 included) and the 529 are retried at most twice.
+  The 402, credit, quota and 404 cases are not retried. The exact error bodies are taken
+  from the providers' error docs when 28b is built and recorded with the mock.
 - AC-5 (R5, R6) Given an indexed corpus, a folder filter active on screen, and a mock
   rewrite returning a `folder_hint` outside the user's folders, When a question is asked,
   Then the hint is ignored. Every passage sent is inside the on-screen folder. When the hint
   is a real folder disjoint from the on-screen folder filter, Then it is dropped too. The
-  answer request holds the question and at most 10 expanded passages, with no folder path.
-  When the first round returns 2 passages, Then a second round without phrases runs. When
-  that returns 3, Then a third round without the rewrite's filters runs, and no fourth. On
+  answer request holds the question and at most 10 merged passages, with no folder path.
+  When the first round returns 2 documents, Then a second round with the `any` query runs.
+  When that returns 3, Then a third round without the rewrite's filters runs, and no
+  fourth. Given three documents, the first with three matching passages, Then the passages
+  sent are, in order: the best of documents 1, 2 and 3, then the second of document 1.
+  Overlapping expansions of document 1 are merged into one passage. On
   the first question ever, the notice appears once; after «Entendido» it never appears
   again.
 - AC-6 (R7, R8) Given 10 sent passages (indexes 0–9) and a recorded Anthropic answer citing
@@ -266,8 +277,8 @@ local mock server that replays recorded responses. No test needs a real key.
   folder.
 - **Kill / power cut.** `ai.db` is SQLite in WAL mode. A question cut halfway leaves no
   record. The month total counts only answers whose `usage` arrived.
-- **Huge result sets.** At most 10 expanded passages are sent, and «todos los encontrados» lists at
-  most the documents of the last `retrieve` call (≤ 100).
+- **Huge result sets.** At most 10 merged passages are sent, and «todos los encontrados» lists
+  the documents of the last `retrieve` call (`k` = 20).
 - **Permission-denied, locked files, cloud placeholders.** n/a, because only text already in
   `content.db` is used; cloud-only files have none (VFS-2 R12).
 - **User files.** Never opened or written. The only file written outside the app data folder
@@ -288,8 +299,8 @@ local mock server that replays recorded responses. No test needs a real key.
 |---|---|---|---|
 | 28a | macOS stable self-signed signing identity: certificate kept as a CI secret, Tauri `signingIdentity`, A/B keychain script on the macOS runner, release notes on the one-time change. | AC-3 | 1–2 days **[estimate]** |
 | 28b | Crate `vfs-ai`: the `ChatModel` trait (`validate_key`, `rewrite`, streamed `answer`) for Anthropic and OpenAI over the existing `reqwest`. Also the redacting secret type, key storage with fallback, error mapping, retries, cost metering with the dated price table, `ai.db`, and the mock server for tests. | AC-1 (crate part), AC-2, AC-4, AC-8 (crate part) | 4–5 days **[estimate]** |
-| 28c | Ask flow: rewrite, folder check and filter intersection, retrieval rounds, neighbour join, answer, citation checks, follow-ups, the untrusted-passage prompt, diagnostics. Also the RAG golden set and the recorded answers. | AC-5–AC-7, AC-11, AC-12 | 4–6 days **[estimate]** |
-| 28d | User interface: the Ajustes section, the first-use notice, «Preguntar», the plain-text answer view with markers, the cost and cap prompt, «Qué se ha enviado», «Bibliografía» with copy and RIS. Strings go in both catalogs. | AC-1 and AC-8 (UI parts), AC-9, AC-10, AC-13 | 5–6 days **[estimate]** |
+| 28c | Ask flow: rewrite, folder check and filter intersection, retrieval rounds, passage selection and merging, answer, citation checks, follow-ups, the untrusted-passage prompt, diagnostics. Also the RAG golden set and the recorded answers. | AC-5–AC-7, AC-11, AC-12, AC-13 (system prompt part) | 4–6 days **[estimate]** |
+| 28d | User interface: the Ajustes section, the first-use notice, «Preguntar», the plain-text answer view with markers, the cost and cap prompt, «Qué se ha enviado», «Bibliografía» with copy and RIS. Strings go in both catalogs. | AC-1 and AC-8 (UI parts), AC-9, AC-10, AC-13 (rendering part) | 5–6 days **[estimate]** |
 
 Total ≈ 14–19 working days **[estimate]**.
 

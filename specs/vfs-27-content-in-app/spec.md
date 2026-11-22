@@ -76,10 +76,12 @@ Background pace (owner decision T1)
   worker at the lowest priority (VFS-2 R5), and SHALL apply these rules in order:
   1. WHILE a name walk runs, or a name pass of more than `incremental_max_dirs` folders,
      content indexing waits.
-  2. On Windows, WHILE the content scheduler's own sample of the `DiskLoad` probe (VFS-5) on
-     the drive being read shows a queue above VFS-5's busy threshold, not counting the
-     worker's own read, content indexing waits. macOS has no disk probe, so this rule does
-     not apply there.
+  2. On Windows, the content scheduler samples the `DiskLoad` probe (VFS-5) for the drive
+     being read, between documents only (so the worker's own read is not counted). It uses
+     VFS-5's busy rule (`window` / `busy_in_window`, 3 of the last 5 samples) and its
+     guarantee: after waiting `max_backoff`, it reads for at least `min_work` before it may
+     wait again. So a disk that a sync client keeps busy slows content down but never stops
+     it. macOS has no disk probe, so this rule does not apply there.
   3. IF the last keyboard or mouse input was 60 s ago or less, THEN there is a pause of 15 s
      between documents. Over 60 s, there is no pause.
   4. IF the idle probe fails, THEN the user counts as active.
@@ -94,15 +96,20 @@ Background pace (owner decision T1)
   - «Pausar» / «Reanudar».
   A pause holds across restarts until the user resumes it. WHEN a folder is paused
   (VFS-32), THE content run SHALL skip that folder's documents until it is resumed.
-- R9. WHEN the app closes, the machine sleeps or a folder goes offline mid-run, THE next
-  start, wake or reconnection SHALL continue from the unread documents (VFS-2 R4), and SHALL
-  not show the offer again. A document whose extraction spanned a sleep SHALL be retried,
+- R9. WHEN the app closes or the machine sleeps mid-run, THE next start or wake SHALL continue
+  from the unread documents (VFS-2 R4), and SHALL not show the offer again. WHILE a folder is
+  offline, its documents are skipped and the others are read (VFS-2 R17). WHEN it comes
+  back, its documents are read without any action from the user. A document whose extraction spanned a sleep SHALL be retried,
   not marked failed by timeout.
 - R10. WHEN the name indexer adds or changes documents after a content run has finished,
   THE app SHALL queue them and read them under the same pace rules. The content run is
   "finished" when its queue is empty.
-- R11. IF the content store fails SQLite's `quick_check` when opened after an unclean
-  shutdown, THEN THE app SHALL tell the user «El índice de contenido está dañado», and offer
+- R11. THE app SHALL write a "content run open" marker in the app data folder when a content
+  run starts, and remove it on a clean stop. WHEN the app starts and finds the marker, THE
+  app SHALL run SQLite's `quick_check` on the content store in the background (it can take
+  tens of seconds on an HDD), and SHALL not start content indexing until it ends. Content
+  search is available meanwhile. IF the check fails, or the store's version differs (VFS-2
+  R19), THEN THE app SHALL tell the user «El índice de contenido está dañado», and offer
   «Volver a leer los documentos» (delete the store and start again) or «Desactivar». Nothing
   is deleted without that choice. Name search keeps working meanwhile.
 
@@ -113,7 +120,7 @@ Search
   contenido de los documentos» below them, up to 20 content hits from `retrieve`.
   - Each hit shows the file name, the folder, the highlighted fragment, the page when known,
     and «Mostrar en carpeta».
-  - A «Ver más» link loads the next 20.
+  - A «Ver más» link loads the next 20 (`retrieve` with `offset`).
   - The section respects the active type, date, size and folder filters (VFS-2 R7).
   - The content query starts 300 ms after typing stops, and only for queries of at least 3
     characters.
@@ -124,15 +131,15 @@ Search
   the result partial (VFS-2 R13), THEN THE section SHALL say «Ningún documento tiene todas
   las palabras; estos tienen alguna».
 - R14. THE app SHALL show the unread counts by reason from `unread_counts()` (VFS-2 R15):
-  «en la nube», «sin texto (escaneado)» (a PDF with no text layer), «protegido con
-  contraseña», «demasiado grande» and «no se pudo leer» (any other failure or an empty
-  text). WHEN a name hit is a document with an unread reason, THE hit SHALL carry that
+  «en la nube», «sin texto (escaneado)», «protegido con contraseña», «demasiado grande»,
+  «formato no compatible» and «no se pudo leer», mapped as in VFS-2 R15's table. Documents not
+  yet read are counted apart, as «pendientes». WHEN a name hit is a document with an unread reason, THE hit SHALL carry that
   reason as a small label, looked up with `unread(file_ids)` for the visible page only.
 
 Run-level failures and diagnostics
 
 - R15. WHEN the run stops for a run-level reason (VFS-2 R17: worker missing or blocked,
-  version mismatch, folder offline, store not writable, worker unstable), THE status area
+  version mismatch, store not writable, worker unstable), THE status area
   SHALL show the reason in plain words with «Reintentar». Per-file states are not touched.
 - R16. THE diagnostic log SHALL record, with no file or folder name (VFS-5 R8):
   - each content run's start and stop;
@@ -167,7 +174,9 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
   resumes.
 - AC-7 (R7) Given a fake clock and fake idle and `DiskLoad` probes:
   - When a name walk is running, Then no document is extracted.
-  - On Windows, when the probe shows the disk busy, Then no document is extracted.
+  - On Windows, when 3 of the last 5 probe samples are busy, Then no document is extracted.
+    When the probe stays busy for longer than `max_backoff`, Then a document is still
+    extracted within `max_backoff` + `min_work`.
   - When input happened 10 s or 60 s ago, Then documents are extracted at least 15 s apart.
   - When input happened 61 s ago, Then they are extracted back to back.
   - When the idle probe errors, Then the 15 s pause applies.
@@ -175,11 +184,14 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
   restarts the app, Then it stays paused with 300 of 1,000 shown. When resumed, Then it reads
   only the 700 left, and the rate shown excludes the pause. Given a folder paused through
   VFS-32, Then none of its documents is read. Given a document in flight when the machine
-  sleeps for 2 min, Then after waking it is retried, not failed.
+  sleeps for 2 min, Then after waking it is retried, not failed. Given one of two folders
+  offline, Then the other's documents are read. When the offline folder returns, Then its
+  documents are read with no user action.
 - AC-9 (R10) Given a finished content run, When a new document is added to an indexed folder,
   Then after the name pass it is read, and a content search finds it.
-- AC-10 (R11) Given a `content.db` corrupted on purpose and an unclean-shutdown marker, When
-  the app starts, Then the damage message appears. Name search works, and the store is
+- AC-10 (R11) Given a `content.db` corrupted on purpose and the run-open marker present, When
+  the app starts, Then the window is usable while the check runs, and the damage message
+  appears when it ends. Name search works, and the store is
   deleted only after «Volver a leer los documentos».
 - AC-11 (R12) Given an indexed folder where `factura.pdf` contains «Peñalara» in its text but
   not in its name, When the user types `peñalara`, Then the name hits render before the
@@ -189,9 +201,9 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
   filter is active, Then only hits that pass it are shown.
 - AC-12 (R13) Given content indexing at 40 of 100 documents, When the user searches, Then the
   section shows «Todavía leyendo documentos: 40 de 100».
-- AC-13 (R14) Given a cloud-only DOCX, a scanned PDF, a password-protected PDF and a corrupt
-  DOC, When content indexing finishes, Then Ajustes shows one document under each reason,
-  the four name hits carry their labels, and the cloud-only file was never opened.
+- AC-13 (R14) Given a cloud-only DOCX, a scanned PDF, a password-protected PDF, a `.pages`
+  file and a corrupt DOC, When content indexing finishes, Then Ajustes shows one document
+  under each reason, the five name hits carry their labels, and the cloud-only file was never opened.
 - AC-14 (R15) Given the `vfs-extract` binary removed from the bundle, When content indexing
   starts, Then the status area shows the worker reason with «Reintentar», and no document
   changes state.
@@ -238,7 +250,8 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
 - **Permission-denied, locked files, cloud placeholders, offline folders.**
   - Cloud-only files are never opened.
   - Locked or denied files are «no se pudo leer», retried when they change.
-  - An offline folder stops the run rather than failing its files (R9, VFS-2 R17).
+  - An offline folder's documents are skipped, not failed, and are read when it returns
+    (R9, VFS-2 R17).
 - **User files.** The worker opens them read-only, and nothing is written, moved or deleted
   (VFS-2 AC-1).
 

@@ -33,16 +33,20 @@ an embedding API key or a local model downloaded from Ajustes (VFS-2 D15).
 - **Consent.** Embedding by API sends the whole text of every document once. It needs its own
   explicit consent, per folder, with the estimated cost shown first. The "Qué se ha enviado"
   view (VFS-28) records it per folder and date.
-- **Storage.** Vector sets in `content.db`, keyed by (provider, model, dimension): one 1-bit
+- **Storage.** Vector sets in their own file, `vectors.db`, beside `content.db`, so that
+  deleting or rebuilding the content store (VFS-27 R5, R11) never silently wipes embeddings
+  that cost hours or money. They are keyed by (provider, model, dimension), with chunk
+  addresses that stay valid while the chunking (VFS-2 D14) is unchanged: one 1-bit
   row per chunk for the scan and int8 for the rescore. There is no vector database and no ANN
   index below ~3–5 M chunks (research §3). Changing the model builds a new set beside the old
   one, and the old set is dropped once the new one is complete. A new set is built only
   after a free-space check like VFS-27 R6.
 - **Search.** `retrieve` runs BM25 and the vector scan, then fuses them with RRF (k = 60).
   The query is embedded once per search, by API or locally. With an API, every content
-  query therefore leaves the PC; it is recorded in «Qué se ha enviado» like a question. Offline, without a key, or
+  query therefore leaves the PC. The full spec decides how «Qué se ha enviado» records them,
+  for example one line per day with the count, rather than one entry per query. Offline, without a key, or
   before the vectors are complete, `retrieve` falls back to BM25 and the section says so.
-- **Background.** The same pace rules as VFS-27 R6. API embedding runs in batches, with
+- **Background.** The same pace rules as VFS-27 R7. API embedding runs in batches, with
   retries and cost metering. Local embedding runs in a child process with its own memory cap.
 - **Local model spike (its own PR, before the local option ships).**
   - Candidates: bekko-a8m, granite-97m-multilingual-r2, multilingual-e5-small, and a
@@ -78,6 +82,6 @@ If the API model fails the gate, hybrid search is not built.
 
 | PR | Scope | Effort |
 |---|---|---|
-| 29a | Vector sets in `content.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, offline fallback, golden-set comparison | 5–7 days **[estimate]** |
+| 29a | Vector sets in `vectors.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, offline fallback, golden-set comparison | 5–7 days **[estimate]** |
 | 29b | Local model spike: measure the candidates on the Mac and the real PC; pick model and runtime | 3–4 days **[estimate]** |
 | 29c | Local model download, check and child-process `Embedder` | 4–6 days **[estimate]** |

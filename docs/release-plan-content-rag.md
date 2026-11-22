@@ -41,8 +41,10 @@ release.
 | 3 | VFS-28 28c | Ask flow, citations, follow-ups, RAG golden set | 4–6 |
 | 4 | VFS-28 28d | Interface: answer view, cost cap, «Qué se ha enviado», bibliography | 5–6 |
 
-28a and 28b do not depend on content search, so they can run in parallel with v0.3. The
-gap between the two releases is then about 9–12 days.
+28b does not depend on content search, so a second session can build it during v0.3. 28a
+(the macOS signing change) is merged only after v0.3 ships, to keep one new risk per
+release. With 28b done during v0.3, the gap between the releases is about 10–14 days
+(28a + 28c + 28d). With one session only, it is the full 14–19.
 
 **Gate before release:**
 - the RAG golden set passes on the recorded answers;
