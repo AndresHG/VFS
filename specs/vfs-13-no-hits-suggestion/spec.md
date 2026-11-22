@@ -25,9 +25,7 @@ same query the screen searched (files only). `Suggestion` (camelCase in JSON):
   word that folds to the term replaced or removed in place, the rest untouched); unchanged
   for `dropFilters`.
 - `clearFilters`: true only for `dropFilters` (type, date, size and folder filters; the
-  sources and the bookmark folder stay as they are). Since VFS-38 R13, pressing it applies
-  «Quitar filtros» (VFS-38 R8: also the source and the scope «Todo»), keeping only the
-  bookmark folder.
+  sources and the bookmark folder stay as they are).
 - `term`: the typed word that changes (`spelling`, `dropTerm`); `replacement`: the new word
   (`spelling`).
 - `count`: hits of the suggested search as the list would show them (grouped copies, VFS-19),

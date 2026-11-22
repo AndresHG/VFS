@@ -46,9 +46,9 @@ ordinary or fast machines. The product spec is
 - Optionally includes Firefox bookmarks ("Incluir marcadores de Firefox" in the "Carpetas"
   panel, off by default; spec [VFS-6](specs/vfs-6-bookmarks/spec.md)). Bookmarks are found by
   title, address, folder path, tags and keyword with the same rules as files; bookmark
-  folders are results and can be chosen as the "Carpeta" filter; the source choice under
-  "Más filtros" (VFS-38) picks files, bookmarks or both, and "Orden" adds files first,
-  then bookmarks. "Abrir en Firefox" opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
+  folders are results and can be chosen as the "Carpeta" filter; "Buscar en" picks files,
+  bookmarks or both, and "Orden" adds files first, then bookmarks. "Abrir en Firefox"
+  opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
   place, never written, and only bookmark tables are read (no history, passwords or
   cookies).
 - Follows changes: a live watcher while the app runs; at each start, a replay of what

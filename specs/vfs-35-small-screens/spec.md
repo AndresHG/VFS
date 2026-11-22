@@ -61,8 +61,8 @@ and the middle of its bottom edge (nothing, such as the sticky bottom bar, cover
 
 ## Non-goals
 
-- A "Filtros" button that folds the filters away (superseded by VFS-38 D1: «Más filtros»
-  holds size, folder and source).
+- A "Filtros" button that folds the filters away: one scrollable row is enough for six pills
+  and keeps every filter one click away (VFS-1 R9).
 - A screenshot in the Windows e2e journey at a small window size (issue 169 sketch): the
   headless viewport checks cover the layout; the e2e workflow is left as it is.
 - An in-app text size setting: "large text" here is the system text size, which the UI
@@ -72,9 +72,7 @@ and the middle of its bottom edge (nothing, such as the sticky bottom bar, cover
 ## Decisions
 
 - D1. One scrollable row of filters on short windows (R2), not a "Filtros" button; the issue
-  allows either, and the row keeps every filter visible and needs no new copy. VFS-38 D1
-  (owner) later moved size, folder and source behind «Más filtros». The sideways scroll
-  remains the fallback below 1280×720 and with large text (VFS-38 R10).
+  allows either, and the row keeps every filter visible and needs no new copy.
 - D2. The bottom bar is sticky at the bottom of the page instead of the page losing its
   scroll: on a window too short for everything, the header scrolls away under a visible
   bottom bar rather than being clipped. Only the minimum window at large text gets there.

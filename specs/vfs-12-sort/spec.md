@@ -36,8 +36,7 @@ Tests cite these ids (`VFS-12 AC-<m>`).
   the 2,000-hit cap.
 - AC-4 Given the default order (relevance) Then results and caps are unchanged and the
   VFS-11 golden set stays green.
-- AC-5 Given the «Orden» select Then it is on screen whenever there are results, in the
-  results header beside the count (VFS-38 R9), with «Lo más parecido primero»
+- AC-5 Given the «Orden» select Then it is always on screen with «Lo más parecido primero»
   (default), «Lo más reciente primero», «Lo más antiguo primero», «Por nombre (A-Z)», «Lo más
   grande primero», plus «Archivos primero, luego marcadores» while bookmarks are included.
   With bookmarks, dates are the date saved, name sorts by title, and bookmarks (no size) come
@@ -48,8 +47,7 @@ Tests cite these ids (`VFS-12 AC-<m>`).
 - An index on `mtime` or `size`: that would be a schema change. The read cap and the
   deadline bound the cost instead.
 - Clicking column headers, and an ascending/descending toggle per order.
-- Remembering the order between sessions: it reset to relevance at start (issue 82) until
-  VFS-38 D2 (owner), which keeps it across restarts.
+- Remembering the order between sessions: it resets to relevance at start (issue 82).
 - Publication dates, NTFS creation dates and EXIF dates (issue 82 "Fuera de este paso").
 - Per-row source labels («Archivo», «Marcador»), which issue 82 suggests. The owner chose to
   keep "by source" as an order.

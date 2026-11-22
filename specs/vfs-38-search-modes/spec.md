@@ -17,6 +17,15 @@
     section.
   - [VFS-29](../vfs-29-hybrid-search/spec.md): meaning search.
   - [VFS-35](../vfs-35-small-screens/spec.md) R2, D1: one row of filter pills.
+- **Supersedes** (implemented specs are not edited; this list is the record):
+  - VFS-1 R7 under «Solo nombres» (R3), and R9's "visible filters" for size, folder and
+    source, now one click away (R7, R8);
+  - VFS-6's «Buscar en» source pill, which becomes the «Origen» choice in «Más filtros»
+    (R7), and D7's reset at each start (D2);
+  - VFS-12 AC-5 ("always on screen" in the filter line) and its non-goal on remembering the
+    order (R6, R9);
+  - VFS-13's `clearFilters`, which now also resets the source and the scope (R8, R13);
+  - VFS-35 D1 and its non-goal against a "Filtros" button (D1, R10).
 
 ## Problem
 
@@ -122,7 +131,7 @@ Filter line
     folder as today, plus the source (back to the default) and the scope (back to «Todo»).
     Sort only orders and hides nothing, so it stays.
 - R9. THE «Orden» select SHALL move to the results header, beside the result count. It is
-  shown whenever there are file or bookmark results to order. This amends VFS-12 AC-5.
+  shown whenever there are file or bookmark results to order. This supersedes VFS-12 AC-5.
 - R10. At normal text size, at 1280×720 at 125 % and every larger VFS-35 viewport, THE
   filter line SHALL fit on one row inside its own width (the `--measure` column, 60 rem),
   in Spanish and in English. It must fit in every filter state, with bookmarks on and the
@@ -298,7 +307,7 @@ Tests cite these ids (`VFS-38 AC-<m>`) in their doc comments.
 | PR | Scope | Rides with | Proves |
 |---|---|---|---|
 | 38a | Core `scope` across `search`, `count`, `suggest` and `vfs-bookmarks` matching; the names-only S8 probe; cache key; Tauri arguments; `contract.js` and `contract.rs`; CLI `vfs search --names-only` | v0.3, independent: any time, before 38b | AC-1–AC-3, AC-11 (core part) |
-| 38b | Filter line: scope group («Todo», «Solo nombres»), «Más filtros» popover and its inline fallback, the chip line with «Quitar filtros», «Orden» in the results header, remembered choices (`ScopeChoice`), the «Origen» label, the empty-view wording; both catalogs; viewport and UI tests | v0.3, after 38a and before VFS-27 27c, so that 27c builds its section into the new line | AC-5–AC-9, AC-11 |
+| 38b | Filter line: scope group («Todo», «Solo nombres»), «Más filtros» popover and its inline fallback, the chip line with «Quitar filtros», «Orden» in the results header, remembered choices (`ScopeChoice`), the «Origen» label, the empty-view wording; both catalogs; the README feature list and `docs/design/system.md` (principle 3, filter control, Sources) updated to the new line; viewport and UI tests | v0.3, after 38a and before VFS-27 27c, so that 27c builds its section into the new line | AC-5–AC-9, AC-11 |
 | (27c) | «Solo documentos» button and R4–R5, AC-8 re-run with three buttons: built inside VFS-27 27c | VFS-27 27c | AC-4 |
 | (29) | «relacionado por tema» label | the VFS-29 PR that shows meaning hits in the app (VFS-29 is an outline; its UI PR is named when it is completed) | AC-10 |
 
