@@ -135,9 +135,13 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .app {
   height: 100dvh;
   overflow: auto;
+  /* VFS-35 D3: height thresholds below follow the text size (rem), unlike media queries. */
+  container: app / size;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(10rem, 1fr) auto;
+  /* Notices give way before the results (VFS-35 R3): they scroll once the list is down to
+     three rows. */
+  grid-template-rows: auto auto minmax(0, auto) minmax(14rem, 1fr) auto;
 }
 .app > * {
   justify-self: center;
@@ -390,7 +394,7 @@ input[type="date"] {
 
 /* ---------- Notices: one line each, quiet tint. */
 
-.notices { display: grid; gap: var(--s2); }
+.notices { display: grid; align-content: start; gap: var(--s2); min-height: 0; overflow-y: auto; }
 .notices:has(> :not([hidden])) { padding-block-end: var(--s3); }
 .banner {
   display: flex;
@@ -622,15 +626,20 @@ input[type="date"] {
 .app[data-view="start"] .empty[data-mode="idle"] .empty-art,
 .app[data-view="start"] .empty[data-mode="first-scan"] .empty-art { display: none; }
 
-/* ---------- Bottom: result count and status on one line. */
+/* ---------- Bottom: result count and status on one line. Sticky, so it stays in the window
+   even when a short window must scroll the rest away (VFS-35 R1, D2). */
 
 .bottom {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s1) var(--s2);
   padding-block: var(--s2);
   border-block-start: 1px solid var(--line);
+  background: var(--paper);
 }
 .status-text { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); }
 .status-text p { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
@@ -700,7 +709,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   border-width: 0 0 0 1px;
   background: var(--paper);
 }
-.drawer[open] { display: flex; flex-direction: column; }
+.drawer[open] { display: flex; flex-direction: column; overflow-y: auto; }
 .drawer-head {
   display: flex;
   align-items: center;
@@ -710,7 +719,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 }
 .drawer-intro { margin: 0; padding: 0 var(--s5) var(--s4); color: var(--ink-2); }
 #folders-msg { margin: 0 var(--s5) var(--s4); }
-.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1; overflow-y: auto; border-block-start: 1px solid var(--line); }
+.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1 0 auto; border-block-start: 1px solid var(--line); }
 .roots .none { color: var(--ink-2); padding: var(--s4) 0; }
 .root {
   display: grid;
@@ -746,12 +755,55 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .root-state[data-status="unavailable"]::before { background: transparent; border: 2px solid var(--warn-ink); }
 .root-state[data-status="removing"]::before { background: var(--danger); }
 .root-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s1); }
+/* The panel scrolls as a whole; its actions stay at the bottom of the window (VFS-35 R4). */
 .drawer-foot {
+  position: sticky;
+  inset-block-end: 0;
+  margin-block-start: auto;
   display: flex;
   flex-wrap: wrap;
   gap: var(--s3);
   padding: var(--s4) var(--s5) var(--s5);
   border-block-start: 1px solid var(--line);
+  background: var(--paper);
+}
+
+/* ---------- Short windows (VFS-35 R2): a compact header and one sideways-scrolling row of
+   filters, so the results keep the height. */
+
+@container app (height < 40rem) {
+  .top { padding-block: var(--s2) var(--s1); }
+  /* The prompt above the box is for screen readers only, as in the list view. */
+  .search-label { position: absolute; clip-path: inset(50%); overflow: hidden; width: 1px; height: 1px; margin: -1px; white-space: nowrap; }
+  #q { padding-block: var(--s1); font-size: var(--t-name); }
+  .filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-block: 5px var(--s1);
+    padding-inline: 5px;
+    margin-inline: -5px;
+    scrollbar-width: thin;
+  }
+  .filters > * { flex: none; }
+  .app[data-view="start"] > .filters { justify-content: safe center; }
+  /* A scroller in an auto grid row may shrink to nothing; keep one pill row. */
+  .filters:not(:has(> .range:not([hidden]))) { min-block-size: calc(var(--target) + 5px + var(--s1)); }
+  /* A custom date range the user just asked for gets its own line, as on tall windows. */
+  .filters:has(> .range:not([hidden])) { flex-wrap: wrap; overflow-x: visible; }
+  .filters > .range { flex: 1 0 100%; }
+  .bottom { padding-block: var(--s1); }
+  .bottom .btn { min-block-size: 2.25rem; padding-inline: var(--s3); }
+  .status-text p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .status-text { flex: 1 1 0; min-width: 7rem; }
+  .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto minmax(0, 1.4fr) auto; }
+  .app[data-view="start"] .empty { padding-block-start: var(--s1); }
+  .app[data-view="start"] .empty .empty-art { display: none; }
+}
+
+/* Short and narrow: a status that does not fit beside the buttons takes its own line. */
+@container app (height < 40rem) and (width < 50rem) {
+  .status-text { flex-basis: auto; }
+  .bottom { justify-content: flex-end; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
