@@ -21,6 +21,9 @@ use crate::AppState;
 /// Log target of panic records written by [`install_panic_hook`].
 pub const PANIC_TARGET: &str = "vfs::panic";
 
+/// How a panic record's message starts: `panic at <file>:<line>: <payload>`.
+const PANIC_PREFIX: &str = "panic at ";
+
 /// What replaces a path in a redacted line.
 pub const REDACTED: &str = "<ruta>";
 
@@ -124,7 +127,7 @@ pub fn install_panic_hook() {
             .map(|s| (*s).to_owned())
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "?".to_owned());
-        log::error!(target: PANIC_TARGET, "panic at {location}: {message}");
+        log::error!(target: PANIC_TARGET, "{PANIC_PREFIX}{location}: {message}");
         log::logger().flush();
         previous(info);
     }));
@@ -246,7 +249,7 @@ pub fn redact_message(message: &str, private: &[String]) -> String {
 /// messages quote names in backticks, a search term can be in it), so only the location is
 /// kept: `panic at <file>:<line>: <omitido>`.
 fn redact_panic(message: &str) -> String {
-    let location = message.strip_prefix("panic at ").and_then(|rest| {
+    let location = message.strip_prefix(PANIC_PREFIX).and_then(|rest| {
         rest.match_indices(": ")
             .map(|(i, _)| &rest[..i])
             .find(|loc| {
@@ -255,7 +258,7 @@ fn redact_panic(message: &str) -> String {
             })
     });
     match location {
-        Some(loc) => format!("panic at {loc}: {OMITTED}"),
+        Some(loc) => format!("{PANIC_PREFIX}{loc}: {OMITTED}"),
         None => OMITTED.to_owned(),
     }
 }

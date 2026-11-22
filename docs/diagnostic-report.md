@@ -1,8 +1,9 @@
 # Reading a VFS diagnostic report
 
 "Enviar comentarios" (VFS-20) saves `vfs-informe-<AAAA-MM-DD-HHMM>.zip` in the user's
-Downloads folder. It holds one file, `informe.txt`, exactly the text the dialog's "Ver el
-informe" shows. This page says what is in it and how to analyse it in a session on this repo.
+Downloads folder. It holds one file, `informe.txt`, the whole report: the text the dialog's
+"Ver el informe" shows, which carries only the newest ~200 KB of log lines (VFS-30), with
+every log line. This page says what is in it and how to analyse it in a session on this repo.
 
 ## Getting a report
 
