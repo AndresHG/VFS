@@ -1737,18 +1737,20 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
 }
 
 /// `path` spelled under `root` as stored, when it lies below `root`; compared ignoring case
-/// when `ignore_case` (Windows: the change journal names folders as they are now, so a root
-/// renamed only in case would otherwise match no replayed path, VFS-9 R7). `None` outside.
-fn under_root(path: &Path, root: &Path, ignore_case: bool) -> Option<PathBuf> {
+/// and the `\\?\` prefix when `windows` (the change journal names folders as they are now, so
+/// a root renamed only in case would otherwise match no replayed path, and a folder path over
+/// 260 characters comes back with the prefix the stored root lacks; VFS-9 R7). `None` outside.
+fn under_root(path: &Path, root: &Path, windows: bool) -> Option<PathBuf> {
     if path.starts_with(root) {
         return Some(path.to_path_buf());
     }
-    if !ignore_case {
+    if !windows {
         return None;
     }
+    let (path, plain_root) = (plain_form(path), plain_form(root));
     let fold = |c: std::path::Component<'_>| c.as_os_str().to_string_lossy().to_lowercase();
     let mut rest = path.components();
-    for want in root.components() {
+    for want in plain_root.components() {
         if rest.next().map(fold) != Some(fold(want)) {
             return None;
         }
@@ -1756,6 +1758,24 @@ fn under_root(path: &Path, root: &Path, ignore_case: bool) -> Option<PathBuf> {
     let mut out = root.to_path_buf();
     out.extend(rest);
     Some(out)
+}
+
+/// `path` without the Windows verbatim prefix: `\\?\C:\x` becomes `C:\x` and
+/// `\\?\UNC\server\share\x` becomes `\\server\share\x`; anything else is unchanged.
+fn plain_form(path: &Path) -> PathBuf {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    // SAFETY: both prefixes are ASCII, so the rest starts on a character boundary, as
+    // `from_encoded_bytes_unchecked` requires.
+    let rest = |n: usize| unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[n..]) };
+    if bytes.starts_with(br"\\?\UNC\") {
+        let mut s = std::ffi::OsString::from(r"\\");
+        s.push(rest(8));
+        PathBuf::from(s)
+    } else if bytes.starts_with(br"\\?\") {
+        PathBuf::from(rest(4))
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// The marking of `mark_dirty`. With `dirs_only`, each path is a directory whose entries

@@ -185,6 +185,30 @@ fn start_replays_changes_without_a_full_walk() {
     fx.vfs.shutdown();
 }
 
+/// VFS-9 AC-1 (R2, R7), VFS-1 AC-8: changes made while closed in a folder whose path is
+/// longer than 260 characters are replayed too. Windows names such a folder with the `\\?\`
+/// prefix the stored root lacks; the stress run lost them for good (nightly run 45008368202).
+#[test]
+fn start_replays_changes_below_a_long_path() {
+    let segment = "carpeta con un nombre bastante largo para la prueba";
+    let deep: Vec<String> = (0..6).map(|i| format!("{segment} {i}")).collect();
+    let deep = deep.join("/");
+    let fx = Fixture::scanned(&[&format!("{deep}/viejo.txt"), "corto/testigo.txt"]);
+    assert!(fx.root().join(&deep).as_os_str().len() > 260);
+    settle();
+    fx.file(&format!("{deep}/nuevo notaría.txt"));
+    fs::remove_file(fx.root().join(format!("{deep}/viejo.txt"))).unwrap();
+    settle();
+
+    start(&fx.vfs);
+    let new = format!("{deep}/nuevo notaría.txt");
+    let want = names(&[new.as_str(), "corto/testigo.txt"]);
+    wait_until("replay below a long path", || {
+        fx.all_files() == want && fx.state().0 == RootStatus::Ready && fx.state().2 == 0
+    });
+    fx.vfs.shutdown();
+}
+
 /// VFS-9 AC-2 (R1, R2): a walk cut short resumes after a restart, and a file added while
 /// closed to a folder it had already listed is replayed into the index; folders already
 /// listed and untouched are not listed again.
