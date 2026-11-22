@@ -45,6 +45,12 @@ jobs:
         with:
           node-version: lts/*
 
+      # VFS-27 R1: the extraction worker, built for size (VFS-2 D16) and placed where
+      # tauri.sidecar.conf.json's externalBin expects it, before the app is bundled.
+      - name: Build the extraction worker (sidecar)
+        shell: bash
+        run: python3 scripts/sidecar.py build
+
       # Not OS code signing: the minisign signature the updater checks before installing.
       # createUpdaterArtifacts is set only here, so local builds need no key.
       - name: Build (updater-signed)
@@ -56,7 +62,12 @@ jobs:
         run: |
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
           npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles ${{ matrix.bundles }} \
+            --config tauri.sidecar.conf.json \
             --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
+
+      - name: Check the bundle (worker inside, its version, installer size; VFS-27 AC-1)
+        shell: bash
+        run: python3 scripts/sidecar.py check
 
       - name: Collect Windows installer
         if: runner.os == 'Windows'

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::extract::{extract_bytes, Extracted};
+use crate::paths::long_path;
 use crate::protocol::{FailReason, Hello, Outcome, Request, Response, SkipReason, WORKER_VERSION};
 
 /// Global allocator for the worker binary that refuses allocations beyond a cap. Refusal
@@ -156,24 +157,6 @@ pub fn background_priority() -> (bool, i64) {
     }
 }
 
-/// Windows: absolute paths of 248+ characters get the `\\?\` prefix (same rule as
-/// `vfs_core::platform::long_path`, VFS-1 AC-8). Elsewhere: unchanged.
-pub(crate) fn long_path(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let s = path.as_os_str().to_string_lossy();
-        if s.len() >= 248 && !s.starts_with(r"\\?\") {
-            if let Some(unc) = s.strip_prefix(r"\\") {
-                return PathBuf::from(format!(r"\\?\UNC\{unc}"));
-            }
-            if path.is_absolute() {
-                return PathBuf::from(format!(r"\\?\{s}"));
-            }
-        }
-    }
-    path.to_path_buf()
-}
-
 /// Test-only behaviours, chosen with `--test-hook=<kind>:<arg>` worker arguments
 /// (repeatable). The content indexer never passes them, so they change nothing outside tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +171,8 @@ enum TestHook {
     Version(String),
     /// Append `open <name>` / `close <name>` lines to the file `arg` around each file (AC-23).
     OpenLog(PathBuf),
+    /// Write the worker's process id to the file `arg` at start (VFS-27 AC-3).
+    PidFile(PathBuf),
 }
 
 fn test_hooks() -> Vec<TestHook> {
@@ -202,6 +187,7 @@ fn test_hooks() -> Vec<TestHook> {
                 "crash" => Some(TestHook::Crash(arg)),
                 "version" => Some(TestHook::Version(arg)),
                 "openlog" => Some(TestHook::OpenLog(arg.into())),
+                "pidfile" => Some(TestHook::PidFile(arg.into())),
                 _ => None,
             }
         })
@@ -382,6 +368,11 @@ pub fn worker_main(alloc: &CappedAlloc) {
     // Panics are answered as `Failed`; keep the default hook from spamming stderr.
     std::panic::set_hook(Box::new(|_| {}));
     let hooks = test_hooks();
+    for hook in &hooks {
+        if let TestHook::PidFile(p) = hook {
+            std::fs::write(p, std::process::id().to_string()).expect("write pid file");
+        }
+    }
     let version = hooks
         .iter()
         .find_map(|h| match h {

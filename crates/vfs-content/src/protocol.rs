@@ -5,6 +5,24 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Extensions extracted (lower case). Other document kinds (`pages`, `numbers`, `key`,
+/// `epub`) are skipped unread (VFS-2 scope).
+pub const SUPPORTED: &[&str] = &[
+    "pdf", "doc", "docx", "odt", "rtf", "txt", "md", "csv", "xls", "xlsx", "ods", "ppt", "pptx",
+    "odp",
+];
+
+/// Document metadata as the extractor reports it, beyond the title (VFS-2 R16). Nothing is
+/// guessed from the text.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocMeta {
+    #[serde(default)]
+    pub authors: Vec<String>,
+    /// Creation date as reported (ISO 8601 where the format has it).
+    #[serde(default)]
+    pub created: Option<String>,
+}
+
 /// Environment variable carrying the worker's heap cap in bytes (VFS-2 D6).
 pub const MEM_CAP_ENV: &str = "VFS_EXTRACT_MEM_CAP";
 
@@ -85,7 +103,7 @@ pub enum Outcome {
         page_starts: Vec<usize>,
         /// Authors and creation date, when the format carries them (VFS-2 R16).
         #[serde(default)]
-        meta: crate::extract::DocMeta,
+        meta: DocMeta,
     },
     Skipped(SkipReason),
     Failed {

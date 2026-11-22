@@ -4,16 +4,24 @@
 //!
 //! Name and path search (`vfs-core`) never depend on this crate; nothing here runs unless the
 //! caller switches content search on by calling [`indexer::run`].
+//!
+//! The `extractor` feature (on by default) adds Xberg, the extraction itself and the worker
+//! entry point used by the `vfs-extract` binary. A caller that only indexes and searches, as
+//! the app will (VFS-27 PR 27b), depends on this crate without it, so Xberg stays in the
+//! worker (VFS-2 D3, VFS-27 D1).
 
 pub mod analyze;
 pub mod chunk;
 pub mod cloud;
+#[cfg(feature = "extractor")]
 pub mod extract;
 pub mod indexer;
+pub mod paths;
 pub mod protocol;
 pub mod search;
 pub mod store;
 pub mod supervisor;
+#[cfg(feature = "extractor")]
 pub mod worker;
 
 pub use indexer::{run as index, IndexOptions, RunSummary, StoreStats};

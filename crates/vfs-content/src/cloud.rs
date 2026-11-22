@@ -35,7 +35,7 @@ pub fn is_cloud_only(path: &Path) -> bool {
         use windows_sys::Win32::Storage::FileSystem::{
             GetFileAttributesW, INVALID_FILE_ATTRIBUTES,
         };
-        let wide: Vec<u16> = crate::worker::long_path(path)
+        let wide: Vec<u16> = crate::paths::long_path(path)
             .as_os_str()
             .encode_wide()
             .chain(Some(0))

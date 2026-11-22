@@ -5,6 +5,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -22,6 +23,28 @@ pub struct WorkerConfig {
     pub timeout: Duration,
     /// Heap cap of the worker, in bytes (passed as `VFS_EXTRACT_MEM_CAP`).
     pub mem_cap: usize,
+    /// After a stop request, how long the document in flight may still take before the
+    /// worker is killed (VFS-27 R3: at most 5 s, so an update can replace the executable).
+    pub stop_grace: Duration,
+}
+
+/// How often a wait for the worker's answer looks at the stop flag.
+const STOP_POLL: Duration = Duration::from_millis(50);
+
+/// Why [`Supervisor::extract`] returned no answer for the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Halt {
+    /// No worker could be started: the run cannot continue (VFS-2 R17).
+    Start(StartError),
+    /// A stop was requested and the file was not finished within the grace period; the
+    /// worker was killed and the file is left as it was (VFS-27 R3).
+    Stopped,
+}
+
+impl From<StartError> for Halt {
+    fn from(e: StartError) -> Halt {
+        Halt::Start(e)
+    }
 }
 
 /// Extra bytes allowed on one response line beyond the text cap (JSON escaping, title).
@@ -216,13 +239,14 @@ impl Supervisor {
 
     /// Extracts one file in the worker. Never panics on worker misbehaviour: a hang, crash,
     /// oversized or malformed answer becomes a `Failed` response and the worker is replaced.
-    /// `Err` only when no worker can be started, which ends the run (VFS-2 R17).
-    pub fn extract(&mut self, req: &Request) -> Result<Response, StartError> {
+    /// `Err` when no worker can be started, which ends the run (VFS-2 R17), or when `stop` is
+    /// set and the file does not finish within the grace period (VFS-27 R3).
+    pub fn extract(&mut self, req: &Request, stop: &AtomicBool) -> Result<Response, Halt> {
         let line_cap = Self::line_cap(req.max_text_bytes);
         let timeout = self.config.timeout;
         self.start(line_cap)?;
         let started = Instant::now();
-        Ok(self.exchange(req, line_cap, timeout, started))
+        self.exchange(req, line_cap, timeout, started, stop)
     }
 
     fn exchange(
@@ -231,7 +255,8 @@ impl Supervisor {
         line_cap: usize,
         timeout: Duration,
         started: Instant,
-    ) -> Response {
+        stop: &AtomicBool,
+    ) -> Result<Response, Halt> {
         let mut payload = serde_json::to_string(req).expect("request serializes");
         payload.push('\n');
         let r = self.running.as_mut().expect("running");
@@ -241,9 +266,34 @@ impl Supervisor {
             .and_then(|_| r.stdin.flush())
         {
             let detail = self.kill();
-            return Response::failed(FailReason::Crash, format!("worker gone: {e}; {detail}"));
+            return Ok(Response::failed(
+                FailReason::Crash,
+                format!("worker gone: {e}; {detail}"),
+            ));
         }
-        match r.lines.recv_timeout(timeout) {
+        // Wait in short slices so a stop request is seen; after one, the file in flight gets
+        // `stop_grace` before the worker is killed.
+        let deadline = started + timeout;
+        let mut grace_end: Option<Instant> = None;
+        let received = loop {
+            let now = Instant::now();
+            if grace_end.is_none() && stop.load(Ordering::Relaxed) {
+                grace_end = Some(now + self.config.stop_grace);
+            }
+            if grace_end.is_some_and(|g| now >= g) {
+                self.kill();
+                return Err(Halt::Stopped);
+            }
+            let until = grace_end
+                .map_or(deadline, |g| g.min(deadline))
+                .min(now + STOP_POLL);
+            let lines = &self.running.as_ref().expect("running").lines;
+            match lines.recv_timeout(until.saturating_duration_since(now)) {
+                Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => continue,
+                other => break other,
+            }
+        };
+        Ok(match received {
             Ok(Ok(line)) if line.len() <= line_cap && line.ends_with('\n') => {
                 match serde_json::from_str::<Response>(&line) {
                     Ok(resp) => resp,
@@ -283,7 +333,7 @@ impl Supervisor {
                 };
                 Response::failed(reason, format!("worker exited: {detail}"))
             }
-        }
+        })
     }
 }
 

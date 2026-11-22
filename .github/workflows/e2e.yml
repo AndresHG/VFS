@@ -47,15 +47,17 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+      - name: Extraction worker (sidecar, as release.yml builds it)
+        run: python3 scripts/sidecar.py build
       - name: Release installer (unsigned, exactly as release.yml builds it)
         working-directory: apps/desktop/src-tauri
-        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis -- --locked
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis --config tauri.sidecar.conf.json -- --locked
       - name: Keep it apart
         shell: bash
         run: mkdir -p bin/release && mv target/release/bundle/nsis/*-setup.exe bin/release/
       - name: Installer of the webdriver build (embedded W3C server; e2e only)
         working-directory: apps/desktop/src-tauri
-        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis --features webdriver -- --locked
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles nsis --features webdriver --config tauri.sidecar.conf.json -- --locked
       - name: CLI
         shell: bash
         run: |
@@ -200,9 +202,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+      - name: Extraction worker (sidecar, as release.yml builds it)
+        run: python3 scripts/sidecar.py build
       - name: App with the embedded WebDriver server (no external driver exists for WKWebView)
         working-directory: apps/desktop/src-tauri
-        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles app --features webdriver -- --locked
+        run: npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles app --features webdriver --config tauri.sidecar.conf.json -- --locked
       - name: Python packages
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"

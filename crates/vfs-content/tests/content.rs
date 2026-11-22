@@ -784,8 +784,8 @@ fn ac20_missing_worker_stops_the_run_without_changes() {
     assert!(before.iter().all(|(_, st)| *st == NONE));
 }
 
-/// VFS-2 AC-20: a worker reporting another version stops the run with "version mismatch",
-/// and no file changes state.
+/// VFS-2 AC-20, VFS-27 AC-1: a worker reporting another version stops the run with
+/// "version mismatch", and no file changes state.
 #[test]
 fn ac20_version_mismatch_stops_the_run() {
     let s = setup();
@@ -1506,4 +1506,73 @@ fn ac22_structured_queries_and_paging() {
         .map(|h| h.id)
         .collect();
     assert_eq!(paged, whole.hits.iter().map(|h| h.id).collect::<Vec<_>>());
+}
+
+/// Whether the process `pid` is still running (not merely a reaped id).
+fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+        };
+        // SAFETY: the handle is opened, waited on with no timeout and closed here.
+        unsafe {
+            let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if h.is_null() {
+                return false;
+            }
+            let alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+            CloseHandle(h);
+            alive
+        }
+    }
+}
+
+/// VFS-27 AC-3 (R3): a stop during a document gives it the grace period, then the worker is
+/// killed and has exited when the run returns; the document stays queued, not failed.
+#[test]
+fn stop_mid_document_kills_the_worker_within_the_grace() {
+    let s = setup();
+    s.write("a/lento.txt", "este documento no termina nunca");
+    s.scan();
+    let pidfile = s._tmp.path().join("worker.pid");
+    let mut o = s.opts();
+    o.worker.stop_grace = Duration::from_secs(1);
+    o.worker.args = vec![
+        "--test-hook=hang:lento.txt".into(),
+        format!("--test-hook=pidfile:{}", pidfile.display()),
+    ];
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let (db, flag) = (s.db.clone(), stop.clone());
+    let run = std::thread::spawn(move || vfs_content::index(&db, &o, &flag).unwrap());
+    // Wait until the worker has started and the document is in flight.
+    let t = std::time::Instant::now();
+    while !pidfile.exists() && t.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pid: u32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let asked = std::time::Instant::now();
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let sum = run.join().unwrap();
+    // The grace (1 s here, 5 s in the app) plus the kill and reap.
+    assert!(
+        asked.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        asked.elapsed()
+    );
+    assert!(!process_alive(pid), "worker {pid} still running");
+    assert_eq!(sum.stopped, None, "{sum:?}");
+    assert_eq!((sum.failed, sum.remaining), (0, 1), "{sum:?}");
+    assert_eq!(s.state("lento.txt"), (QUEUED, None, None));
 }
