@@ -19,10 +19,9 @@ use vfs_core::FileKind;
 use crate::analyze::Analyzer;
 use crate::chunk::chunks;
 use crate::cloud;
-use crate::extract::SUPPORTED;
-use crate::protocol::{FailReason, Outcome, Request, Response, SkipReason};
+use crate::protocol::{FailReason, Outcome, Request, Response, SkipReason, SUPPORTED};
 use crate::store;
-use crate::supervisor::{StartError, Supervisor, WorkerConfig};
+use crate::supervisor::{Halt, StartError, Supervisor, WorkerConfig};
 use crate::Result;
 
 /// A file that timed out is tried once more on a later run before its failure is final: at
@@ -66,6 +65,7 @@ impl IndexOptions {
                 args,
                 timeout: Duration::from_secs(30),
                 mem_cap: 512 << 20,
+                stop_grace: Duration::from_secs(5),
             },
             max_input_bytes: None,
             max_text_bytes: 1 << 20,
@@ -652,16 +652,19 @@ pub fn run(index_db: &Path, opts: &IndexOptions, stop: &AtomicBool) -> Result<Ru
                     ms: 0,
                 }
             } else {
-                match sup.extract(&Request {
+                let req = Request {
                     path,
                     max_input_bytes: max_input,
                     max_text_bytes: opts.max_text_bytes,
-                }) {
+                };
+                match sup.extract(&req, stop) {
                     Ok(r) => r,
-                    Err(e) => {
+                    Err(Halt::Start(e)) => {
                         sum.stop(StopReason::from(&e), e.to_string());
                         break 'outer;
                     }
+                    // Stopped by the caller mid-file: the file stays queued (VFS-27 R3).
+                    Err(Halt::Stopped) => break 'outer,
                 }
             };
             if matches!(

@@ -15,6 +15,7 @@ use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use vfs_core::api::ApiError;
 
+use crate::content::ContentRuns;
 use crate::AppState;
 
 /// Settings file in the local app-data directory, apart from the index (VFS-21 D3).
@@ -106,15 +107,18 @@ impl<T: Clone> CheckOnce<T> {
     }
 }
 
-/// Download, then `install`, then `after_install`; `recover` runs when `install` fails
-/// (VFS-21 R3, R5, R8). The updater plugin verifies the signature in `download` and again at the
-/// start of `install`, so a failed download or a bad signature returns before anything is
-/// installed or stopped. Windows: the indexer is stopped inside `install` (the updater's
-/// `on_before_exit` hook, after verifying)
+/// Download, then `before_install`, then `install`, then `after_install`; `recover` runs when
+/// `install` fails (VFS-21 R3, R5, R8). The updater plugin verifies the signature in `download`
+/// and again at the start of `install`, so a failed download returns before anything is
+/// installed or stopped. `before_install` stops the content run, whose worker gets 5 s and is
+/// then killed, on both platforms before the installer touches `vfs-extract` (VFS-27 R3); a
+/// failed install leaves content search stopped until it is started again. Windows: the
+/// indexer is stopped inside `install` (the updater's `on_before_exit` hook, after verifying)
 /// and on success the process exits for the installer. macOS: `install` replaces the bundle
 /// while the indexer runs, then `after_install` stops it and relaunches.
-pub async fn install_flow<D, DFut, I, A, F, E>(
+pub async fn install_flow<D, DFut, B, I, A, F, E>(
     download: D,
+    before_install: B,
     install: I,
     after_install: A,
     recover: F,
@@ -122,11 +126,13 @@ pub async fn install_flow<D, DFut, I, A, F, E>(
 where
     D: FnOnce() -> DFut,
     DFut: Future<Output = Result<Vec<u8>, E>>,
+    B: FnOnce(),
     I: FnOnce(&[u8]) -> Result<(), E>,
     A: FnOnce(),
     F: FnOnce(),
 {
     let bytes = download().await?;
+    before_install();
     if let Err(e) = install(&bytes) {
         recover();
         return Err(e);
@@ -183,6 +189,14 @@ fn io_error(e: impl Display) -> ApiError {
 fn shutdown_index<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<AppState>() {
         state.vfs.shutdown();
+    }
+}
+
+/// Stops the content run before the installer starts, so it can replace `vfs-extract`: the
+/// document in flight gets 5 s, then the worker is killed (VFS-27 R3).
+fn stop_content<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(runs) = app.try_state::<ContentRuns>() {
+        runs.stop_for_update();
     }
 }
 
@@ -281,6 +295,7 @@ pub async fn install_update<R: Runtime>(
     };
     let result = install_flow(
         download,
+        || stop_content(&app),
         |bytes| update.install(bytes),
         || {
             // macOS: the bundle was replaced in place; relaunch on the new version.
@@ -400,6 +415,7 @@ mod tests {
                     Err("connection reset".to_string())
                 }
             },
+            || steps.borrow_mut().push("stop content"),
             |bytes: &[u8]| {
                 assert_eq!(bytes, [1, 2, 3]);
                 steps.borrow_mut().push("install");
@@ -430,7 +446,7 @@ mod tests {
     fn failed_install_runs_recovery() {
         let (result, steps) = run_flow(true, false);
         assert_eq!(result.unwrap_err(), "signature mismatch");
-        assert_eq!(steps, ["download", "install", "recover"]);
+        assert_eq!(steps, ["download", "stop content", "install", "recover"]);
     }
 
     /// VFS-21 AC-12: recovery relaunches the current version only when the indexer was
@@ -447,12 +463,15 @@ mod tests {
         assert_eq!(relaunched.load(Ordering::SeqCst), 1);
     }
 
-    /// VFS-21 AC-8: the index is shut down only after the update is installed and before the
-    /// relaunch.
+    /// VFS-21 AC-8, VFS-27 AC-3: the content run stops before the installer starts, and the
+    /// index is shut down only after the update is installed and before the relaunch.
     #[test]
     fn index_stops_after_install_before_relaunch() {
         let (result, steps) = run_flow(true, true);
         assert!(result.is_ok());
-        assert_eq!(steps, ["download", "install", "shutdown+relaunch"]);
+        assert_eq!(
+            steps,
+            ["download", "stop content", "install", "shutdown+relaunch"]
+        );
     }
 }

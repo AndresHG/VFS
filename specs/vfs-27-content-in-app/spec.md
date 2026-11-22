@@ -1,7 +1,7 @@
 # VFS-27 — Content search in the app
 
 - **Status**: approved. The owner decided D9–D13 of VFS-2 and D1 here. An independent critic
-  review asked for revisions, and all of them are made here.
+  review asked for revisions, and all of them are made here. PR 27a is implemented.
 - **Size**: L. It ships a second executable in both installers, opens user files from the app
   for the first time, and adds platform-specific idle and disk probes. It is multi-PR.
 - **Links**:

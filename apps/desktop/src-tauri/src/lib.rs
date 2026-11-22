@@ -4,6 +4,7 @@
 
 pub mod bookmarks;
 pub mod commands;
+pub mod content;
 pub mod feedback;
 pub mod i18n;
 pub mod reveal;
@@ -368,6 +369,8 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(WebviewSuspended::default());
+            // VFS-27 R3: the content run an update must stop first (27b starts runs).
+            app.manage(content::ContentRuns::default());
             let handle = app.handle().clone();
             // VFS-22 R5: the OS language until the UI sends its own through `set_language`.
             let lang = i18n::Lang::system();

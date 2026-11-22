@@ -8,24 +8,7 @@
 use std::path::Path;
 
 use crate::protocol::SkipReason;
-
-/// Extensions extracted (lower case). Other document kinds (`pages`, `numbers`, `key`,
-/// `epub`) are skipped unread (VFS-2 scope).
-pub const SUPPORTED: &[&str] = &[
-    "pdf", "doc", "docx", "odt", "rtf", "txt", "md", "csv", "xls", "xlsx", "ods", "ppt", "pptx",
-    "odp",
-];
-
-/// Document metadata as the extractor reports it, beyond the title (VFS-2 R16). Nothing is
-/// guessed from the text.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct DocMeta {
-    #[serde(default)]
-    pub authors: Vec<String>,
-    /// Creation date as reported (ISO 8601 where the format has it).
-    #[serde(default)]
-    pub created: Option<String>,
-}
+pub use crate::protocol::{DocMeta, SUPPORTED};
 
 /// What the extractor made of one file's bytes.
 #[derive(Debug, Clone, PartialEq)]

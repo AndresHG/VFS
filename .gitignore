@@ -12,6 +12,8 @@ npm-debug.log*
 
 # Tauri (generated capability schemas; src-tauri/target is covered above)
 src-tauri/gen/schemas/
+# The extraction worker placed for bundling by scripts/sidecar.py (VFS-27 R1)
+apps/desktop/src-tauri/binaries/
 
 # macOS
 .DS_Store

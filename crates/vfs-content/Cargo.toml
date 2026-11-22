@@ -9,6 +9,12 @@ publish.workspace = true
 [[bin]]
 name = "vfs-extract"
 path = "src/bin/vfs-extract.rs"
+required-features = ["extractor"]
+
+[features]
+default = ["extractor"]
+# Xberg and the worker: the `vfs-extract` binary and the CLI's worker mode (VFS-2 D3).
+extractor = ["dep:xberg", "dep:tokio"]
 
 [dependencies]
 vfs-core.workspace = true
@@ -20,8 +26,8 @@ unicode-normalization.workspace = true
 rust-stemmers = "1.2"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Pure-Rust PDF backend plus office and spreadsheet extractors; no OCR, models or network.
-xberg = { version = "=1.4.2", default-features = false, features = ["pdf", "office", "excel"] }
-tokio = { version = "1", default-features = false, features = ["rt"] }
+xberg = { version = "=1.4.2", default-features = false, features = ["pdf", "office", "excel"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -56,6 +56,13 @@ jobs:
         run: cargo test --workspace --locked
       - name: UI tests
         run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs apps/desktop/ui-dev/sources.test.mjs apps/desktop/ui-dev/strings.test.mjs apps/desktop/ui-dev/fonts.test.mjs apps/desktop/ui-dev/updates.test.mjs apps/desktop/ui-dev/suggest.test.mjs apps/desktop/ui-dev/feedback.test.mjs apps/desktop/ui-dev/folders.test.mjs apps/desktop/ui-dev/layout.test.mjs apps/desktop/ui-dev/kinds.test.mjs
+      - name: Xberg stays out of the app (VFS-2 D3, VFS-27 D1)
+        shell: bash
+        run: |
+          # The tree goes to a file first, so a failing `cargo tree` fails the step.
+          cargo tree -p vfs-desktop -e normal --locked > "$RUNNER_TEMP/app-tree.txt"
+          if grep -q ' xberg ' "$RUNNER_TEMP/app-tree.txt"; then
+            echo "xberg is in the app's dependency graph"; exit 1; fi
       - name: Test content-search engine (VFS-2, feature off by default)
         run: |
           cargo clippy -p vfs-cli --all-targets --features content -- -D warnings
