@@ -27,7 +27,7 @@ test('feedback dialog markup and copy', () => {
   assert.match(S.feedbackExport, /Exportar diagnóstico/);
 });
 
-/** VFS-20 R1: "Ver el informe" says it shows only the newest log lines and the .zip holds
+/** VFS-30 AC-5: "Ver el informe" says it shows only the newest log lines and the .zip holds
  * all, in both catalogs. */
 test('the preview says the .zip holds the whole log', () => {
   assert.match(html, /<details id="feedback-details">[\s\S]*data-s="feedbackPreviewNote"[\s\S]*<\/details>/);
@@ -79,7 +79,8 @@ function fakeDom() {
 }
 
 /** VFS-20 AC-7: the dialog opens with the names box unticked; opening "Ver el informe" asks
- * for the report, and ticking the box asks again with names; saving reports where it went. */
+ * for the report, and ticking the box asks again with names; saving reports where it went.
+ * VFS-30 AC-5: typing asks for no report. */
 test('dialog asks for the report and refreshes it when the names box changes', async () => {
   const $ = fakeDom();
   const calls = [];

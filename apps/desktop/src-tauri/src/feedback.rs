@@ -24,10 +24,12 @@ pub const PANIC_TARGET: &str = "vfs::panic";
 /// What replaces a path in a redacted line.
 pub const REDACTED: &str = "<ruta>";
 
-/// What replaces a panic's message, or a whole continuation line, when names are left out (R3).
+/// What replaces a panic's message, or a whole continuation line, when names are left out
+/// (VFS-30 R1, R3).
 pub const OMITTED: &str = "<omitido>";
 
-/// Most bytes of log lines "Ver el informe" shows: the newest ones (R1). The `.zip` holds all.
+/// Most bytes of log lines "Ver el informe" shows: the newest ones (VFS-30 R4). The `.zip`
+/// holds all.
 pub const PREVIEW_LOG_BYTES: usize = 200 * 1024;
 
 /// New-issue page of the project; the `comentarios` form lives in `.github/ISSUE_TEMPLATE/`.
@@ -240,7 +242,7 @@ pub fn redact_message(message: &str, private: &[String]) -> String {
     out
 }
 
-/// A panic record's message with names left out (R3): its payload is free text (Rust's own
+/// A panic record's message with names left out (VFS-30 R1): its payload is free text (Rust's own
 /// messages quote names in backticks, a search term can be in it), so only the location is
 /// kept: `panic at <file>:<line>: <omitido>`.
 fn redact_panic(message: &str) -> String {
@@ -258,7 +260,8 @@ fn redact_panic(message: &str) -> String {
     }
 }
 
-/// One log line as the report shows it with names left out (R3): diagnostic records verbatim,
+/// One log line as the report shows it with names left out (VFS-20 R3, VFS-30 R1–R3):
+/// diagnostic records verbatim,
 /// a panic record with only its location, any other line with its prefix kept and its
 /// message redacted. A continuation line (no prefix) is kept as written only when the record
 /// it continues is a diagnostic one (`after_diag`); any other is replaced whole, since a name
@@ -327,8 +330,8 @@ fn mb(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / (1024.0 * 1024.0))
 }
 
-/// Builds the report (R2–R4). Its labels are English: it is read by maintainers. Only the
-/// newest `log_budget` bytes of log lines are included, whole lines only (the preview passes
+/// Builds the report (VFS-20 R2–R4). Its labels are English: it is read by maintainers. Only
+/// the newest `log_budget` bytes of log lines are included, whole lines only (the preview passes
 /// [`PREVIEW_LOG_BYTES`], the `.zip` `usize::MAX`); the counts always cover every line.
 pub fn build_report(
     env: &Environment,
@@ -873,7 +876,7 @@ fn current_report<R: Runtime>(
     )
 }
 
-/// "Ver el informe" (R1): the report as it would be saved, with only the newest
+/// "Ver el informe" (VFS-20 R1, VFS-30 R4): the report as it would be saved, with only the newest
 /// [`PREVIEW_LOG_BYTES`] of log lines, so a slow PC never loads the whole log into the page.
 #[tauri::command(async)]
 pub fn feedback_report<R: Runtime>(
@@ -1088,6 +1091,8 @@ mod tests {
 
     /// VFS-20 AC-2: with the box unticked no root path, file or folder name survives in any
     /// warning format, `<ruta>` takes their place, and diagnostic lines are unchanged.
+    /// VFS-30 AC-1: nor in a panic payload or a name's tail after a line break; each panic
+    /// keeps only its location.
     #[test]
     fn report_without_names_redacts_every_path() {
         let r = build_report(
@@ -1123,6 +1128,7 @@ mod tests {
 
     /// VFS-20 AC-2: the generic rule alone (no root given) still catches Windows, UNC, macOS
     /// and home-relative paths, and leaves ordinary words and our own source paths alone.
+    /// VFS-30 AC-2: also after a backtick, `<`, `{` or `|`.
     #[test]
     fn generic_rule_redacts_paths_without_known_roots() {
         let none: &[String] = &[];
@@ -1203,7 +1209,7 @@ mod tests {
         );
     }
 
-    /// VFS-20 AC-2: a panic keeps only its location, whatever its payload; a continuation line
+    /// VFS-30 AC-3: a panic keeps only its location, whatever its payload; a continuation line
     /// is kept only after a diagnostic record, any other is replaced whole (a macOS name can
     /// hold a line break).
     #[test]
@@ -1254,7 +1260,7 @@ mod tests {
         assert!(text.ends_with(&format!("{DIAG}\n  dirs=3\n")), "{text}");
     }
 
-    /// VFS-20 AC-1 (R1): the preview holds the summary and only the newest
+    /// VFS-30 AC-5: the preview holds the summary and only the newest
     /// [`PREVIEW_LOG_BYTES`] of log lines, whole lines, and says the rest is in the `.zip`;
     /// the counts still cover every line.
     #[test]

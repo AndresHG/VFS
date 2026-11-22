@@ -13,7 +13,7 @@ use vfs_desktop_lib::{install_logger, LOG_KEEP, LOG_MAX_BYTES};
 /// target is not.
 /// VFS-20 AC-6: a panic is written as an error with its location; the file rotates at
 /// `LOG_MAX_BYTES`, keeps `LOG_KEEP` old files, and they hold at least 20 MB (several weeks).
-/// VFS-20 AC-2: the report's parser reads the lines this logger writes (target, level,
+/// VFS-30 AC-4: the report's parser reads the lines this logger writes (target, level,
 /// message), so a diagnostic record is kept and a panic loses its message.
 #[test]
 fn warnings_go_to_the_log_file_and_info_does_not() {
