@@ -178,7 +178,7 @@
     </div>
   </dialog>
 
-  <!-- VFS-22: settings (language); VFS-21: the update check. -->
+  <!-- VFS-22: settings (language); VFS-21: the update check; VFS-33: advanced. -->
   <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="any">
     <div class="drawer-head">
       <h2 id="settings-title" data-s="settingsTitle"></h2>
@@ -196,6 +196,12 @@
       <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
       <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
     </section>
+    <!-- VFS-33: the default folder exclusions; almost nobody needs this, so it stays folded. -->
+    <details class="setting setting-advanced">
+      <summary data-s="advancedTitle"></summary>
+      <label class="toggle"><input type="checkbox" id="include-all"> <span data-s="includeAllToggle"></span></label>
+      <p class="bookmarks-intro bookmarks-status" data-s="includeAllIntro"></p>
+    </details>
   </dialog>
 
   <dialog id="copies" class="drawer" aria-labelledby="copies-title" closedby="any">

@@ -2492,3 +2492,114 @@ fn small_updates_publish_no_scanning_state() {
         sink.states.lock().unwrap()
     );
 }
+
+/// Whether a folder at `rel` is indexed, and how many files it holds.
+fn indexed(fx: &Fx, rel: &str) -> Option<i64> {
+    fx.dir(rel).map(|(id, _)| {
+        fx.conn
+            .query_row("SELECT COUNT(*) FROM files WHERE dir_id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    })
+}
+
+/// VFS-33 AC-8: by default a walk skips `node_modules`, the contents of a `CACHEDIR.TAG`
+/// folder and a venv's `lib`, but keeps the venv's project files; with the setting on, a new
+/// walk indexes everything; off again, the next walk removes it.
+#[test]
+fn default_exclusions_follow_the_setting() {
+    let mut fx = fixture(&[
+        "Web/node_modules/pad",
+        "Rust/target/debug",
+        "Proyecto/lib/site",
+        "Normal",
+    ]);
+    let root = fx.root();
+    fs::write(root.join("Rust/target/CACHEDIR.TAG"), b"Signature: x").unwrap();
+    fs::write(root.join("Proyecto/pyvenv.cfg"), b"home = /usr").unwrap();
+    fs::write(root.join("Proyecto/notas.txt"), b"x").unwrap();
+    fx.scan();
+    assert_eq!(indexed(&fx, "Normal"), Some(1));
+    assert_eq!(indexed(&fx, "Web/node_modules"), None);
+    assert_eq!(
+        indexed(&fx, "Rust/target"),
+        Some(0),
+        "the folder, not its contents"
+    );
+    assert_eq!(indexed(&fx, "Rust/target/debug"), None);
+    assert_eq!(indexed(&fx, "Proyecto/lib"), None);
+    assert_eq!(
+        indexed(&fx, "Proyecto"),
+        Some(2),
+        "pyvenv.cfg and notas.txt"
+    );
+
+    exclude::set_include_all(&fx.conn, true).unwrap();
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(indexed(&fx, "Web/node_modules/pad"), Some(1));
+    assert_eq!(indexed(&fx, "Rust/target"), Some(1));
+    assert_eq!(indexed(&fx, "Rust/target/debug"), Some(1));
+    assert_eq!(indexed(&fx, "Proyecto/lib/site"), Some(1));
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+
+    exclude::set_include_all(&fx.conn, false).unwrap();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(indexed(&fx, "Web/node_modules"), None);
+    assert_eq!(indexed(&fx, "Rust/target"), Some(0));
+    assert_eq!(indexed(&fx, "Proyecto/lib"), None);
+    assert_eq!(indexed(&fx, "Normal"), Some(1));
+}
+
+/// VFS-33 AC-9: a root last walked under another exclusion list (or none recorded, an index
+/// from before) owes a full walk when the indexer starts, and records the current one.
+#[test]
+fn an_older_exclusion_list_owes_a_walk() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+    fx.conn
+        .execute("DELETE FROM meta WHERE key LIKE 'exclusions/%'", [])
+        .unwrap();
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+    fx.set_last_scan(1000);
+    let h = IndexerHandle::spawn_with(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        Sched::inert(),
+        Some(Duration::from_secs(3600)),
+    )
+    .unwrap();
+    let reader = db::open_ro(&fx.db_path).unwrap();
+    wait_until("the owed walk", Duration::from_secs(20), || {
+        reader
+            .query_row(
+                "SELECT last_full_scan_at FROM roots WHERE id = ?1",
+                [fx.root_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+            .unwrap_or(0)
+            > 1000
+    });
+    drop(h);
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+}
+
+/// VFS-33 AC-9: a walk during which the switch changed records the setting it started
+/// under, so the root is still stale afterwards and owes another walk.
+#[test]
+fn a_walk_the_switch_changed_halfway_stays_stale() {
+    let mut fx = fixture(&["A", "B"]);
+    fx.scan();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    exclude::set_include_all(&fx.conn, true).unwrap();
+    fx.scan();
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+}

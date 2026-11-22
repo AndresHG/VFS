@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::exclude::Children;
 use crate::types::UnreadableReason;
 
 pub(crate) enum EntryKind {
@@ -110,8 +111,16 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
 /// entry whose metadata is denied (a Unix folder readable but not searchable) fails the
 /// whole listing, so the folder is retried like an unlistable one instead of being marked
 /// clean without those entries.
-pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<Entry>> {
+///
+/// `rules` are the default exclusions for this folder (VFS-33 R5): excluded subfolders are
+/// left out; a marker entry empties the listing or drops the subfolders it names.
+pub(crate) fn list_dir(
+    dir: &Path,
+    skip: Option<&Path>,
+    rules: &Children<'_>,
+) -> std::io::Result<Vec<Entry>> {
     let mut out = Vec::new();
+    let mut marked: Option<&[&str]> = None;
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
         let os_name = entry.file_name();
@@ -121,6 +130,12 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
         };
         if is_excluded(&name) {
             continue;
+        }
+        if rules.is_marker(&name) {
+            return Ok(Vec::new());
+        }
+        if let Some(children) = rules.marked_children(&name) {
+            marked = Some(children);
         }
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -136,7 +151,7 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
         let kind = if file_type.is_symlink() {
             EntryKind::Link { mtime }
         } else if file_type.is_dir() {
-            if skip.is_some_and(|s| entry.path() == s) {
+            if skip.is_some_and(|s| entry.path() == s) || rules.skips_dir(&name) {
                 continue;
             }
             EntryKind::Dir { mtime }
@@ -155,6 +170,9 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
             kind,
             cloud_only,
         });
+    }
+    if let Some(children) = marked {
+        out.retain(|e| !matches!(e.kind, EntryKind::Dir { .. }) || !children.contains(&&*e.name));
     }
     Ok(out)
 }

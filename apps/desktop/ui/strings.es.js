@@ -203,6 +203,10 @@ export const es = {
   updatesTitle: 'Actualizaciones',
   updatesToggle: 'Buscar actualizaciones al abrir',
   updatesIntro: 'Al abrirse, VFS comprueba en GitHub si hay una versión nueva. Es la única conexión a internet que hace VFS: no envía nada sobre sus archivos y, si desactiva esta opción, no se conecta nunca.',
+  // VFS-33: the default folder exclusions, folded under «Avanzado».
+  advancedTitle: 'Avanzado',
+  includeAllToggle: 'Incluir carpetas del sistema y de programas',
+  includeAllIntro: 'Normalmente VFS no revisa las carpetas que solo usan el sistema y los programas: archivos del sistema, datos de aplicaciones (Library en Mac, AppData en Windows), carpetas de desarrollo (node_modules, .git, entornos de Python) y cachés de otros programas. Si añade una de esas carpetas a su lista, sí se revisa. Al cambiar esta opción, VFS vuelve a revisar todas sus carpetas.',
   updateAvailable: (version) => `Hay una versión nueva de VFS (${version}).`,
   updateInstall: 'Actualizar',
   updateLater: 'Ahora no',

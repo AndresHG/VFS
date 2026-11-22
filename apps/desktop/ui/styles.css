@@ -813,6 +813,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .bookmarks-setting { padding: var(--s4) var(--s5) 0; border-block-start: 1px solid var(--line); }
 .bookmarks-setting h3 { margin: 0 0 var(--s1); font-size: 1rem; }
 .bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }
+.setting-advanced summary { cursor: pointer; font-weight: 700; }
 .toggle { display: inline-flex; align-items: center; gap: var(--s2); min-block-size: 2.5rem; font-weight: 700; }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; accent-color: var(--accent); }
 .bookmarks-status { margin: var(--s1) 0 var(--s4); color: var(--ink-2); }

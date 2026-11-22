@@ -20,10 +20,12 @@
 
 mod apply;
 mod cursor;
+mod exclude;
 mod sched;
 mod walk;
 mod watch;
 
+pub(crate) use exclude::{include_all, set_include_all};
 pub use sched::DIAG_TARGET;
 pub(crate) use walk::cloud_only_attributes;
 
@@ -414,6 +416,12 @@ fn scan_root(
     let mut rows = 0u64;
     let mut started = Instant::now();
     pass.walk = sched.mode == Mode::Walk;
+    let root_path = Path::new(&root.path);
+    let excl = if exclude::include_all(conn)? {
+        exclude::Exclusions::none(root_path)
+    } else {
+        exclude::Exclusions::for_root(root_path, exclude::home().as_deref())
+    };
     loop {
         if stop() {
             commit(&mut tx, sched)?;
@@ -461,7 +469,7 @@ fn scan_root(
             if walk::behind_link(Path::new(&root.path), &rel_path) {
                 Err(std::io::Error::from(std::io::ErrorKind::NotFound))
             } else {
-                walk::list_dir(&abs, skip)
+                walk::list_dir(&abs, skip, &excl.children_of(&abs))
             }
         });
         let open = match tx.take() {
@@ -484,6 +492,7 @@ fn scan_root(
         }
         if let Some(now) = first_cursor {
             cursor::store(t, root.id, now.as_deref())?;
+            exclude::begin_walk(t, root.id)?;
             set_root_status(t, root.id, RootStatus::Scanning)?;
             root.status = RootStatus::Scanning;
         }
@@ -595,6 +604,7 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
         // A link file that could not be read (locked, antivirus) is read again by the next
         // deferred pass after each full walk (VFS-18 R9).
         ingest::retry_unreadable_links(&tx, root.id)?;
+        exclude::stamp(&tx, root.id)?;
         tx.execute(
             "INSERT INTO files_fts(files_fts, rank) VALUES('merge', 500)",
             [],
@@ -687,6 +697,7 @@ fn queue_rewalk(conn: &Connection, history: &dyn History, root_id: i64) -> Resul
             params![root_id, ScanState::PendingDeep as i64],
         )?;
         cursor::store(&tx, root_id, now.as_deref())?;
+        exclude::begin_walk(&tx, root_id)?;
     }
     tx.commit()?;
     Ok(true)
@@ -716,6 +727,7 @@ fn restart_walk(conn: &Connection, history: &dyn History, root_id: i64) -> Resul
         params![root_id, ScanState::PendingDeep as i64],
     )?;
     cursor::store(&tx, root_id, now.as_deref())?;
+    exclude::begin_walk(&tx, root_id)?;
     tx.commit()?;
     Ok(true)
 }
@@ -822,6 +834,7 @@ fn finish_removing(conn: &Connection, stop: &dyn Fn() -> bool) -> Result<bool> {
                 tx.execute("DELETE FROM roots WHERE id = ?1", [root_id])?;
                 cursor::store(&tx, root_id, None)?;
                 crate::roots::set_paused_key(&tx, root_id, false)?;
+                exclude::forget(&tx, root_id)?;
                 tx.commit()?;
                 // Counts and time of this run; a removal resumed after a stop counts from
                 // the resume (VFS-31 R5).
@@ -1001,7 +1014,7 @@ impl IndexerHandle {
             conn,
             rx,
             watch_tx: tx.clone(),
-            ignore,
+            filter: watch::Filter::new(ignore),
             shared: Arc::clone(&shared),
             sink,
             watcher: None,
@@ -1095,7 +1108,8 @@ struct Worker {
     conn: Connection,
     rx: Receiver<Cmd>,
     watch_tx: Sender<Cmd>,
-    ignore: PathBuf,
+    /// Drops events under the app data directory and the default exclusions (VFS-33 R5).
+    filter: watch::Filter,
     shared: Arc<Shared>,
     sink: Arc<dyn ProgressSink>,
     watcher: Option<watch::RootWatcher>,
@@ -1204,6 +1218,10 @@ impl Worker {
                 self.publish(IndexerState::Paused);
                 self.wait(Duration::from_secs(1));
                 continue;
+            }
+            match exclude::include_all(&self.conn) {
+                Ok(on) => self.filter.set_include_all(on),
+                Err(e) => log::warn!("indexer: {e}"),
             }
             let shared = Arc::clone(&self.shared);
             let stop = move || {
@@ -1363,10 +1381,17 @@ impl Worker {
     fn init(&mut self) -> Result<()> {
         finish_removing(&self.conn, &|| false)?;
         refresh_counts(&self.conn, None)?;
-        self.watcher = start_watcher(self.watch_tx.clone(), self.ignore.clone());
+        self.filter
+            .set_include_all(exclude::include_all(&self.conn)?);
+        self.watcher = start_watcher(self.watch_tx.clone(), self.filter.clone());
         self.sync_watches();
-        let filter = watch::Filter::new(self.ignore.clone());
-        let ids = catch_up(&mut self.conn, &*self.history, &filter)?;
+        let mut ids = catch_up(&mut self.conn, &*self.history, &self.filter)?;
+        // Walked under another exclusion list or setting: walk again (VFS-33 R8).
+        for id in exclude::stale_roots(&self.conn)? {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
         // Their cursors (or lack of one) stay put until the owed walk stores a new one,
         // however long it waits for the boot grace or another walk (VFS-9 R3, R6).
         for &id in &ids {
@@ -1517,11 +1542,10 @@ impl Worker {
         let Ok((changed, next)) = replayed else {
             return Ok(None);
         };
-        let filter = watch::Filter::new(self.ignore.clone());
         let changed: Vec<PathBuf> = changed
             .iter()
             .filter_map(|p| under_root(p, &root, cfg!(windows)))
-            .filter(|p| !filter.dropped(p, &root))
+            .filter(|p| !self.filter.dropped(p, &root))
             .collect();
         let tx = begin(&self.conn)?;
         mark_paths(&tx, &[(root_id, root)], &changed, true)?;
@@ -1733,11 +1757,11 @@ impl Worker {
 }
 
 /// Starts the watcher. A failing watcher never stops indexing: periodic and on-demand re-walks still catch changes (VFS-1 AC-7).
-fn start_watcher(tx: Sender<Cmd>, ignore: PathBuf) -> Option<watch::RootWatcher> {
+fn start_watcher(tx: Sender<Cmd>, filter: watch::Filter) -> Option<watch::RootWatcher> {
     let sink: watch::WatchSink = Arc::new(move |event| {
         let _ = tx.send(Cmd::Watch(event));
     });
-    match watch::RootWatcher::start(sink, ignore) {
+    match watch::RootWatcher::start(sink, filter) {
         Ok(w) => Some(w),
         Err(e) => {
             log::warn!("file watcher unavailable: {e}");

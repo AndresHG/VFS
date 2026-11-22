@@ -201,6 +201,10 @@ export const en = {
   updatesTitle: 'Updates',
   updatesToggle: 'Check for updates when opening',
   updatesIntro: 'When it opens, VFS checks GitHub for a new version. This is the only internet connection VFS makes: it sends nothing about your files, and if you turn this off it never connects.',
+  // VFS-33: the default folder exclusions, folded under "Advanced".
+  advancedTitle: 'Advanced',
+  includeAllToggle: 'Include system and program folders',
+  includeAllIntro: 'Normally VFS skips folders that only the system and programs use: system files, app data (Library on Mac, AppData on Windows), development folders (node_modules, .git, Python environments) and other programs\' caches. If you add one of those folders to your list, it is checked. Changing this option checks all your folders again.',
   updateAvailable: (version) => `A new version of VFS is available (${version}).`,
   updateInstall: 'Update',
   updateLater: 'Not now',
