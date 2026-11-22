@@ -1,6 +1,6 @@
 # VFS-34 — File filter: excluded names and extensions, and a size limit for reading content
 
-- **Status**: approved. The planning session relayed the owner's request and recommended D1
+- **Status**: implemented (PR #183); approved before that. The planning session relayed the owner's request and recommended D1
   and D2, which the spec takes. An independent critic review asked for revisions; all of
   them are made here.
 - **Size**: M. One subsystem: the indexer's exclusion matcher, plus one Ajustes section and
