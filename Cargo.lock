@@ -5487,7 +5487,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vfs-bookmarks"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "log",
  "lz4_flex",
@@ -5501,7 +5501,7 @@ dependencies = [
 
 [[package]]
 name = "vfs-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "dunce",
@@ -5518,7 +5518,7 @@ dependencies = [
 
 [[package]]
 name = "vfs-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dunce",
  "libc",
@@ -5536,7 +5536,7 @@ dependencies = [
 
 [[package]]
 name = "vfs-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "dunce",
