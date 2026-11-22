@@ -107,9 +107,9 @@ impl<T: Clone> CheckOnce<T> {
 }
 
 /// Download, then `install`, then `after_install`; `recover` runs when `install` fails
-/// (VFS-21 R3, R5, R8). `install` verifies the signature before anything else, so a failed
-/// download or a bad signature returns before anything is installed or stopped. Windows: the
-/// indexer is stopped inside `install` (the updater's `on_before_exit` hook, after verifying)
+/// (VFS-21 R3, R5, R8). `download` verifies the signature (the updater plugin checks it once the
+/// bytes arrive), so a failed download or a bad signature returns before anything is installed
+/// or stopped. Windows: the indexer is stopped inside `install` (the updater's `on_before_exit` hook)
 /// and on success the process exits for the installer. macOS: `install` replaces the bundle
 /// while the indexer runs, then `after_install` stops it and relaunches.
 pub async fn install_flow<D, DFut, I, A, F, E>(
