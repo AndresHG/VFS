@@ -57,13 +57,15 @@ documents also cost minutes of extraction each on the target PC for little value
 - R4. WHEN the user adds a pattern, THE indexer SHALL delete the matching files already in
   the index in the background, with no walk:
   - It scans `files` in `id` order in batches of 10,000, matching in Rust.
-  - It keeps a `meta` cursor and a "purge owed" flag, so a restart resumes where it
-    stopped. The flag clears when the scan reaches the end.
+  - It keeps the `meta` keys `user_exclusions_purge` (the "purge owed" flag) and
+    `user_exclusions_cursor` (the last `id` done), so a restart resumes where it stopped.
+    Both are removed when the scan reaches the end.
   - Search stops showing a file as soon as its batch is deleted.
   - Their content rows are removed by the next content run (VFS-2 R21).
 - R5. VFS-33's per-root stamp `exclusions/<id>` SHALL gain a generation number for the user
   list, giving `VERSION:include:gen`. Removing a pattern or restoring the list bumps the
-  generation, and adding a pattern does not. A bumped generation makes every root owe a
+  generation, and adding a pattern does not. A stamp in the old `VERSION:include` form reads
+  as generation 0, the generation of a fresh list. Upgrading therefore makes no root stale. A bumped generation makes every root owe a
   full walk (VFS-33 R8, deferred for a root being walked), and files no longer excluded come
   back after that walk. Ajustes says so: «Los archivos volverán a aparecer tras la próxima
   revisión completa».
