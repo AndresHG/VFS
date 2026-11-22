@@ -1651,9 +1651,9 @@ impl Worker {
         }
     }
 
-    /// Watches every root not being removed or paused (VFS-32 R2), unwatches the others. A root that cannot be
-    /// watched is retried later (`watch_failed`); once watched after a failure, it owes a
-    /// re-walk for the changes nobody saw meanwhile (VFS-1 I12).
+    /// Watches every root not being removed or paused (VFS-32 R2), unwatches the others. A
+    /// root that cannot be watched is retried later (`watch_failed`); once watched after a
+    /// failure, it owes a re-walk for the changes nobody saw meanwhile (VFS-1 I12).
     fn sync_watches(&mut self) {
         self.last_watch_try = Instant::now();
         let Some(watcher) = self.watcher.as_mut() else {
