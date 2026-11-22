@@ -427,3 +427,182 @@ mod tests {
         }
     }
 }
+
+/// Temporary probe for issue 170: how Cloud Files placeholders list. Fails on purpose to print.
+#[cfg(all(test, windows))]
+mod cloud_probe {
+    use super::*;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::CloudFilters::*;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO,
+    };
+
+    fn wide(p: &Path) -> Vec<u16> {
+        p.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    fn place(base: &Path, name: &str, dir: bool, flags: i32, out: &mut String) {
+        let n = wide(Path::new(name));
+        let id = b"id";
+        let mut info = CF_PLACEHOLDER_CREATE_INFO {
+            RelativeFileName: n.as_ptr(),
+            FsMetadata: CF_FS_METADATA {
+                BasicInfo: FILE_BASIC_INFO {
+                    CreationTime: 133_000_000_000_000_000,
+                    LastAccessTime: 133_000_000_000_000_000,
+                    LastWriteTime: 133_000_000_000_000_000,
+                    ChangeTime: 133_000_000_000_000_000,
+                    FileAttributes: if dir {
+                        FILE_ATTRIBUTE_DIRECTORY
+                    } else {
+                        FILE_ATTRIBUTE_NORMAL
+                    },
+                },
+                FileSize: if dir { 0 } else { 5000 },
+            },
+            FileIdentity: id.as_ptr().cast(),
+            FileIdentityLength: 2,
+            Flags: flags,
+            ..Default::default()
+        };
+        let b = wide(base);
+        let mut done = 0u32;
+        // SAFETY: all pointers outlive the call.
+        let hr = unsafe {
+            CfCreatePlaceholders(b.as_ptr(), &mut info, 1, CF_CREATE_FLAG_NONE, &mut done)
+        };
+        out.push_str(&format!(
+            "place {name}: hr={hr:#x} result={:#x} done={done}\n",
+            info.Result
+        ));
+    }
+
+    fn dump(dir: &Path, label: &str, out: &mut String) {
+        out.push_str(&format!("-- raw read_dir {label}\n"));
+        match fs::read_dir(dir) {
+            Err(e) => out.push_str(&format!("  open err {e:?} raw={:?}\n", e.raw_os_error())),
+            Ok(rd) => {
+                for e in rd {
+                    match e {
+                        Ok(e) => {
+                            let ft = e.file_type().unwrap();
+                            let m = e.metadata().unwrap();
+                            out.push_str(&format!(
+                                "  {:?} attrs={:#x} sym={} dir={} file={} len={}\n",
+                                e.file_name(),
+                                m.file_attributes(),
+                                ft.is_symlink(),
+                                ft.is_dir(),
+                                ft.is_file(),
+                                m.len()
+                            ));
+                        }
+                        Err(e) => {
+                            out.push_str(&format!("  next err {e:?} raw={:?}\n", e.raw_os_error()))
+                        }
+                    }
+                }
+            }
+        }
+        let ex = super::super::exclude::Exclusions::none(dir);
+        match list_dir(dir, None, &ex.children_of(dir)) {
+            Ok(v) => out.push_str(&format!(
+                "  list_dir ok {:?}\n",
+                v.iter()
+                    .map(|e| (e.name.clone(), e.cloud_only))
+                    .collect::<Vec<_>>()
+            )),
+            Err(e) => out.push_str(&format!(
+                "  list_dir err {e:?} raw={:?}\n",
+                e.raw_os_error()
+            )),
+        }
+        out.push_str(&format!("  behind_link={}\n", behind_link(dir, "")));
+    }
+
+    #[test]
+    fn probe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap().join("SyncRoot");
+        fs::create_dir(&root).unwrap();
+        let mut out = String::new();
+        let name = wide(Path::new("VfsProbe"));
+        let ver = wide(Path::new("1.0"));
+        let id = b"root";
+        let reg = CF_SYNC_REGISTRATION {
+            StructSize: size_of::<CF_SYNC_REGISTRATION>() as u32,
+            ProviderName: name.as_ptr(),
+            ProviderVersion: ver.as_ptr(),
+            SyncRootIdentity: id.as_ptr().cast(),
+            SyncRootIdentityLength: 4,
+            ProviderId: windows_sys::core::GUID::from_u128(
+                0x5f1a_77c2_0b3e_4d6a_9e21_7c55_aa10_0170,
+            ),
+            ..Default::default()
+        };
+        let pol = CF_SYNC_POLICIES {
+            StructSize: size_of::<CF_SYNC_POLICIES>() as u32,
+            Hydration: CF_HYDRATION_POLICY {
+                Primary: CF_HYDRATION_POLICY_FULL,
+                Modifier: 0,
+            },
+            Population: CF_POPULATION_POLICY {
+                Primary: CF_POPULATION_POLICY_FULL,
+                Modifier: 0,
+            },
+            InSync: CF_INSYNC_POLICY_NONE,
+            HardLink: CF_HARDLINK_POLICY_NONE,
+            PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
+        };
+        let r = wide(&root);
+        // SAFETY: pointers outlive the call.
+        let hr = unsafe { CfRegisterSyncRoot(r.as_ptr(), &reg, &pol, CF_REGISTER_FLAG_NONE) };
+        out.push_str(&format!("register hr={hr:#x}\n"));
+        let populated = CF_PLACEHOLDER_CREATE_FLAG_DISABLE_ON_DEMAND_POPULATION
+            | CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
+        place(
+            &root,
+            "nube.txt",
+            false,
+            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
+            &mut out,
+        );
+        place(&root, "Poblada", true, populated, &mut out);
+        place(
+            &root,
+            "SinPoblar",
+            true,
+            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
+            &mut out,
+        );
+        place(
+            &root.join("Poblada"),
+            "dentro.txt",
+            false,
+            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
+            &mut out,
+        );
+        place(
+            &root.join("SinPoblar"),
+            "oculto.txt",
+            false,
+            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
+            &mut out,
+        );
+        let w = fs::write(root.join("local.txt"), b"x");
+        out.push_str(&format!("write local: {w:?}\n"));
+        dump(&root, "root", &mut out);
+        dump(&root.join("Poblada"), "Poblada", &mut out);
+        let t = std::time::Instant::now();
+        dump(&root.join("SinPoblar"), "SinPoblar", &mut out);
+        out.push_str(&format!("SinPoblar took {:?}\n", t.elapsed()));
+        let attrs = fs::symlink_metadata(root.join("nube.txt")).map(|m| m.file_attributes());
+        out.push_str(&format!("nube after: {attrs:x?}\n"));
+        // SAFETY: NUL-terminated path.
+        let hr = unsafe { CfUnregisterSyncRoot(r.as_ptr()) };
+        out.push_str(&format!("unregister hr={hr:#x}\n"));
+        panic!("PROBE\n{out}");
+    }
+}
