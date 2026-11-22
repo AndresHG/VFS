@@ -2603,3 +2603,239 @@ fn a_walk_the_switch_changed_halfway_stays_stale() {
     fx.scan();
     assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
 }
+
+/// A Cloud Files sync root as OneDrive makes one, registered for the test's life and
+/// unregistered on drop (issue 170).
+#[cfg(windows)]
+struct SyncRoot {
+    path: PathBuf,
+    connection: Option<i64>,
+}
+
+#[cfg(windows)]
+mod cloud_files {
+    use super::*;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::CloudFilters::*;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO,
+    };
+
+    pub(super) fn wide(p: &Path) -> Vec<u16> {
+        p.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    impl SyncRoot {
+        /// Registers `path` (an existing empty folder) with on-demand population, like a
+        /// provider whose folders fill in when listed.
+        pub(super) fn register(path: &Path) -> SyncRoot {
+            let name = wide(Path::new("VfsTest"));
+            let version = wide(Path::new("1.0"));
+            let identity = b"root";
+            let reg = CF_SYNC_REGISTRATION {
+                StructSize: size_of::<CF_SYNC_REGISTRATION>() as u32,
+                ProviderName: name.as_ptr(),
+                ProviderVersion: version.as_ptr(),
+                SyncRootIdentity: identity.as_ptr().cast(),
+                SyncRootIdentityLength: identity.len() as u32,
+                ProviderId: windows_sys::core::GUID::from_u128(
+                    0x5f1a_77c2_0b3e_4d6a_9e21_7c55_aa10_0170,
+                ),
+                ..Default::default()
+            };
+            let policies = CF_SYNC_POLICIES {
+                StructSize: size_of::<CF_SYNC_POLICIES>() as u32,
+                Hydration: CF_HYDRATION_POLICY {
+                    Primary: CF_HYDRATION_POLICY_FULL,
+                    Modifier: CF_HYDRATION_POLICY_MODIFIER_NONE,
+                },
+                Population: CF_POPULATION_POLICY {
+                    Primary: CF_POPULATION_POLICY_FULL,
+                    Modifier: CF_POPULATION_POLICY_MODIFIER_NONE,
+                },
+                InSync: CF_INSYNC_POLICY_NONE,
+                HardLink: CF_HARDLINK_POLICY_NONE,
+                PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
+            };
+            let p = wide(path);
+            // SAFETY: every pointer outlives the call.
+            let hr =
+                unsafe { CfRegisterSyncRoot(p.as_ptr(), &reg, &policies, CF_REGISTER_FLAG_NONE) };
+            assert_eq!(hr, 0, "CfRegisterSyncRoot");
+            SyncRoot {
+                path: path.to_path_buf(),
+                connection: None,
+            }
+        }
+
+        /// Creates a cloud-only placeholder `name` in `base` (5000 bytes when a file); a
+        /// folder is left unpopulated unless `populated`.
+        pub(super) fn place(&self, base: &Path, name: &str, dir: bool, populated: bool) {
+            let n = wide(Path::new(name));
+            let identity = b"id";
+            let time = 133_000_000_000_000_000; // 2022, in FILETIME units.
+            let mut flags = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
+            if populated {
+                flags |= CF_PLACEHOLDER_CREATE_FLAG_DISABLE_ON_DEMAND_POPULATION;
+            }
+            let mut info = CF_PLACEHOLDER_CREATE_INFO {
+                RelativeFileName: n.as_ptr(),
+                FsMetadata: CF_FS_METADATA {
+                    BasicInfo: FILE_BASIC_INFO {
+                        CreationTime: time,
+                        LastAccessTime: time,
+                        LastWriteTime: time,
+                        ChangeTime: time,
+                        FileAttributes: if dir {
+                            FILE_ATTRIBUTE_DIRECTORY
+                        } else {
+                            FILE_ATTRIBUTE_NORMAL
+                        },
+                    },
+                    FileSize: if dir { 0 } else { 5000 },
+                },
+                FileIdentity: identity.as_ptr().cast(),
+                FileIdentityLength: identity.len() as u32,
+                Flags: flags,
+                ..Default::default()
+            };
+            let b = wide(base);
+            let mut done = 0u32;
+            // SAFETY: every pointer outlives the call.
+            let hr = unsafe {
+                CfCreatePlaceholders(b.as_ptr(), &mut info, 1, CF_CREATE_FLAG_NONE, &mut done)
+            };
+            assert_eq!((hr, done), (0, 1), "CfCreatePlaceholders {name}");
+        }
+
+        /// Connects a provider that fails every request to fill in a folder.
+        pub(super) fn connect_failing(&mut self) {
+            let table = [
+                CF_CALLBACK_REGISTRATION {
+                    Type: CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS,
+                    Callback: Some(fail_fetch),
+                },
+                CF_CALLBACK_REGISTRATION {
+                    Type: CF_CALLBACK_TYPE_NONE,
+                    Callback: None,
+                },
+            ];
+            let p = wide(&self.path);
+            let mut key: CF_CONNECTION_KEY = 0;
+            // SAFETY: the table is copied by the call; `key` outlives it.
+            let hr = unsafe {
+                CfConnectSyncRoot(
+                    p.as_ptr(),
+                    table.as_ptr(),
+                    std::ptr::null(),
+                    CF_CONNECT_FLAG_NONE,
+                    &mut key,
+                )
+            };
+            assert_eq!(hr, 0, "CfConnectSyncRoot");
+            self.connection = Some(key);
+        }
+    }
+
+    unsafe extern "system" fn fail_fetch(
+        info: *const CF_CALLBACK_INFO,
+        _params: *const CF_CALLBACK_PARAMETERS,
+    ) {
+        // SAFETY: the filter passes a valid info for the callback's duration.
+        let info = unsafe { &*info };
+        let op = CF_OPERATION_INFO {
+            StructSize: size_of::<CF_OPERATION_INFO>() as u32,
+            Type: CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS,
+            ConnectionKey: info.ConnectionKey,
+            TransferKey: info.TransferKey,
+            CorrelationVector: std::ptr::null(),
+            SyncStatus: std::ptr::null(),
+            RequestKey: info.RequestKey,
+        };
+        // SAFETY: all-zero is a valid CF_OPERATION_PARAMETERS.
+        let mut params: CF_OPERATION_PARAMETERS = unsafe { std::mem::zeroed() };
+        params.ParamSize = size_of::<CF_OPERATION_PARAMETERS>() as u32;
+        params.Anonymous.TransferPlaceholders = CF_OPERATION_PARAMETERS_0_4 {
+            Flags: CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE,
+            CompletionStatus: 0xC000_0001_u32 as i32, // STATUS_UNSUCCESSFUL
+            PlaceholderTotalCount: 0,
+            PlaceholderArray: std::ptr::null_mut(),
+            PlaceholderCount: 0,
+            EntriesProcessed: 0,
+        };
+        // SAFETY: valid operation info and parameters.
+        unsafe { CfExecute(&op, &mut params) };
+    }
+
+    impl Drop for SyncRoot {
+        fn drop(&mut self) {
+            if let Some(key) = self.connection {
+                // SAFETY: a key CfConnectSyncRoot returned.
+                unsafe { CfDisconnectSyncRoot(key) };
+            }
+            let p = wide(&self.path);
+            // SAFETY: a NUL-terminated path.
+            unsafe { CfUnregisterSyncRoot(p.as_ptr()) };
+        }
+    }
+}
+
+/// VFS-1 AC-4, VFS-25 R1 (Windows, issue 170): below a real Cloud Files sync root, as
+/// OneDrive makes one, cloud-only files and folders, populated or not, are indexed by name
+/// with the cloud-only flag, none is taken for a link, and none is downloaded by the scan;
+/// a folder its provider fails to fill in is still indexed as a folder.
+#[cfg(windows)]
+#[test]
+fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
+    use std::os::windows::fs::MetadataExt;
+    let mut fx = fixture(&[]);
+    let root = fx.root().join("OneDrive");
+    fs::create_dir(&root).unwrap();
+    let mut sync = SyncRoot::register(&root);
+    sync.place(&root, "apuntes.pdf", false, false);
+    sync.place(&root, "Poblada", true, true);
+    sync.place(&root.join("Poblada"), "tema1.pptx", false, false);
+    sync.place(&root, "SinPoblar", true, false);
+    sync.place(&root.join("SinPoblar"), "examen.docx", false, false);
+    sync.place(&root, "Vacía", true, false);
+    sync.connect_failing();
+    fx.scan();
+
+    for (dir, name) in [
+        ("OneDrive", "apuntes.pdf"),
+        ("OneDrive/Poblada", "tema1.pptx"),
+        ("OneDrive/SinPoblar", "examen.docx"),
+    ] {
+        assert!(cloud_bit(&fx.conn, dir, name).1, "{dir}/{name}");
+    }
+    let links: i64 = fx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM files WHERE flags & ?1 != 0",
+            [ingest::FLAG_LINK],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(links, 0);
+    // A folder the provider fails to fill in lists as empty, with no error from Windows: it
+    // is indexed as a folder.
+    let vacia: i64 = fx
+        .conn
+        .query_row(
+            "SELECT count(*) FROM dirs WHERE rel_path = 'OneDrive/Vacía'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(vacia, 1);
+    // RECALL_ON_DATA_ACCESS stays set: the scan opened no placeholder.
+    for f in [
+        root.join("apuntes.pdf"),
+        root.join("Poblada").join("tema1.pptx"),
+        root.join("SinPoblar").join("examen.docx"),
+    ] {
+        let attrs = fs::symlink_metadata(&f).unwrap().file_attributes();
+        assert_ne!(attrs & 0x0040_0000, 0, "{}", f.display());
+    }
+    drop(sync);
+}

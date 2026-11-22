@@ -23,6 +23,10 @@ notify.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+# Cloud Files placeholders in tests (issue 170): a real sync root, as OneDrive makes one.
+windows-sys = { workspace = true, features = ["Win32_Storage_CloudFilters", "Win32_System_CorrelationVector"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true

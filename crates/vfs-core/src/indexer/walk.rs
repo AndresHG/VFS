@@ -107,10 +107,10 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
 /// Unix from `lstat`. `FileType::is_symlink` is true for symlinks and for Windows
 /// name-surrogate reparse points (junctions, mount points), so those are never followed;
 /// cloud placeholders are not name surrogates and are listed from their metadata without
-/// being downloaded. Entries that vanish or fail while listing are skipped, except that an
-/// entry whose metadata is denied (a Unix folder readable but not searchable) fails the
-/// whole listing, so the folder is retried like an unlistable one instead of being marked
-/// clean without those entries.
+/// being downloaded. Entries whose metadata vanishes while listing are skipped. An entry
+/// whose metadata is denied (a Unix folder readable but not searchable) or an enumeration
+/// that fails partway fails the whole listing, so the folder is retried like an unlistable
+/// one instead of being marked clean without those entries (issue 170).
 ///
 /// `rules` are the default exclusions for this folder (VFS-33 R5): excluded subfolders are
 /// left out; a marker entry empties the listing or drops the subfolders it names.
@@ -119,10 +119,19 @@ pub(crate) fn list_dir(
     skip: Option<&Path>,
     rules: &Children<'_>,
 ) -> std::io::Result<Vec<Entry>> {
+    list_entries(fs::read_dir(dir)?, skip, rules)
+}
+
+/// [`list_dir`] over an enumeration already opened.
+fn list_entries(
+    entries: impl Iterator<Item = std::io::Result<fs::DirEntry>>,
+    skip: Option<&Path>,
+    rules: &Children<'_>,
+) -> std::io::Result<Vec<Entry>> {
     let mut out = Vec::new();
     let mut marked: Option<&[&str]> = None;
-    for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else { continue };
+    for entry in entries {
+        let entry = entry?;
         let os_name = entry.file_name();
         let (name, lossy) = match os_name.to_str() {
             Some(s) => (s.to_owned(), false),
@@ -259,6 +268,25 @@ fn unix_unavailable(_: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-1 AC-4 (issue 170): an enumeration that fails partway fails the listing, so the
+    /// folder is retried and logged instead of being stored as complete without the rest.
+    #[test]
+    fn a_listing_that_fails_partway_is_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("uno.txt"), b"x").unwrap();
+        let excl = super::super::exclude::Exclusions::none(tmp.path());
+        let rules = excl.children_of(tmp.path());
+        let ok = list_entries(fs::read_dir(tmp.path()).unwrap(), None, &rules).unwrap();
+        assert_eq!(ok.len(), 1);
+        let broken =
+            fs::read_dir(tmp.path())
+                .unwrap()
+                .chain(std::iter::once(Err(std::io::Error::other(
+                    "enumeration failed",
+                ))));
+        assert!(list_entries(broken, None, &rules).is_err());
+    }
 
     /// VFS-25 AC-1: each of the three placeholder bits marks a file cloud-only; plain,
     /// hidden, archive, read-only and reparse-point words do not; the stored flag is bit 2.
