@@ -3175,3 +3175,37 @@ fn the_defaults_are_stored_and_purged_once() {
     assert!(!patterns::purge_owed(&fx.conn).unwrap(), "only once");
     assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
 }
+
+/// VFS-34 AC-1, R2: the count before adding a pattern agrees with the exact matcher on
+/// names whose folded form differs from their own: NFD accents, `ß`, a ligature that folds to
+/// two letters, and literal `%` and `_`, which the SQL narrowing must not read as wildcards.
+#[test]
+fn the_count_before_adding_matches_the_exact_matcher() {
+    let mut fx = fixture(&[]);
+    fx.scan();
+    let names = [
+        "Informe e\u{301}xito.doc", // NFD
+        "INFORME ÉXITO.doc",
+        "Straße.txt",
+        "\u{fb01}cha.pdf", // "ﬁ" ligature
+        "ficha.pdf",
+        "100%_listo.txt",
+        "100ab_listo.txt",
+    ];
+    insert_files(&mut fx, names.len(), |i| names[i].to_string());
+    for (pattern, want) in [
+        ("*éxito.doc", 2),
+        ("*ß*", 1),
+        ("\u{fb01}*", 1),
+        ("fi*", 1),
+        ("100%_*", 1),
+        ("100??_*", 1),
+        ("100?_*", 1),
+    ] {
+        assert_eq!(
+            patterns::count_matches(&fx.conn, pattern).unwrap(),
+            want,
+            "{pattern}"
+        );
+    }
+}

@@ -44,8 +44,10 @@ impl Error {
     }
 }
 
-/// Why a file-filter pattern is refused (VFS-34 R2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why a file-filter pattern is refused (VFS-34 R2). The serde names are the UI contract's
+/// `PatternReason` and equal the `Display` text sent as the error message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PatternError {
     Empty,
     /// It holds `/` or `\`: a pattern matches a name, never a path.

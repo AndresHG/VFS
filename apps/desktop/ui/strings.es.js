@@ -3,7 +3,7 @@
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
 
 export const es = {
   appName: 'Buscador de archivos',
@@ -221,10 +221,10 @@ export const es = {
   fileFilterConfirmBody: (p, n) => `«${p}» coincide con ${n} archivos de sus carpetas. Dejarán de aparecer en las búsquedas; los archivos no se tocan.`,
   fileFilterConfirmAdd: 'Añadir',
   fileFilterErrors: {
-    empty: 'Escriba un nombre o una extensión.',
-    separator: 'Escriba solo un nombre de archivo, sin carpetas (sin / ni \\).',
-    no_literal: 'Eso dejaría fuera casi todos los archivos. Escriba también parte del nombre, por ejemplo *.tmp.',
-    duplicate: 'Ya está en la lista.',
+    [PatternReason.EMPTY]: 'Escriba un nombre o una extensión.',
+    [PatternReason.SEPARATOR]: 'Escriba solo un nombre de archivo, sin carpetas (sin / ni \\).',
+    [PatternReason.NO_LITERAL]: 'Eso dejaría fuera casi todos los archivos. Escriba también parte del nombre, por ejemplo *.tmp.',
+    [PatternReason.DUPLICATE]: 'Ya está en la lista.',
   },
   contentMaxLabel: 'Tamaño máximo para leer el contenido (MB)',
   contentMaxHint: 'Los documentos más grandes se encuentran por su nombre, pero no se lee lo que contienen. 0 significa sin límite.',

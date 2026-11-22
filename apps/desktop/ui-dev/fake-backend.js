@@ -21,7 +21,7 @@
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
 import {
-  BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
+  BookmarkRoot, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
   RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason,
 } from '../ui/contract.js';
 
@@ -231,10 +231,10 @@ export function createFakeBackend(params) {
   let contentMaxMb = 100;
   const checkPattern = (p) => {
     const fail = (message) => { throw { code: ErrorCode.INVALID_PATTERN, message }; };
-    if (!p) fail('empty');
-    if (/[/\\]/.test(p)) fail('separator');
-    if (/^[*?.]+$/.test(p)) fail('no_literal');
-    if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail('duplicate');
+    if (!p) fail(PatternReason.EMPTY);
+    if (/[/\\]/.test(p)) fail(PatternReason.SEPARATOR);
+    if (/^[*?.]+$/.test(p)) fail(PatternReason.NO_LITERAL);
+    if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail(PatternReason.DUPLICATE);
   };
   const updateCbs = new Set();
   const bookmarkCbs = new Set();

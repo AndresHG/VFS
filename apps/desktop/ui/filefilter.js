@@ -17,8 +17,7 @@ export async function addPattern(api, pattern, confirm) {
   return { list, count };
 }
 
-/** The message for a refused pattern (`empty`, `separator`, `no_literal`, `duplicate`), or
- *  null for any other error. */
+/** The message for a refused pattern (a `PatternReason`), or null for any other error. */
 export function patternErrorText(err, S) {
   if (err?.code !== ErrorCode.INVALID_PATTERN) return null;
   return S.fileFilterErrors[err.message] ?? null;

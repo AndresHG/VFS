@@ -2,7 +2,7 @@
 // words, no "index" jargon. Functions take already-formatted values.
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -219,10 +219,10 @@ export const en = {
   fileFilterConfirmBody: (p, n) => `“${p}” matches ${n} files in your folders. They will no longer appear in searches; the files themselves are not touched.`,
   fileFilterConfirmAdd: 'Add',
   fileFilterErrors: {
-    empty: 'Type a name or an extension.',
-    separator: 'Type a file name only, without folders (no / or \\).',
-    no_literal: 'That would leave out almost every file. Type part of the name too, for example *.tmp.',
-    duplicate: 'It is already in the list.',
+    [PatternReason.EMPTY]: 'Type a name or an extension.',
+    [PatternReason.SEPARATOR]: 'Type a file name only, without folders (no / or \\).',
+    [PatternReason.NO_LITERAL]: 'That would leave out almost every file. Type part of the name too, for example *.tmp.',
+    [PatternReason.DUPLICATE]: 'It is already in the list.',
   },
   contentMaxLabel: 'Largest size to read contents (MB)',
   contentMaxHint: 'Larger documents are found by name, but what they contain is not read. 0 means no limit.',

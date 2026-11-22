@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { addPattern, patternErrorText, parseLimit, showContentLimit, CONFIRM_ABOVE } from '../ui/filefilter.js';
-import { ErrorCode } from '../ui/contract.js';
+import { ErrorCode, PatternReason } from '../ui/contract.js';
 import { CATALOGS, Lang } from '../ui/strings.js';
 
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
@@ -49,13 +49,13 @@ test('up to 1,000 matches is added without asking', async () => {
  *  languages. */
 test('refused patterns are worded in both languages', async () => {
   const api = {
-    async countFileExclusion() { throw { code: ErrorCode.INVALID_PATTERN, message: 'duplicate' }; },
+    async countFileExclusion() { throw { code: ErrorCode.INVALID_PATTERN, message: PatternReason.DUPLICATE }; },
     async addFileExclusion() { assert.fail('added'); },
   };
-  await assert.rejects(addPattern(api, '*.tmp', async () => true), (e) => e.message === 'duplicate');
+  await assert.rejects(addPattern(api, '*.tmp', async () => true), (e) => e.message === PatternReason.DUPLICATE);
   for (const lang of Object.values(Lang)) {
     const S = CATALOGS[lang];
-    for (const reason of ['empty', 'separator', 'no_literal', 'duplicate']) {
+    for (const reason of Object.values(PatternReason)) {
       const text = patternErrorText({ code: ErrorCode.INVALID_PATTERN, message: reason }, S);
       assert.ok(text && text.length > 5, `${lang} ${reason}`);
     }

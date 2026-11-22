@@ -197,6 +197,19 @@ fn all_read_states() -> Vec<ReadState> {
     all
 }
 
+fn all_pattern_reasons() -> Vec<vfs_core::PatternError> {
+    use vfs_core::PatternError::*;
+    let all = vec![Empty, Separator, NoLiteral, Duplicate];
+    for r in &all {
+        match r {
+            Empty | Separator | NoLiteral | Duplicate => {}
+        }
+        // The error message the UI reads is the serde name.
+        assert_eq!(serde_names(&[*r])[0], r.to_string());
+    }
+    all
+}
+
 fn all_error_codes() -> Vec<String> {
     let all = vec![
         Error::NotFound(String::new()),
@@ -248,6 +261,7 @@ fn contract_js_matches_the_rust_enums() {
         ("ReadState", serde_names(&all_read_states())),
         ("SuggestionKind", serde_names(&all_suggestion_kinds())),
         ("SortOrder", serde_names(&all_sort_orders())),
+        ("PatternReason", serde_names(&all_pattern_reasons())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
