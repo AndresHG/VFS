@@ -105,8 +105,8 @@ pub struct LogFile {
 }
 
 /// The report: `summary` is everything but the user's text, the log lines and the root paths
-/// (what the public issue URL carries), `text` the whole report (what the `.zip` holds and the
-/// preview shows).
+/// (what the public issue URL carries), `text` the report with the log lines its budget allows
+/// (all of them for the `.zip`, the newest [`PREVIEW_LOG_BYTES`] for the preview).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub summary: String,
@@ -249,14 +249,16 @@ pub fn redact_message(message: &str, private: &[String]) -> String {
 /// messages quote names in backticks, a search term can be in it), so only the location is
 /// kept: `panic at <file>:<line>: <omitido>`.
 fn redact_panic(message: &str) -> String {
-    let location = message.strip_prefix(PANIC_PREFIX).and_then(|rest| {
-        rest.match_indices(": ")
-            .map(|(i, _)| &rest[..i])
-            .find(|loc| {
-                loc.rsplit_once(':')
-                    .is_some_and(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            })
-    });
+    // Only the text before the first `": "` can be the location (a source path never holds
+    // one); the `?` written when std gives no location is not one either.
+    let location = message
+        .strip_prefix(PANIC_PREFIX)
+        .and_then(|rest| rest.split_once(": "))
+        .map(|(loc, _)| loc)
+        .filter(|loc| {
+            loc.rsplit_once(':')
+                .is_some_and(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        });
     match location {
         Some(loc) => format!("{PANIC_PREFIX}{loc}: {OMITTED}"),
         None => OMITTED.to_owned(),
@@ -264,9 +266,8 @@ fn redact_panic(message: &str) -> String {
 }
 
 /// One log line as the report shows it with names left out (VFS-20 R3, VFS-30 R1–R3):
-/// diagnostic records verbatim,
-/// a panic record with only its location, any other line with its prefix kept and its
-/// message redacted. A continuation line (no prefix) is kept as written only when the record
+/// diagnostic records verbatim, a panic record with only its location, any other line with
+/// its prefix kept and its message redacted. A continuation line (no prefix) is kept as written only when the record
 /// it continues is a diagnostic one (`after_diag`); any other is replaced whole, since a name
 /// holding a line break leaves its tail there.
 pub fn redact_line(line: &str, private: &[String], after_diag: bool) -> String {
@@ -1229,6 +1230,10 @@ mod tests {
         );
         assert_eq!(
             redact_line(&panic("panic at x.rs: 3: Boda: y"), none, false),
+            panic(OMITTED)
+        );
+        assert_eq!(
+            redact_line(&panic("panic at ?: open Boda.jpg:3: y"), none, false),
             panic(OMITTED)
         );
         assert_eq!(redact_line("Boda Laura.jpg", none, false), OMITTED);
