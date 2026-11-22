@@ -222,21 +222,30 @@ fn names_only(query: &SearchQuery) -> bool {
     query.scope == crate::types::Scope::Names
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Test hook (VFS-38 AC-3): the stages a search ran on this thread, in order: `"path"`
-    /// (the path tier), `"near"` (near-spelling typo tier), `"split"` (split-term typo pass).
-    static STAGES: std::cell::RefCell<Vec<&'static str>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+/// A search stage the VFS-38 AC-3 test hook records.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Stage {
+    /// The path tier (VFS-1 S2).
+    Path,
+    /// The near-spelling typo tier.
+    Near,
+    /// The split-term typo pass.
+    Split,
 }
 
 #[cfg(test)]
-fn ran(stage: &'static str) {
+thread_local! {
+    /// Test hook (VFS-38 AC-3): the stages a search ran on this thread, in order.
+    static STAGES: std::cell::RefCell<Vec<Stage>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn ran(stage: Stage) {
     STAGES.with(|s| s.borrow_mut().push(stage));
 }
 
 #[cfg(not(test))]
-fn ran(_: &'static str) {}
+fn ran(_: Stage) {}
 
 /// Any type, date, size or folder filter.
 pub(crate) fn has_filter(f: &SearchFilters) -> bool {
@@ -1283,7 +1292,7 @@ fn run_query(
         }
     }
     if !terms.is_empty() && !run.stopped && run.hits.len() < FUZZY_TRIGGER {
-        ran("near");
+        ran(Stage::Near);
         for prefix in [true, false] {
             for g in &groups {
                 fuzzy_variants(conn, run, &ctx, g, prefix)?;
@@ -1293,7 +1302,7 @@ fn run_query(
     // The split-term pass reads many candidates per term: only when nothing matched at all
     // (substitutions and missing letters, which the near spellings do not cover).
     if !terms.is_empty() && !run.stopped && run.hits.is_empty() {
-        ran("split");
+        ran(Stage::Split);
         fuzzy_pass(conn, run, &ctx, &groups)?;
     }
     Ok(())
@@ -1658,7 +1667,7 @@ fn exact_group(conn: &mut Connection, run: &mut Run, ctx: &Ctx, g: &Group) -> Re
     if ctx.names {
         return Ok(());
     }
-    ran("path");
+    ran(Stage::Path);
     let roots = g.roots_sql();
     // S3: FTS-driven generation is bounded by the hit cap, not by the configured deadline.
     let deadline = run.hard;
@@ -2168,12 +2177,12 @@ mod tests {
         assert!(stages.is_empty(), "{stages:?}");
         let (total, stages) = run("sierra excursion", crate::types::Scope::All);
         assert_eq!(total, 2);
-        assert!(stages.contains(&"path"), "{stages:?}");
+        assert!(stages.contains(&Stage::Path), "{stages:?}");
         // A name within one edit is still possible: the typo passes run under names too.
         let (total, stages) = run("excursoin", crate::types::Scope::Names);
         assert_eq!(total, 1);
-        assert!(!stages.contains(&"path"), "{stages:?}");
-        assert!(stages.contains(&"near"), "{stages:?}");
+        assert!(!stages.contains(&Stage::Path), "{stages:?}");
+        assert!(stages.contains(&Stage::Near), "{stages:?}");
 
         let possible = |q: &str, names: bool| {
             let g = Group {
