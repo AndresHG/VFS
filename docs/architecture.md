@@ -187,8 +187,8 @@ to stop, pause and wake) reads each pending link: at most 64 KiB of the link fil
 is never opened. Right before a `.lnk` or `.url` would be opened, its attributes are read by
 name (`GetFileAttributesW`, which downloads nothing): a cloud-only file is not opened but
 marked unreadable and cloud-only, which covers shortcuts queued by the version-5 migration
-before any listing recorded their bit (VFS-25 R3). A link that cannot be read is marked unreadable and queued again when its
-root's next full walk ends. A search matches links by their own folder, name and target
+before any listing recorded their bit (VFS-25 R3). A link that cannot be read is marked
+unreadable and queued again when its root's next full walk ends. A search matches links by their own folder, name and target
 together, attaches `link` (kind, target, `openable`) to every link hit, and drops a link
 whose target is an indexed item the same search returns (`search::attach_links`).
 

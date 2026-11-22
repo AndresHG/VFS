@@ -176,8 +176,6 @@ pub(crate) fn working_set_bytes() -> Option<u64> {
     imp::working_set_bytes()
 }
 
-/// Windows: sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `dir`, so Windows Search does not
-/// re-index the index's WAL churn (VFS-5 R9). Elsewhere nothing.
 /// The Windows attributes of `path`, read by name (`GetFileAttributesW`: no handle is
 /// opened, so a cloud placeholder is not downloaded); `None` elsewhere or when unreadable.
 #[cfg(windows)]
@@ -199,6 +197,8 @@ pub(crate) fn file_attributes(_path: &Path) -> Option<u32> {
     None
 }
 
+/// Windows: sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `dir`, so Windows Search does not
+/// re-index the index's WAL churn (VFS-5 R9). Elsewhere nothing.
 pub(crate) fn exclude_from_content_index(dir: &Path) -> std::io::Result<()> {
     imp::exclude_from_content_index(dir)
 }

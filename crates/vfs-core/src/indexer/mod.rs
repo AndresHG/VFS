@@ -1736,9 +1736,6 @@ pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()>
     Ok(())
 }
 
-/// The marking of `mark_dirty`. With `dirs_only`, each path is a directory whose entries
-/// changed (a replayed change, VFS-9 R2): it is marked, or its nearest indexed ancestor when
-/// it is not indexed, and its parent is left alone.
 /// `path` spelled under `root` as stored, when it lies below `root`; compared ignoring case
 /// when `ignore_case` (Windows: the change journal names folders as they are now, so a root
 /// renamed only in case would otherwise match no replayed path, VFS-9 R7). `None` outside.
@@ -1761,6 +1758,9 @@ fn under_root(path: &Path, root: &Path, ignore_case: bool) -> Option<PathBuf> {
     Some(out)
 }
 
+/// The marking of `mark_dirty`. With `dirs_only`, each path is a directory whose entries
+/// changed (a replayed change, VFS-9 R2): it is marked, or its nearest indexed ancestor when
+/// it is not indexed, and its parent is left alone.
 fn mark_paths(
     tx: &Connection,
     roots: &[(i64, PathBuf)],
