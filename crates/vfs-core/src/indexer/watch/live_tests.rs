@@ -41,7 +41,7 @@ fn fixture() -> Fixture {
             WatchEvent::Dirty(p) => {
                 r.dirty.insert(p);
             }
-            WatchEvent::Rescan(id) => r.rescans.push(id),
+            WatchEvent::Overflow(id) | WatchEvent::Failed(id) => r.rescans.push(id),
             WatchEvent::Renamed { .. } => {}
         }
     });

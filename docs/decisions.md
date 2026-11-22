@@ -58,9 +58,10 @@ option if measured re-walk times on the real PC are unacceptable.
 On macOS the watcher uses the `notify` crate (FSEvents) and honours its rescan flag. On
 Windows VFS has its own `ReadDirectoryChangesW` loop, one thread per root, with a 64 KB
 buffer (`crates/vfs-core/src/indexer/watch.rs`, spec I2). Owning the loop makes the
-failure behaviour explicit: a buffer overflow (0 bytes or `ERROR_NOTIFY_ENUM_DIR`) queues a
-full re-walk of exactly that root and re-arms on the same handle; any other failure queues a
-re-walk, closes the handle and reopens it every 2 s; the directory is opened with the
+failure behaviour explicit: a buffer overflow (0 bytes or `ERROR_NOTIFY_ENUM_DIR`) re-arms on
+the same handle and replays that root's change history (VFS-26), walking it only when the
+replay cannot run; any other failure queues a re-walk, closes the handle and reopens it
+every 2 s; the directory is opened with the
 long-path prefix. With `notify`, overflow and reopen handling on Windows would be whatever
 its backend does, which we had not audited. Rejected: `notify` on both systems. Caveat: this
 loop has run only on a GitHub Windows runner (VFS-8).
@@ -158,10 +159,11 @@ the last walk is older than a day, which missed changes made the same day while 
 ## One full re-walk at a time, with a cooldown for lost events
 
 Full re-walks run one at a time and a walk in progress is never restarted; a request for a
-folder being walked owes one more pass after it. Requests caused by lost events (watcher
-overflow, a watch that failed) wait until the folder's last full walk is an hour old (spec
-I10). A sync client can produce event storms that overflow the watcher buffer repeatedly;
-restarting or chaining full walks would keep the HDD busy all day and never finish one.
+folder being walked owes one more pass after it. Requests caused by lost events (a watch
+that failed, or an overflow whose history replay could not run, VFS-26) wait until the
+folder's last full walk is an hour old (spec I10). A sync client can produce event storms
+that overflow the watcher buffer repeatedly; restarting or chaining full walks would keep
+the HDD busy all day and never finish one.
 Rejected: restarting the walk on every overflow, and walking several folders in parallel on
 one disk.
 
