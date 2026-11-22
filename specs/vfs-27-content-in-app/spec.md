@@ -115,8 +115,8 @@ Background pace (owner decision T1)
 
 Search
 
-- R12. WHEN the user searches with content search on, THE app SHALL show the name and path hits
-  first, without waiting for content. It SHALL then show, in a separate section «En el
+- R12. WHEN the user searches with content search on and the scope «Todo» (VFS-38 R2), THE
+  app SHALL show the name and path hits first, without waiting for content. It SHALL then show, in a separate section «En el
   contenido de los documentos» below them, up to 20 content hits from `retrieve`.
   - Each hit shows the file name, the folder, the highlighted fragment, the page when known,
     and «Mostrar en carpeta».
@@ -261,7 +261,7 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
 |---|---|---|---|
 | 27a | `vfs-extract` as a Tauri sidecar in both bundles, built with VFS-2 D16's size profile by the CI release job before `tauri build`. Also the version handshake, the worker stop before an update, and the installer size check. | AC-1, AC-3 | 2–3 days **[estimate]** |
 | 27b | Background content indexer in the app: the pace rules with the idle and `DiskLoad` probes (exposed from `vfs-core`), pause and resume, VFS-32 interplay, progress and time left, the low-space pause, the queue for new documents, damage detection, run-level reasons, Tauri commands, diagnostics. | AC-2, AC-6–AC-10, AC-14, AC-15 | 5–7 days **[estimate]** |
-| 27c | User interface: the offer, the Ajustes switch, store size, delete and unread counts, labels on name hits, and the content section with debounce and sequence numbers. Strings go in both catalogs. Also the e2e scenario. | AC-4, AC-5, AC-11–AC-13, AC-16 | 4–5 days **[estimate]** |
+| 27c | User interface: the offer, the Ajustes switch, store size, delete and unread counts, labels on name hits, and the content section with debounce and sequence numbers. It builds on VFS-38 38b's filter line and adds its «Solo documentos» button (VFS-38 R4, R5, AC-4). Strings go in both catalogs. Also the e2e scenario. | AC-4, AC-5, AC-11–AC-13, AC-16; VFS-38 AC-4 | 4–5 days **[estimate]** |
 | 27m | Real-PC measurement (docs and probe script): document count and bytes under the real folders, open-and-read time for 1,000 documents with Defender on, and free space on C:. Before 27c ships. | D3 | 1 day + the field visit |
 
 Total ≈ 12–16 working days, plus the field measurement **[estimate]**.

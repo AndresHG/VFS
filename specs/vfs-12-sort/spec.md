@@ -36,7 +36,8 @@ Tests cite these ids (`VFS-12 AC-<m>`).
   the 2,000-hit cap.
 - AC-4 Given the default order (relevance) Then results and caps are unchanged and the
   VFS-11 golden set stays green.
-- AC-5 Given the «Orden» select Then it is always on screen with «Lo más parecido primero»
+- AC-5 Given the «Orden» select Then it is on screen whenever there are results, in the
+  results header beside the count (VFS-38 R9), with «Lo más parecido primero»
   (default), «Lo más reciente primero», «Lo más antiguo primero», «Por nombre (A-Z)», «Lo más
   grande primero», plus «Archivos primero, luego marcadores» while bookmarks are included.
   With bookmarks, dates are the date saved, name sorts by title, and bookmarks (no size) come

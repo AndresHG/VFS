@@ -44,11 +44,13 @@ working on the owner's Mac plus a Windows installer built by CI.
 - R6. THE indexer SHALL index and find paths longer than 260 characters and Unicode names in
   NFC or NFD.
 - R7. WHEN the user types a query, THE search engine SHALL match file name and any segment of
-  the path, case- and accent-insensitively, tolerating one typo, within the latency and memory
+  the path (only the name with the scope «Solo nombres», VFS-38 R3), case- and accent-insensitively, tolerating one typo, within the latency and memory
   budget of AC-9.
 - R8. THE search engine SHALL combine filters by type, date, size and folder.
 - R9. THE app SHALL be a single Spanish-language screen with a search box, results as the user
-  types, and visible filters.
+  types, and visible filters. The scope, «Tipo» and «Fecha» are on the filter line; size,
+  folder and source are one click away behind «Más filtros», shown as chips while active
+  (VFS-38 R7, R8).
 - R10. WHEN the user chooses "mostrar en carpeta" on a result, THE app SHALL open
   Finder/Explorer with that file selected.
 - R11. THE CI SHALL produce a downloadable Windows installer and a macOS build.

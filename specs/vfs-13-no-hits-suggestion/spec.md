@@ -24,8 +24,9 @@ same query the screen searched (files only). `Suggestion` (camelCase in JSON):
 - `text`: the search-box text to run, built by the core from the typed text (every typed
   word that folds to the term replaced or removed in place, the rest untouched); unchanged
   for `dropFilters`.
-- `clearFilters`: true only for `dropFilters` (type, date, size and folder filters; the
-  sources and the bookmark folder stay as they are).
+- `clearFilters`: true only for `dropFilters` (type, date, size and folder filters, and the
+  scope back to «Todo» per VFS-38 R13; the sources and the bookmark folder stay as they
+  are).
 - `term`: the typed word that changes (`spelling`, `dropTerm`); `replacement`: the new word
   (`spelling`).
 - `count`: hits of the suggested search as the list would show them (grouped copies, VFS-19),

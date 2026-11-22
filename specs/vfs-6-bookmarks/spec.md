@@ -192,9 +192,10 @@ filters stay, because "Carpetas" and the "Carpeta" select also apply to bookmark
 
 - Setting "Incluir marcadores de Firefox", off by default, in the "Carpetas" panel, with
   one line saying what it reads and that nothing leaves the computer.
-- While it is on, a "Buscar en" pill with three choices: "Archivos y marcadores" (default),
-  "Archivos", "Marcadores". While it is off, the pill is not shown and searches cover files
-  only.
+- While it is on, a source choice with three options: "Archivos y marcadores" (default),
+  "Archivos", "Marcadores". Since VFS-38 it sits inside «Más filtros» (VFS-38 R7) and shows
+  as a chip when it is not the default; «Buscar en» now names the scope group. While the
+  setting is off, the choice is not shown and searches cover files only.
 - Turning it on reads bookmarks at once; turning it off deletes every stored bookmark.
 
 ### Staying current
@@ -351,7 +352,7 @@ Tests cite these ids (`VFS-6 AC-<m>`).
 | D4 | Filters on bookmarks | Table "Filters" | session | 2026-11-20 |
 | D5 | Ranking across sources | Shared tiers; file first on ties | session | 2026-11-20 |
 | D6 | Refresh triggers | Start, setting on, button, every 30 min if changed | session | 2026-11-20 |
-| D7 | Default source | Both ("Archivos y marcadores"), reset at each start | owner | 2026-11-20 |
+| D7 | Default source | Both ("Archivos y marcadores"). Reset at each start until VFS-38 D2 (owner, 2026-11-22), which keeps the last choice across restarts | owner | 2026-11-20 |
 | D8 | Several profiles | All profiles Firefox lists, profile groups included; the profile name shows only when more than one profile has bookmarks ("the user probably uses one, but maybe all is better") | owner | 2026-11-20 |
 | D9 | Action on a bookmark | "Abrir en Firefox" (first answer was the default browser; changed by the owner through the design session); `http`/`https` only | owner | 2026-11-20 |
 | D10 | Folder hierarchy | Essential: searchable, shown on every row, a filter, folders as results, Firefox's order kept | owner | 2026-11-20 |
