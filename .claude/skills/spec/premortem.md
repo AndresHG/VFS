@@ -15,6 +15,7 @@ incidents; every line added from now on cites the bug that taught it.
 | What does a query that matches a million files do to latency, memory and the UI? Are results capped, paged or streamed? | seed (VFS-1) |
 | What happens on permission-denied folders, locked files, symlinks, junctions and cloud placeholders (OneDrive, iCloud): skipped, followed once, or looped? | seed (VFS-1) |
 | Does any step open, write, move or delete a user file? v1 only reads metadata and asks the OS to reveal a file. | seed (VFS-1) |
+| Does any of this already ship? Before writing the Problem or a requirement, grep every module of the area (all of `apps/desktop/ui/*.js`, not one file) for the behavior. | VFS-38: the draft re-specified highlighting that #61 already shipped in `format.js` |
 
 When a bug escapes because a question wasn't asked, add the question here
 with the spec or PR that taught it, in the same PR as the fix.
