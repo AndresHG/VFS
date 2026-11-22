@@ -3,7 +3,7 @@
 - **Status**: approved. The owner decided D9–D13 of VFS-2 and D1 here. An independent critic
   review asked for revisions, and all of them are made here. PR 27a is implemented. 27b
   ships in two PRs: 27b-1 (the engine's gate and pace policy, the probes, paused folders,
-  sleep) and 27b-2 (the app's background indexer); 27b-1 is implemented.
+  sleep) and 27b-2 (the app's background indexer); both are implemented.
 - **Size**: L. It ships a second executable in both installers, opens user files from the app
   for the first time, and adds platform-specific idle and disk probes. It is multi-PR.
 - **Links**:

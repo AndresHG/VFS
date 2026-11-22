@@ -1607,7 +1607,7 @@ struct Budget {
 }
 
 impl vfs_content::Gate for Budget {
-    fn before_document(&mut self, _stop: &AtomicBool) -> vfs_content::Admit {
+    fn before_document(&mut self, _path: &Path) -> vfs_content::Admit {
         if self.seen.len() < self.budget {
             vfs_content::Admit::Read
         } else {
@@ -1674,4 +1674,69 @@ fn searcher_opened_on_an_empty_store_ranks_new_documents() {
         .retrieve(&text("documento Peñalara"), &filters, 10, 0)
         .unwrap();
     assert_eq!(hit_names(&r), vec!["doc07.txt"], "{r:?}");
+}
+
+/// VFS-2 R20, VFS-27 R8 (#178): the content states are written in windows of file ids; with
+/// enough documents to span several windows and a folder offline, every reachable document is
+/// marked queued and the offline folder's documents keep their state.
+#[test]
+fn mirror_spans_windows_and_respects_offline_roots() {
+    let s = setup();
+    s.write("a/real.txt", "texto");
+    let other = s._tmp.path().join("Disco");
+    std::fs::create_dir_all(other.join("b")).unwrap();
+    std::fs::write(other.join("b/ausente.txt"), "texto").unwrap();
+    s.scan();
+    s.vfs.add_root(&other).unwrap();
+    s.scan();
+    {
+        let conn = Connection::open(&s.db).unwrap();
+        let dir_of = |name: &str| -> i64 {
+            conn.query_row("SELECT dir_id FROM files WHERE name = ?1", [name], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        let (online, offline) = (dir_of("real.txt"), dir_of("ausente.txt"));
+        conn.execute_batch("BEGIN").unwrap();
+        let mut ins = conn
+            .prepare(
+                "INSERT INTO files(dir_id, name, name_key, kind, size, mtime)
+                 VALUES (?1, ?2, ?2, ?3, 10, 1700000000)",
+            )
+            .unwrap();
+        for i in 0..12_000 {
+            let dir = if i % 3 == 0 { offline } else { online };
+            ins.execute(rusqlite::params![
+                dir,
+                format!("sint{i:05}.txt"),
+                FileKind::Document.code()
+            ])
+            .unwrap();
+        }
+        drop(ins);
+        conn.execute_batch("COMMIT").unwrap();
+    }
+    std::fs::rename(&other, s._tmp.path().join("Disco-desconectado")).unwrap();
+    let mut o = s.opts();
+    o.max_files = Some(0); // mirror the states, read nothing
+    let sum = s.run(&o);
+    assert_eq!(sum.files_opened, 0, "{sum:?}");
+    let conn = Connection::open(&s.db).unwrap();
+    let count = |state: i64, offline: bool| -> i64 {
+        conn.query_row(
+            "SELECT count(*) FROM files f JOIN dirs d ON d.id = f.dir_id JOIN roots r ON r.id = d.root_id
+             WHERE f.kind = ?1 AND f.content_state = ?2 AND (r.path LIKE '%Disco') = ?3",
+            rusqlite::params![FileKind::Document.code(), state, offline],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        count(QUEUED, false),
+        8_000 + 1,
+        "every reachable document is queued"
+    );
+    assert_eq!(count(QUEUED, true), 0, "the offline folder keeps its state");
+    assert_eq!(count(NONE, true), 4_000 + 1);
 }

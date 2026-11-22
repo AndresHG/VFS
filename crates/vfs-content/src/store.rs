@@ -80,13 +80,26 @@ pub fn delete(index_db: &Path) -> std::io::Result<()> {
     for suffix in ["", "-wal", "-shm"] {
         let mut f = p.as_os_str().to_owned();
         f.push(suffix);
-        match std::fs::remove_file(&f) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
+        remove_retrying(Path::new(&f))?;
     }
     Ok(())
+}
+
+/// Removes `path`, missing or not. On Windows a file another connection holds open (a search
+/// in flight) cannot be removed, so it is tried again for about a second.
+fn remove_retrying(path: &Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match std::fs::remove_file(path) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if tries >= 20 => return Err(e),
+            Err(_) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 fn tune(conn: &Connection) -> Result<()> {

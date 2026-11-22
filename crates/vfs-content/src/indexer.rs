@@ -35,6 +35,9 @@ const UNSTABLE_CRASHES: u32 = 5;
 /// VFS-34's setting).
 pub const CONTENT_MAX_MB_KEY: &str = "content_max_mb";
 
+/// File ids per `mirror` transaction (R20: short transactions on `index.db`).
+const MIRROR_WINDOW: i64 = 5_000;
+
 /// Input-size budget when `index.db` has no `content_max_mb` (VFS-2 R21).
 const DEFAULT_MAX_INPUT_MB: u64 = 100;
 
@@ -247,13 +250,16 @@ fn roots(conn: &Connection) -> Result<(HashMap<i64, PathBuf>, HashSet<i64>)> {
 }
 
 /// SQL predicate on `files f`: the file's root folder is reachable.
-fn root_ok_sql(offline: &HashSet<i64>) -> String {
+/// SQL predicate on the `files` row named `table` (`f` or `files`): its root folder is
+/// reachable. Applied to the row itself, so each statement looks up one folder per file and
+/// never rebuilds a list of all files (#178: `mirror` runs it once per window).
+fn root_ok_sql(offline: &HashSet<i64>, table: &str) -> String {
     if offline.is_empty() {
         return "1".into();
     }
     let ids: Vec<String> = offline.iter().map(i64::to_string).collect();
     format!(
-        "(SELECT dd.root_id FROM dirs dd WHERE dd.id = f.dir_id) NOT IN ({})",
+        "(SELECT dd.root_id FROM dirs dd WHERE dd.id = {table}.dir_id) NOT IN ({})",
         ids.join(",")
     )
 }
@@ -311,7 +317,7 @@ fn enqueue(
     // Documents that are decided without being read: cloud-only (R12), unsupported, too
     // large.
     let supported = supported_sql();
-    let root_ok = root_ok_sql(offline);
+    let root_ok = root_ok_sql(offline, "f");
     let mut unread = Vec::new();
     for (reason, condition) in [
         (SkipReason::Cloud, "f.flags & ?4 <> 0".to_string()),
@@ -377,32 +383,43 @@ fn enqueue(
 /// commits atomic.
 fn mirror(conn: &mut Connection, offline: &HashSet<i64>) -> Result<()> {
     let doc = FileKind::Document.code();
-    let root_ok = root_ok_sql(offline);
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute(
-        "UPDATE files SET content_state = (SELECT state FROM c.docs d WHERE d.file_id = files.id)
-         WHERE id IN (SELECT file_id FROM c.docs)
-           AND content_state <> (SELECT state FROM c.docs d WHERE d.file_id = files.id)",
-        [],
-    )?;
-    // After the processed states: a timeout waiting for its retry is in both and shows
-    // as queued.
-    tx.execute(
-        "UPDATE files SET content_state = ?1
-         WHERE id IN (SELECT file_id FROM c.queue) AND content_state <> ?1",
-        [ContentState::Queued as i64],
-    )?;
-    // Documents the store has no word on go back to `none`, except on offline or paused
-    // roots, whose documents keep their state (R17; VFS-27 R8).
-    tx.execute(
-        &format!(
-            "UPDATE files SET content_state = ?1 WHERE kind = ?2 AND content_state <> ?1
-               AND id NOT IN (SELECT file_id FROM c.docs) AND id NOT IN (SELECT file_id FROM c.queue)
-               AND id IN (SELECT f.id FROM files f WHERE {root_ok})"
-        ),
-        params![ContentState::None as i64, doc],
-    )?;
-    tx.commit()?;
+    let root_ok = root_ok_sql(offline, "files");
+    let max_id: i64 = conn.query_row("SELECT coalesce(max(id), 0) FROM files", [], |r| r.get(0))?;
+    // Windows of file ids, each its own short transaction, so a first run over hundreds of
+    // thousands of documents never holds `index.db`'s write lock for long (R20).
+    let mut lo = 0i64;
+    while lo < max_id {
+        let hi = lo + MIRROR_WINDOW;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE files SET content_state = (SELECT state FROM c.docs d WHERE d.file_id = files.id)
+             WHERE id > ?1 AND id <= ?2 AND id IN (SELECT file_id FROM c.docs)
+               AND content_state <> (SELECT state FROM c.docs d WHERE d.file_id = files.id)",
+            params![lo, hi],
+        )?;
+        // After the processed states: a timeout waiting for its retry is in both and shows
+        // as queued.
+        tx.execute(
+            "UPDATE files SET content_state = ?1
+             WHERE id > ?2 AND id <= ?3 AND id IN (SELECT file_id FROM c.queue)
+               AND content_state <> ?1",
+            params![ContentState::Queued as i64, lo, hi],
+        )?;
+        // Documents the store has no word on go back to `none`, except on offline or paused
+        // roots, whose documents keep their state (R17; VFS-27 R8).
+        tx.execute(
+            &format!(
+                "UPDATE files SET content_state = ?1
+                 WHERE id > ?3 AND id <= ?4 AND kind = ?2 AND content_state <> ?1
+                   AND id NOT IN (SELECT file_id FROM c.docs)
+                   AND id NOT IN (SELECT file_id FROM c.queue)
+                   AND {root_ok}"
+            ),
+            params![ContentState::None as i64, doc, lo, hi],
+        )?;
+        tx.commit()?;
+        lo = hi;
+    }
     Ok(())
 }
 
@@ -560,16 +577,22 @@ fn commit_batch(
 pub enum Admit {
     /// Read the document now.
     Read,
+    /// Ask again after this long. The run commits what it has read first, so finished
+    /// documents reach the store while it waits, and it watches the stop flag meanwhile.
+    Wait(Duration),
     /// End the run here; the document and the rest stay queued.
     Stop,
 }
+
+/// How often a gate's wait looks at the stop flag.
+const GATE_POLL: Duration = Duration::from_millis(250);
 
 /// The caller's hooks into a run, called between documents only, so the worker's own read
 /// never counts against the pace (VFS-27 R7). The app paces and counts progress through it;
 /// [`run`] uses one that admits every document.
 pub trait Gate {
-    /// Before the next document. May wait (checking `stop`) before answering.
-    fn before_document(&mut self, stop: &AtomicBool) -> Admit;
+    /// Before reading the document at `path`.
+    fn before_document(&mut self, path: &Path) -> Admit;
     /// After a document was processed, with its outcome and the worker's time on it.
     fn after_document(&mut self, outcome: OutcomeKind, worker_ms: u64);
 }
@@ -578,7 +601,7 @@ pub trait Gate {
 pub struct NoGate;
 
 impl Gate for NoGate {
-    fn before_document(&mut self, _stop: &AtomicBool) -> Admit {
+    fn before_document(&mut self, _path: &Path) -> Admit {
         Admit::Read
     }
     fn after_document(&mut self, _outcome: OutcomeKind, _worker_ms: u64) {}
@@ -694,8 +717,27 @@ pub fn run_with(
                 }
             } else {
                 // The gate paces reads only: a cloud placeholder, never opened, costs no slot.
-                if gate.before_document(stop) == Admit::Stop || stop.load(Ordering::Relaxed) {
-                    break 'outer;
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break 'outer;
+                    }
+                    match gate.before_document(&path) {
+                        Admit::Read => break,
+                        Admit::Stop => break 'outer,
+                        Admit::Wait(d) => {
+                            if let Err((reason, detail)) =
+                                commit_batch(&mut conn, &mut batch, &analyzer, &mut sum)
+                            {
+                                sum.stop(reason, detail);
+                                break 'outer;
+                            }
+                            last_commit = Instant::now();
+                            let until = Instant::now() + d;
+                            while Instant::now() < until && !stop.load(Ordering::Relaxed) {
+                                std::thread::sleep(GATE_POLL.min(until - Instant::now()));
+                            }
+                        }
+                    }
                 }
                 let req = Request {
                     path,
@@ -785,6 +827,41 @@ fn finish(
     sum
 }
 
+/// Roots whose documents a run passes over now: offline (the folder cannot be reached) or
+/// paused (VFS-32), sorted. A change here means documents to read (VFS-27 R8, R9).
+pub fn passed_over_roots(index_db: &Path) -> Result<Vec<i64>> {
+    let conn = rusqlite::Connection::open_with_flags(
+        index_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    let (_, mut offline) = roots(&conn)?;
+    offline.extend(vfs_core::db::paused_root_ids(&conn)?);
+    let mut ids: Vec<i64> = offline.into_iter().collect();
+    ids.sort_unstable();
+    Ok(ids)
+}
+
+/// Whether a document that timed out waits for its one more try (VFS-2 R3): only then does
+/// a look with no document changed have anything to read.
+pub fn has_timeout_retries(index_db: &Path) -> bool {
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        store::store_path(index_db),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return false;
+    };
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM docs WHERE state = ?1 AND reason = ?2 AND attempts < ?3)",
+        params![
+            ContentState::Failed as i64,
+            reason_str(&FailReason::Timeout),
+            TIMEOUT_ATTEMPTS
+        ],
+        |r| r.get(0),
+    )
+    .unwrap_or(false)
+}
+
 /// Counts of documents by content state, from the content store and the queue.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct StoreStats {
@@ -799,7 +876,11 @@ pub fn stats(index_db: &Path) -> Result<StoreStats> {
     if !store::exists(index_db) {
         return Err(crate::Error::Off);
     }
-    let conn = store::open_or_create(index_db)?;
+    // Read-only and never repaired here: a damaged store is the user's call (VFS-27 R11).
+    let conn = rusqlite::Connection::open_with_flags(
+        store::store_path(index_db),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
     let count = |state: ContentState| -> rusqlite::Result<u64> {
         conn.query_row(
             "SELECT count(*) FROM docs WHERE state = ?1",

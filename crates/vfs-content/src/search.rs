@@ -489,6 +489,7 @@ impl Stats {
             let n: Option<i64> = st.query_row([k], |r| r.get(0)).optional()?;
             df.insert(k.to_string(), n.unwrap_or(0).max(0) as u64);
         }
+        let docs = at_least_every_df(docs, &df);
         Ok(Stats { docs, df })
     }
 
@@ -622,6 +623,12 @@ pub struct Searcher {
 /// frequency guard's 5 % (R14); while the store fills, a count up to this old can mark a few
 /// more words common than a fresh one. A count of 0 is never reused.
 const DOC_COUNT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A cached count can trail the store while it fills; no key is in more documents than there
+/// are, so the count is raised to the largest document frequency and `idf` stays positive.
+fn at_least_every_df(docs: u64, df: &HashMap<String, u64>) -> u64 {
+    df.values().copied().fold(docs, u64::max)
+}
 
 /// The cached count, when it may be reused at `now`: not older than [`DOC_COUNT_TTL`], and
 /// never 0 (a store still filling would make every word common).
@@ -1043,5 +1050,23 @@ mod tests {
         assert_eq!(reuse_count(Some((t, 0)), t), None);
         assert_eq!(reuse_count(Some((t, 40)), t + DOC_COUNT_TTL / 2), Some(40));
         assert_eq!(reuse_count(Some((t, 40)), t + DOC_COUNT_TTL), None);
+    }
+
+    /// VFS-2 AC-15 (R14): a count that trails the store (cached while it fills) is raised to
+    /// the largest document frequency, so `idf` stays positive and a word in every document
+    /// counts as common, not as rare.
+    #[test]
+    fn trailing_count_keeps_idf_positive() {
+        let df: HashMap<String, u64> = [("factura".to_string(), 100), ("pena".to_string(), 3)]
+            .into_iter()
+            .collect();
+        let docs = at_least_every_df(5, &df);
+        assert_eq!(docs, 100);
+        let stats = Stats { docs, df };
+        assert!(stats.idf("factura") > 0.0);
+        assert!(stats.idf("pena") > stats.idf("factura"));
+        assert!(stats.common(&["factura".to_string()]));
+        assert!(!stats.common(&["pena".to_string()]));
+        assert_eq!(at_least_every_df(500, &stats.df), 500);
     }
 }

@@ -7341,6 +7341,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tempfile",
  "vfs-bookmarks",
+ "vfs-content",
  "vfs-core",
  "webview2-com",
  "windows-core",
