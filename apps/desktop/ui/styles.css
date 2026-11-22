@@ -855,7 +855,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 }
 
 /* VFS-6: bookmarks as a source (docs/design/system.md "Sources"). */
-.row .ico[data-kind="bookmark"] { color: var(--accent); }
+.row .ico[data-kind="bookmark"], .row .ico[data-kind="bookmark-folder"] { color: var(--accent); }
 .setting { display: grid; gap: var(--s2); padding: 0 var(--s5) var(--s4); }
 .setting label { font-weight: 700; }
 .setting select {
