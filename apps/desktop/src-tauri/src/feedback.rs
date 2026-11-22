@@ -360,14 +360,21 @@ pub fn build_report(
     let roots_start = s.len();
     let mut named_roots = String::new();
     for (root, disk) in &env.roots {
+        // Why a cloud-synced root looks small (VFS-37 R1): counts only, no path or name (R5).
+        let known = |n: Option<u64>| n.map_or_else(|| "?".to_owned(), |n| n.to_string());
         let line = format!(
-            "root {}: drive={} disk={} status={} files={} folders={} last_full_scan={}\n",
+            "root {}: drive={} disk={} status={} files={} folders={} cloud_only={} links={} \
+             unreadable={} unpopulated={} last_full_scan={}\n",
             root.id,
             wire_name(root.drive),
             disk.name(),
             wire_name(root.status),
             root.files,
             root.dirs,
+            known(root.cloud_only),
+            known(root.links),
+            root.unreadable,
+            root.unpopulated,
             age(env.now, root.last_full_scan),
         );
         s.push_str(&line);
@@ -952,6 +959,9 @@ mod tests {
             drive: DriveKind::Local,
             unreadable: 0,
             paused: false,
+            unpopulated: 0,
+            cloud_only: Some(0),
+            links: Some(0),
         }
     }
 
@@ -1075,7 +1085,8 @@ mod tests {
             "## What happened\nVa lento",
             "version: 0.2.0",
             "os: windows 10.0.19045 22H2 (x86_64)",
-            "root 1: drive=local disk=hdd status=ready files=1200 folders=80 last_full_scan=3 d ago",
+            "root 1: drive=local disk=hdd status=ready files=1200 folders=80 cloud_only=0 links=0 \
+             unreadable=0 unpopulated=0 last_full_scan=3 d ago",
             "files: 1200\nfolders: 80\nroots: 1\nsize_mb: 5.0\nwal_mb: 1.0\nschema: 4",
             "indexer: idle",
             "firefox_bookmarks: on (profiles=1 bookmarks=230)",
@@ -1092,6 +1103,34 @@ mod tests {
         assert!(!r.summary.contains("Va lento"));
         assert!(!r.summary.contains("pass mode=walk"));
         assert!(r.text.contains(&r.summary));
+    }
+
+    /// VFS-37 AC-1, AC-2: each root's line counts its cloud-only files, links, unreadable and
+    /// unpopulated folders, `?` for a count not known yet; the summary carries the line and
+    /// not the root's path.
+    #[test]
+    fn root_line_says_why_a_cloud_root_looks_small() {
+        let mut e = env(&[r"C:\Users\ana\OneDrive", r"D:\Fotos"]);
+        let r = &mut e.roots[0].0;
+        (r.cloud_only, r.links, r.unreadable, r.unpopulated) = (Some(7), Some(2), 3, 4);
+        let r = &mut e.roots[1].0;
+        (r.cloud_only, r.links) = (None, None);
+        let report = build_report(&e, "", true, &[], usize::MAX);
+        for want in [
+            "root 1: drive=local disk=hdd status=ready files=1200 folders=80 cloud_only=7 \
+             links=2 unreadable=3 unpopulated=4 last_full_scan=3 d ago",
+            "root 2: drive=local disk=hdd status=ready files=1200 folders=80 cloud_only=? \
+             links=? unreadable=0 unpopulated=0 last_full_scan=3 d ago",
+        ] {
+            assert!(
+                report.summary.contains(want),
+                "{want:?} in\n{}",
+                report.summary
+            );
+            assert!(report.text.contains(want));
+        }
+        assert!(report.text.contains(r"path: C:\Users\ana\OneDrive"));
+        assert!(!report.summary.contains("OneDrive"));
     }
 
     /// VFS-20 AC-2: with the box unticked no root path, file or folder name survives in any

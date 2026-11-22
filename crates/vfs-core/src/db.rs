@@ -12,22 +12,23 @@ use crate::types::{LinkKind, LinkTarget};
 
 /// `PRAGMA user_version` written by this build. Later versions (such as document content
 /// search, VFS-1 AC-15) add tables without touching existing ones.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Migrations: entry `i` takes an index from version `i` to `i + 1`.
-const MIGRATIONS: [&str; 6] = [
+const MIGRATIONS: [&str; 7] = [
     include_str!("schema.sql"),
     include_str!("schema_v2.sql"),
     include_str!("schema_v3.sql"),
     include_str!("schema_v4.sql"),
     include_str!("schema_v5.sql"),
     include_str!("schema_v6.sql"),
+    include_str!("schema_v7.sql"),
 ];
 
 /// An index migrated from a version below this one is compacted afterwards: the migrations
 /// to versions 3 and 4 free about a fifth of the file. Later ones (5: `links`, 6:
-/// `dirs.error`) free nothing, and a `VACUUM` rewrites the whole index: minutes on the
-/// target HDD right after an update, for nothing.
+/// `dirs.error`, 7: VFS-37 counts) free nothing, and a `VACUUM` rewrites the whole index:
+/// minutes on the target HDD right after an update, for nothing.
 const COMPACT_FROM_BELOW: u32 = 4;
 
 /// Page size of a new index, and of an existing index compacted after a migration.
@@ -1023,15 +1024,27 @@ pub mod ingest {
         Ok(())
     }
 
-    /// Marks a directory listed: clean, and its unreadable reason forgotten (VFS-10 R2).
+    /// Marks a directory listed: clean, its unreadable reason forgotten (VFS-10 R2) and its
+    /// unpopulated mark cleared (VFS-37 R2).
     pub fn mark_listed(tx: &Transaction, dir_id: i64) -> Result<()> {
-        tx.prepare_cached("UPDATE dirs SET scan_state = 0, error = NULL WHERE id = ?1")?
+        tx.prepare_cached(
+            "UPDATE dirs SET scan_state = 0, error = NULL, unpopulated = NULL WHERE id = ?1",
+        )?
+        .execute([dir_id])?;
+        Ok(())
+    }
+
+    /// Marks a directory just listed as an unpopulated cloud placeholder: empty, and still
+    /// not all present locally (VFS-37 R2).
+    pub fn mark_unpopulated(tx: &Transaction, dir_id: i64) -> Result<()> {
+        tx.prepare_cached("UPDATE dirs SET unpopulated = 1 WHERE id = ?1")?
             .execute([dir_id])?;
         Ok(())
     }
 
     /// Records why a directory failed to list (VFS-10 R1); with `settled` (its retries are
     /// exhausted) it is also marked clean until the next full walk (VFS-1 I11).
+    /// A folder that fails to list is never unpopulated (VFS-37 R2).
     pub fn record_unreadable(
         tx: &Transaction,
         dir_id: i64,
@@ -1039,9 +1052,9 @@ pub mod ingest {
         settled: bool,
     ) -> Result<()> {
         let sql = if settled {
-            "UPDATE dirs SET error = ?2, scan_state = 0 WHERE id = ?1"
+            "UPDATE dirs SET error = ?2, scan_state = 0, unpopulated = NULL WHERE id = ?1"
         } else {
-            "UPDATE dirs SET error = ?2 WHERE id = ?1"
+            "UPDATE dirs SET error = ?2, unpopulated = NULL WHERE id = ?1"
         };
         tx.prepare_cached(sql)?
             .execute(params![dir_id, reason.code()])?;
@@ -1163,6 +1176,16 @@ mod tests {
             .unwrap()
     }
 
+    /// VFS-37: the README and the architecture doc name the current schema version, so a
+    /// schema change that leaves them behind fails here.
+    #[test]
+    fn docs_name_the_schema_version() {
+        let readme = include_str!("../../../README.md");
+        assert!(readme.contains(&format!("schema version {SCHEMA_VERSION} ")));
+        let arch = include_str!("../../../docs/architecture.md");
+        assert!(arch.contains(&format!("`core/schema_v{SCHEMA_VERSION}.sql`")));
+    }
+
     /// A version-2 index at 4 KB pages: file 3 `Año 2019/Banco.pdf` and 2,901 more files,
     /// with their version-2 FTS rows.
     fn version_2_index(path: &Path) {
@@ -1279,6 +1302,10 @@ mod tests {
                  WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
                    INSERT INTO junk SELECT randomblob(1000) FROM n;
                  DROP TABLE junk;
+                 DROP INDEX dirs_unpopulated;
+                 ALTER TABLE dirs DROP COLUMN unpopulated;
+                 ALTER TABLE roots DROP COLUMN cloud_only_count;
+                 ALTER TABLE roots DROP COLUMN links_count;
                  DROP TABLE links;
                  DROP INDEX dirs_unreadable;
                  ALTER TABLE dirs DROP COLUMN error;

@@ -383,6 +383,12 @@ pub struct Root {
     pub unreadable: u64,
     /// Indexing of this root is paused until resumed (VFS-32 R1).
     pub paused: bool,
+    /// Folders that listed empty while still cloud placeholders not filled in (VFS-37 R2).
+    pub unpopulated: u64,
+    /// Cloud-only files at the root's last full walk; `None` before one (VFS-37 R3).
+    pub cloud_only: Option<u64>,
+    /// Links at the root's last full walk; `None` before one (VFS-37 R3).
+    pub links: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -538,6 +544,9 @@ mod tests {
             drive: DriveKind::Removable,
             unreadable: 2,
             paused: false,
+            unpopulated: 0,
+            cloud_only: None,
+            links: Some(0),
         };
         let v = serde_json::to_value(&root).unwrap();
         assert_eq!(v["lastFullScan"], json!(9));
