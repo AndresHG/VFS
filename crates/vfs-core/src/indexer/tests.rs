@@ -2295,3 +2295,22 @@ fn taken_in_paused_root_loses_its_pause() {
         "other pauses stay"
     );
 }
+
+/// VFS-32 R2: the shortcut pass leaves a paused root's links pending and finds them again
+/// once it is resumed.
+#[test]
+fn paused_root_links_wait_for_the_resume() {
+    let mut fx = fixture(&["A"]);
+    let url = fx.root().join("A").join("Banco.url");
+    fs::write(&url, "[InternetShortcut]\r\nURL=https://example.com/\r\n").unwrap();
+    fx.scan();
+    assert_eq!(ingest::pending_links(&fx.conn, 10).unwrap().len(), 1);
+    pause(&fx.conn, fx.root_id, true);
+    assert!(ingest::pending_links(&fx.conn, 10).unwrap().is_empty());
+    assert_eq!(
+        crate::link::read_pending(&mut fx.conn, &|| false).unwrap(),
+        0
+    );
+    pause(&fx.conn, fx.root_id, false);
+    assert_eq!(ingest::pending_links(&fx.conn, 10).unwrap().len(), 1);
+}

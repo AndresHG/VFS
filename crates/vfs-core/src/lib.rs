@@ -727,7 +727,11 @@ mod tests {
         let conn = db::open_ro(&path).unwrap();
         let keys: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM meta WHERE key LIKE 'paused/%'",
+                concat!(
+                    "SELECT COUNT(*) FROM meta WHERE key LIKE '",
+                    crate::roots::paused_prefix!(),
+                    "%'"
+                ),
                 [],
                 |r| r.get(0),
             )
