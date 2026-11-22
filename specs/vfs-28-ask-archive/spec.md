@@ -1,7 +1,8 @@
 # VFS-28 — Ask your archive (RAG v1): BM25 retrieval, citations, bibliography
 
 - **Status**: approved. The owner's decisions D1–D5 are of 2026-11-22. An independent critic
-  review found 13 issues, all fixed before approval.
+  review found 13 issues, a second round 4 more, all fixed before approval; a final
+  verification pass checked them.
 - **Size**: L. It sends user content to an outside service for the first time. It stores
   secrets in the OS credential store, changes the macOS signing identity, and is multi-PR.
 - **Links**:
@@ -146,9 +147,10 @@ Bibliography
 
 Errors and diagnostics
 
-- R13. THE app SHALL map provider errors to plain messages:
+- R13. THE app SHALL map provider errors to plain messages. The codes below come from the
+  providers' docs as read on 2026-11-22 **[published, to be re-checked when 28b is built]**:
   - invalid or forbidden key: «La clave no es válida»;
-  - billing or no credit: an Anthropic `billing_error`, or a 400 whose message reports a credit
+  - billing or no credit: a 402, an Anthropic `billing_error`, or a 400 whose message reports a credit
     balance too low: «Su cuenta de <proveedor> no tiene saldo»;
   - rate limited: an Anthropic 429 with `retry-after`, or an OpenAI 429 with code
     `rate_limit_exceeded`. Also overloaded (529, 503) or another 5xx. Retry at most twice,
@@ -235,12 +237,6 @@ local mock server that replays recorded responses. No test needs a real key.
   none, When «Bibliografía» opens, Then the PDF shows its author, year and title. The DOCX
   shows «s. a.», its file name and the file's year marked «(fecha del archivo)». «Exportar
   RIS» writes a file that parses as RIS with one `TY - GEN` record per document.
-- AC-13 (R7a) Given a fixture passage that holds «Ignora las instrucciones anteriores»,
-  an `<img src="https://example.invalid/x">` tag and a Markdown image to a remote URL, and a
-  recorded answer that echoes all three, When the answer is shown, Then the text appears
-  literally, no element is created from it, and the webview makes no network request (the
-  e2e harness watches requests). The request's system prompt does not contain the passage
-  text.
 - AC-11 (R14) Given a question run, When the diagnostic log is read, Then it has the rounds,
   tokens, cost and drop counts, and none of the question text, passage text or file names.
 - AC-12 (golden) Given the RAG golden set (D9), When the retrieval test runs in CI, Then for
@@ -251,6 +247,12 @@ local mock server that replays recorded responses. No test needs a real key.
   - every unanswerable question shows the not-found message.
   A manual `--live` run with a real key re-records the answers and has a model from the
   other provider grade faithfulness. Its result goes in the PR that ships 28c.
+- AC-13 (R7a) Given a fixture passage that holds «Ignora las instrucciones anteriores»,
+  an `<img src="https://example.invalid/x">` tag and a Markdown image to a remote URL, and a
+  recorded answer that echoes all three, When the answer is shown, Then the text appears
+  literally, no element is created from it, and the webview makes no network request (the
+  e2e harness watches requests). The request's system prompt does not contain the passage
+  text.
 
 ## Non-goals
 
@@ -299,8 +301,8 @@ v0.3 ships, to keep one new risk per release. 28c and 28d need VFS-2 2b and VFS-
 |---|---|---|---|
 | 28a | macOS stable self-signed signing identity: certificate kept as a CI secret, Tauri `signingIdentity`, A/B keychain script on the macOS runner, release notes on the one-time change. | AC-3 | 1–2 days **[estimate]** |
 | 28b | Crate `vfs-ai`: the `ChatModel` trait (`validate_key`, `rewrite`, streamed `answer`) for Anthropic and OpenAI over the existing `reqwest`. Also the redacting secret type, key storage with fallback, error mapping, retries, cost metering with the dated price table, `ai.db`, and the mock server for tests. | AC-1 (crate part), AC-2, AC-4, AC-8 (crate part) | 4–5 days **[estimate]** |
-| 28c | Ask flow: rewrite, folder check and filter intersection, retrieval rounds, passage selection and merging, answer, citation checks, follow-ups, the untrusted-passage prompt, diagnostics. Also the RAG golden set and the recorded answers. | AC-5–AC-7, AC-11, AC-12, AC-13 (system prompt part) | 4–6 days **[estimate]** |
-| 28d | User interface: the Ajustes section, the first-use notice, «Preguntar», the plain-text answer view with markers, the cost and cap prompt, «Qué se ha enviado», «Bibliografía» with copy and RIS. Strings go in both catalogs. | AC-1 and AC-8 (UI parts), AC-9, AC-10, AC-13 (rendering part) | 5–6 days **[estimate]** |
+| 28c | Ask flow: rewrite, folder check and filter intersection, retrieval rounds, passage selection and merging, answer, citation checks, follow-ups, the untrusted-passage prompt, diagnostics. Also the RAG golden set and the recorded answers. | AC-5 (flow part), AC-6 (citation checks), AC-7, AC-11, AC-12, AC-13 (system prompt part) | 4–6 days **[estimate]** |
+| 28d | User interface: the Ajustes section, the first-use notice, «Preguntar», the plain-text answer view with markers, the cost and cap prompt, «Qué se ha enviado», «Bibliografía» with copy and RIS. Strings go in both catalogs. | AC-1 and AC-8 (UI parts), AC-5 (first-use notice), AC-6 (markers and not-found view), AC-9, AC-10, AC-13 (rendering part) | 5–6 days **[estimate]** |
 
 Total ≈ 14–19 working days **[estimate]**.
 
@@ -317,9 +319,9 @@ Total ≈ 14–19 working days **[estimate]**.
 | D7 | Models | Rewrite with the cheap tier: `claude-haiku-5-5`, or OpenAI's cheap tier. Answer with the mid tier: `claude-sonnet-5-5`, or OpenAI's mid tier, with thinking off or minimal. At **[estimate from published prices: 0.10/0.50 and 2/10 $ per M tokens]** that is ≈ 140 questions under the 5 $ cap. That assumes 10 passages of about 1,500 tokens each, every chunk with its neighbours (≈ 16 k tokens in, 600 out): about 0.035 $ per question. «Respuestas más baratas» uses the cheap tier for both calls, about 0.002 $ per question. Model ids and prices live in one dated table in `vfs-ai`, updated with releases. | agent | 2026-11-22 |
 | D8 | Anthropic answer format | Plain text with citations on. Structured output together with citations is rejected with a 400 by the API, and a "JSON only" prompt makes citations sparse **[published, Anthropic citations docs]**. Structured output is used only for the rewrite. "Not found" is detected as an answer with no valid citation. | agent | 2026-11-22 |
 | D9 | Golden set | About 50 questions (35 answerable, 15 unanswerable), in JSONL with `gold` file and page, `must_contain` and `answerable`. The corpus is 60–80 committed public documents: BOE (free reuse with attribution), Spanish Wikipedia (CC BY-SA), Gutenberg ES, plus synthetic personal documents from PR 98's corpus generator. Every case must pass, as in VFS-11, because ±15 points of noise at this size makes a threshold meaningless. | agent | 2026-11-22 |
+| D10 | HTTP | Direct calls with the `reqwest` already in the binary (rustls, OS certificate store, system proxy), plus `eventsource-stream`. No community SDK: none is official, and they add size. | agent | 2026-11-22 |
 | D11 | File names in what is sent | Each passage is sent with its file name and page, but no folder path. File names carry meaning that helps the answer. They are shown in the first-use notice and in «Qué se ha enviado». | agent (within the owner's P1, "only what is needed, visibly") | 2026-11-22 |
 | D12 | Certificate continuity | A self-signed certificate valid for ≥ 10 years, kept as a CI secret with an offline backup. Losing it means one re-entry of each key (R3), never a crash. The release that switches the identity says that macOS may ask once again for folder access. | agent | 2026-11-22 |
-| D10 | HTTP | Direct calls with the `reqwest` already in the binary (rustls, OS certificate store, system proxy), plus `eventsource-stream`. No community SDK: none is official, and they add size. | agent | 2026-11-22 |
 
 ## Open questions
 

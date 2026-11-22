@@ -1,9 +1,9 @@
 # VFS-2 — Document content search: the engine
 
 - **Status**: approved. The prototype in PR 98 was built against R1–R11. The owner answered
-  the open questions on 2026-11-21 (D9–D15). R12–R15 and the phased PRs were added on
-  2026-11-22 to close the engine before the app step. The spec passed an independent critic
-  review.
+  the open questions on 2026-11-21 (D9–D15). R12–R20 and the phased PRs were added on
+  2026-11-22 to close the engine before the app step. Two independent critic rounds
+  reviewed it, and a final verification pass checked the fixes.
 - **Size**: L. The engine opens user files for the first time, adds an on-disk store next to
   the index, and adds a child process with platform-specific limits. It spans several
   components.
@@ -86,12 +86,13 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
   results.
 - R9. THE content store SHALL live outside `index.db` and SHALL be deletable as a whole,
   which switches content search off without touching the name index.
+- R10. THE engine SHALL be reachable from the CLI only (`vfs content-index`,
+  `vfs content-search`), behind a build switch that is off by default.
 - R11. THE content store SHALL keep each document's text in addressable chunks (document id,
   chunk ordinal, byte and character offsets into the stored text, page number where the
   format has pages), and THE content search SHALL return, for each document hit, its
-  best-matching passages with those addresses.
-- R10. THE engine SHALL be reachable from the CLI only (`vfs content-index`,
-  `vfs content-search`), behind a build switch that is off by default.
+  best-matching passages with those addresses, at most 3 per hit, ranked within the
+  document.
 - R12. IF a file is cloud-only, THEN THE content indexer SHALL not open it, SHALL mark it
   skipped with the reason "in the cloud", and SHALL extract it on a later run once it is local
   (D12). A file is cloud-only when:
@@ -174,6 +175,9 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   worker hang), When the content indexer runs, Then the worker is killed within the limit plus
   one second, the file is marked `failed`, and the next file is still indexed; the next run
   tries that file once more, and the run after that does not open it.
+- AC-23 (R5) Given a content run, When the worker's priority is read from the OS, Then it is
+  the idle priority class with background mode on Windows, or `PRIO_DARWIN_BG` on macOS. At
+  most one document is open at a time: the test's file-open hook never sees two.
 - AC-4 (R2) Given truncated, randomly corrupted, password-protected, zero-byte and zip-bomb
   documents, When the content indexer runs, Then the run completes, each such file ends
   `failed` or `skipped` (password-protected and empty-text files `skipped`), and the valid
@@ -222,7 +226,7 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   three, When the user searches `documento Peñalara`, Then the three are returned, ranked by
   the `Peñalara` score. When the user searches `documento` alone, Then at most `limit` hits
   come back, and the p95 latency stays within the query budget.
-- AC-16 (R15) Given an indexed folder, When `retrieve("contrato de alquiler", filters, 10)`
+- AC-16 (R15) Given an indexed folder, When `retrieve("contrato de alquiler", filters, 10, 0)`
   is called, Then it returns the same documents in the same order as `vfs content-search`.
   Each returned passage's character range, read from the stored text, contains a matched
   word. `passage_text(file, ordinal, 1, 1)` returns the text of chunks ordinal−1 to
@@ -263,7 +267,7 @@ Each PR leaves `main` releasable, and the `content` feature stays off by default
 
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
-| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures, the worker's lifetime, the store version and the `content_state` writes (R17–R20), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20, AC-21 | 2–3 days **[estimate]** |
+| 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), the run-level failures, the worker's lifetime, the store version and the `content_state` writes (R17–R20), and the extractor's toolchain and size profile (D16). | AC-1–AC-13, AC-20, AC-21, AC-23 | 2–3 days **[estimate]** |
 | 2b | Query semantics and the engine calls: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` with structured queries and paging, `passage_text` and `unread` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-19, AC-22 | 2–3 days **[estimate]** |
 
 ## Budgets

@@ -2,8 +2,9 @@
 
 The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The specs are
 [VFS-2](../specs/vfs-2-content-search/spec.md), [VFS-27](../specs/vfs-27-content-in-app/spec.md),
-[VFS-28](../specs/vfs-28-ask-archive/spec.md) and [VFS-29](../specs/vfs-29-hybrid-search/spec.md)
-(outline). Efforts are working days of one session **[estimate]**.
+[VFS-28](../specs/vfs-28-ask-archive/spec.md), [VFS-34](../specs/vfs-34-file-filter/spec.md)
+(file filter, added to v0.3 at the owner's request) and
+[VFS-29](../specs/vfs-29-hybrid-search/spec.md) (outline). Efforts are working days of one session **[estimate]**.
 
 ## Why not both in v0.3
 
@@ -14,7 +15,7 @@ The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The 
 - **Pending measurement.** The document count and Defender's cost per file (VFS-27 27m) set
   the offer's estimates, and possibly a Tantivy step. They are unknown until the field
   visit.
-- **Size.** v0.3 is about 16–22 days, v0.4 about 14–19. Together they would be one
+- **Size.** v0.3 is about 18–25 days, v0.4 about 14–19. Together they would be one
   six-week release.
 
 ## v0.3: content search
@@ -23,9 +24,10 @@ The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The 
 |---|---|---|---|
 | 1 | VFS-2 2a | Resume PR 98, rebase, Windows CI, cloud-only skip, run-level failures, worker lifetime, size profile | 2–3 |
 | 2 | VFS-2 2b | AND by default, frequency guard, `retrieve` / `passage_text` / `unread`, metadata, content golden set | 2–3 |
-| 3 | VFS-27 27a | Sidecar packaging, version handshake, stopping the worker before an update | 2–3 |
-| 4 | VFS-27 27b | Background content indexer: pace, probes, pause, progress, damage, diagnostics | 5–7 |
-| 5 | VFS-27 27c | Offer, Ajustes, content section, unread labels, e2e | 4–5 |
+| 3 | VFS-34 | File filter: excluded names and extensions, size limit for reading content | 2–3 |
+| 4 | VFS-27 27a | Sidecar packaging, version handshake, stopping the worker before an update | 2–3 |
+| 5 | VFS-27 27b | Background content indexer: pace, probes, pause, progress, damage, diagnostics | 5–7 |
+| 6 | VFS-27 27c | Offer, Ajustes, content section, unread labels, e2e | 4–5 |
 | any time | VFS-27 27m | Real-PC measurement; must land before 27c ships | 1 + visit |
 
 **Gate before release:** CI green on both platforms; 27m measured. If the real archive has
