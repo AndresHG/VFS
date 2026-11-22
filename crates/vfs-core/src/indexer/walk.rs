@@ -107,10 +107,10 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
 /// Unix from `lstat`. `FileType::is_symlink` is true for symlinks and for Windows
 /// name-surrogate reparse points (junctions, mount points), so those are never followed;
 /// cloud placeholders are not name surrogates and are listed from their metadata without
-/// being downloaded. Entries that vanish or fail while listing are skipped, except that an
-/// entry whose metadata is denied (a Unix folder readable but not searchable) fails the
-/// whole listing, so the folder is retried like an unlistable one instead of being marked
-/// clean without those entries.
+/// being downloaded. Entries whose metadata vanishes while listing are skipped. An entry
+/// whose metadata is denied (a Unix folder readable but not searchable) or an enumeration
+/// that fails partway fails the whole listing, so the folder is retried like an unlistable
+/// one instead of being marked clean without those entries (issue 170).
 ///
 /// `rules` are the default exclusions for this folder (VFS-33 R5): excluded subfolders are
 /// left out; a marker entry empties the listing or drops the subfolders it names.
@@ -119,10 +119,19 @@ pub(crate) fn list_dir(
     skip: Option<&Path>,
     rules: &Children<'_>,
 ) -> std::io::Result<Vec<Entry>> {
+    list_entries(fs::read_dir(dir)?, skip, rules)
+}
+
+/// [`list_dir`] over an enumeration already opened.
+fn list_entries(
+    entries: impl Iterator<Item = std::io::Result<fs::DirEntry>>,
+    skip: Option<&Path>,
+    rules: &Children<'_>,
+) -> std::io::Result<Vec<Entry>> {
     let mut out = Vec::new();
     let mut marked: Option<&[&str]> = None;
-    for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else { continue };
+    for entry in entries {
+        let entry = entry?;
         let os_name = entry.file_name();
         let (name, lossy) = match os_name.to_str() {
             Some(s) => (s.to_owned(), false),
@@ -259,6 +268,25 @@ fn unix_unavailable(_: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-1 AC-4 (issue 170): an enumeration that fails partway fails the listing, so the
+    /// folder is retried and logged instead of being stored as complete without the rest.
+    #[test]
+    fn a_listing_that_fails_partway_is_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("uno.txt"), b"x").unwrap();
+        let excl = super::super::exclude::Exclusions::none(tmp.path());
+        let rules = excl.children_of(tmp.path());
+        let ok = list_entries(fs::read_dir(tmp.path()).unwrap(), None, &rules).unwrap();
+        assert_eq!(ok.len(), 1);
+        let broken =
+            fs::read_dir(tmp.path())
+                .unwrap()
+                .chain(std::iter::once(Err(std::io::Error::other(
+                    "enumeration failed",
+                ))));
+        assert!(list_entries(broken, None, &rules).is_err());
+    }
 
     /// VFS-25 AC-1: each of the three placeholder bits marks a file cloud-only; plain,
     /// hidden, archive, read-only and reparse-point words do not; the stored flag is bit 2.
@@ -425,332 +453,5 @@ mod tests {
         ] {
             assert!(!is_excluded(n), "{n}");
         }
-    }
-}
-
-/// Temporary probe for issue 170: how Cloud Files placeholders list. Fails on purpose to print.
-#[cfg(all(test, windows))]
-mod cloud_probe {
-    use super::*;
-    use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Storage::CloudFilters::*;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO,
-    };
-
-    fn wide(p: &Path) -> Vec<u16> {
-        p.as_os_str().encode_wide().chain([0]).collect()
-    }
-
-    fn place(base: &Path, name: &str, dir: bool, flags: i32, out: &mut String) {
-        let n = wide(Path::new(name));
-        let id = b"id";
-        let mut info = CF_PLACEHOLDER_CREATE_INFO {
-            RelativeFileName: n.as_ptr(),
-            FsMetadata: CF_FS_METADATA {
-                BasicInfo: FILE_BASIC_INFO {
-                    CreationTime: 133_000_000_000_000_000,
-                    LastAccessTime: 133_000_000_000_000_000,
-                    LastWriteTime: 133_000_000_000_000_000,
-                    ChangeTime: 133_000_000_000_000_000,
-                    FileAttributes: if dir {
-                        FILE_ATTRIBUTE_DIRECTORY
-                    } else {
-                        FILE_ATTRIBUTE_NORMAL
-                    },
-                },
-                FileSize: if dir { 0 } else { 5000 },
-            },
-            FileIdentity: id.as_ptr().cast(),
-            FileIdentityLength: 2,
-            Flags: flags,
-            ..Default::default()
-        };
-        let b = wide(base);
-        let mut done = 0u32;
-        // SAFETY: all pointers outlive the call.
-        let hr = unsafe {
-            CfCreatePlaceholders(b.as_ptr(), &mut info, 1, CF_CREATE_FLAG_NONE, &mut done)
-        };
-        out.push_str(&format!(
-            "place {name}: hr={hr:#x} result={:#x} done={done}\n",
-            info.Result
-        ));
-    }
-
-    fn dump(dir: &Path, label: &str, out: &mut String) {
-        out.push_str(&format!("-- raw read_dir {label}\n"));
-        match fs::read_dir(dir) {
-            Err(e) => out.push_str(&format!("  open err {e:?} raw={:?}\n", e.raw_os_error())),
-            Ok(rd) => {
-                for e in rd {
-                    match e {
-                        Ok(e) => {
-                            let ft = e.file_type().unwrap();
-                            let m = e.metadata().unwrap();
-                            out.push_str(&format!(
-                                "  {:?} attrs={:#x} sym={} dir={} file={} len={}\n",
-                                e.file_name(),
-                                m.file_attributes(),
-                                ft.is_symlink(),
-                                ft.is_dir(),
-                                ft.is_file(),
-                                m.len()
-                            ));
-                        }
-                        Err(e) => {
-                            out.push_str(&format!("  next err {e:?} raw={:?}\n", e.raw_os_error()))
-                        }
-                    }
-                }
-            }
-        }
-        let ex = super::super::exclude::Exclusions::none(dir);
-        match list_dir(dir, None, &ex.children_of(dir)) {
-            Ok(v) => out.push_str(&format!(
-                "  list_dir ok {:?}\n",
-                v.iter()
-                    .map(|e| (e.name.clone(), e.cloud_only))
-                    .collect::<Vec<_>>()
-            )),
-            Err(e) => out.push_str(&format!(
-                "  list_dir err {e:?} raw={:?}\n",
-                e.raw_os_error()
-            )),
-        }
-        out.push_str(&format!("  behind_link={}\n", behind_link(dir, "")));
-    }
-
-    fn raw_first(dir: &Path, out: &mut String) {
-        use windows_sys::Win32::Foundation::GetLastError;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-            WIN32_FIND_DATAW,
-        };
-        let star = wide(&dir.join("*"));
-        let mut wfd: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
-        let h = unsafe {
-            FindFirstFileExW(
-                star.as_ptr(),
-                FindExInfoBasic,
-                (&raw mut wfd).cast(),
-                FindExSearchNameMatch,
-                std::ptr::null(),
-                0,
-            )
-        };
-        if h == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-            out.push_str(&format!("  raw FindFirst err={}\n", unsafe {
-                GetLastError()
-            }));
-            return;
-        }
-        let mut names = vec![String::from_utf16_lossy(&wfd.cFileName)
-            .trim_end_matches('\0')
-            .to_owned()];
-        loop {
-            if unsafe { FindNextFileW(h, &mut wfd) } == 0 {
-                out.push_str(&format!("  raw end err={}\n", unsafe { GetLastError() }));
-                break;
-            }
-            names.push(
-                String::from_utf16_lossy(&wfd.cFileName)
-                    .trim_end_matches('\0')
-                    .to_owned(),
-            );
-        }
-        unsafe { FindClose(h) };
-        out.push_str(&format!("  raw names {names:?}\n"));
-    }
-
-    #[test]
-    fn probe() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(tmp.path()).unwrap().join("SyncRoot");
-        fs::create_dir(&root).unwrap();
-        let mut out = String::new();
-        let name = wide(Path::new("VfsProbe"));
-        let ver = wide(Path::new("1.0"));
-        let id = b"root";
-        let reg = CF_SYNC_REGISTRATION {
-            StructSize: size_of::<CF_SYNC_REGISTRATION>() as u32,
-            ProviderName: name.as_ptr(),
-            ProviderVersion: ver.as_ptr(),
-            SyncRootIdentity: id.as_ptr().cast(),
-            SyncRootIdentityLength: 4,
-            ProviderId: windows_sys::core::GUID::from_u128(
-                0x5f1a_77c2_0b3e_4d6a_9e21_7c55_aa10_0170,
-            ),
-            ..Default::default()
-        };
-        let pol = CF_SYNC_POLICIES {
-            StructSize: size_of::<CF_SYNC_POLICIES>() as u32,
-            Hydration: CF_HYDRATION_POLICY {
-                Primary: CF_HYDRATION_POLICY_FULL,
-                Modifier: 0,
-            },
-            Population: CF_POPULATION_POLICY {
-                Primary: CF_POPULATION_POLICY_FULL,
-                Modifier: 0,
-            },
-            InSync: CF_INSYNC_POLICY_NONE,
-            HardLink: CF_HARDLINK_POLICY_NONE,
-            PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
-        };
-        let r = wide(&root);
-        // SAFETY: pointers outlive the call.
-        let hr = unsafe { CfRegisterSyncRoot(r.as_ptr(), &reg, &pol, CF_REGISTER_FLAG_NONE) };
-        out.push_str(&format!("register hr={hr:#x}\n"));
-        let populated = CF_PLACEHOLDER_CREATE_FLAG_DISABLE_ON_DEMAND_POPULATION
-            | CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
-        place(
-            &root,
-            "nube.txt",
-            false,
-            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-            &mut out,
-        );
-        place(&root, "Poblada", true, populated, &mut out);
-        place(
-            &root,
-            "SinPoblar",
-            true,
-            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-            &mut out,
-        );
-        place(
-            &root.join("Poblada"),
-            "dentro.txt",
-            false,
-            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-            &mut out,
-        );
-        place(
-            &root.join("SinPoblar"),
-            "oculto.txt",
-            false,
-            CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC,
-            &mut out,
-        );
-        let w = fs::write(root.join("local.txt"), b"x");
-        out.push_str(&format!("write local: {w:?}\n"));
-        dump(&root, "root", &mut out);
-        dump(&root.join("Poblada"), "Poblada", &mut out);
-        let t = std::time::Instant::now();
-        dump(&root.join("SinPoblar"), "SinPoblar", &mut out);
-        out.push_str(&format!("SinPoblar took {:?}\n", t.elapsed()));
-        let attrs = fs::symlink_metadata(root.join("nube.txt")).map(|m| m.file_attributes());
-        out.push_str(&format!("nube after: {attrs:x?}\n"));
-        // SAFETY: NUL-terminated path.
-        let hr = unsafe { CfUnregisterSyncRoot(r.as_ptr()) };
-        out.push_str(&format!("unregister hr={hr:#x}\n"));
-        panic!("PROBE\n{out}");
-    }
-
-    unsafe extern "system" fn fail_fetch(
-        info: *const CF_CALLBACK_INFO,
-        _params: *const CF_CALLBACK_PARAMETERS,
-    ) {
-        // SAFETY: the filter passes a valid info for the callback's duration.
-        let info = unsafe { &*info };
-        let op = CF_OPERATION_INFO {
-            StructSize: size_of::<CF_OPERATION_INFO>() as u32,
-            Type: CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS,
-            ConnectionKey: info.ConnectionKey,
-            TransferKey: info.TransferKey,
-            CorrelationVector: std::ptr::null(),
-            SyncStatus: std::ptr::null(),
-            RequestKey: info.RequestKey,
-        };
-        let mut p: CF_OPERATION_PARAMETERS = unsafe { std::mem::zeroed() };
-        p.ParamSize = size_of::<CF_OPERATION_PARAMETERS>() as u32;
-        p.Anonymous.TransferPlaceholders = CF_OPERATION_PARAMETERS_0_4 {
-            Flags: CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE,
-            CompletionStatus: 0xC000_0001u32 as i32,
-            PlaceholderTotalCount: 0,
-            PlaceholderArray: std::ptr::null_mut(),
-            PlaceholderCount: 0,
-            EntriesProcessed: 0,
-        };
-        // SAFETY: valid op and params.
-        unsafe { CfExecute(&op, &mut p) };
-    }
-
-    #[test]
-    fn probe_connected_fail() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(tmp.path()).unwrap().join("SyncRoot2");
-        fs::create_dir(&root).unwrap();
-        let mut out = String::new();
-        let name = wide(Path::new("VfsProbe2"));
-        let ver = wide(Path::new("1.0"));
-        let id = b"root";
-        let reg = CF_SYNC_REGISTRATION {
-            StructSize: size_of::<CF_SYNC_REGISTRATION>() as u32,
-            ProviderName: name.as_ptr(),
-            ProviderVersion: ver.as_ptr(),
-            SyncRootIdentity: id.as_ptr().cast(),
-            SyncRootIdentityLength: 4,
-            ProviderId: windows_sys::core::GUID::from_u128(
-                0x5f1a_77c2_0b3e_4d6a_9e21_7c55_aa10_0171,
-            ),
-            ..Default::default()
-        };
-        let pol = CF_SYNC_POLICIES {
-            StructSize: size_of::<CF_SYNC_POLICIES>() as u32,
-            Hydration: CF_HYDRATION_POLICY {
-                Primary: CF_HYDRATION_POLICY_FULL,
-                Modifier: 0,
-            },
-            Population: CF_POPULATION_POLICY {
-                Primary: CF_POPULATION_POLICY_FULL,
-                Modifier: 0,
-            },
-            InSync: CF_INSYNC_POLICY_NONE,
-            HardLink: CF_HARDLINK_POLICY_NONE,
-            PlaceholderManagement: CF_PLACEHOLDER_MANAGEMENT_POLICY_DEFAULT,
-        };
-        let r = wide(&root);
-        let hr = unsafe { CfRegisterSyncRoot(r.as_ptr(), &reg, &pol, CF_REGISTER_FLAG_NONE) };
-        out.push_str(&format!("register hr={hr:#x}\n"));
-        let insync = CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
-        place(&root, "Falla", true, insync, &mut out);
-        place(&root, "FallaConHijo", true, insync, &mut out);
-        place(&root.join("FallaConHijo"), "a.txt", false, insync, &mut out);
-        place(&root.join("FallaConHijo"), "b.txt", false, insync, &mut out);
-        let table = [
-            CF_CALLBACK_REGISTRATION {
-                Type: CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS,
-                Callback: Some(fail_fetch),
-            },
-            CF_CALLBACK_REGISTRATION {
-                Type: CF_CALLBACK_TYPE_NONE,
-                Callback: None,
-            },
-        ];
-        let mut key: CF_CONNECTION_KEY = 0;
-        let hr = unsafe {
-            CfConnectSyncRoot(
-                r.as_ptr(),
-                table.as_ptr(),
-                std::ptr::null(),
-                CF_CONNECT_FLAG_NONE,
-                &mut key,
-            )
-        };
-        out.push_str(&format!("connect hr={hr:#x}\n"));
-        dump(&root, "root", &mut out);
-        dump(&root.join("Falla"), "Falla", &mut out);
-        raw_first(&root.join("Falla"), &mut out);
-        raw_first(&root.join("FallaConHijo"), &mut out);
-        raw_first(&root, &mut out);
-        let empty = root.join("FallaConHijo");
-        let _ = empty;
-        dump(&root.join("FallaConHijo"), "FallaConHijo", &mut out);
-        unsafe { CfDisconnectSyncRoot(key) };
-        let hr = unsafe { CfUnregisterSyncRoot(r.as_ptr()) };
-        out.push_str(&format!("unregister hr={hr:#x}\n"));
-        panic!("PROBE2\n{out}");
     }
 }
