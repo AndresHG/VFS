@@ -406,6 +406,10 @@ root directory: its name) and at least one term is in its name (D1). For each ro
 already contained in the root's own folded path are ignored, unless none would remain (S1):
 in a root called `Fotos`, the query "fotos boda" finds what contains "boda" instead of
 nothing (directory `path_key`s are relative to the root, so they never contain its name).
+With `scope: names` (VFS-38 R3) only names count: a file matches when every term is in its
+`name_key`, a folder when every term is in its own name, a bookmark when every term is in
+its title; S1 does not apply, the path tier does not run, and short-term scans, the folder
+filter and typos check names only.
 
 ### Filters
 
@@ -468,8 +472,8 @@ or filter-only query, the response sets `approximateOrder` and the screen says s
 
 When a file search ends with no hits (and the deadline did not cut it), the screen asks
 `Vfs::suggest` (command `suggest`) for one search that finds something. `suggest.rs` tries,
-in order: the same text without the type, date, size and folder filters (only with text and
-a filter); for each term of 4–5 letters, its adjacent transpositions and, for 5 letters, its
+in order: the same text without the type, date, size and folder filters and with
+`scope: all` (only with text and a filter or `scope: names`, VFS-38 R13); for each term of 4–5 letters, its adjacent transpositions and, for 5 letters, its
 deletions (shorter terms would need 2-letter variants below the trigram index; from 6
 letters the search already tolerates a typo); then, for two or more terms, the query without
 one term, last first. The first try that finds anything wins. Each try is
@@ -520,7 +524,8 @@ alignment distance 1); their hits are `matched = "fuzzy"`.
 Before the typo stages, a query with no hit at all probes `file_paths_fts` and `dirs_fts`
 once for a row holding, for every term, the term or one of its one-edit alternatives
 (`may_match`). Every hit of every tier holds those, so when the probe finds nothing the
-typo stages are skipped (S8). On the 2 M-file synthetic index this probe takes a few
+typo stages are skipped (S8). With `scope: names` the probe reads `files_fts` and the
+`name_key` column of `dirs_fts` instead (VFS-38 R3). On the 2 M-file synthetic index this probe takes a few
 milliseconds; the `no_hit` class's warm p95 went from 146 ms (one run before the change)
 to 29–59 ms (three runs after), measured.
 
@@ -611,8 +616,9 @@ and once when it finishes, from `src-tauri/src/updates.rs`.
 Key shapes:
 
 - `SearchQuery { text, filters: { kinds, modifiedFrom, modifiedTo, sizeMin, sizeMax, folder },
-  limit, offset, sort }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes; `sort`
-  is a `SortOrder` (VFS-12).
+  limit, offset, sort, scope }`; dates are unix seconds (`modifiedTo` exclusive), sizes bytes;
+  `sort` is a `SortOrder` (VFS-12); `scope` is `all | names`, optional, default `all`
+  (VFS-38).
 - `Suggestion { kind: dropFilters | spelling | dropTerm, text, clearFilters, term,
   replacement, count, capped }` (VFS-13): the box text to run and the grouped, capped count.
 - `SearchHit { id, name, dir, kind, size, modified, matched, isDir, copies?, link?,
