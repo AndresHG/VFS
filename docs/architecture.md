@@ -196,8 +196,16 @@ followed, and a root that has become a link is unavailable. It skips:
   `Scripts`, `include`). `Exclusions::for_root` drops the path rules that are the root or
   contain it, so a folder added as a root is indexed; per listing it costs one map lookup
   and a name scan per subfolder. The watcher filter and replays drop changes inside them.
-  Each root records the list version and setting its last full walk started under (`meta`
-  `exclusions/<id>`); a mismatch at start owes a full walk;
+  Each root records the list version, the setting and the file filter's generation its last
+  full walk started under (`meta` `exclusions/<id>`, `VERSION:include:gen`; a stamp in the
+  older `VERSION:include` form reads as generation 0); a mismatch at start owes a full walk;
+- files whose name matches the user's file filter (`indexer/patterns.rs`, VFS-34; `meta`
+  `user_exclusions`, defaults `*.tmp`, `*.temp`, `*.swp`, `*.crdownload`, `*.part`): `*` and
+  `?` globs on the name only, after NFC and case folding, with no file-system call, whether
+  or not the folder exclusions apply. Adding a pattern deletes the indexed matches in
+  batches of 10,000 by `files.id`, resumable through `meta` `user_exclusions_purge` and
+  `user_exclusions_cursor`, with no walk; removing one or restoring the list bumps
+  `user_exclusions_gen`, so every root owes a full walk;
 - the app's own data directory;
 - entries that vanish, or fail with an error other than permission denied, while being
   listed. An entry whose metadata is denied fails the whole listing, so the folder is

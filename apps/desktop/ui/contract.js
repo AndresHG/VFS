@@ -86,7 +86,6 @@ export const ErrorCode = Object.freeze({
   IO: 'io',
 });
 
-/** The UI's own rejection code, when no Tauri runtime answers; never sent by Rust. */
 /** Why a file-filter pattern is refused: the message of an `invalid_pattern` error (VFS-34 R2). */
 export const PatternReason = Object.freeze({
   EMPTY: 'empty',
@@ -95,4 +94,5 @@ export const PatternReason = Object.freeze({
   DUPLICATE: 'duplicate',
 });
 
+/** The UI's own rejection code, when no Tauri runtime answers; never sent by Rust. */
 export const UiErrorCode = Object.freeze({ BACKEND_MISSING: 'backend_missing' });
