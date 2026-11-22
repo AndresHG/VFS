@@ -1851,7 +1851,10 @@ pub(crate) fn rename_dir(conn: &mut Connection, from: &Path, to: &Path) -> Resul
         return Ok(false);
     }
     let (parent_rel, name) = rel_to.rsplit_once('/').unwrap_or(("", rel_to.as_str()));
-    let tx = conn.transaction()?;
+    // Immediate: this transaction reads before it writes, and SQLite never waits to upgrade
+    // a read to a write, so another writer (the content indexer, VFS-2 D18) would make it
+    // fail with "database is locked".
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let find = |rel: &str| -> Result<Option<i64>> {
         Ok(tx
             .prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?
@@ -1927,7 +1930,8 @@ fn root_paths(conn: &Connection) -> Result<Vec<(i64, PathBuf)>> {
 /// yet marks its nearest indexed ancestor. Paths outside every root are ignored.
 pub(crate) fn mark_dirty(conn: &mut Connection, paths: &[PathBuf]) -> Result<()> {
     let roots = root_paths(conn)?;
-    let tx = conn.transaction()?;
+    // Immediate for the same reason as the rename handler above (VFS-2 D18).
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     mark_paths(&tx, &roots, paths, false)?;
     tx.commit()?;
     Ok(())

@@ -1,6 +1,6 @@
 # VFS-33 — A huge root settles: protected folders once, quiet background updates
 
-- **Status**: part 1 implemented (PR #162); part 2 approved (owner decision, then an independent critic pass)
+- **Status**: implemented (PR #162, #164)
 - **Size**: M (indexer only, no schema change; part 2 adds a platform-specific list)
 - **Links**: issues 159, 156; VFS-1 I11 and U6; VFS-5 R1–R3 (pass modes); VFS-10 R1 (reasons)
 

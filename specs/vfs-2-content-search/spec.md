@@ -3,7 +3,8 @@
 - **Status**: approved. The prototype in PR 98 was built against R1–R11. The owner answered
   the open questions on 2026-11-21 (D9–D15). R12–R20 and the phased PRs were added on
   2026-11-22 to close the engine before the app step. Two independent critic rounds
-  reviewed it, and a final verification pass checked the fixes.
+  reviewed it, and a final verification pass checked the fixes. PR 2a is implemented in
+  PR #98; PR 2b is next.
 - **Size**: L. The engine opens user files for the first time, adds an on-disk store next to
   the index, and adds a child process with platform-specific limits. It spans several
   components.
@@ -14,7 +15,7 @@
     [VFS-28](../vfs-28-ask-archive/spec.md) (ask the archive),
     [VFS-29](../vfs-29-hybrid-search/spec.md) (hybrid search).
   - Design: `docs/content-search-design.md`. Research: `docs/research/content-vector-rag.md`.
-  - Measurements: `docs/content-search-measurements.md`, on PR 98's branch.
+  - Measurements: `docs/content-search-measurements.md`.
   - Milestone "Fase 3 · Contenido de documentos": issues #23 (isolated extraction), #24
     (Spanish full-text search), #25 (results with a highlighted fragment).
 
@@ -352,8 +353,9 @@ tuned on the real PC.
 | D13 | Q5: OCR | A later, optional step: off by default, per folder, after normal extraction. Scanned PDFs are marked "no text (scanned)". | owner | 2026-11-21 |
 | D14 | Q6: chunk size | Keep chunks of ~2,000 characters (≈ 450–550 Spanish tokens), tiling, never crossing a page, without stored overlap; neighbours are joined at retrieval time. Fixed now, before any vector exists. | agent (owner delegated) | 2026-11-21 |
 | D15 | Embeddings and AI (for the later phases) | BM25 by default and offline. Hybrid search is opt-in, using an embedding API key (OpenAI or Voyage, separate from the answer key) or a local model downloaded from Settings. Without a connection, search falls back to BM25. Per question, only the passages used leave the PC, visibly. | owner | 2026-11-21 |
-| D16 | Extractor toolchain, size and packaging | The workspace `rust-version` rises to 1.99 (Xberg's minimum). `rust-toolchain.toml` already pins 1.100.0, and Xberg stays pinned `=1.4.2` with `--locked`. `vfs-extract` is built with `opt-level="s"`, `lto="fat"` and `codegen-units=1`, keeping unwinding panics: 22.2 MB raw, 6.6 MB xz-compressed, against 34.2 / 8.9 MB with the current profile **[measured, macOS arm64, 2026-11-22]**. It ships as a Tauri sidecar (VFS-27 D1). | agent | 2026-11-22 |
+| D16 | Extractor toolchain, size and packaging | The workspace `rust-version` rises to 1.99 (Xberg's minimum). `rust-toolchain.toml` already pins 1.100.0, and Xberg stays pinned `=1.4.2` with `--locked`. `vfs-extract` is built with `opt-level="s"`, `lto="fat"` and `codegen-units=1`, keeping unwinding panics: 22.3 MB raw, 6.6 MB xz-compressed, against 34.2 / 8.9 MB with the current profile **[measured, macOS arm64, 2026-11-22]**. It ships as a Tauri sidecar (VFS-27 D1). | agent | 2026-11-22 |
 | D17 | Content golden set | About 40 Spanish queries over committed public documents: BOE PDFs (free reuse with attribution), Spanish Wikipedia rendered to PDF/DOCX (CC BY-SA), and the synthetic personal documents of `bench/content-corpus/make_corpus.py`. The format and the per-case contract follow VFS-11. The corpus is shared with VFS-28's RAG golden set (D9 there). | agent | 2026-11-22 |
+| D18 | `vfs-core` transactions that read before they write | Start them `Immediate`, as `vfs-core`'s other writers do. SQLite never waits to upgrade a read to a write, so with the content indexer as a second writer, `mark_dirty` and the folder-rename handler failed with "database is locked" (found by AC-21's test). Two lines in `vfs-core`'s indexer, the only exception to the non-goal on that code. | agent | 2026-11-22 |
 
 ## Owner answers (former open questions Q1–Q6)
 
