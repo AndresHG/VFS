@@ -1089,3 +1089,41 @@ fn symlinks_are_link_rows_never_entered() {
     assert!(fx.find_files("ajeno").is_empty());
     assert!(find_dirs_by_name(&fx.reader(), "recuerdos").is_empty());
 }
+
+/// Keeps every progress snapshot the indexer sends.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<IndexProgress>>);
+
+impl ProgressSink for Recorder {
+    fn on_progress(&self, p: &IndexProgress) {
+        self.0.lock().unwrap().push(p.clone());
+    }
+}
+
+/// VFS-31 AC-1 (issue 154): removing a root while the indexer is idle sends a progress
+/// snapshot without it once its rows are deleted, so the UI re-reads the folder list.
+/// Before, the indexer was idle before and after, sent nothing, and the folder read
+/// "Quitando…" until the app restarted.
+#[test]
+fn removing_a_root_sends_progress_without_it() {
+    let fx = Fixture::new();
+    fx.file("A/uno.txt", 1);
+    fx.file("B/dos.txt", 1);
+    let rec = Arc::new(Recorder::default());
+    fx.vfs.start_indexer(rec.clone()).unwrap();
+    wait_until("first scan", || {
+        fx.status() == RootStatus::Ready && fx.vfs.progress().state == IndexerState::Idle
+    });
+    // Let late watcher events about the tree's creation run their course first.
+    std::thread::sleep(Duration::from_secs(3));
+    let seen = rec.0.lock().unwrap().len();
+    fx.vfs.remove_root(fx.root_id).unwrap();
+    wait_until("a progress snapshot without the removed root", || {
+        rec.0.lock().unwrap()[seen..]
+            .iter()
+            .any(|p| p.state == IndexerState::Idle && p.roots.is_empty())
+    });
+    assert!(fx.vfs.list_roots().unwrap().is_empty());
+    assert!(fx.vfs.progress().roots.is_empty());
+    fx.vfs.shutdown();
+}

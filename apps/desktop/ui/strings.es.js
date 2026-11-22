@@ -190,6 +190,7 @@ export const es = {
   rootNeverChecked: 'Aún no se ha terminado de revisar',
   rescanStarted: 'Se buscarán cambios en segundo plano. Puede seguir buscando mientras tanto.',
   rootAdded: (p) => `Se añadió «${p}». Se está revisando; puede buscar mientras tanto.`,
+  rootTakesIn: (p, inner) => { const l = [].concat(inner); return `Se añadió «${p}». Incluye ${l.map((x) => `«${x}»`).join(', ')}, que ya ${l.length > 1 ? 'estaban' : 'estaba'} en la lista; sus archivos siguen apareciendo en las búsquedas mientras se revisa.`; },
   remoteWarning: 'Esta carpeta está en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
   bookmarksTitle: 'Marcadores de Firefox',
   bookmarksToggle: 'Incluir marcadores de Firefox',
@@ -246,7 +247,6 @@ export const es = {
 
   revealedParent: 'Se abrió la carpeta, pero no se pudo seleccionar el archivo.',
   overlapInside: (p) => `Esa carpeta ya está incluida, porque está dentro de «${p}».`,
-  overlapParent: (p) => `Esa carpeta contiene «${p}», que ya está en la lista. Quite primero «${p}» y vuelva a añadir la carpeta más grande.`,
   overlapGeneric: 'Esa carpeta ya está en la lista o está dentro de otra de la lista.',
 
   // ApiError.code -> text, per action. Unknown codes fall back to `generic`.

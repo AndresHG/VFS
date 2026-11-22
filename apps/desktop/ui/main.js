@@ -10,6 +10,7 @@ import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions } from './status.js';
+import { takenInBy, newestOnly } from './folders.js';
 import {
   DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
   Source, TruncatedBy, UiErrorCode,
@@ -1177,12 +1178,11 @@ function main(L) {
   $('rescan-now').addEventListener('click', () => rescanRoot(null));
   $('add-folder').addEventListener('click', () => addFolder());
 
-  /** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows. */
+  /** Explains an overlap precisely (VFS-1 U4) from the folders the UI already knows: the
+   * core refuses only the same folder or one inside a listed folder (VFS-31 R3). */
   function overlapText(path) {
     const inside = state.roots.find((r) => F.isUnder(path, r.path));
     if (inside) return S.overlapInside(inside.path);
-    const contains = state.roots.find((r) => F.isUnder(r.path, path));
-    if (contains) return S.overlapParent(contains.path);
     return S.overlapGeneric;
   }
 
@@ -1196,10 +1196,11 @@ function main(L) {
       path = await api.pickFolder();
     } catch (err) { showError(errorText(err)); return; }
     if (!path) return;
+    const takenIn = takenInBy(state.roots, path);
     try {
       const root = await api.addRoot(path);
       await refreshRoots();
-      const msg = S.rootAdded(path);
+      const msg = takenIn.length ? S.rootTakesIn(path, takenIn) : S.rootAdded(path);
       const remote = REMOTE_DRIVES.has(root.drive);
       if (foldersDialog.open) {
         folderMessage(remote ? `${msg} ${S.remoteWarning}` : msg, remote ? Notice.WARN : Notice.INFO);
@@ -1319,14 +1320,18 @@ function main(L) {
 
   /* ---------------------------------------------------------------- live data */
 
+  const listRoots = newestOnly(() => api.listRoots());
   async function refreshRoots() {
+    let reply;
     try {
-      state.roots = await api.listRoots();
-      state.rootsLoaded = true;
+      reply = await listRoots();
     } catch (err) {
       if (!api.missing) showError(errorText(err));
       return;
     }
+    if (reply.stale) return;
+    state.roots = reply.value;
+    state.rootsLoaded = true;
     renderFolderSelect();
     renderClearButton();
     renderUnavailableBanner();

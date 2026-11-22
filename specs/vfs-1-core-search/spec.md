@@ -241,7 +241,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 - U2. During the first scan the UI says the user can search meanwhile and that closing the
   program resumes the scan later.
 - U3. Results from unavailable roots are marked, and the banner names the missing folder.
-- U4. Adding a folder that overlaps a root names the relation (same, inside, contains);
+- U4. Adding a folder that overlaps a root names the relation (same, inside); a folder that
+  contains roots takes them in with a notice (VFS-31);
   a folder on a network or removable drive gets a warning.
 - U5. The development fake backend lives outside the bundled frontend and cannot load in
   the app.

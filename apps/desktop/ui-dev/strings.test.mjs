@@ -132,3 +132,17 @@ test('the Ajustes panel offers every language and the system one', () => {
   assert.equal(choiceFor('es'), LanguageChoice.ES);
   for (const saved of [null, '', 'system', 'fr', 'toString']) assert.equal(choiceFor(saved), LanguageChoice.SYSTEM);
 });
+
+/** VFS-31 AC-4 (issue 154): adding a folder that holds listed folders names them in one
+ *  notice, singular or plural, in both languages; no text asks to remove a folder first. */
+test('a folder that takes in listed folders says so', () => {
+  for (const lang of [Lang.ES, Lang.EN]) {
+    const S = CATALOGS[lang];
+    const one = S.rootTakesIn('/d', ['/d/fotos']);
+    const two = S.rootTakesIn('/d', ['/d/fotos', '/d/banco']);
+    assert.ok(one.includes('/d/fotos') && two.includes('/d/banco'), lang);
+    assert.notEqual(one.replace('/d/fotos', ''), two.replace('/d/fotos, /d/banco', ''), `${lang} plural`);
+    assert.equal(S.overlapParent, undefined, lang);
+    for (const [key, v] of leaves(S)) assert.ok(!/Quite primero|Remove .* first/.test(String(v)), `${lang}.${key}`);
+  }
+});

@@ -44,10 +44,9 @@ impl Error {
 pub enum OverlapRelation {
     /// The same folder, possibly spelled differently (case, accents, NFC/NFD, separator).
     Same,
-    /// Inside the existing root.
+    /// Inside the existing root. A folder containing a root is not refused: it takes the
+    /// root in (VFS-31 R2).
     Inside,
-    /// Contains the existing root.
-    Contains,
 }
 
 impl std::fmt::Display for OverlapRelation {
@@ -55,7 +54,6 @@ impl std::fmt::Display for OverlapRelation {
         f.write_str(match self {
             OverlapRelation::Same => "same",
             OverlapRelation::Inside => "inside",
-            OverlapRelation::Contains => "contains",
         })
     }
 }

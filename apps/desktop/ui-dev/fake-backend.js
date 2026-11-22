@@ -358,8 +358,10 @@ export function createFakeBackend(params) {
     async addRoot(path) {
       await sleep(120);
       const norm = (p) => fold(p).replace(/\/+$/, '');
-      const clash = roots.find((r) => norm(path) === norm(r.path) || norm(path).startsWith(norm(r.path) + '/') || norm(r.path).startsWith(norm(path) + '/'));
+      const clash = roots.find((r) => r.status !== RootStatus.REMOVING && (norm(path) === norm(r.path) || norm(path).startsWith(norm(r.path) + '/')));
       if (clash) throw { code: ErrorCode.OVERLAPPING_ROOT, message: `overlaps an indexed folder: ${clash.path}` };
+      // Listed folders inside the new one are taken in (VFS-31 R2).
+      roots = roots.filter((r) => r.status === RootStatus.REMOVING || !norm(r.path).startsWith(norm(path) + '/'));
       const drive = path.startsWith('\\\\') ? DriveKind.NETWORK : DriveKind.LOCAL;
       const r = { id: 100 + roots.length, path, status: RootStatus.PENDING, files: 0, dirs: 0, lastFullScan: null, drive };
       roots.push(r); done.set(r.id, 0); pending.set(r.id, 40);

@@ -63,9 +63,9 @@ fn ac4_rejects_missing_path_and_file() {
     assert!(vfs.list_roots().unwrap().is_empty());
 }
 
-/// VFS-1 AC-4, U4: the same folder, a folder inside a root and a folder containing a root
-/// are each rejected with a relation the UI can word; a sibling sharing a name prefix is
-/// accepted.
+/// VFS-1 AC-4, U4: the same folder and a folder inside a root are each rejected with a
+/// relation the UI can word; a sibling sharing a name prefix is accepted. A folder
+/// containing a root takes it in (VFS-31 AC-2, `root_swap.rs`).
 #[test]
 fn ac4_u4_overlapping_roots() {
     let tmp = tempfile::tempdir().unwrap();
@@ -88,15 +88,6 @@ fn ac4_u4_overlapping_roots() {
     assert_eq!(overlap(same), (OverlapRelation::Same, root.path.clone()));
     let inside = overlap(vfs.add_root(&child).unwrap_err());
     assert_eq!(inside, (OverlapRelation::Inside, root.path.clone()));
-    let contains = vfs.add_root(&parent).unwrap_err();
-    assert_eq!(
-        contains.to_string(),
-        format!("overlaps an indexed folder: contains {}", root.path)
-    );
-    assert_eq!(
-        overlap(contains),
-        (OverlapRelation::Contains, root.path.clone())
-    );
 
     let ok = vfs.add_root(&sibling).unwrap();
     assert_ne!(ok.id, root.id);
