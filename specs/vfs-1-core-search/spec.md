@@ -228,7 +228,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
   (overflow, a watch that failed), and those owed by a root that was being walked, wait
   until that root's last full scan is 1 hour old; start-up and manual requests do not.
 - I11. A directory that fails to list keeps its rows, stays pending and counts as an error;
-  it is retried after 1 min, doubling, and after 6 failures waits for the next full walk.
+  it is retried after 1 min, doubling, and after 6 failures waits for the next full walk;
+  a "no permission" failure is retried once (VFS-33 R1).
   Its reason is recorded and listed in the folders panel (VFS-10).
 - I12. A root that cannot be watched is retried every minute and as soon as it is
   reachable again; once watched it owes a re-walk (I10). Marking a folder dirty from the
@@ -247,7 +248,8 @@ Ids cited by code and tests next to the AC ids. D1–D4 are decisions 13–16 ab
 - U5. The development fake backend lives outside the bundled frontend and cannot load in
   the app.
 - U6. The status bar says "Revisando carpetas…" during the first scan, "Comprobando
-  cambios…" during any later scan (the catch-up at start included) and, when idle,
+  cambios…" during any later full walk or batch of more than 64 folders (the catch-up at
+  start included; smaller background updates stay silent, VFS-33 R4) and, when idle,
   "Última revisión: hoy 9:14" with the oldest completed check of the reachable folders;
   the manual button reads "Buscar cambios ahora".
 - X1. One desktop test drives add_root, search and get_progress over IPC on Tauri's mock

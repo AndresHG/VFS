@@ -1,6 +1,6 @@
 # VFS-10 — Folders that could not be read: a visible list
 
-- **Status**: implemented (PR #138); approved after an independent architect review
+- **Status**: implemented (PR #138); approved after an independent architect review; R1 and AC-1 amended by VFS-33 R1 (a "no permission" folder is retried once, then settled)
 - **Size**: L (a schema migration: one column and one partial index on `dirs`)
 - **Links**: issue 71; prior-art proposal P7 (`docs/research/prior-art-proposals.md`); VFS-1
   I11 (retries); VFS-25 (cloud-only files, issue 49) and content extraction (Fase 3) will

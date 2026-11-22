@@ -25,7 +25,8 @@ step of the measurement plan that will replace the guess.
 
 - R1. WHILE a root is walked in full (first index or re-walk), or more than
   `incremental_max_dirs` directories are pending, THE indexer thread SHALL run at normal I/O
-  priority, lowest CPU priority and low memory priority (the *walk profile*).
+  priority, lowest CPU priority and low memory priority (the *walk profile*). Pending
+  directories waiting for a retry are not counted (VFS-33 R3), here and in R2.
 - R2. WHILE no root is walked in full and at most `incremental_max_dirs` directories are
   pending, THE indexer SHALL list each directory in background mode (very-low I/O) and SHALL
   leave background mode before touching the index.

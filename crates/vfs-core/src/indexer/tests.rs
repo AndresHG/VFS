@@ -335,55 +335,60 @@ impl Drop for Locked {
     }
 }
 
-/// VFS-1 AC-7, AC-8, I11: a directory that fails to list keeps its indexed contents, stays
-/// pending, counts as an error and is retried only when due, each delay longer than the
-/// last; after `RETRY_ATTEMPTS` failures it is left for the next full walk. Once it can be
-/// read again, a due retry lists it.
-#[cfg(unix)]
+/// VFS-1 AC-7, AC-8, I11; VFS-33 AC-3: a directory that fails to list with an error other
+/// than "no permission" (here a file now stands where it was) keeps its indexed contents,
+/// stays pending, counts as an error and is retried only when due, each delay longer than
+/// the last; after `RETRY_ATTEMPTS` failures it is left for the next full walk. Once it can
+/// be read again, a due retry lists it.
 #[test]
 fn failed_listing_is_retried_with_growing_delay() {
-    let mut fx = fixture(&["Abierta", "Cerrada"]);
+    let mut fx = fixture(&["Abierta", "Rota"]);
     fx.scan();
-    let files = fx.files();
-    let locked = Locked::new(fx.root().join("Cerrada"));
-    if fs::read_dir(&locked.0).is_ok() {
-        return; // running as root: permissions do not apply
-    }
-    let (cerrada, _) = fx.dir("Cerrada").unwrap();
+    let files: Vec<(i64, i64)> = fx.files();
+    let rota_path = fx.root().join("Rota");
+    let (rota, _) = fx.dir("Rota").unwrap();
+    // The folder's listing fails; the walk keeps its rows because the parent is not listed.
+    let break_it = |fx: &mut Fx| {
+        fs::remove_dir_all(&rota_path).unwrap();
+        fs::write(&rota_path, b"x").unwrap();
+        let tx = fx.conn.transaction().unwrap();
+        ingest::set_dir_state(&tx, rota, ingest::ScanState::PendingShallow).unwrap();
+        tx.commit().unwrap();
+    };
+    break_it(&mut fx);
     let mut retries = Retries::new();
-
-    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
     let mut last_delay = Duration::ZERO;
     for attempt in 1..=RETRY_ATTEMPTS {
         let before = Instant::now();
         let summary = fx.run_once(&mut retries);
         assert_eq!(summary.errors, 1, "attempt {attempt}");
         assert_eq!(fx.files(), files, "stale contents are kept");
-        assert_eq!(fx.status(), RootStatus::Ready, "the walk still ends");
         if attempt == RETRY_ATTEMPTS {
-            assert_eq!(fx.dir("Cerrada").unwrap().1, CLEAN, "gave up");
+            assert_eq!(fx.dir("Rota").unwrap().1, CLEAN, "gave up");
             assert!(retries.is_empty());
             break;
         }
-        assert_ne!(fx.dir("Cerrada").unwrap().1, CLEAN, "left pending");
-        let retry = &retries[&cerrada];
+        assert_ne!(fx.dir("Rota").unwrap().1, CLEAN, "left pending");
+        let retry = &retries[&rota];
         assert_eq!(retry.attempts, attempt);
         let delay = retry.next_at.duration_since(before);
         assert!(delay > last_delay, "delay grows");
         last_delay = delay;
         assert_eq!(fx.run_once(&mut retries).errors, 0, "not due yet");
-        retries.get_mut(&cerrada).unwrap().next_at = Instant::now();
+        retries.get_mut(&rota).unwrap().next_at = Instant::now();
     }
 
-    // Readable again: the next due retry lists it.
-    let hint = fx.root().join("Cerrada/archivo.txt");
-    mark_dirty(&mut fx.conn, &[hint]).unwrap();
+    // Queued again and failing; readable again, the next due retry lists it.
+    let tx = fx.conn.transaction().unwrap();
+    ingest::set_dir_state(&tx, rota, ingest::ScanState::PendingShallow).unwrap();
+    tx.commit().unwrap();
     assert_eq!(fx.run_once(&mut retries).errors, 1);
-    drop(locked);
-    retries.get_mut(&cerrada).unwrap().next_at = Instant::now();
+    fs::remove_file(&rota_path).unwrap();
+    fs::create_dir(&rota_path).unwrap();
+    retries.get_mut(&rota).unwrap().next_at = Instant::now();
     let summary = fx.run_once(&mut retries);
     assert_eq!((summary.errors, summary.dirs_listed), (0, 1));
-    assert_eq!(fx.dir("Cerrada").unwrap().1, CLEAN);
+    assert_eq!(fx.dir("Rota").unwrap().1, CLEAN);
     assert!(retries.is_empty());
 }
 
@@ -1262,9 +1267,10 @@ fn unreadable_count(conn: &Connection) -> u64 {
     crate::roots::list_roots(conn).unwrap()[0].unreadable
 }
 
-/// VFS-10 AC-1, AC-2: a folder the user cannot read is recorded "no permission" at its first
-/// failure and counts at once, while it is still retried; a re-walk that fails again keeps
-/// it; once readable and listed, it is forgotten; a deleted folder takes its reason along.
+/// VFS-10 AC-1, AC-2; VFS-33 AC-1: a folder the user cannot read is recorded "no permission"
+/// at its first failure and counts at once; it is retried once, then settled with no retry
+/// left; a re-walk that fails again keeps it; once readable, the next full walk lists it
+/// and forgets it; a deleted folder takes its reason along.
 #[cfg(unix)]
 #[test]
 fn unreadable_folder_is_recorded_kept_and_forgotten() {
@@ -1283,8 +1289,19 @@ fn unreadable_folder_is_recorded_kept_and_forgotten() {
         Some(UnreadableReason::NoPermission)
     );
     assert_eq!(unreadable_count(&fx.conn), 1);
-    assert_ne!(fx.dir("Cerrada").unwrap().1, CLEAN, "still retried");
+    assert_ne!(fx.dir("Cerrada").unwrap().1, CLEAN, "retried once");
     assert_eq!(retries[&cerrada].attempts, 1);
+    assert_eq!(fx.run_once(&mut retries).errors, 0, "not due yet");
+    retries.get_mut(&cerrada).unwrap().next_at = Instant::now();
+    assert_eq!(fx.run_once(&mut retries).errors, 1);
+    assert_eq!(fx.dir("Cerrada").unwrap().1, CLEAN, "settled");
+    assert!(retries.is_empty(), "no retry left");
+    let again = fx.run_once(&mut retries);
+    assert_eq!(
+        (again.errors, again.dirs_listed),
+        (0, 0),
+        "nothing left to list"
+    );
     let list = crate::roots::unreadable_dirs(&fx.conn, fx.root_id).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, cerrada);
@@ -1293,14 +1310,16 @@ fn unreadable_folder_is_recorded_kept_and_forgotten() {
     assert_eq!(reason_of(&fx.conn, "Abierta"), None);
 
     // A later full walk queues it again; failing again keeps it counted.
-    retries.clear();
     assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
-    fx.run_once(&mut retries);
+    assert_eq!(fx.run_once(&mut retries).errors, 1);
     assert_eq!(unreadable_count(&fx.conn), 1);
 
-    // Readable again: the next listing forgets it.
+    // Readable again: the next full walk lists it and forgets it.
     drop(locked);
-    retries.get_mut(&cerrada).unwrap().next_at = Instant::now();
+    // The failed re-walk left a retry waiting; a walk within that minute skips the folder
+    // until the retry is due (in-memory retries, VFS-1 I11). Start after it has run out.
+    retries.clear();
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
     fx.run_once(&mut retries);
     assert_eq!(reason_of(&fx.conn, "Cerrada"), None);
     assert_eq!(unreadable_count(&fx.conn), 0);
@@ -2250,9 +2269,15 @@ fn paused_backlog_leaves_other_roots_incremental() {
     let cfg = SchedConfig::default();
     assert!(fx.pending_dirs() as u64 > cfg.incremental_max_dirs);
     pause(&fx.conn, fx.root_id, true);
-    assert_eq!(pass_mode(&fx.conn, &cfg).unwrap(), Mode::Incremental);
+    assert_eq!(
+        pass_mode(&fx.conn, &cfg, &Retries::new()).unwrap(),
+        Mode::Incremental
+    );
     pause(&fx.conn, fx.root_id, false);
-    assert_eq!(pass_mode(&fx.conn, &cfg).unwrap(), Mode::Walk);
+    assert_eq!(
+        pass_mode(&fx.conn, &cfg, &Retries::new()).unwrap(),
+        Mode::Walk
+    );
 }
 
 /// VFS-32 AC-9 (R5): when the resume cannot replay, a root being walked restarts its walk in place
@@ -2313,4 +2338,157 @@ fn paused_root_links_wait_for_the_resume() {
     );
     pause(&fx.conn, fx.root_id, false);
     assert_eq!(ingest::pending_links(&fx.conn, 10).unwrap().len(), 1);
+}
+
+/// VFS-33 AC-2: a watcher hint naming a folder the user may not read marks only its parent,
+/// one below it marks nothing, and a replayed change naming it marks nothing; a readable
+/// folder is marked as before. Deleted, it leaves the index when its parent is listed.
+#[test]
+fn hints_leave_unreadable_folders_alone() {
+    let mut fx = fixture(&["Padre/Cerrada", "Padre/Abierta"]);
+    fx.scan();
+    let (cerrada, _) = fx.dir("Padre/Cerrada").unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    ingest::record_unreadable(&tx, cerrada, UnreadableReason::NoPermission, true).unwrap();
+    tx.commit().unwrap();
+    let root = fx.root();
+    let inside = [
+        root.join("Padre/Cerrada/archivo.txt"),
+        root.join("Padre/Cerrada/no/indexada"),
+    ];
+    for hint in &inside {
+        mark_dirty(&mut fx.conn, std::slice::from_ref(hint)).unwrap();
+        assert_eq!(fx.pending_dirs(), 0, "{hint:?}");
+    }
+    let roots = root_paths(&fx.conn).unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    mark_paths(&tx, &roots, &[root.join("Padre/Cerrada")], true).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(fx.pending_dirs(), 0, "replayed change");
+
+    mark_dirty(&mut fx.conn, &[root.join("Padre/Abierta/archivo.txt")]).unwrap();
+    assert_ne!(fx.dir("Padre/Abierta").unwrap().1, CLEAN);
+    assert_eq!(fx.pending_dirs(), 1);
+    fx.scan();
+
+    // The folder itself named (here deleted): only its parent is listed, which drops it.
+    fs::remove_dir_all(root.join("Padre/Cerrada")).unwrap();
+    mark_dirty(&mut fx.conn, &[root.join("Padre/Cerrada")]).unwrap();
+    assert_eq!(fx.dir("Padre/Cerrada").unwrap().1, CLEAN);
+    assert_ne!(fx.dir("Padre").unwrap().1, CLEAN);
+    fx.scan();
+    assert!(fx.dir("Padre/Cerrada").is_none());
+    assert_eq!(unreadable_count(&fx.conn), 0);
+}
+
+/// VFS-33 AC-4: the pass mode counts only the pending folders that are due: many folders
+/// waiting for a retry and one due choose incremental; the same folders all due choose walk.
+#[test]
+fn pass_mode_leaves_out_waiting_retries() {
+    let cfg = SchedConfig::default();
+    let n = cfg.incremental_max_dirs as usize + 1;
+    let names: Vec<String> = (0..=n).map(|i| format!("d{i}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut fx = fixture(&refs);
+    fx.scan();
+    fx.conn
+        .execute(
+            "UPDATE dirs SET scan_state = ?1 WHERE rel_path <> ''",
+            [ingest::ScanState::PendingShallow as i64],
+        )
+        .unwrap();
+    let later = Instant::now() + Duration::from_secs(3600);
+    let mut retries = Retries::new();
+    for name in &names[..n] {
+        let (id, _) = fx.dir(name).unwrap();
+        retries.insert(
+            id,
+            Retry {
+                attempts: 1,
+                next_at: later,
+            },
+        );
+    }
+    assert_eq!(
+        pass_mode(&fx.conn, &cfg, &retries).unwrap(),
+        Mode::Incremental
+    );
+    assert_eq!(
+        pass_mode(&fx.conn, &cfg, &Retries::new()).unwrap(),
+        Mode::Walk
+    );
+}
+
+/// Records the indexer states sent to the sink and counts index-changed signals.
+#[derive(Default)]
+struct StateSink {
+    states: Mutex<Vec<IndexerState>>,
+    changed: std::sync::atomic::AtomicUsize,
+}
+
+impl ProgressSink for Arc<StateSink> {
+    fn on_progress(&self, p: &IndexProgress) {
+        self.states.lock().unwrap().push(p.state);
+    }
+    fn on_index_changed(&self) {
+        self.changed.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// VFS-33 AC-5: a small incremental update sends no scanning progress (the status stays as
+/// it was) but still signals the index change and ends with a fresh idle snapshot; a full
+/// walk sends scanning progress.
+#[test]
+fn small_updates_publish_no_scanning_state() {
+    let fx = fixture(&["A", "B"]);
+    let sink = Arc::new(StateSink::default());
+    let sched = Sched::new(
+        SchedConfig::default(),
+        Box::new(platform::OsThreadPriority::default()),
+        None,
+        sched::log_sink(),
+    );
+    let h = IndexerHandle::spawn_with(fx.db_path.clone(), Arc::new(Arc::clone(&sink)), sched, None)
+        .unwrap();
+    let reader = db::open_ro(&fx.db_path).unwrap();
+    let files = |name: &str| -> i64 {
+        reader
+            .query_row("SELECT COUNT(*) FROM files WHERE name = ?1", [name], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    };
+    let idle = || sink.states.lock().unwrap().last() == Some(&IndexerState::Idle);
+    wait_until("the first walk", Duration::from_secs(20), || {
+        files("archivo.txt") == 2 && idle()
+    });
+    assert!(
+        sink.states
+            .lock()
+            .unwrap()
+            .contains(&IndexerState::Scanning),
+        "a full walk shows"
+    );
+
+    // Past the progress throttle, so a scanning snapshot would be sent if allowed.
+    std::thread::sleep(PROGRESS_EVERY + Duration::from_millis(100));
+    sink.states.lock().unwrap().clear();
+    let changed = sink.changed.load(Ordering::SeqCst);
+    fs::write(fx.root().join("A/nuevo.txt"), b"x").unwrap();
+    let mut conn = db::open_rw(&fx.db_path).unwrap();
+    mark_dirty(&mut conn, &[fx.root().join("A/nuevo.txt")]).unwrap();
+    h.wake();
+    wait_until("the small update", Duration::from_secs(20), || {
+        files("nuevo.txt") == 1 && sink.changed.load(Ordering::SeqCst) > changed && idle()
+    });
+    drop(h);
+    assert!(
+        !sink
+            .states
+            .lock()
+            .unwrap()
+            .contains(&IndexerState::Scanning),
+        "{:?}",
+        sink.states.lock().unwrap()
+    );
 }

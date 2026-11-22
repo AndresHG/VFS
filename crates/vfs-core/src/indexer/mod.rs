@@ -82,6 +82,9 @@ const OWED_COOLDOWN_SECS: i64 = 3600;
 const RETRY_FIRST: Duration = Duration::from_secs(60);
 /// ...and left alone until the next full walk after this many failed attempts.
 const RETRY_ATTEMPTS: u32 = 6;
+/// A "no permission" failure is retried once, for denials that pass (a folder being deleted
+/// on Windows, a sync or antivirus filter), then left for the next full walk (VFS-33 R1).
+const DENIED_ATTEMPTS: u32 = 2;
 /// Roots that could not be watched are retried this often, and at once when they come back.
 const WATCH_RETRY: Duration = Duration::from_secs(60);
 /// A watched root's change cursor advances this often, to the position taken at the
@@ -192,9 +195,23 @@ fn pause(d: Duration, stop: &dyn Fn() -> bool) -> bool {
     }
 }
 
+/// SQL condition leaving out the directories in `retries` whose retry is not yet due.
+fn not_waiting(retries: &Retries, now: Instant) -> String {
+    let waiting: Vec<String> = retries
+        .iter()
+        .filter(|(_, r)| r.next_at > now)
+        .map(|(id, _)| id.to_string())
+        .collect();
+    if waiting.is_empty() {
+        String::new()
+    } else {
+        format!(" AND id NOT IN ({})", waiting.join(","))
+    }
+}
+
 /// Mode of the next pass: walk while a root is walked in full or many directories are
-/// pending (VFS-5 R1, R2).
-fn pass_mode(conn: &Connection, cfg: &SchedConfig) -> Result<Mode> {
+/// due, those waiting for a retry left out (VFS-5 R1, R2; VFS-33 R3).
+fn pass_mode(conn: &Connection, cfg: &SchedConfig, retries: &Retries) -> Result<Mode> {
     if !walking(conn)?.is_empty() {
         return Ok(Mode::Walk);
     }
@@ -203,8 +220,9 @@ fn pass_mode(conn: &Connection, cfg: &SchedConfig) -> Result<Mode> {
     let pending: i64 = conn
         .prepare_cached(&format!(
             "SELECT COUNT(*) FROM (SELECT 1 FROM dirs INDEXED BY dirs_pending WHERE root_id IN \
-             (SELECT id FROM roots WHERE {NOT_PAUSED}) AND {} LIMIT ?1)",
-            pending_condition()
+             (SELECT id FROM roots WHERE {NOT_PAUSED}) AND {}{} LIMIT ?1)",
+            pending_condition(),
+            not_waiting(retries, Instant::now())
         ))?
         .query_row([cfg.incremental_max_dirs as i64 + 1], |r| r.get(0))?;
     Ok(sched::choose_mode(false, pending as u64, cfg))
@@ -229,6 +247,8 @@ struct Pass {
     finished: HashSet<i64>,
     /// A root unavailable before became reachable again in this pass.
     back_online: bool,
+    /// The pass runs in walk mode; only then is the scanning state published (VFS-33 R4).
+    walk: bool,
 }
 
 /// Failed listings of one directory, left pending until `next_at` (VFS-1 I11).
@@ -280,7 +300,7 @@ fn run(
     if !finish_removing(conn, stop)? {
         return Ok(Outcome::Yielded);
     }
-    sched.mode = pass_mode(conn, &sched.cfg)?;
+    sched.mode = pass_mode(conn, &sched.cfg, retries)?;
     let skip = data_dir(conn);
     let roots: Vec<ActiveRoot> = {
         // A paused root is left as it is: its pending folders wait (VFS-32 R2).
@@ -393,6 +413,7 @@ fn scan_root(
     let mut tx: Option<Transaction<'_>> = None;
     let mut rows = 0u64;
     let mut started = Instant::now();
+    pass.walk = sched.mode == Mode::Walk;
     loop {
         if stop() {
             commit(&mut tx, sched)?;
@@ -411,16 +432,7 @@ fn scan_root(
             }
         }
         let now = Instant::now();
-        let waiting: Vec<String> = retries
-            .iter()
-            .filter(|(_, r)| r.next_at > now)
-            .map(|(id, _)| id.to_string())
-            .collect();
-        let not_waiting = if waiting.is_empty() {
-            String::new()
-        } else {
-            format!(" AND id NOT IN ({})", waiting.join(","))
-        };
+        let not_waiting = not_waiting(retries, now);
         let next: Option<(i64, String, i64)> = tx
             .as_deref()
             .unwrap_or(conn)
@@ -508,7 +520,7 @@ fn scan_root(
             Err(e) => {
                 // Permission or I/O error (a busy or syncing disk): keep what is indexed,
                 // count it, and leave the directory pending for a retry after a growing
-                // delay; after `RETRY_ATTEMPTS` failures it waits for the next full walk.
+                // delay; after its last attempt it waits for the next full walk.
                 log::warn!("cannot list {}: {e}", abs.display());
                 pass.summary.errors += 1;
                 let retry = retries.entry(dir_id).or_insert(Retry {
@@ -517,14 +529,21 @@ fn scan_root(
                 });
                 retry.attempts += 1;
                 // Its reason is recorded when it should show (VFS-10 R1): "no permission" at
-                // once (it is still retried), any other only once the retries are exhausted.
+                // once, any other once the retries are exhausted. "No permission" rarely heals
+                // by waiting: it gets one retry, then waits for a full walk (VFS-33 R1).
                 let reason = walk::unreadable_reason(&e, cfg!(windows));
-                if retry.attempts >= RETRY_ATTEMPTS {
+                let denied = reason == UnreadableReason::NoPermission;
+                let limit = if denied {
+                    DENIED_ATTEMPTS
+                } else {
+                    RETRY_ATTEMPTS
+                };
+                if retry.attempts >= limit {
                     retries.remove(&dir_id);
                     ingest::record_unreadable(t, dir_id, reason, true)?;
                 } else {
                     retry.next_at = now + RETRY_FIRST * 2u32.pow(retry.attempts - 1);
-                    if reason == UnreadableReason::NoPermission {
+                    if denied {
                         ingest::record_unreadable(t, dir_id, reason, false)?;
                     }
                 }
@@ -1202,7 +1221,8 @@ impl Worker {
                     sink.on_index_changed();
                     *last_changed = Instant::now();
                 }
-                if last_progress.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
+                // A small incremental update leaves the status as it was (VFS-33 R4).
+                if pass.walk && last_progress.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
                     match build_progress(conn, pass, IndexerState::Scanning) {
                         Ok(p) => {
                             *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clone();
@@ -1247,6 +1267,9 @@ impl Worker {
                     if self.pass.summary.dirs_listed > 0 || self.pass.summary.errors > 0 {
                         self.sink.on_index_changed();
                         self.last_changed = Instant::now();
+                        // A quiet incremental pass still ends with a fresh idle snapshot, so
+                        // the counts follow (VFS-33 R4).
+                        self.published = None;
                     }
                     let s = &mut self.sched;
                     s.diag.pass_end(
@@ -1938,9 +1961,22 @@ fn mark_paths(
     dirs_only: bool,
 ) -> Result<()> {
     let (shallow, clean) = (ScanState::PendingShallow as i64, ScanState::Clean as i64);
-    let mut find = tx.prepare_cached("SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?;
+    let mut find =
+        tx.prepare_cached("SELECT id, error FROM dirs WHERE root_id = ?1 AND rel_path = ?2")?;
     let mut mark =
         tx.prepare_cached("UPDATE dirs SET scan_state = ?2 WHERE id = ?1 AND scan_state = ?3")?;
+    // The indexed directory at `rel`, and whether the user may not read it.
+    let mut lookup = |root_id: i64, rel: String| -> Result<Option<(i64, bool)>> {
+        Ok(find
+            .query_row(params![root_id, rel], |r| {
+                let error: Option<i64> = r.get(1)?;
+                Ok((
+                    r.get(0)?,
+                    error == Some(UnreadableReason::NoPermission.code()),
+                ))
+            })
+            .optional()?)
+    };
     for path in paths {
         let Some((root_id, rel)) = roots
             .iter()
@@ -1952,23 +1988,22 @@ fn mark_paths(
             .components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect();
-        if let Some(id) = find
-            .query_row(params![root_id, comps.join("/")], |r| r.get::<_, i64>(0))
-            .optional()?
-        {
-            mark.execute(params![id, shallow, clean])?;
+        // A folder the user may not read is left for the next full walk: a hint naming it
+        // marks only its parent (it may be gone), one below it marks nothing (VFS-33 R2).
+        if let Some((id, denied)) = lookup(root_id, comps.join("/"))? {
+            if !denied {
+                mark.execute(params![id, shallow, clean])?;
+            }
             if dirs_only {
                 continue;
             }
         }
         let mut n = comps.len().saturating_sub(1);
         loop {
-            let ancestor = comps[..n].join("/");
-            if let Some(id) = find
-                .query_row(params![root_id, ancestor], |r| r.get::<_, i64>(0))
-                .optional()?
-            {
-                mark.execute(params![id, shallow, clean])?;
+            if let Some((id, denied)) = lookup(root_id, comps[..n].join("/"))? {
+                if !denied {
+                    mark.execute(params![id, shallow, clean])?;
+                }
                 break;
             }
             if n == 0 {
