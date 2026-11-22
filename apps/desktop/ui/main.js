@@ -1334,7 +1334,6 @@ function main(L) {
       showError(errorText(err));
     }
   });
-  api.getIncludeAllFolders().then((on) => { includeAll.checked = on; }, () => {});
 
   async function startUpdates() {
     try {
@@ -1394,6 +1393,11 @@ function main(L) {
     renderStatus();
     q.focus();
     if (api.missing) { renderEmpty(); return; }
+    startUpdates();
+    // VFS-39 R2: the index opens off the main thread, which can take minutes after an unclean
+    // exit; the status says «Preparando la búsqueda…» until it is open.
+    try { await api.waitCore(); } catch (err) { showError(errorText(err)); return; }
+    api.getIncludeAllFolders().then((on) => { includeAll.checked = on; }, () => {});
     await api.onProgress(onProgress);
     await api.onIndexChanged(onIndexChanged);
     await api.onBookmarksChanged(onBookmarksChanged);
@@ -1401,7 +1405,6 @@ function main(L) {
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
-    startUpdates();
   }
 
   start();

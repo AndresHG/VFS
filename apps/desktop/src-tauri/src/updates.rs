@@ -188,8 +188,8 @@ fn io_error(e: impl Display) -> ApiError {
 
 /// Stops the indexer so the index is consistent before the app is replaced (VFS-21 R8).
 fn shutdown_index<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(state) = app.try_state::<AppState>() {
-        state.vfs.shutdown();
+    if let Some(vfs) = app.try_state::<AppState>().and_then(|s| s.vfs().ok()) {
+        vfs.shutdown();
     }
 }
 

@@ -343,6 +343,7 @@ export function createFakeBackend(params) {
     async systemLocale() { return params.get('locale') || navigator.language; },
     async setLanguage() {},
 
+    async waitCore() { await sleep(20); },
     async listRoots() { await sleep(30); return roots.map(rootView); },
 
     async listUnreadable(rootId) {

@@ -962,7 +962,16 @@ pub(crate) struct IndexerHandle {
     tx: Sender<Cmd>,
     shared: Arc<Shared>,
     join: Option<JoinHandle<()>>,
+    /// Interrupts the thread's SQLite statement when a stop must not wait for it (VFS-39 R3).
+    interrupt: rusqlite::InterruptHandle,
 }
+
+/// How long a stop waits for the thread to reach a point where it checks the stop flag
+/// before its SQLite work is interrupted (VFS-39 R3). A normal batch stops well within it.
+const STOP_GRACE: Duration = Duration::from_millis(500);
+/// How often a stop checks whether the thread has ended, and interrupts again once the
+/// grace is over: an interrupt reaches only the statement running at that moment.
+const STOP_POLL: Duration = Duration::from_millis(20);
 
 impl IndexerHandle {
     /// Starts the thread (priority and back-off via `sched`, watcher via `watch`), which
@@ -1062,6 +1071,7 @@ impl IndexerHandle {
             lost: HashMap::new(),
             replay_due: HashMap::new(),
         };
+        let interrupt = worker.conn.get_interrupt_handle();
         let join = std::thread::Builder::new()
             .name("vfs-indexer".into())
             .spawn(move || worker.run())?;
@@ -1069,6 +1079,7 @@ impl IndexerHandle {
             tx,
             shared,
             join: Some(join),
+            interrupt,
         })
     }
 
@@ -1114,10 +1125,22 @@ impl IndexerHandle {
 }
 
 impl Drop for IndexerHandle {
+    /// Stops the thread. One step can hold it for minutes: deleting a subtree of millions of
+    /// files that a new exclusion dropped, or a start-up step, none of which checks the stop
+    /// flag. After [`STOP_GRACE`] the thread's SQLite work is interrupted, so its open
+    /// transaction rolls back (cheap in WAL mode) and the next walk redoes it; the index stays
+    /// consistent and a close or an update never waits on it (VFS-39 R3).
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         let _ = self.tx.send(Cmd::Wake);
         if let Some(join) = self.join.take() {
+            let grace = Instant::now() + STOP_GRACE;
+            while !join.is_finished() {
+                if Instant::now() >= grace {
+                    self.interrupt.interrupt();
+                }
+                std::thread::sleep(STOP_POLL);
+            }
             if join.join().is_err() {
                 log::error!("indexer thread panicked");
             }

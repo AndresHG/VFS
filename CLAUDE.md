@@ -119,6 +119,8 @@ is silent on success or when Rust is not installed. Hooks fail open.
 - A SQLite transaction that reads before it writes a database another connection also writes
   starts `Immediate`: SQLite never waits to upgrade a read to a write, so the other writer
   fails it with "database is locked" (VFS-2 D18).
+- The desktop shell never opens or reads the index on the main thread, Tauri `setup`
+  included: after an unclean exit the open reads the whole index, and the window waits (VFS-39).
 - Simple over clever; no abstractions for one caller; nothing for hypothetical requirements.
 - Code, identifiers, comments and specs are English; user-facing copy goes in both catalogs,
   `apps/desktop/ui/strings.es.js` and `strings.en.js`, same keys (VFS-22).

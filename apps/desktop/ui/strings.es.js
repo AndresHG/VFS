@@ -156,7 +156,7 @@ export const es = {
   dayAndTime: (day, time) => `${day}, ${time}`,
   statusReadyUnavailable: (files, n) => `${files} archivos · ${n === 1 ? '1 carpeta no disponible' : `${n} carpetas no disponibles`}`,
   statusNoRoots: 'Todavía no hay carpetas',
-  statusConnecting: 'Conectando…',
+  statusConnecting: 'Preparando la búsqueda…',
   pause: 'Pausar',
   resume: 'Continuar',
   foldersButton: (n) => (n ? `Carpetas (${n})` : 'Carpetas'),

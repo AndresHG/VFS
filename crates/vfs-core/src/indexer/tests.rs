@@ -2916,3 +2916,73 @@ fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
     }
     drop(sync);
 }
+
+/// Adds `n` file rows to the folder `rel` of `fx`'s root, with their FTS rows, in one
+/// statement each: a subtree as big as the ones a new exclusion drops, without writing `n`
+/// files to disk.
+fn add_rows(fx: &mut Fx, rel: &str, n: u32) {
+    let tx = fx.conn.transaction().unwrap();
+    let dir_id: i64 = tx
+        .query_row(
+            "SELECT id FROM dirs WHERE root_id = ?1 AND rel_path = ?2",
+            params![fx.root_id, rel],
+            |r| r.get(0),
+        )
+        .unwrap();
+    tx.execute(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?2) \
+         INSERT INTO files(dir_id, name, name_key, kind, size, mtime, flags) \
+         SELECT ?1, 'f' || i || '.txt', 'f' || i || '.txt', 0, 1, 0, 0 FROM n",
+        params![dir_id, n],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO files_fts(rowid, name) SELECT id, ?2 || name_key FROM files WHERE dir_id = ?1",
+        params![dir_id, crate::search::NAME_START.to_string()],
+    )
+    .unwrap();
+    tx.execute(
+        &format!(
+            "INSERT INTO file_paths_fts(rowid, path) SELECT f.id, {} \
+             FROM files f JOIN dirs d ON d.id = f.dir_id WHERE f.dir_id = ?1",
+            ingest::FILE_PATH_SQL
+        ),
+        [dir_id],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+}
+
+fn files_in(conn: &Connection, rel: &str) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM files f JOIN dirs d ON d.id = f.dir_id WHERE d.rel_path = ?1",
+        [rel],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// VFS-39 AC-3: a stop requested while the indexer is inside one long step (a walk deleting
+/// a subtree of 1,000,000 files that left the disk, as a new exclusion does) returns within
+/// 2 s instead of waiting for the step, and the index stays consistent: the next scan
+/// finishes the deletion and keeps the other folders.
+#[test]
+fn stop_does_not_wait_for_a_long_deletion() {
+    let mut fx = fixture(&["keep", "big"]);
+    fx.scan();
+    add_rows(&mut fx, "big", 1_000_000);
+    fs::remove_dir_all(fx.root().join("big")).unwrap();
+    let h = IndexerHandle::spawn_with(fx.db_path.clone(), Arc::new(NullSink), Sched::inert(), None)
+        .unwrap();
+    h.rescan(Some(fx.root_id));
+    wait_for("the re-walk", || fx.status() == RootStatus::Scanning);
+    std::thread::sleep(Duration::from_millis(300));
+    let asked = Instant::now();
+    h.shutdown();
+    let took = asked.elapsed();
+    assert!(took < Duration::from_secs(2), "the stop waited {took:?}");
+
+    fx.scan();
+    assert_eq!(files_in(&fx.conn, "big"), 0);
+    assert_eq!(files_in(&fx.conn, "keep"), 1);
+}

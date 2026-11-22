@@ -12,7 +12,7 @@ use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow, WebviewWindowBuilder};
 use vfs_core::Error;
 use vfs_desktop_lib::i18n::{self, Lang};
-use vfs_desktop_lib::{commands, init_core, AppState, INDEX_FILE};
+use vfs_desktop_lib::{commands, init_core, open_core, AppState, INDEX_FILE};
 
 fn mock_app() -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let app = mock_builder()
@@ -56,7 +56,7 @@ fn progress_and_errors_over_ipc() {
     let data = tempfile::tempdir().unwrap();
     let (app, webview) = mock_app();
     let vfs = vfs_core::Vfs::open(&data.path().join(INDEX_FILE)).unwrap();
-    app.manage(AppState { vfs });
+    app.manage(AppState::open(vfs));
 
     let progress = invoke(&webview, "get_progress", json!({})).unwrap();
     assert_eq!(progress["state"], json!("idle"));
@@ -232,7 +232,7 @@ fn add_root_search_progress_end_to_end() {
     paused(false);
     invoke(&webview, "remove_root", json!({ "id": root_id })).unwrap();
 
-    app.state::<AppState>().vfs.shutdown();
+    app.state::<AppState>().vfs().unwrap().shutdown();
 }
 
 /// VFS-6 AC-8, AC-11, AC-12 over IPC: with the setting off `search_sources` returns files only
@@ -255,7 +255,7 @@ fn bookmark_commands_over_ipc() {
     vfs.add_root(&root).unwrap();
     vfs.scan_to_completion(&std::sync::atomic::AtomicBool::new(false))
         .unwrap();
-    app.manage(AppState { vfs });
+    app.manage(AppState::open(vfs));
 
     let mut ff = FakeFirefox::new(&data.path().join("Firefox"));
     let profile = ff.add_profile("default", "p.default");
@@ -358,7 +358,7 @@ fn feedback_report_over_ipc() {
     let (app, webview) = mock_app();
     let vfs = vfs_core::Vfs::open(&data.path().join(INDEX_FILE)).unwrap();
     let root = vfs.add_root(tree.path()).unwrap();
-    app.manage(AppState { vfs });
+    app.manage(AppState::open(vfs));
 
     let args = |names: bool| json!({ "description": "Va lento", "includeNames": names });
     let text = invoke(&webview, "feedback_report", args(false)).unwrap();
@@ -464,4 +464,51 @@ fn content_commands_over_ipc() {
         json!({ "query": "carta", "filters": {}, "offset": 0 }),
     );
     assert!(gone.is_err(), "the store is gone: {gone:?}");
+}
+
+/// VFS-39 AC-1, AC-2: the index opens on its own thread. While the open is held up (here
+/// by another connection's write lock; in the field by a `quick_check` of a multi-GB index
+/// after an unclean exit), `open_core` has already returned, so the main thread runs the
+/// event loop and the window paints; index commands reject with `unavailable` instead of
+/// hanging, and `wait_core` resolves once the index is open, after which they work.
+#[test]
+fn index_opens_off_the_main_thread() {
+    let data = tempfile::tempdir().unwrap();
+    let db = data.path().join(INDEX_FILE);
+    let holder = rusqlite::Connection::open(&db).unwrap();
+    holder
+        .execute_batch("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE hold(x);")
+        .unwrap();
+    let (app, webview) = mock_app();
+
+    let started = Instant::now();
+    open_core(app.handle(), db.clone()).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "open_core waited for the open"
+    );
+    let err = invoke(&webview, "list_roots", json!({})).unwrap_err();
+    assert_eq!(err["code"], json!(Error::Unavailable(String::new()).code()));
+
+    const HELD: Duration = Duration::from_millis(800);
+    let waited = std::thread::scope(|s| {
+        let waiter = s.spawn(|| {
+            let asked = Instant::now();
+            invoke(&webview, "wait_core", json!({})).unwrap();
+            asked.elapsed()
+        });
+        std::thread::sleep(HELD);
+        holder.execute_batch("ROLLBACK").unwrap();
+        waiter.join().unwrap()
+    });
+    assert!(
+        waited >= HELD - Duration::from_millis(100),
+        "resolved before the open: {waited:?}"
+    );
+    assert_eq!(
+        invoke(&webview, "list_roots", json!({})).unwrap(),
+        json!([])
+    );
+
+    app.state::<AppState>().vfs().unwrap().shutdown();
 }
