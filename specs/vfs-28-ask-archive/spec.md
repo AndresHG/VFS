@@ -292,8 +292,8 @@ local mock server that replays recorded responses. No test needs a real key.
 
 ## Phased PRs
 
-28a and 28b do not depend on content search and can run during v0.3. 28c and 28d need VFS-2
-2b and VFS-27.
+28b does not depend on content search and can be built during v0.3. 28a is merged only after
+v0.3 ships, to keep one new risk per release. 28c and 28d need VFS-2 2b and VFS-27.
 
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
