@@ -5,6 +5,7 @@ import { choiceFor, languageFor, localeFor } from './strings.js';
 import * as F from './format.js';
 import { createVirtualList } from './vlist.js';
 import { placesOf, showsCloudBadge } from './copies.js';
+import { ROW_KINDS, rowKindOf } from './kinds.js';
 import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
@@ -45,8 +46,7 @@ const PICK_FOLDER = '__pick';
 const ON = 'is-on';
 /** Look of a message in the folder panel. */
 const Notice = Object.freeze({ ERROR: 'error', WARN: 'warn', INFO: 'info' });
-/** Icons of a bookmark row and of the row actions (VFS-6). */
-const BOOKMARK_ICON = 'bookmark';
+/** Icons of the row actions (VFS-6); the row's own icon comes from kinds.js (VFS-36). */
 const OPEN_ICON = 'open';
 const REVEAL_ICON = 'reveal';
 /** "Mostrar el destino" (VFS-18): the shortcut arrow. */
@@ -536,9 +536,9 @@ function main(L) {
     if (hit.source === Source.BOOKMARKS) { setSecond(row, null); fillBookmarkRow(row, hit); return; }
     setAction(row.children[5], REVEAL_ICON, S.revealButton, true);
     setSecond(row, secondAction(hit));
-    const kindKey = hit.isDir ? FileKind.FOLDER : hit.kind;
-    ico.dataset.kind = kindKey;
-    ico.replaceChildren(icon(kindKey));
+    const rowKind = rowKindOf(hit);
+    ico.dataset.kind = rowKind;
+    ico.replaceChildren(icon(ROW_KINDS[rowKind].icon));
 
     const [nameEl, pathEl] = main.children;
     const nameText = el('span', 'name-text');
@@ -572,7 +572,7 @@ function main(L) {
     pathEl.replaceChildren(...parts);
     pathEl.title = link?.target ? S.linkTargetPrefix + link.target : hit.dir;
 
-    const kindLabel = S.kindSingular[kindKey];
+    const kindLabel = ROW_KINDS[rowKind].label(S);
     const dateText = N.date(hit.modified);
     const sizeText = hit.isDir ? '' : N.size(hit.size);
     kind.textContent = kindLabel;
@@ -614,9 +614,9 @@ function main(L) {
    *  same middle truncation as a file's, its kind and the date it was saved. */
   function fillBookmarkRow(row, hit) {
     const [ico, main, kind, date, size, action] = row.children;
-    const iconName = hit.isFolder ? FileKind.FOLDER : BOOKMARK_ICON;
-    ico.dataset.kind = iconName;
-    ico.replaceChildren(icon(iconName));
+    const rowKind = rowKindOf(hit);
+    ico.dataset.kind = rowKind;
+    ico.replaceChildren(icon(ROW_KINDS[rowKind].icon));
     const [nameEl, pathEl] = main.children;
     const nameText = el('span', 'name-text');
     F.appendHighlighted(nameText, hit.title, F.matchRanges(hit.title, state.terms));
@@ -631,7 +631,7 @@ function main(L) {
     F.appendHighlighted(tail, whole, ranges, cut, whole.length);
     pathEl.replaceChildren(head, tail);
     pathEl.title = whole;
-    const kindLabel = hit.isFolder ? S.bookmarkFolderKind : S.bookmarkKind;
+    const kindLabel = ROW_KINDS[rowKind].label(S);
     const dateText = N.date(hit.added);
     // A bookmark has no size; its slot shows the site (VFS-6 AC-11).
     const host = hit.isFolder ? '' : site(hit.url);
