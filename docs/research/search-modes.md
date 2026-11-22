@@ -122,7 +122,7 @@ per-row «coincide en» badge was tempting.
   Three things keep a remembered narrowing from hiding files:
   - the selected button is always on screen;
   - the empty view names the scope and offers «Todo»;
-  - «Borrar filtros» resets it.
+  - «Quitar filtros» resets it.
 - **Results.**
   - Name and path hits stay in one list ranked by the VFS-1 tiers.
   - Content hits keep their own section (VFS-2 D9).

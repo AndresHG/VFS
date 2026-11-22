@@ -44,7 +44,7 @@ an embedding API key or a local model downloaded from Ajustes (VFS-2 D15).
 - **Search.** `retrieve` runs BM25 and the vector scan, then fuses them with RRF (k = 60).
   Meaning hits appear in the content section, never in a list of their own and never as a
   fourth «Buscar en» button (VFS-38). A hit found by meaning alone carries «relacionado por
-  tema» (VFS-38 R12, AC-10, built in 29a).
+  tema» (VFS-38 R12, AC-10), built in the VFS-29 PR that shows meaning hits in the app.
   The query is embedded once per search, by API or locally. With an API, every content
   query therefore leaves the PC. The full spec decides how «Qué se ha enviado» records them,
   for example one line per day with the count, rather than one entry per query. Offline, without a key, or

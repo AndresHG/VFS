@@ -77,7 +77,7 @@ Implementation: raw values as custom properties, switched under
 | Search box | surface, 1.5px `--line-strong`, radius 0.875rem | — | 3px `--focus` ring, 2px offset | — | — |
 | Primary button | accent fill, on-accent text | 8 % darker | ring | 2 % darker | 55 % opacity, no pointer |
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
-| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all | — |
+| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all, on the chip line below the filters (VFS-38 R8) | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
@@ -112,9 +112,10 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 
 Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
 Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keeps its shape:
-- **Where to search** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") is the
-  first pill in the filter line and shows only while bookmarks are included. **"Orden"** is
-  the last pill and always shows, with five orders (most alike, newest, oldest, name A–Z,
+- **Where to search** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") shows
+  only while bookmarks are included; since VFS-38 it sits inside «Más filtros», and the
+  filter line starts with the «Buscar en» scope group. **"Orden"** moves to the results
+  header (VFS-38 R9) and shows whenever there are results, with five orders (most alike, newest, oldest, name A–Z,
   largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12).
   Both are native-select pills like date and size rather than the type checklist: each is
   one choice, and a select also works where the Popover API is missing.

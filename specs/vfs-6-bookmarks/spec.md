@@ -105,7 +105,7 @@ soon as it has been read.
 - **Tauri**: new commands `search_sources(query, options: {sources, bookmarkFolder, sort})`,
   `open_bookmark`, `get_bookmarks_status`, `set_bookmarks_enabled`; `rescan` also refreshes
   bookmarks.
-- **UI**: a "Buscar en" pill, first in the filter line, bookmark and bookmark-folder rows,
+- **UI**: a source choice (since VFS-38 inside «Más filtros»), bookmark and bookmark-folder rows,
   bookmark roots in the "Carpeta" filter and a sort choice, behind the setting
   (`docs/design/system.md` "Sources").
 
@@ -219,7 +219,7 @@ start if a crash left it.
 ## Requirements (EARS)
 
 - R1. WHILE the setting is off, THE app SHALL not read any Firefox file, SHALL not show the
-  "Buscar en" control, and SHALL search files only.
+  source choice (called "Buscar en" before VFS-38), and SHALL search files only.
 - R2. WHEN the setting is turned on, the app starts with it on, "Buscar cambios ahora" is
   pressed, or 30 minutes pass, THE bookmark reader SHALL read the bookmarks of every
   Firefox profile found whose `places.sqlite` or WAL changed since its last read.
@@ -289,7 +289,7 @@ Tests cite these ids (`VFS-6 AC-<m>`).
   runs, Then no copy is made.
 - AC-10 (R9) `vfs search --source bookmarks recetas` prints bookmarks only; `--source all`
   both; `--source files` files only.
-- AC-11 (UI) The "Buscar en" choice and the bookmark row values are in `contract.js`, checked
+- AC-11 (UI) The source choice and the bookmark row values are in `contract.js`, checked
   against the Rust enums; the control is hidden while the setting is off; a bookmark row
   shows title, folder path, site and date.
 - AC-12 (R10) Given an `https` bookmark, When `open_bookmark` is called with its id, Then its
