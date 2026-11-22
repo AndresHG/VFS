@@ -2632,7 +2632,7 @@ fn a_full_walk_stores_cloud_only_and_link_counts() {
 }
 
 /// VFS-37 AC-5 (R2): a folder marked unpopulated loses the mark when it lists again with
-/// entries; off Windows an empty folder is never marked.
+/// entries, or fails to list; off Windows an empty folder is never marked.
 #[test]
 fn a_folder_that_lists_with_entries_is_not_unpopulated() {
     let mut fx = fixture(&["A"]);
@@ -2647,6 +2647,15 @@ fn a_folder_that_lists_with_entries_is_not_unpopulated() {
         .unwrap();
     assert_eq!(root_row(&fx).unpopulated, 1);
     fx.scan();
+    assert_eq!(root_row(&fx).unpopulated, 0);
+    // Nor does a folder that fails to list keep the mark.
+    let (a, _) = fx.dir("A").unwrap();
+    fx.conn
+        .execute("UPDATE dirs SET unpopulated = 1 WHERE id = ?1", [a])
+        .unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    ingest::record_unreadable(&tx, a, UnreadableReason::DiskError, true).unwrap();
+    tx.commit().unwrap();
     assert_eq!(root_row(&fx).unpopulated, 0);
 }
 

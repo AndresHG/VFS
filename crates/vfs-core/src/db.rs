@@ -1044,6 +1044,7 @@ pub mod ingest {
 
     /// Records why a directory failed to list (VFS-10 R1); with `settled` (its retries are
     /// exhausted) it is also marked clean until the next full walk (VFS-1 I11).
+    /// A folder that fails to list is never unpopulated (VFS-37 R2).
     pub fn record_unreadable(
         tx: &Transaction,
         dir_id: i64,
@@ -1051,9 +1052,9 @@ pub mod ingest {
         settled: bool,
     ) -> Result<()> {
         let sql = if settled {
-            "UPDATE dirs SET error = ?2, scan_state = 0 WHERE id = ?1"
+            "UPDATE dirs SET error = ?2, scan_state = 0, unpopulated = NULL WHERE id = ?1"
         } else {
-            "UPDATE dirs SET error = ?2 WHERE id = ?1"
+            "UPDATE dirs SET error = ?2, unpopulated = NULL WHERE id = ?1"
         };
         tx.prepare_cached(sql)?
             .execute(params![dir_id, reason.code()])?;
