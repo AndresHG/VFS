@@ -162,11 +162,9 @@ pub(crate) fn list_dir(dir: &Path, skip: Option<&Path>) -> std::io::Result<Vec<E
 /// Attribute bits of a cloud placeholder whose data is not on the disk (VFS-25 R1):
 /// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, `FILE_ATTRIBUTE_RECALL_ON_OPEN`,
 /// `FILE_ATTRIBUTE_OFFLINE`.
-#[cfg_attr(not(windows), allow(dead_code))]
 const CLOUD_ONLY_ATTRIBUTES: u32 = 0x0040_0000 | 0x0004_0000 | 0x0000_1000;
 
 /// True when Windows file attributes mark a cloud-only file (VFS-25 R1).
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn cloud_only_attributes(attributes: u32) -> bool {
     attributes & CLOUD_ONLY_ATTRIBUTES != 0
 }

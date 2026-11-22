@@ -62,9 +62,11 @@ peaks at about 138 MB at schema version 3, 123 MB at version 2, measured). Reade
 version 5 and `core/schema_v6.sql` version 6 (`PRAGMA user_version`). `db::open_rw` runs the missing
 migrations (`MIGRATIONS` in `core/db.rs`) in order, in one transaction: a new file gets all
 of them, and an older index is migrated from the rows already there, so no rescan is
-needed. After migrating an existing index it compacts the file once (`VACUUM`, at
-`PAGE_SIZE`, 16 KB; a new index is created at that size); if another connection holds the
-index, it stays valid and uncompacted. An index from a newer build fails with
+needed. After migrating an existing index from below version 4 (the migrations to 3 and 4
+free about a fifth of the file) it compacts the file once (`VACUUM`, at `PAGE_SIZE`, 16 KB;
+a new index is created at that size); versions 5 and 6 free nothing, so an index from 0.1.1
+(version 4) is not rewritten. If another connection holds the index, it stays valid and
+uncompacted. An index from a newer build fails with
 `schema_too_new` and is never discarded.
 
 | Table | Holds |
@@ -182,8 +184,11 @@ is reported, the indexer's deferred pass (`link::read_pending`, 200 per transact
 to stop, pause and wake) reads each pending link: at most 64 KiB of the link file itself
 (the bounded `.lnk` / `.url` parser in `core/link.rs`), or the link's own reparse data
 (`read_link`; a relative target is resolved as text against the link's folder). The target
-is never opened. A link that cannot be read is marked unreadable and queued again when its
-root's next full walk ends. A search matches links by their own folder, name and target
+is never opened. Right before a `.lnk` or `.url` would be opened, its attributes are read by
+name (`GetFileAttributesW`, which downloads nothing): a cloud-only file is not opened but
+marked unreadable and cloud-only, which covers shortcuts queued by the version-5 migration
+before any listing recorded their bit (VFS-25 R3). A link that cannot be read is marked
+unreadable and queued again when its root's next full walk ends. A search matches links by their own folder, name and target
 together, attaches `link` (kind, target, `openable`) to every link hit, and drops a link
 whose target is an indexed item the same search returns (`search::attach_links`).
 

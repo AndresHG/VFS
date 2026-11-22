@@ -1886,3 +1886,83 @@ fn overflow_replays_are_recorded_without_names() {
         }
     }
 }
+
+/// VFS-25 R3 after an upgrade (Windows): an index written by 0.1.1 (version 4, no
+/// cloud-only bit) holding a cloud-only `.url` is migrated, which queues the shortcut for
+/// the link pass; the pass runs before any walk has recorded the bit, reads the attributes
+/// by name, never opens the file, and records it cloud-only and unreadable.
+#[cfg(windows)]
+#[test]
+fn migrated_cloud_only_shortcut_is_never_opened() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        SetFileAttributesW, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_OFFLINE,
+    };
+    let mut fx = fixture(&["A"]);
+    let url = fx.root().join("A").join("Banco.url");
+    fs::write(&url, "[InternetShortcut]\r\nURL=https://example.com/\r\n").unwrap();
+    fx.scan();
+    let wide: Vec<u16> = url.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `wide` is a NUL-terminated path that outlives the call.
+    let ok = unsafe {
+        SetFileAttributesW(
+            wide.as_ptr(),
+            FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_ARCHIVE,
+        )
+    };
+    assert_ne!(ok, 0);
+    // Back to what 0.1.1 wrote: version 4, no links table, no flag bits beyond bit 0.
+    fx.conn
+        .execute_batch(
+            "UPDATE files SET flags = flags & 1;
+             DROP TABLE links;
+             DROP INDEX dirs_unreadable;
+             ALTER TABLE dirs DROP COLUMN error;
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+    let mut conn = db::open_rw(&fx.db_path).unwrap();
+    let (id, cloud) = cloud_bit(&conn, "A", "Banco.url");
+    assert!(!cloud, "the migrated row has no bit yet");
+    assert_eq!(ingest::pending_links(&conn, 10).unwrap().len(), 1);
+
+    crate::link::read_pending(&mut conn, &|| false).unwrap();
+    let (state, target): (i64, Option<String>) = conn
+        .query_row(
+            "SELECT state, target FROM links WHERE file_id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (state, target),
+        (ingest::LinkState::Unreadable as i64, None)
+    );
+    assert!(cloud_bit(&conn, "A", "Banco.url").1, "recorded cloud-only");
+}
+
+/// VFS-9 R7 (Windows case rule): a replayed path below the root in other capitals is
+/// spelled under the stored root when case is ignored, and left out when it is not; a path
+/// outside the root, or a sibling sharing a prefix, is always left out.
+#[test]
+fn replayed_paths_are_matched_to_the_root_ignoring_case_on_windows() {
+    let root = Path::new("/Datos/Fotos");
+    assert_eq!(
+        under_root(Path::new("/datos/FOTOS/Boda/2003"), root, true),
+        Some(PathBuf::from("/Datos/Fotos/Boda/2003"))
+    );
+    assert_eq!(
+        under_root(Path::new("/datos/FOTOS/Boda"), root, false),
+        None
+    );
+    assert_eq!(
+        under_root(Path::new("/Datos/Fotos/Boda"), root, false),
+        Some(PathBuf::from("/Datos/Fotos/Boda"))
+    );
+    assert_eq!(under_root(Path::new("/Datos/Otros/x"), root, true), None);
+    assert_eq!(
+        under_root(Path::new("/Datos/Fotos viejas/x"), root, true),
+        None
+    );
+    assert_eq!(under_root(Path::new("/Datos"), root, true), None);
+}

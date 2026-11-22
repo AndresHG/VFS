@@ -230,9 +230,9 @@ be added again and are scanned from scratch, and the bookmark setting is off aga
 
 The index has schema version 6 (version 2 added a per-file path index; versions 3 and 4 make the
 index about a sixth smaller, VFS-4; version 5 adds the table of shortcuts and links, VFS-18;
-version 6 records why a folder could not be read, VFS-10). An index written by an older build is upgraded in place
-when the app opens it, without a rescan, and then compacted once; one written by a newer
-build is refused, never overwritten.
+version 6 records why a folder could not be read, VFS-10). An index written by an older
+build is upgraded in place when the app opens it, without a rescan; one older than version
+4 is then compacted once. One written by a newer build is refused, never overwritten.
 
 ## Status: what has and has not been run
 
