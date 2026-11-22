@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::fold::fold_key;
 use crate::matching::parse_query;
-use crate::search::{self, has_filter};
+use crate::search::{self, has_filter, Cancel};
 use crate::types::{
     SearchConfig, SearchFilters, SearchQuery, SortOrder, Suggestion, SuggestionKind,
 };
@@ -31,17 +31,18 @@ struct Try {
     replacement: Option<String>,
 }
 
-/// Runs the tries for `query` in order on the search connection. `stale` tells whether a
-/// newer search started, which ends the call with no suggestion (R4).
+/// Runs the tries for `query` in order on the search connection. `cancel` tells whether a
+/// newer search started, which ends the call with no suggestion (R4), between tries and
+/// inside a running one.
 pub(crate) fn suggest(
     conn: &mut Connection,
     config: &SearchConfig,
     query: &SearchQuery,
-    stale: &dyn Fn() -> bool,
+    cancel: &Cancel,
 ) -> Result<Option<Suggestion>> {
     let end = Instant::now() + config.suggest_budget;
     for t in tries(&query.text, &query.filters) {
-        if stale() || Instant::now() >= end {
+        if cancel.is_set() || Instant::now() >= end {
             return Ok(None);
         }
         let q = SearchQuery {
@@ -55,8 +56,8 @@ pub(crate) fn suggest(
             offset: 0,
             sort: SortOrder::Relevance,
         };
-        if let Some((count, capped)) = search::count(conn, &q, end)? {
-            if stale() {
+        if let Some((count, capped)) = search::count(conn, &q, end, cancel)? {
+            if cancel.is_set() {
                 return Ok(None);
             }
             return Ok(Some(Suggestion {

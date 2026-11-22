@@ -26,6 +26,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rusqlite::types::Value;
@@ -124,14 +126,37 @@ pub(crate) fn search(
     response
 }
 
+/// Whether a newer search started since this was made: the search counter moved past the
+/// generation it read (VFS-13 R4).
+#[derive(Clone)]
+pub(crate) struct Cancel {
+    searches: Arc<AtomicU64>,
+    generation: u64,
+}
+
+impl Cancel {
+    pub(crate) fn new(searches: &Arc<AtomicU64>) -> Cancel {
+        Cancel {
+            searches: searches.clone(),
+            generation: searches.load(Ordering::SeqCst),
+        }
+    }
+
+    pub(crate) fn is_set(&self) -> bool {
+        self.searches.load(Ordering::SeqCst) != self.generation
+    }
+}
+
 /// Counts the hits of `query` as the list would show them (copies grouped, VFS-19) under
 /// relevance, with both deadlines given: `Some((count, capped))`, or `None` when nothing
-/// matched or the deadline or an interruption cut the read (VFS-13 R3, R4). Resolves no page
-/// and leaves the S7 cache alone.
+/// matched or the deadline, an interruption or `cancel` cut the read (VFS-13 R3, R4). The
+/// progress handler checks `cancel`, so a newer search's interrupt that landed before this
+/// count's first statement still stops it. Resolves no page and leaves the S7 cache alone.
 pub(crate) fn count(
     conn: &mut Connection,
     query: &SearchQuery,
     deadline: Instant,
+    cancel: &Cancel,
 ) -> Result<Option<(usize, bool)>> {
     let begin = match conn.is_autocommit() {
         true => conn.execute_batch("BEGIN"),
@@ -142,7 +167,7 @@ pub(crate) fn count(
         Err(e) if is_interrupt(&e) => return Ok(None),
         Err(e) => return Err(e.into()),
     }
-    let counted = count_snapshot(conn, query, deadline);
+    let counted = count_snapshot(conn, query, deadline, cancel);
     if conn.execute_batch("COMMIT").is_err() {
         conn.execute_batch("ROLLBACK")?;
     }
@@ -153,6 +178,7 @@ fn count_snapshot(
     conn: &mut Connection,
     query: &SearchQuery,
     deadline: Instant,
+    cancel: &Cancel,
 ) -> Result<Option<(usize, bool)>> {
     let terms = crate::matching::parse_query(&query.text).terms;
     let f = &query.filters;
@@ -168,6 +194,7 @@ fn count_snapshot(
         truncated: None,
         stopped: false,
         limit: MAX_HITS,
+        cancel: Some(cancel.clone()),
     };
     let outcome = run_query(conn, &mut run, &terms, f, false);
     conn.progress_handler(0, None::<fn() -> bool>)?;
@@ -245,6 +272,7 @@ fn search_snapshot(
         truncated: None,
         stopped: false,
         limit: MAX_HITS,
+        cancel: None,
     };
     // VFS-12: an order other than relevance reads up to `SORT_READ_CAP` candidates and sorts
     // them all before the cut. A filter-only query under relevance keeps the hit cap (its
@@ -554,6 +582,8 @@ struct Run {
     stopped: bool,
     /// Candidates the current tier may bring the list up to.
     limit: usize,
+    /// Stops the run like the deadline once set (VFS-13 R4); a search has none.
+    cancel: Option<Cancel>,
 }
 
 impl Run {
@@ -605,13 +635,15 @@ where
     if run.stopped || (run.hits.len() >= run.limit && run.truncated.is_some()) {
         return Ok(());
     }
-    conn.progress_handler(PROGRESS_OPS, Some(move || Instant::now() >= deadline))?;
+    let cancel = run.cancel.clone();
+    let cut = move || Instant::now() >= deadline || cancel.as_ref().is_some_and(Cancel::is_set);
+    conn.progress_handler(PROGRESS_OPS, Some(cut.clone()))?;
     let conn: &Connection = conn;
     let outcome = (|| -> rusqlite::Result<()> {
         let mut stmt = conn.prepare_cached(sql)?;
         let mut rows = stmt.query(params_from_iter(params))?;
         while let Some(row) = rows.next()? {
-            if Instant::now() >= deadline {
+            if cut() {
                 run.stop(TruncatedBy::Deadline);
                 break;
             }
@@ -2052,6 +2084,56 @@ mod tests {
         );
     }
 
+    /// VFS-13 AC-5 (R4): a newer search that started after a suggestion's last check, its
+    /// interrupt spent before the count's first statement (the lost-interrupt race), still
+    /// stops the count: here the generation moved and no interrupt is ever sent, yet a count
+    /// with a minute of budget returns `None` at once; with nothing newer it counts.
+    #[test]
+    fn a_newer_search_stops_a_count_without_an_interrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let mut w = db::open_rw(&path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        for i in 0..1_500 {
+            let name = format!("archivo {i}.pdf");
+            let file = ingest::NewFile {
+                name: &name,
+                size: 10,
+                mtime: 1,
+                lossy: false,
+            };
+            ingest::insert_file(&tx, top, &file).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let mut conn = db::open_ro(&path).unwrap();
+        let q = SearchQuery {
+            text: "archivo".into(),
+            filters: SearchFilters::default(),
+            limit: 1,
+            offset: 0,
+            sort: Default::default(),
+        };
+        let searches = Arc::new(AtomicU64::new(7));
+        let cancel = Cancel::new(&searches);
+        let budget = Instant::now() + Duration::from_secs(60);
+        assert_eq!(
+            count(&mut conn, &q, budget, &cancel).unwrap(),
+            Some((1_500, false))
+        );
+        searches.fetch_add(1, Ordering::SeqCst);
+        let started = Instant::now();
+        assert_eq!(count(&mut conn, &q, budget, &cancel).unwrap(), None);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(conn.is_autocommit());
+    }
+
     /// VFS-4 AC-5 (R5): once the list is full and marked truncated by the cap, no further
     /// statement is even prepared (here an invalid one), and a list not yet capped still
     /// runs its statements.
@@ -2068,6 +2150,7 @@ mod tests {
             truncated: Some(TruncatedBy::Cap),
             stopped: false,
             limit: 0,
+            cancel: None,
         };
         let deadline = run.hard;
         let mut calls = 0;
