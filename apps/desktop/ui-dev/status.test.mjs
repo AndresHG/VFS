@@ -102,6 +102,7 @@ test('folder row button for each state', () => {
     [RootStatus.READY, true, RootAction.RESUME],
     [RootStatus.READY, false, RootAction.RESCAN],
     [RootStatus.UNAVAILABLE, false, RootAction.RESCAN],
+    [RootStatus.REMOVING, true, RootAction.RESCAN],
   ];
   for (const [status, paused, want] of cases) {
     assert.equal(rootAction(root({ status, paused }), status), want, `${status} paused=${paused}`);

@@ -60,10 +60,12 @@ export function viewFor({ backendMissing, rootsLoaded, rootCount, searchState })
 }
 
 /** The folder row's first button (VFS-32 R8): pause while the folder is being walked, resume
- *  while paused, otherwise check again. `status` is the row's current status. */
+ *  while paused, otherwise check again (disabled while removing). `status` is the row's current
+ *  status. */
 export const RootAction = Object.freeze({ PAUSE: 'pause', RESUME: 'resume', RESCAN: 'rescan' });
 
 export function rootAction(root, status) {
+  if (status === RootStatus.REMOVING) return RootAction.RESCAN;
   if (root.paused) return RootAction.RESUME;
   if (status === RootStatus.PENDING || status === RootStatus.SCANNING) return RootAction.PAUSE;
   return RootAction.RESCAN;
