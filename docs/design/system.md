@@ -127,7 +127,8 @@ Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keep
   Firefox, like "Mostrar en carpeta" for files, with the same Intro/double-click behaviour.
   Firefox cannot be told from outside to select a bookmark in its bookmark manager, so the
   folder path on the row is what tells where the bookmark is saved (owner's decision).
-- **Bookmark folders** are results with the folder icon; their action is **"Ver su
+- **Bookmark folders** are results with their own icon, a folder with a bookmark ribbon in
+  the accent colour (VFS-36), so they never pass for a disk folder; their action is **"Ver su
   contenido"**, which makes the folder the "Carpeta" filter ("Dentro de: Recetas") and lists
   what it holds in Firefox's order. The "Carpeta" select also offers the bookmark roots under
   "Marcadores de Firefox".

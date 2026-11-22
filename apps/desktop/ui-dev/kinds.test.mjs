@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { FileKind, Source } from '../ui/contract.js';
+import { FileKind, LinkKind, Source } from '../ui/contract.js';
 import { ROW_KINDS, RowKind, rowKindOf } from '../ui/kinds.js';
 import { CATALOGS } from '../ui/strings.js';
 
@@ -41,5 +41,5 @@ test('row kind of each result', () => {
   assert.equal(rowKindOf({ source: Source.BOOKMARKS, isFolder: false, url: 'https://a.example' }), RowKind.BOOKMARK);
   assert.equal(rowKindOf({ source: Source.BOOKMARKS, isFolder: true }), RowKind.BOOKMARK_FOLDER);
   // A shortcut and a cloud-only file keep their file kind; their badge says the rest.
-  assert.equal(rowKindOf(file(FileKind.PHOTO, { link: { kind: 'shortcut' }, cloudOnly: true })), RowKind.PHOTO);
+  assert.equal(rowKindOf(file(FileKind.PHOTO, { link: { kind: LinkKind.SHORTCUT }, cloudOnly: true })), RowKind.PHOTO);
 });
