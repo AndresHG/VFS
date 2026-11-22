@@ -1,0 +1,12 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_01Answer","status":"in_progress","model":"gpt-6.2-sol"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_01","output_index":1,"content_index":0,"delta":"{\"answer\":\"La fianza fue de 1.200 € [P0].\","}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_01","output_index":1,"content_index":0,"delta":"\"citations\":[{\"passage_id\":0,\"quote\":\"La fianza asciende a 1.200 euros.\"},{\"passage_id\":1,\"quote\":\"no está en el pasaje\"}]}"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_01Answer","object":"response","status":"completed","model":"gpt-6.2-sol","output":[{"id":"rs_01","type":"reasoning","summary":[]},{"id":"msg_01","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","annotations":[],"text":"{\"answer\":\"La fianza fue de 1.200 € [P0].\",\"citations\":[{\"passage_id\":0,\"quote\":\"La fianza asciende a 1.200 euros.\"},{\"passage_id\":1,\"quote\":\"no está en el pasaje\"}]}"}]}],"usage":{"input_tokens":9500,"input_tokens_details":{"cached_tokens":0},"output_tokens":120,"output_tokens_details":{"reasoning_tokens":20},"total_tokens":9620}}}
+
