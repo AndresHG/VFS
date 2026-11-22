@@ -21,7 +21,8 @@ libc.workspace = true
 notify.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
+# VFS-27 R7: the idle probe (GetLastInputInfo).
+windows-sys = { workspace = true, features = ["Win32_UI_Input_KeyboardAndMouse"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # Cloud Files placeholders in tests (issue 170): a real sync root, as OneDrive makes one.

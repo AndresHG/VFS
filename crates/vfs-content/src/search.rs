@@ -482,22 +482,14 @@ struct Stats {
 }
 
 impl Stats {
-    fn load(conn: &Connection, keys: &HashSet<&str>) -> Result<Stats> {
-        let docs: i64 = conn.query_row(
-            "SELECT count(*) FROM c.docs WHERE state = ?1",
-            [ContentState::Indexed as i64],
-            |r| r.get(0),
-        )?;
+    fn load(conn: &Connection, docs: u64, keys: &HashSet<&str>) -> Result<Stats> {
         let mut st = conn.prepare_cached("SELECT doc FROM c.content_vocab WHERE term = ?1")?;
         let mut df = HashMap::new();
         for k in keys {
             let n: Option<i64> = st.query_row([k], |r| r.get(0)).optional()?;
             df.insert(k.to_string(), n.unwrap_or(0).max(0) as u64);
         }
-        Ok(Stats {
-            docs: docs.max(0) as u64,
-            df,
-        })
+        Ok(Stats { docs, df })
     }
 
     /// R14: a word in more than 5 % of the indexed documents filters but does not rank.
@@ -621,6 +613,31 @@ impl UnreadReason {
 /// every other crate (VFS-2 R15).
 pub struct Searcher {
     conn: Connection,
+    /// The indexed-document count and when it was read: counted at most every
+    /// [`DOC_COUNT_TTL`], not on every query (VFS-27 hand-off from VFS-2).
+    doc_count: std::sync::Mutex<Option<(Instant, u64)>>,
+}
+
+/// How long a [`Searcher`] reuses its indexed-document count. The count only weighs the
+/// frequency guard's 5 % (R14); while the store fills, a count up to this old can mark a few
+/// more words common than a fresh one. A count of 0 is never reused.
+const DOC_COUNT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The cached count, when it may be reused at `now`: not older than [`DOC_COUNT_TTL`], and
+/// never 0 (a store still filling would make every word common).
+fn reuse_count(cached: Option<(Instant, u64)>, now: Instant) -> Option<u64> {
+    let (at, n) = cached?;
+    (n > 0 && now.saturating_duration_since(at) < DOC_COUNT_TTL).then_some(n)
+}
+
+/// Indexed documents in the store.
+fn count_indexed(conn: &Connection) -> Result<u64> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM c.docs WHERE state = ?1",
+        [ContentState::Indexed as i64],
+        |r| r.get(0),
+    )?;
+    Ok(n.max(0) as u64)
 }
 
 impl Searcher {
@@ -631,6 +648,7 @@ impl Searcher {
         }
         Ok(Searcher {
             conn: store::open_index_ro(index_db)?,
+            doc_count: std::sync::Mutex::new(None),
         })
     }
 
@@ -642,7 +660,18 @@ impl Searcher {
         k: u32,
         offset: u32,
     ) -> Result<ContentResponse> {
-        retrieve_conn(&self.conn, query, filters, k, offset)
+        let docs = {
+            let mut cached = self.doc_count.lock().unwrap_or_else(|e| e.into_inner());
+            match reuse_count(*cached, Instant::now()) {
+                Some(n) => n,
+                None => {
+                    let n = count_indexed(&self.conn)?;
+                    *cached = Some((Instant::now(), n));
+                    n
+                }
+            }
+        };
+        retrieve_conn(&self.conn, docs, query, filters, k, offset)
     }
 
     /// The user's text query, as the CLI and the app run it.
@@ -768,6 +797,7 @@ pub fn retrieve(
 
 fn retrieve_conn(
     conn: &Connection,
+    docs: u64,
     query: &Query,
     filters: &SearchFilters,
     k: u32,
@@ -795,13 +825,13 @@ fn retrieve_conn(
             ..empty
         });
     };
-    let stats = Stats::load(conn, &plan.keys())?;
+    let stats = Stats::load(conn, docs, &plan.keys())?;
     let mut resp = run_plan(conn, &plan, &stats, &filter, k, offset, &analyzer)?;
     // R13: two or more words that are not all in one document: any of them, marked partial.
     let words = plan.required.len() + plan.optional.len();
     if resp.total == 0 && matches!(query, Query::Text(_)) && words >= 2 {
         let fallback = plan.any_of_all();
-        let stats = Stats::load(conn, &fallback.keys())?;
+        let stats = Stats::load(conn, docs, &fallback.keys())?;
         resp = run_plan(conn, &fallback, &stats, &filter, k, offset, &analyzer)?;
         resp.partial = true;
     }
@@ -1002,5 +1032,16 @@ mod tests {
         let words: Vec<&str> = hl.iter().map(|[b, e]| &s[*b..*e]).collect();
         assert_eq!(words, ["facturas", "calefacción"]);
         assert!(s.contains("señor Muñoz pagó las facturas"));
+    }
+
+    /// VFS-2 AC-15 (R14): a `Searcher` reuses its indexed-document count for at most
+    /// `DOC_COUNT_TTL`, and never a count of 0.
+    #[test]
+    fn document_count_reuse() {
+        let t = Instant::now();
+        assert_eq!(reuse_count(None, t), None);
+        assert_eq!(reuse_count(Some((t, 0)), t), None);
+        assert_eq!(reuse_count(Some((t, 40)), t + DOC_COUNT_TTL / 2), Some(40));
+        assert_eq!(reuse_count(Some((t, 40)), t + DOC_COUNT_TTL), None);
     }
 }

@@ -31,6 +31,20 @@ pub struct WorkerConfig {
 /// How often a wait for the worker's answer looks at the stop flag.
 const STOP_POLL: Duration = Duration::from_millis(50);
 
+/// A wait that returns this much later than asked means the machine was suspended.
+const SUSPEND_GAP: Duration = Duration::from_secs(2);
+
+/// The deadline after a wait that asked for `asked` and took `took`: a wait that overran by
+/// more than [`SUSPEND_GAP`] spanned a sleep, and the time asleep does not count against the
+/// document (VFS-27 R9).
+pub(crate) fn extend_for_suspension(deadline: Instant, asked: Duration, took: Duration) -> Instant {
+    if took > asked + SUSPEND_GAP {
+        deadline + (took - asked)
+    } else {
+        deadline
+    }
+}
+
 /// Why [`Supervisor::extract`] returned no answer for the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
@@ -273,7 +287,7 @@ impl Supervisor {
         }
         // Wait in short slices so a stop request is seen; after one, the file in flight gets
         // `stop_grace` before the worker is killed.
-        let deadline = started + timeout;
+        let mut deadline = started + timeout;
         let mut grace_end: Option<Instant> = None;
         let received = loop {
             let now = Instant::now();
@@ -287,9 +301,16 @@ impl Supervisor {
             let until = grace_end
                 .map_or(deadline, |g| g.min(deadline))
                 .min(now + STOP_POLL);
+            let asked = until.saturating_duration_since(now);
             let lines = &self.running.as_ref().expect("running").lines;
-            match lines.recv_timeout(until.saturating_duration_since(now)) {
-                Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => continue,
+            match lines.recv_timeout(asked) {
+                Err(RecvTimeoutError::Timeout) => {
+                    deadline = extend_for_suspension(deadline, asked, now.elapsed());
+                    if Instant::now() < deadline {
+                        continue;
+                    }
+                    break Err(RecvTimeoutError::Timeout);
+                }
                 other => break other,
             }
         };
@@ -401,5 +422,29 @@ mod job {
                 CloseHandle(self.0);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// VFS-27 AC-8 (R9): a wait that overran by the length of a sleep moves the document's
+    /// deadline by that much, so a document in flight across a sleep is not failed by timeout;
+    /// an ordinary wait leaves it alone.
+    #[test]
+    fn sleep_does_not_count_against_the_document() {
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(30);
+        let poll = Duration::from_millis(50);
+        assert_eq!(
+            extend_for_suspension(deadline, poll, Duration::from_millis(60)),
+            deadline
+        );
+        let slept = Duration::from_secs(120);
+        assert_eq!(
+            extend_for_suspension(deadline, poll, poll + slept),
+            deadline + slept
+        );
     }
 }

@@ -21,7 +21,7 @@
 mod apply;
 mod cursor;
 mod exclude;
-mod sched;
+pub(crate) mod sched;
 mod walk;
 mod watch;
 

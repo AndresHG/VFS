@@ -29,6 +29,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │   │    ├─ cursor.rs    change cursor: USN / FSEvents replay │
 │   │    └─ watch.rs     FSEvents (notify) / own Windows loop │
 │   ├─ platform.rs       volume key, drive kind, priority     │
+│   ├─ probes.rs         disk load, idle, free space (pub)    │
 │   ├─ db.rs             connections, schema, ingest, session │
 │   ├─ link.rs           .lnk / .url / symlink target reader  │
 │   └─ fold.rs, kind.rs  search keys, extension → type        │

@@ -16,6 +16,7 @@ pub mod cloud;
 #[cfg(feature = "extractor")]
 pub mod extract;
 pub mod indexer;
+pub mod pace;
 pub mod paths;
 pub mod protocol;
 pub mod search;
@@ -24,7 +25,9 @@ pub mod supervisor;
 #[cfg(feature = "extractor")]
 pub mod worker;
 
-pub use indexer::{run as index, IndexOptions, RunSummary, StoreStats};
+pub use indexer::{
+    run as index, run_with as index_with, Admit, Gate, IndexOptions, RunSummary, StoreStats,
+};
 pub use search::{
     retrieve, search, ContentHit, ContentResponse, Passage, PassageText, Query, Searcher,
     StructuredQuery, UnreadReason,

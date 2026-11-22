@@ -99,15 +99,16 @@ pub(crate) fn catchup_delay(uptime: Option<Duration>, boot_grace: Duration) -> D
 
 /// What the walk does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Step {
+pub enum Step {
     Work,
     /// Pause this long, then ask again.
     Wait(Duration),
 }
 
 /// Busy-disk back-off (VFS-5 R4): a window of busy/calm samples, a pause while the window is
-/// busy, and a forced work slice after `max_backoff` so progress never stops.
-pub(crate) struct BackOff {
+/// busy, and a forced work slice after `max_backoff` so progress never stops. The content
+/// indexer uses the same rule between documents (VFS-27 R7).
+pub struct BackOff {
     cfg: SchedConfig,
     samples: VecDeque<bool>,
     last_sample: Option<Instant>,
@@ -126,9 +127,24 @@ impl BackOff {
         }
     }
 
+    /// The rule with VFS-5's default thresholds.
+    pub fn with_defaults() -> BackOff {
+        BackOff::new(SchedConfig::default())
+    }
+
+    /// Longest continuous back-off before a forced work slice.
+    pub fn max_backoff(&self) -> Duration {
+        self.cfg.max_backoff
+    }
+
+    /// Length of the forced work slice.
+    pub fn min_work(&self) -> Duration {
+        self.cfg.min_work
+    }
+
     /// Decides at `now`, taking a new sample from `load` (a queue length, or `None` when the
     /// probe has nothing) once `sample_every` has passed since the last one.
-    pub(crate) fn step(&mut self, now: Instant, load: &mut dyn FnMut() -> Option<f64>) -> Step {
+    pub fn step(&mut self, now: Instant, load: &mut dyn FnMut() -> Option<f64>) -> Step {
         if self
             .last_sample
             .is_none_or(|t| now.saturating_duration_since(t) >= self.cfg.sample_every)
