@@ -1788,8 +1788,10 @@ fn ac5_content_size_limit_from_the_file_filter() {
 
     // Lowered again, a new 120 MB document is too large; at 0 it is read.
     s.vfs.set_content_max_mb(100).unwrap();
-    let p = big_file(&s, "enorme.pdf", 120);
-    s.vfs.mark_dirty(&[p.canonicalize().unwrap()]).unwrap();
+    big_file(&s, "enorme.pdf", 120);
+    // The root as stored (canonical, without Windows' `\\?\` prefix) names the change.
+    let root = std::path::PathBuf::from(&s.vfs.list_roots().unwrap()[0].path);
+    s.vfs.mark_dirty(&[root.join("enorme.pdf")]).unwrap();
     s.scan();
     let third = s.run(&s.opts());
     assert_eq!(third.files_opened, 0, "{third:?}");
