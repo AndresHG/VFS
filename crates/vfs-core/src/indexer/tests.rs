@@ -1934,6 +1934,10 @@ fn migrated_cloud_only_shortcut_is_never_opened() {
     fx.conn
         .execute_batch(
             "UPDATE files SET flags = flags & 1;
+             DROP INDEX dirs_unpopulated;
+             ALTER TABLE dirs DROP COLUMN unpopulated;
+             ALTER TABLE roots DROP COLUMN cloud_only_count;
+             ALTER TABLE roots DROP COLUMN links_count;
              DROP TABLE links;
              DROP INDEX dirs_unreadable;
              ALTER TABLE dirs DROP COLUMN error;
