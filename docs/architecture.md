@@ -71,7 +71,7 @@ uncompacted. An index from a newer build fails with
 
 | Table | Holds |
 |---|---|
-| `meta` | key/value pairs: each root's change cursor, `cursor/<root id>` (VFS-9) |
+| `meta` | key/value pairs: each root's change cursor, `cursor/<root id>` (VFS-9), and `paused/<root id>` while a root is paused (VFS-32) |
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`) |
@@ -286,6 +286,12 @@ walked, wait until that root's last full scan is 1 hour old; manual requests do 
 power cut can roll the index back to an older walk (VFS-3 AC-5). An owed walk that is due
 starts before the indexer reports idle, so the status never reads up to date while one is
 owed (I10). So a burst of sync-client churn cannot chain full walks back to back.
+
+A paused root (VFS-32) is left alone: none of its pending folders is listed, it is not
+watched, its history is not replayed at start, its owed walks stay owed, and it counts for
+neither the one-walk rule nor the pass mode, so the other roots keep indexing. Resuming
+watches it again, replays its history from its cursor and continues its pending folders;
+when the replay cannot run, a root being walked restarts its walk in place.
 
 ### Watcher and re-walk
 
@@ -528,11 +534,12 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 |---|---|---|
 | `system_locale` | — | `string`: the OS locale as BCP 47, `""` when unknown; the UI picks its language from it (VFS-22) |
 | `set_language` | `lang` (`"es"` or `"en"`; anything else is ignored) | `null`; window title, macOS menu and folder picker follow it (VFS-22) |
-| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`, and `unreadable`: its number of folders that could not be listed, VFS-10) |
+| `list_roots` | — | `Root[]` (each with `drive`: `local`, `network`, `removable`, `unknown`, `unreadable`: its number of folders that could not be listed, VFS-10, and `paused`, VFS-32) |
 | `list_unreadable` | `rootId` | `UnreadableDir[]` (`{ id, path, reason }`, `reason`: `no_permission`, `unavailable`, `cloud_only`, `disk_error`; `id` is a `dirs.id`), at most 500 in path order |
 | `pick_folder` | — | `string \| null` (native folder dialog) |
 | `add_root` | `path` | `Root` |
 | `remove_root` | `id` | `null` |
+| `set_root_paused` | `id`, `paused` | `null`; `not_found` for an unknown root or one being removed (VFS-32) |
 | `search` | `query: SearchQuery` | `SearchResponse` |
 | `suggest` | `query: SearchQuery` | `Suggestion \| null` (VFS-13) |
 | `reveal` | `id`, `isDir` | `"revealed"` or `"opened_parent"` |

@@ -12,10 +12,36 @@ use crate::fold::fold_key;
 use crate::platform;
 use crate::types::{Root, RootStatus, UnreadableDir, UnreadableReason};
 
-/// The last column counts the root's unreadable folders on the partial index
-/// `dirs_unreadable` (its condition is spelled out so SQLite uses it, VFS-10 R4).
-const ROOT_COLS: &str = "id, path, status, files_count, dirs_count, last_full_scan_at, \
-    (SELECT COUNT(*) FROM dirs d WHERE d.root_id = roots.id AND d.error IS NOT NULL)";
+/// Column 6 counts the root's unreadable folders on the partial index `dirs_unreadable`
+/// (its condition is spelled out so SQLite uses it, VFS-10 R4); column 7 is its pause key
+/// (VFS-32 R1).
+const ROOT_COLS: &str = concat!(
+    "id, path, status, files_count, dirs_count, last_full_scan_at, \
+    (SELECT COUNT(*) FROM dirs d WHERE d.root_id = roots.id AND d.error IS NOT NULL), EXISTS ",
+    paused_key_sql!("roots.id")
+);
+
+/// Prefix of a root's pause key in `meta`, `paused/<root id>` (VFS-32 R1). Every key and SQL
+/// condition is built from it.
+macro_rules! paused_prefix {
+    () => {
+        "paused/"
+    };
+}
+
+/// A subquery that has a row when the root whose id is the SQL expression `$id` is paused.
+macro_rules! paused_key_sql {
+    ($id:literal) => {
+        concat!(
+            "(SELECT 1 FROM meta WHERE key = '",
+            $crate::roots::paused_prefix!(),
+            "' || ",
+            $id,
+            ")"
+        )
+    };
+}
+pub(crate) use {paused_key_sql, paused_prefix};
 
 fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
     let path: String = r.get(1)?;
@@ -28,6 +54,7 @@ fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
         dirs: r.get::<_, i64>(4)?.max(0) as u64,
         last_full_scan: r.get(5)?,
         unreadable: r.get::<_, i64>(6)?.max(0) as u64,
+        paused: r.get(7)?,
     })
 }
 
@@ -173,8 +200,10 @@ pub(crate) fn add_root(conn: &mut Connection, path: &Path) -> Result<(Root, Take
         drop(rows);
         for id in superseded {
             ingest::delete_root(&tx, id)?;
-            // Root ids are reused: the old root's change cursor goes with it (VFS-9 R8).
+            // Root ids are reused: the old root's change cursor and pause go with it
+            // (VFS-9 R8, VFS-32 R1).
             crate::indexer::forget_cursor(&tx, id)?;
+            set_paused_key(&tx, id, false)?;
         }
     }
     let id = ingest::insert_root(&tx, &platform::volume_key(&canon), &path_str)?;
@@ -280,6 +309,9 @@ fn take_in(
     }
     tx.execute("DELETE FROM roots WHERE id = ?1", [inner_id])?;
     crate::indexer::forget_cursor(tx, inner_id)?;
+    // Root ids are reused: the inner root's pause goes with it (VFS-32 R1); its folders,
+    // pending ones included, are the parent's now.
+    set_paused_key(tx, inner_id, false)?;
     taken.roots += 1;
     Ok(())
 }
@@ -295,6 +327,34 @@ pub(crate) fn remove_root(conn: &mut Connection, root_id: i64) -> Result<()> {
         return Err(Error::NotFound(format!("root {root_id}")));
     }
     Ok(())
+}
+
+/// Writes or deletes `root_id`'s pause key (VFS-32 R1).
+pub(crate) fn set_paused_key(conn: &Connection, root_id: i64, paused: bool) -> Result<()> {
+    let key = format!(concat!(paused_prefix!(), "{}"), root_id);
+    if paused {
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, '1')",
+            [key],
+        )?;
+    } else {
+        conn.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+    }
+    Ok(())
+}
+
+/// Pauses or resumes indexing of a root (VFS-32 R1). `NotFound` for an unknown root or one
+/// being removed. The facade notifies the indexer afterwards.
+pub(crate) fn set_root_paused(conn: &Connection, root_id: i64, paused: bool) -> Result<()> {
+    let live: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM roots WHERE id = ?1 AND status <> ?2)",
+        [root_id, RootStatus::Removing.code()],
+        |r| r.get(0),
+    )?;
+    if !live {
+        return Err(Error::NotFound(format!("root {root_id}")));
+    }
+    set_paused_key(conn, root_id, paused)
 }
 
 #[cfg(test)]

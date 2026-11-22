@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { statusText, checkedAt, viewFor, footerActions } from '../ui/status.js';
+import { statusText, checkedAt, viewFor, footerActions, rootAction, RootAction } from '../ui/status.js';
 import { SearchState, View, TypeChecklist, typeChecklistMode } from '../ui/choices.js';
 import { localeFor } from '../ui/strings.js';
 import { IndexerState, RootStatus } from '../ui/contract.js';
@@ -89,4 +89,24 @@ test('footerActions offers pause or a check, never both', () => {
 test('typeChecklistMode falls back to inline chips without the Popover API', () => {
   assert.equal(typeChecklistMode({ popover: null }), TypeChecklist.POPOVER);
   assert.equal(typeChecklistMode({}), TypeChecklist.INLINE);
+});
+
+/** VFS-32 AC-6 (R8): the folder row's first button pauses a folder being walked, resumes a
+ *  paused one, and otherwise checks again; the labels come from both catalogs. */
+test('folder row button for each state', () => {
+  const cases = [
+    [RootStatus.PENDING, false, RootAction.PAUSE],
+    [RootStatus.SCANNING, false, RootAction.PAUSE],
+    [RootStatus.PENDING, true, RootAction.RESUME],
+    [RootStatus.SCANNING, true, RootAction.RESUME],
+    [RootStatus.READY, true, RootAction.RESUME],
+    [RootStatus.READY, false, RootAction.RESCAN],
+    [RootStatus.UNAVAILABLE, false, RootAction.RESCAN],
+  ];
+  for (const [status, paused, want] of cases) {
+    assert.equal(rootAction(root({ status, paused }), status), want, `${status} paused=${paused}`);
+  }
+  assert.deepEqual([S.rootPause, S.rootResume, S.rescan, S.rootPaused], ['Pausar', 'Reanudar', 'Volver a revisar', 'En pausa']);
+  const en = localeFor('en', 'en-US').S;
+  assert.deepEqual([en.rootPause, en.rootResume, en.rescan, en.rootPaused], ['Pause', 'Resume', 'Check again', 'Paused']);
 });

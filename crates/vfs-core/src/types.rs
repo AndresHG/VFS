@@ -381,6 +381,8 @@ pub struct Root {
     pub drive: DriveKind,
     /// Folders of this root that could not be listed (VFS-10 R4).
     pub unreadable: u64,
+    /// Indexing of this root is paused until resumed (VFS-32 R1).
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,6 +537,7 @@ mod tests {
             last_full_scan: Some(9),
             drive: DriveKind::Removable,
             unreadable: 2,
+            paused: false,
         };
         let v = serde_json::to_value(&root).unwrap();
         assert_eq!(v["lastFullScan"], json!(9));

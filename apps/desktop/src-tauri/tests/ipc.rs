@@ -217,6 +217,19 @@ fn add_root_search_progress_end_to_end() {
 
     invoke(&webview, "set_paused", json!({ "paused": true })).unwrap();
     invoke(&webview, "set_paused", json!({ "paused": false })).unwrap();
+    // VFS-32 R1, R8: `set_root_paused` over IPC; the root list carries `paused`.
+    let paused = |on: bool| {
+        invoke(
+            &webview,
+            "set_root_paused",
+            json!({ "id": root_id, "paused": on }),
+        )
+        .unwrap();
+        let roots = invoke(&webview, "list_roots", json!({})).unwrap();
+        assert_eq!(roots[0]["paused"], json!(on));
+    };
+    paused(true);
+    paused(false);
     invoke(&webview, "remove_root", json!({ "id": root_id })).unwrap();
 
     app.state::<AppState>().vfs.shutdown();

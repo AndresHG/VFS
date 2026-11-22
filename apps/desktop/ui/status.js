@@ -59,6 +59,16 @@ export function viewFor({ backendMissing, rootsLoaded, rootCount, searchState })
   return searchState === SearchState.IDLE ? View.START : View.LIST;
 }
 
+/** The folder row's first button (VFS-32 R8): pause while the folder is being walked, resume
+ *  while paused, otherwise check again. `status` is the row's current status. */
+export const RootAction = Object.freeze({ PAUSE: 'pause', RESUME: 'resume', RESCAN: 'rescan' });
+
+export function rootAction(root, status) {
+  if (root.paused) return RootAction.RESUME;
+  if (status === RootStatus.PENDING || status === RootStatus.SCANNING) return RootAction.PAUSE;
+  return RootAction.RESCAN;
+}
+
 /**
  * Status-line buttons for progress `p`: "Pausar"/"Continuar" while folders are being checked,
  * "Buscar cambios ahora" only when nothing is being checked (VFS-1 U6).
