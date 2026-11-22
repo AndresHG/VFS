@@ -284,6 +284,27 @@ impl Vfs {
         }
     }
 
+    /// Whether the default folder exclusions are turned off: «Incluir carpetas del sistema y
+    /// de programas» (VFS-33 R9). Off unless the user turned it on.
+    pub fn include_all_folders(&self) -> Result<bool> {
+        indexer::include_all(&lock(&self.inner.reader))
+    }
+
+    /// Turns «Incluir carpetas del sistema y de programas» on or off and, when it changes,
+    /// queues a full walk of every root so the index follows (VFS-33 R8).
+    pub fn set_include_all_folders(&self, on: bool) -> Result<()> {
+        let conn = db::open_rw(&self.inner.db_path)?;
+        if indexer::include_all(&conn)? == on {
+            return Ok(());
+        }
+        indexer::set_include_all(&conn, on)?;
+        drop(conn);
+        match self.rescan(None) {
+            Err(Error::Unavailable(_)) | Ok(()) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn set_paused(&self, paused: bool) {
         if let Some(h) = lock(&self.inner.indexer).as_ref() {
             h.set_paused(paused);

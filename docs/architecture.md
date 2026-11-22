@@ -173,6 +173,16 @@ followed, and a root that has become a link is unavailable. It skips:
   Synology names `.SynologyWorkingDirectory`, `@eaDir`, `#recycle` and `#snapshot`, and
   temporary names (`._*`, `~$*`, `.~lock.*#`, `~*.tmp`). The watcher uses the same function
   (I8);
+- the default folder exclusions (`indexer/exclude.rs`, VFS-33), unless «Incluir carpetas
+  del sistema y de programas» (`meta` `include_all_folders`) is on: one data table, `LIST`,
+  of folder names anywhere, home paths (`~/Library` but iCloud Drive and `CloudStorage`,
+  `AppData`, tool caches), volume paths (`Windows`, `Program Files`, `/System`...) and marker
+  entries (`CACHEDIR.TAG` empties the folder; `pyvenv.cfg` drops the venv's `lib`, `bin`,
+  `Scripts`, `include`). `Exclusions::for_root` drops the path rules that are the root or
+  contain it, so a folder added as a root is indexed; per listing it costs one map lookup
+  and a name scan per subfolder. The watcher filter and replays drop changes inside them.
+  Each root records the list version and setting of its last full walk (`meta`
+  `exclusions/<id>`); a mismatch at start owes a full walk;
 - the app's own data directory;
 - entries that vanish, or fail with an error other than permission denied, while being
   listed. An entry whose metadata is denied fails the whole listing, so the folder is

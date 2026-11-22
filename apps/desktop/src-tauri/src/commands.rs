@@ -39,6 +39,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         get_progress,
         rescan,
         set_paused,
+        get_include_all_folders,
+        set_include_all_folders,
         crate::bookmarks::search_sources,
         crate::bookmarks::get_bookmarks_status,
         crate::bookmarks::set_bookmarks_enabled,
@@ -217,6 +219,19 @@ pub fn rescan<R: Runtime>(
 pub fn set_paused(state: State<'_, AppState>, paused: bool) -> CmdResult<()> {
     state.vfs.set_paused(paused);
     Ok(())
+}
+
+/// «Incluir carpetas del sistema y de programas» (VFS-33 R9): off by default.
+#[tauri::command(async)]
+pub fn get_include_all_folders(state: State<'_, AppState>) -> CmdResult<bool> {
+    Ok(state.vfs.include_all_folders()?)
+}
+
+/// Sets it and returns the stored value; a change re-walks every folder (VFS-33 R8).
+#[tauri::command(async)]
+pub fn set_include_all_folders(state: State<'_, AppState>, on: bool) -> CmdResult<bool> {
+    state.vfs.set_include_all_folders(on)?;
+    Ok(state.vfs.include_all_folders()?)
 }
 
 #[cfg(test)]

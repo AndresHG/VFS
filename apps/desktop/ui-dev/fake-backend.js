@@ -224,6 +224,7 @@ export function createFakeBackend(params) {
   const progressCbs = new Set();
   const changedCbs = new Set();
   const updateSettings = { checkOnOpen: true };
+  let includeAllFolders = false;
   const updateCbs = new Set();
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
@@ -502,6 +503,8 @@ export function createFakeBackend(params) {
     async feedbackSave() { await sleep(300); return { folder: 'C:\\Users\\demo\\Downloads', file: 'vfs-informe-2026-11-21-1030.zip' }; },
 
     // VFS-21: `?update` offers 0.9.0; `?update=fail` makes the download fail halfway.
+    async getIncludeAllFolders() { return includeAllFolders; },
+    async setIncludeAllFolders(on) { includeAllFolders = on; return includeAllFolders; },
     async getUpdateSettings() { return { ...updateSettings }; },
     async setUpdateCheck(enabled) { updateSettings.checkOnOpen = enabled; return { ...updateSettings }; },
     async checkForUpdate() {

@@ -61,6 +61,9 @@ function tauriBackend(t) {
     rescan: (id) => invoke('rescan', { id }),
     setRootPaused: (id, paused) => invoke('set_root_paused', { id, paused }),
     setPaused: (paused) => invoke('set_paused', { paused }),
+    // VFS-33: «Incluir carpetas del sistema y de programas» -> boolean.
+    getIncludeAllFolders: () => invoke('get_include_all_folders'),
+    setIncludeAllFolders: (on) => invoke('set_include_all_folders', { on }),
     searchSources: (query, options) => invoke('search_sources', { query, options }),
     getBookmarksStatus: () => invoke('get_bookmarks_status'),
     setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),
@@ -96,6 +99,7 @@ function missingBackend() {
     listRoots: fail, listUnreadable: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
     suggest: fail,
     reveal: fail, revealTarget: fail, openLinkUrl: fail, getProgress: fail, rescan: fail, setRootPaused: fail, setPaused: fail,
+    getIncludeAllFolders: fail, setIncludeAllFolders: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,
     onUpdateProgress: async () => () => {},

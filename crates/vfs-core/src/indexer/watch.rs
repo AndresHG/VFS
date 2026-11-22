@@ -6,9 +6,11 @@
 //! dropped before they reach the indexer (VFS-1 I3, I8). On Windows a rename's old and new
 //! names in one buffer are also reported as a pair (VFS-1 I9).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use super::exclude::{self, Exclusions};
 use super::walk::is_excluded;
 use crate::error::Result;
 
@@ -62,11 +64,10 @@ pub(crate) struct RootWatcher {
 }
 
 impl RootWatcher {
-    /// Creates a watcher that reports through `sink` and drops events under `ignore` (the
-    /// app's data directory).
-    pub(crate) fn start(sink: WatchSink, ignore: PathBuf) -> Result<RootWatcher> {
+    /// Creates a watcher that reports through `sink` and drops the events `filter` drops.
+    pub(crate) fn start(sink: WatchSink, filter: Filter) -> Result<RootWatcher> {
         Ok(RootWatcher {
-            backend: imp::Backend::new(sink, Filter::new(ignore))?,
+            backend: imp::Backend::new(sink, filter)?,
         })
     }
 
@@ -82,10 +83,21 @@ impl RootWatcher {
     }
 }
 
-/// Paths whose events are dropped (the app data directory, as given and canonicalized).
-/// Replayed changes go through the same filter (VFS-9 R7).
+/// Paths whose events are dropped (the app data directory, as given and canonicalized, and
+/// the default folder exclusions, VFS-33 R5). Replayed changes go through the same filter
+/// (VFS-9 R7). Clones share the exclusion setting.
 #[derive(Clone)]
-pub(crate) struct Filter(Arc<Vec<PathBuf>>);
+pub(crate) struct Filter {
+    ignore: Arc<Vec<PathBuf>>,
+    rules: Arc<RwLock<Rules>>,
+}
+
+/// The default exclusions per root, built on first use; none while the user includes them.
+struct Rules {
+    include_all: bool,
+    home: Option<PathBuf>,
+    by_root: HashMap<PathBuf, Arc<Exclusions>>,
+}
 
 impl Filter {
     /// Drops `ignore` (the app data directory) as given and canonicalized.
@@ -97,21 +109,64 @@ impl Filter {
             }
         }
         ignore_list.push(ignore);
-        Filter(Arc::new(ignore_list))
+        Filter::from_list(ignore_list)
+    }
+
+    fn from_list(ignore: Vec<PathBuf>) -> Filter {
+        Filter {
+            ignore: Arc::new(ignore),
+            rules: Arc::new(RwLock::new(Rules {
+                include_all: false,
+                home: exclude::home(),
+                by_root: HashMap::new(),
+            })),
+        }
+    }
+
+    /// Turns the default exclusions off (`true`) or on, for every clone.
+    pub(crate) fn set_include_all(&self, include_all: bool) {
+        let mut rules = self.rules.write().unwrap_or_else(|e| e.into_inner());
+        if rules.include_all != include_all {
+            rules.include_all = include_all;
+            rules.by_root.clear();
+        }
+    }
+
+    /// The exclusions in force below `root`.
+    pub(crate) fn exclusions(&self, root: &Path) -> Arc<Exclusions> {
+        if let Some(x) = self
+            .rules
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .by_root
+            .get(root)
+        {
+            return Arc::clone(x);
+        }
+        let mut rules = self.rules.write().unwrap_or_else(|e| e.into_inner());
+        let x = Arc::new(if rules.include_all {
+            Exclusions::none(root)
+        } else {
+            Exclusions::for_root(root, rules.home.as_deref())
+        });
+        rules.by_root.insert(root.to_path_buf(), Arc::clone(&x));
+        x
     }
 
     fn ignored(&self, path: &Path) -> bool {
-        self.0.iter().any(|p| path.starts_with(p))
+        self.ignore.iter().any(|p| path.starts_with(p))
     }
 
     /// Whether events for `path`, under the watched `root`, are dropped: under the app data
-    /// directory, or with a component below the root that the walker excludes.
+    /// directory, with a component below the root that the walker excludes, or in a folder
+    /// of the default exclusions.
     pub(crate) fn dropped(&self, path: &Path, root: &Path) -> bool {
         self.ignored(path)
             || path.strip_prefix(root).is_ok_and(|rel| {
                 rel.components()
                     .any(|c| is_excluded(&c.as_os_str().to_string_lossy()))
             })
+            || self.exclusions(root).drops(path)
     }
 }
 
@@ -714,7 +769,7 @@ mod tests {
     /// VFS-1 AC-7: events under the app data directory are dropped.
     #[test]
     fn filter_drops_app_data_paths() {
-        let f = Filter(Arc::new(vec![PathBuf::from("/datos/app")]));
+        let f = Filter::from_list(vec![PathBuf::from("/datos/app")]);
         assert!(f.ignored(Path::new("/datos/app/index.db-wal")));
         assert!(!f.ignored(Path::new("/datos/apple.txt")));
     }
@@ -724,7 +779,7 @@ mod tests {
     /// not a reason to drop.
     #[test]
     fn filter_drops_excluded_names_below_root() {
-        let f = Filter(Arc::new(vec![PathBuf::from("/datos/app")]));
+        let f = Filter::from_list(vec![PathBuf::from("/datos/app")]);
         let root = Path::new("/discos/#recycle/Archivo");
         for p in [
             "Fotos/.SynologyWorkingDirectory/x.db",
@@ -744,7 +799,7 @@ mod tests {
     /// yields no `Renamed`.
     #[test]
     fn notify_buffer_pairs_renames_and_drops_excluded() {
-        let f = Filter(Arc::new(Vec::new()));
+        let f = Filter::from_list(Vec::new());
         let root = Path::new("/r");
         let buf = buffer(vec![
             record(ACTION_RENAMED_OLD, "Viejo"),

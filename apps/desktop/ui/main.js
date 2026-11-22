@@ -1324,6 +1324,18 @@ function main(L) {
     }
   });
 
+  // VFS-33: «Incluir carpetas del sistema y de programas»; a change re-walks every folder.
+  const includeAll = $('include-all');
+  includeAll.addEventListener('change', async () => {
+    try {
+      includeAll.checked = await api.setIncludeAllFolders(includeAll.checked);
+    } catch (err) {
+      includeAll.checked = !includeAll.checked;
+      showError(errorText(err));
+    }
+  });
+  api.getIncludeAllFolders().then((on) => { includeAll.checked = on; }, () => {});
+
   async function startUpdates() {
     try {
       updatesToggle.checked = (await api.getUpdateSettings()).checkOnOpen;

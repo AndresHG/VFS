@@ -1,6 +1,6 @@
 # VFS-33 — A huge root settles: protected folders once, quiet background updates
 
-- **Status**: approved (part 1, after an independent critic pass); part 2 (default exclusions) waits on the owner
+- **Status**: part 1 implemented (PR #162); part 2 approved (owner decision, then an independent critic pass)
 - **Size**: M (indexer only, no schema change; part 2 adds a platform-specific list)
 - **Links**: issues 159, 156; VFS-1 I11 and U6; VFS-5 R1–R3 (pass modes); VFS-10 R1 (reasons)
 
@@ -74,8 +74,6 @@ Tests cite these ids (`VFS-33 AC-<m>`) in their doc comments.
 
 ## Non-goals
 
-- Default exclusions of system and app-data folders: part 2, after the owner's decision
-  (Decisions #3).
 - Coalescing watcher passes for longer than the existing 2 s, or rate-limiting the
   `pass_end` log lines of incremental passes: filed as a follow-up with the measurements
   below.
@@ -117,9 +115,101 @@ Tests cite these ids (`VFS-33 AC-<m>`) in their doc comments.
 |---|----------|--------|-----|------|
 | 1 | Retry "no permission" folders? | Once, then settle. A TCC or ACL denial does not heal by waiting (on macOS: 140 folders, 4 tries each in 15 min), and the VFS-10 list already says «Buscar cambios ahora» checks again. The one retry covers passing denials on Windows | Claude (issue 159 data, critic) | 2026-11-22 |
 | 2 | When does «Comprobando cambios» show? | During walk-mode passes only (full walks and batches over 64 folders); incremental updates are silent | Claude | 2026-11-22 |
-| 3 | Default exclusions (OS and app-data trees, developer folders) | Asked through the coordinating session; part 2 | owner | pending |
+| 3 | Default exclusions (OS and app-data trees, developer folders) | "Sistema + desarrollo" widened: a researched, sourced list in four categories (system, app data, development, other programs), all excluded by default; one hidden switch in Ajustes › Avanzado to include them; a folder added as a root is still indexed | owner (through the coordinating session) | 2026-11-22 |
+| 5 | Venvs: by name or by marker? | By the `pyvenv.cfg` marker, and only the venv's own subfolders: names such as `venv` or `env` are personal-folder names, and `python -m venv .` in a project must not hide the project | Claude (research) | 2026-11-22 |
+| 6 | Where does the setting live? | `meta` key `include_all_folders` in the index; each root records `exclusions/<id>` = list version and setting of its last full walk | Claude | 2026-11-22 |
 | 4 | Approval of part 1 | Approved by the session after an independent critic pass, per the owner's standing instruction | Claude | 2026-11-22 |
 
 ## Open questions
 
-- Decisions #3 (part 2 only; blocks nothing in part 1).
+None.
+
+## Part 2: default exclusions
+
+Owner decision (Decisions #3): option 2, "Sistema + desarrollo", widened. The list is
+researched and sourced, grouped into four categories, and all of it is excluded by default.
+One hidden switch in Ajustes › Avanzado includes these folders. A folder added explicitly as
+a root is still indexed.
+
+### Requirements (EARS)
+
+- R5. WHILE the setting «Incluir carpetas del sistema y de programas» is off (the default),
+  THE walker SHALL skip every folder below a root that a rule of the exclusion list matches,
+  and the watcher and replays (VFS-9, VFS-26) SHALL drop changes inside such folders. The
+  list is one data table (`crates/vfs-core/src/indexer/exclude.rs`, `LIST`), in four
+  categories: system, app data, development, other programs. A rule has one of these forms:
+  - a folder name anywhere, ignoring ASCII case;
+  - a path below the user's home;
+  - every child of a home path except named ones (`~/Library` keeps `Mobile Documents` and
+    `CloudStorage`);
+  - a path below the root of the root's volume;
+  - a marker entry inside a folder, matched by name only, because no file is opened (VFS-1).
+    `CACHEDIR.TAG` skips the folder's contents. `pyvenv.cfg` skips only the venv's
+    `lib`/`Lib`, `bin`, `Scripts`, `include`/`Include` subfolders.
+- R6. A path rule SHALL NOT apply to the root itself or to a folder that contains the root.
+  Markers SHALL NOT apply in the root folder itself. So a folder the user adds as a root
+  (`~/Library`, `AppData`, a `node_modules`, a Cargo `target`) is indexed, except for name
+  rules and markers in its subfolders.
+- R7. Matching SHALL cost one map lookup per listed folder plus a scan of the name list per
+  subfolder, and no file-system call beyond the listing.
+- R8. WHEN the setting changes, or WHEN an index made under an older exclusion list
+  (`meta` key `exclusions`, a version number) is opened, THE indexer SHALL owe a full walk
+  of every root (never deferred, VFS-1 I10). The walk removes newly excluded folders or adds
+  newly included ones.
+- R9. THE settings panel SHALL show, under a collapsed «Avanzado» section, one switch (off
+  by default) and a short text that names the categories with examples and says that adding
+  such a folder to the list indexes it. Both catalogs carry the copy (VFS-22).
+
+### Acceptance scenarios
+
+- AC-6 (R5, R7) Matcher unit tests on both platforms' lists:
+  - name rules, case-insensitive;
+  - home paths, including `~/Library`'s kept children;
+  - volume paths;
+  - both markers;
+  - events dropped under excluded folders and kept elsewhere;
+  - Windows paths compared ignoring case (Windows only);
+  - the table is well formed and uses every category.
+- AC-7 (R6) A root at `~/Library`, `~/Library/Caches`, `AppData` or a `node_modules` folder
+  is listed in full. Name rules and markers still apply below it.
+- AC-8 (R5) Given a tree with `node_modules`, a `CACHEDIR.TAG` folder, a `pyvenv.cfg`
+  project with `lib/` and its own `notas.txt`, and a plain folder, When it is scanned, Then
+  only the plain files, the marked folders' own names and `notas.txt` are indexed. When the
+  setting is turned on and the root is walked again, everything is indexed. When the setting
+  is turned off again and the root is walked, the excluded files are gone.
+- AC-9 (R8) Given an index without the current `exclusions` version, When the indexer
+  starts, Then every root owes a full walk, and the version is stored.
+- AC-10 (R9) UI test: the switch exists, is off by default, sits in a collapsed «Avanzado»
+  section, and its copy exists in both catalogs.
+
+### The list and its sources
+
+| Category | OS | Rule | Source |
+|---|---|---|---|
+| System | Win | volume `Windows`, `Windows.old`, `Program Files`, `Program Files (x86)`, `ProgramData`, `Users/Default`, `Recovery`, `PerfLogs`, `MSOCache`, `$WinREAgent`, `$Windows.~BT`, `$Windows.~WS` | Windows Search default scope (learn.microsoft.com/previous-versions/bb233501); Backblaze Windows exclusions (backblaze.com/computer-backup/docs/configure-exclusions-windows) |
+| System | Mac | volume `System`, `Library`, `private`, `usr`, `bin`, `sbin`, `cores`, `Network`; name `.MobileBackups` | Time Machine exclusions as described in eclecticlight.co/2025/05/02/what-isnt-backed-up; Datto macOS default exclusions (continuity.datto.com/help/Content/kb/EB2/EB2-default-exclusions-mac.htm) |
+| System | both | names `$RECYCLE.BIN`, `System Volume Information`, `.Trashes`, `.Trash`, `.Spotlight-V100`, `.fseventsd`, `.DocumentRevisions-V100`, `.TemporaryItems`, Synology `@eaDir`, `#recycle`, `#snapshot`, `.SynologyWorkingDirectory` | already excluded since VFS-1 (`walk::EXCLUDED`) |
+| App data | Mac | home `Library`, except `Mobile Documents` (iCloud Drive) and `CloudStorage` | Datto (Library/Caches, Containers, Group Containers); Apple File System Programming Guide |
+| App data | Win | home `AppData` | Windows Search skips AppData (devblogs.microsoft.com/windows-search-platform/configuration-and-settings) |
+| App data | both | home `.cache`, `.local/share/Trash` | XDG Base Directory spec (specifications.freedesktop.org/basedir-spec) |
+| Development | both | marker `CACHEDIR.TAG` (Cargo `target`, uv, pytest, mypy, ruff caches) | bford.info/cachedir; doc.rust-lang.org/cargo/guide/build-cache.html |
+| Development | both | marker `pyvenv.cfg` → `lib`, `Lib`, `bin`, `Scripts`, `include`, `Include` | PEP 405 (peps.python.org/pep-0405) |
+| Development | both | names `node_modules`, `bower_components`, `__pycache__`, `.git`, `.hg`, `.svn`, `.tox` | npm folders (docs.npmjs.com/cli/v10/configuring-npm/folders); PEP 3147; fd and ripgrep skip VCS folders (github.com/sharkdp/fd) |
+| Development | both | home `.npm`, `.cargo`, `.rustup`, `.gradle`, `.m2`, `.nuget`, `.conda`, `go/pkg/mod` | each tool's cache docs (npm cache, cargo home, rustup, Gradle directory layout, Maven settings, NuGet global packages, conda envs, go.dev/ref/mod#module-cache) |
+| Development | Mac | volume `opt/homebrew` | docs.brew.sh/Installation |
+| Programs | both | names `steamapps`, `.dropbox.cache` | help.steampowered.com (library folders); help.dropbox.com/sync/dropbox-cache-folder |
+
+Browser profiles, thumbnail caches, OneDrive and Google Drive internal state, and package
+caches under `AppData` or `~/Library` are covered by the app-data rules.
+
+Left out on purpose:
+- Generic names anywhere (`target`, `build`, `bin`, `cache`, `tmp`, `temp`, `dist`, `out`,
+  `lib`, `env`, `venv`): users name personal folders this way. Markers catch the real cases.
+- `VirtualBox VMs` and `Parallels`: few files, and users search for their VMs by name.
+- Skipping every dot-folder (fd's default): some apps and NAS tools write dot-folders inside
+  user content.
+- Checking `CACHEDIR.TAG`'s signature: it would mean opening a file.
+
+Known cost: `~/Library/Mail` (attachments) and `~/Library/Group Containers` (messaging media)
+hold personal data, and they are skipped. Backblaze and Datto make the same trade. The opt-in
+is the switch, or adding the folder as a root.

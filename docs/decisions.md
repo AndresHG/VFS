@@ -185,7 +185,9 @@ Office and LibreOffice lock files, temporary names) is the only list, used by th
 and by the watcher, which drops events under an excluded component before marking
 anything (spec I8). Two lists drift apart, and a watcher that reacts to files the walker
 ignores re-lists folders for nothing during sync churn. Rejected: separate lists per
-component.
+component. The default folder exclusions of VFS-33 (`indexer/exclude.rs`) follow the same
+rule: one table, read by the walker and by the watcher filter. They depend on the root and
+the user's home, so they live apart from the name-only list.
 
 ## Directory rename as a path update
 

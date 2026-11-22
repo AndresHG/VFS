@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::{RootWatcher, WatchEvent, WatchSink};
+use super::{Filter, RootWatcher, WatchEvent, WatchSink};
 
 const ROOT_ID: i64 = 7;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -45,7 +45,7 @@ fn fixture() -> Fixture {
             WatchEvent::Renamed { .. } => {}
         }
     });
-    let mut watcher = RootWatcher::start(sink, root.join("appdata")).unwrap();
+    let mut watcher = RootWatcher::start(sink, Filter::new(root.join("appdata"))).unwrap();
     watcher.watch(ROOT_ID, &root).unwrap();
     let mut f = Fixture {
         watcher,
