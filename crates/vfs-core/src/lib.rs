@@ -62,7 +62,9 @@ struct Inner {
     searcher: Mutex<(Connection, SearchState)>,
     search_interrupt: InterruptHandle,
     /// Searches started so far: a query sees whether a newer one interrupted it.
-    searches: AtomicU64,
+    searches: Arc<AtomicU64>,
+    /// Searches waiting for the search lock: a suggestion holding it stops (VFS-13 R4).
+    waiting: Arc<AtomicU64>,
     indexer: Mutex<Option<IndexerHandle>>,
     /// Open session marker; dropped by `shutdown` or with the last clone (clean shutdown).
     session: Mutex<Option<db::Session>>,
@@ -95,7 +97,8 @@ impl Vfs {
                 reader: Mutex::new(reader),
                 searcher: Mutex::new((search_conn, SearchState::default())),
                 search_interrupt,
-                searches: AtomicU64::new(0),
+                searches: Arc::new(AtomicU64::new(0)),
+                waiting: Arc::new(AtomicU64::new(0)),
                 indexer: Mutex::new(None),
                 session: Mutex::new(Some(session)),
             }),
@@ -145,8 +148,10 @@ impl Vfs {
     /// Runs a query; a query still running on another thread is interrupted first.
     pub fn search(&self, query: &SearchQuery) -> Result<SearchResponse> {
         let this = self.inner.searches.fetch_add(1, Ordering::SeqCst) + 1;
+        self.inner.waiting.fetch_add(1, Ordering::SeqCst);
         self.inner.search_interrupt.interrupt();
         let mut guard = lock(&self.inner.searcher);
+        self.inner.waiting.fetch_sub(1, Ordering::SeqCst);
         let started = std::time::Instant::now();
         let (conn, state) = &mut *guard;
         match search::search(conn, state, &self.inner.config, query) {
@@ -167,13 +172,13 @@ impl Vfs {
     /// One search that finds something for a `query` that found nothing (VFS-13): without
     /// filters, a short word respelt, or a word dropped. Counts only, within
     /// `SearchConfig::suggest_budget`. Never interrupts a search: it waits for a running one;
-    /// a newer search ends it with `None`.
+    /// a newer search ends it with `None`, also when its interrupt came before a try's first
+    /// statement, so that search never waits out the budget.
     pub fn suggest(&self, query: &SearchQuery) -> Result<Option<Suggestion>> {
-        let generation = self.inner.searches.load(Ordering::SeqCst);
+        let cancel = search::Cancel::new(&self.inner.searches, &self.inner.waiting);
         let mut guard = lock(&self.inner.searcher);
         let (conn, _) = &mut *guard;
-        let stale = || self.inner.searches.load(Ordering::SeqCst) != generation;
-        match suggest::suggest(conn, &self.inner.config, query, &stale) {
+        match suggest::suggest(conn, &self.inner.config, query, &cancel) {
             // A try cut while an FTS table opened (a newer search, or its budget) counts as
             // finding nothing (R4), as `search` reads the same cut as an interruption.
             Err(e) if search::is_table_open_cut(&e) => Ok(None),
@@ -307,8 +312,10 @@ impl Vfs {
 mod tests {
     use super::*;
 
-    /// VFS-13 AC-5: a newer search ends a suggestion with none, whether it started before the
-    /// first try or while a try ran; with no newer search the same query gets one.
+    /// VFS-13 AC-5: a newer search that started before the first try ends a suggestion with
+    /// none, and so does a search that started just before it but waits for the lock; with no
+    /// newer search the same query gets one. One that starts while a try runs is
+    /// `search::tests::a_newer_search_stops_a_count_without_an_interrupt`.
     #[test]
     fn a_newer_search_ends_a_suggestion() {
         let dir = tempfile::tempdir().unwrap();
@@ -343,20 +350,16 @@ mod tests {
         let mut guard = lock(&vfs.inner.searcher);
         let (conn, _) = &mut *guard;
         let config = SearchConfig::default();
-        let found = suggest::suggest(conn, &config, &q, &|| false).unwrap();
+        let cancel = search::Cancel::new(&vfs.inner.searches, &vfs.inner.waiting);
+        let found = suggest::suggest(conn, &config, &q, &cancel).unwrap();
         assert_eq!(found.map(|s| s.kind), Some(SuggestionKind::DropFilters));
-        assert_eq!(suggest::suggest(conn, &config, &q, &|| true).unwrap(), None);
-        // Fresh at the first check, stale once the try has run.
-        let checks = std::cell::Cell::new(0);
-        let after_first = || {
-            checks.set(checks.get() + 1);
-            checks.get() > 1
-        };
-        assert_eq!(
-            suggest::suggest(conn, &config, &q, &after_first).unwrap(),
-            None
-        );
-        assert_eq!(checks.get(), 2);
+        vfs.inner.searches.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(suggest::suggest(conn, &config, &q, &cancel).unwrap(), None);
+        // The search bumped the counter before this suggestion read it, then lost the lock.
+        let cancel = search::Cancel::new(&vfs.inner.searches, &vfs.inner.waiting);
+        vfs.inner.waiting.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(suggest::suggest(conn, &config, &q, &cancel).unwrap(), None);
+        vfs.inner.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 
     /// The facade opens a fresh index (current schema version, empty) and reports it.
