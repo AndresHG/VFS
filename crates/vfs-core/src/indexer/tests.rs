@@ -2636,7 +2636,7 @@ fn a_full_walk_stores_cloud_only_and_link_counts() {
 }
 
 /// VFS-37 AC-5 (R2): a folder marked unpopulated loses the mark when it lists again with
-/// entries, or fails to list; off Windows an empty folder is never marked.
+/// entries, or is recorded unreadable; off Windows an empty folder is never marked.
 #[test]
 fn a_folder_that_lists_with_entries_is_not_unpopulated() {
     let mut fx = fixture(&["A"]);
@@ -2900,7 +2900,11 @@ fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
     assert_eq!(marked, ["OneDrive/Vacía"]);
-    assert_eq!(root_row(&fx).unpopulated, 1);
+    let r = root_row(&fx);
+    assert_eq!(
+        (r.unpopulated, r.cloud_only, r.links),
+        (1, Some(3), Some(0))
+    );
     // RECALL_ON_DATA_ACCESS stays set: the scan opened no placeholder.
     for f in [
         root.join("apuntes.pdf"),

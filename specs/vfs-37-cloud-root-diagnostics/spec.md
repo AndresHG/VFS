@@ -24,7 +24,7 @@ folders, which cannot tell these apart. The next report from such a PC must.
 - R2. WHEN a folder lists with no entries on Windows and its own attributes carry
   `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` (its contents are not all present locally), THE
   indexer SHALL mark that folder unpopulated; WHEN it next lists with entries, or without
-  that attribute, or fails to list, THE indexer SHALL clear the mark. On macOS no folder is ever marked.
+  that attribute, or is recorded unreadable (VFS-10), THE indexer SHALL clear the mark. On macOS no folder is ever marked.
 - R3. WHEN a full walk of a root ends, THE indexer SHALL store that root's cloud-only file
   and link counts on the root row; until a root's first full walk under schema 7 they are
   unknown (`?`). They are not refreshed by incremental passes.
@@ -52,8 +52,8 @@ Tests cite these ids (`VFS-37 AC-<m>`) in their doc comments.
   request, with an unpopulated empty placeholder folder, a populated empty one and an
   unpopulated one holding a placeholder file, When it is scanned, Then only the first is
   marked unpopulated (the root reads unpopulated 1), and no placeholder file is hydrated.
-- AC-5 (R2) Given a folder marked unpopulated, When it lists again with entries, or fails to
-  list, Then the mark is cleared.
+- AC-5 (R2) Given a folder marked unpopulated, When it lists again with entries, or is
+  recorded unreadable, Then the mark is cleared.
 
 ## Non-goals
 
