@@ -5,8 +5,8 @@ mod common;
 use common::*;
 use vfs_ai::mock::{MockResponse, MockServer};
 use vfs_ai::{
-    AnswerEvent, CancelToken, Provider, RawCitation, RewriteRequest, Turn, Usage,
-    ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
+    models_for, AnswerEvent, CancelToken, Provider, RawCitation, RewriteRequest, Turn, Usage,
+    ANSWER_MAX_TOKENS, ANTHROPIC_VERSION, REWRITE_MAX_TOKENS,
 };
 
 fn rewrite_request() -> RewriteRequest {
@@ -30,7 +30,7 @@ fn validate_key_lists_models_with_the_key() {
         match provider {
             Provider::Anthropic => {
                 assert_eq!(req.header("x-api-key"), Some(TEST_KEY));
-                assert_eq!(req.header("anthropic-version"), Some("2026-10-21"));
+                assert_eq!(req.header("anthropic-version"), Some(ANTHROPIC_VERSION));
             }
             Provider::OpenAi => {
                 assert_eq!(
@@ -64,7 +64,7 @@ fn anthropic_rewrite() {
     );
     let body = mock.requests()[0].json();
     assert_eq!(mock.requests()[0].path, "/v1/messages");
-    assert_eq!(body["model"], "claude-haiku-5-5");
+    assert_eq!(body["model"], models_for(Provider::Anthropic).rewrite);
     assert_eq!(body["max_tokens"], REWRITE_MAX_TOKENS);
     assert_eq!(body["thinking"]["type"], "disabled");
     assert_eq!(body["output_config"]["format"]["type"], "json_schema");
@@ -89,7 +89,7 @@ fn openai_rewrite() {
     assert_eq!(usage.output_tokens, 70);
     let body = mock.requests()[0].json();
     assert_eq!(mock.requests()[0].path, "/v1/responses");
-    assert_eq!(body["model"], "gpt-6-luna");
+    assert_eq!(body["model"], models_for(Provider::OpenAi).rewrite);
     assert_eq!(body["max_output_tokens"], REWRITE_MAX_TOKENS);
     assert_eq!(body["text"]["format"]["strict"], true);
     assert_eq!(body["store"], false);
@@ -133,11 +133,11 @@ fn anthropic_answer_streams_text_and_citations() {
             ..Usage::default()
         }
     );
-    assert_eq!(answer.model, "claude-sonnet-5-5");
+    assert_eq!(answer.model, models_for(Provider::Anthropic).answer);
     assert_eq!(answer.stop_reason.as_deref(), Some("end_turn"));
 
     let body = mock.requests()[0].json();
-    assert_eq!(body["model"], "claude-sonnet-5-5");
+    assert_eq!(body["model"], models_for(Provider::Anthropic).answer);
     assert_eq!(body["max_tokens"], ANSWER_MAX_TOKENS);
     assert_eq!(body["stream"], true);
     assert_eq!(body["thinking"]["type"], "between_tools");
@@ -171,7 +171,7 @@ fn cheap_answers_use_the_cheap_model() {
         .answer(&request, &CancelToken::new(), &mut |_| {})
         .unwrap();
     let body = mock.requests()[0].json();
-    assert_eq!(body["model"], "claude-haiku-5-5");
+    assert_eq!(body["model"], models_for(Provider::Anthropic).cheap_answer);
     assert_eq!(body["thinking"]["type"], "disabled");
 }
 
@@ -244,7 +244,7 @@ fn openai_answer_parses_json_citations() {
     assert_eq!(answer.usage.input_tokens, 9500);
     assert_eq!(answer.usage.output_tokens, 120);
     let body = mock.requests()[0].json();
-    assert_eq!(body["model"], "gpt-6.2-sol");
+    assert_eq!(body["model"], models_for(Provider::OpenAi).answer);
     assert_eq!(body["max_output_tokens"], ANSWER_MAX_TOKENS);
     assert_eq!(body["text"]["format"]["strict"], true);
     assert!(!body["instructions"]

@@ -12,7 +12,7 @@ use crate::provider::{CancelToken, Endpoint, Provider};
 use crate::secret::ApiKey;
 
 /// The Anthropic API version sent on every call.
-pub(crate) const ANTHROPIC_VERSION: &str = "2026-10-21";
+pub const ANTHROPIC_VERSION: &str = "2026-10-21";
 
 /// Timeouts: connecting (research note, D10); a whole non-streamed call (the key check and the
 /// rewrite); a whole streamed answer, which a blocking client cannot bound per read.

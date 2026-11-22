@@ -175,6 +175,7 @@ pub struct AnswerBlock {
 /// A finished answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Answer {
+    /// The model requested, which is what the price table prices (R10).
     pub model: String,
     pub blocks: Vec<AnswerBlock>,
     pub usage: Usage,

@@ -241,7 +241,7 @@ impl ChatModel for OpenAi {
             })
             .collect();
         Ok(Answer {
-            model: response["model"].as_str().unwrap_or(model).to_owned(),
+            model: model.to_owned(),
             blocks: vec![AnswerBlock {
                 text: parsed.answer,
                 citations,

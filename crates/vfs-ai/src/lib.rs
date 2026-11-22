@@ -23,9 +23,11 @@ mod provider;
 mod secret;
 
 pub use cost::{cost_nano, models_for, Models, Usage};
-pub use db::{AiDb, CallKind, CallRecord, CapStatus, SentPassage, SentRecord, StoredRecord};
+pub use db::{
+    AiDb, CallKind, CallRecord, CapStatus, SentPassage, SentRecord, StoredRecord, DEFAULT_CAP_NANO,
+};
 pub use error::AiError;
-pub use http::RetryPolicy;
+pub use http::{RetryPolicy, ANTHROPIC_VERSION};
 pub use keys::{CredentialBackend, Fallback, KeyError, KeyLocation, Keys, OsStore, StoreError};
 pub use provider::{
     chat_model, Answer, AnswerBlock, AnswerEvent, AnswerRequest, CancelToken, ChatModel, Endpoint,

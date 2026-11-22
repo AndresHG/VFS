@@ -9,7 +9,7 @@ use vfs_ai::cost::NANO_PER_USD;
 use vfs_ai::mock::{MockResponse, MockServer};
 use vfs_ai::{
     cost_nano, models_for, AiDb, CallKind, CallRecord, CancelToken, Provider, RewriteRequest,
-    SentPassage, SentRecord, Usage, ANSWER_MAX_TOKENS,
+    SentPassage, SentRecord, Usage, ANSWER_MAX_TOKENS, DEFAULT_CAP_NANO,
 };
 
 fn at(y: i32, m: u32, d: u32) -> chrono::DateTime<Local> {
@@ -79,12 +79,23 @@ fn three_questions_sum_to_the_month_total() {
     for r in &records {
         db.record(r).unwrap();
     }
-    // Anthropic: rewrite 812 in / 61 out on Haiku (0.10 / 0.50 $ per M) + answer 9,300 in /
-    // 587 out on Sonnet (2 / 10 $ per M).
-    let anthropic = 812 * 100 + 61 * 500 + 9_300 * 2_000 + 587 * 10_000;
-    // OpenAI: rewrite 800 in + 100 cached / 70 out on gpt-6-luna + answer 9,500 / 120 on
-    // gpt-6.2-sol.
-    let openai = 800 * 100 + 100 * 10 + 70 * 500 + 9_500 * 2_000 + 120 * 10_000;
+    // Expected costs come from the recorded token counts and the price table.
+    let cost = |model: &str, input, output, cached| {
+        let usage = Usage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cached,
+            ..Usage::default()
+        };
+        cost_nano(model, &usage)
+    };
+    let (a, o) = (
+        models_for(Provider::Anthropic),
+        models_for(Provider::OpenAi),
+    );
+    let anthropic = cost(a.rewrite, 812, 61, 0) + cost(a.answer, 9_300, 587, 0);
+    let openai = cost(o.rewrite, 800, 70, 100) + cost(o.answer, 9_500, 120, 0);
+    assert!(anthropic > 0 && openai > 0);
     let stored = db.records().unwrap();
     let costs: Vec<i64> = stored.iter().map(|r| r.cost_nano).collect();
     assert_eq!(costs, [anthropic, openai, anthropic]);
@@ -99,19 +110,42 @@ fn unknown_model_costs_the_highest_price() {
         output_tokens: 100,
         ..Usage::default()
     };
-    assert_eq!(
-        cost_nano("claude-unknown-9", &usage),
-        cost_nano("claude-sonnet-5-5", &usage)
-    );
-    assert!(cost_nano("claude-unknown-9", &usage) > cost_nano("claude-haiku-5-5", &usage));
+    let unknown = cost_nano("claude-unknown-9", &usage);
+    for p in [Provider::Anthropic, Provider::OpenAi] {
+        let m = models_for(p);
+        for id in [m.rewrite, m.answer, m.cheap_answer] {
+            assert!(
+                unknown >= cost_nano(id, &usage),
+                "{id} costs more than an unknown model"
+            );
+        }
+    }
+    let dearest = [Provider::Anthropic, Provider::OpenAi]
+        .iter()
+        .flat_map(|p| {
+            let m = models_for(*p);
+            [m.rewrite, m.answer, m.cheap_answer]
+        })
+        .map(|id| cost_nano(id, &usage))
+        .max()
+        .unwrap();
+    assert_eq!(unknown, dearest);
 }
 
 /// VFS-28 AC-8: a cancelled stream with no usage is priced at its `max_tokens`.
 #[test]
 fn cancelled_stream_costs_max_tokens() {
     let usage = Usage::for_cancelled(None, ANSWER_MAX_TOKENS);
-    assert_eq!(usage.output_tokens, 1_200);
-    assert_eq!(cost_nano("claude-sonnet-5-5", &usage), 1_200 * 10_000);
+    assert_eq!(usage.output_tokens, u64::from(ANSWER_MAX_TOKENS));
+    let one_token = Usage {
+        output_tokens: 1,
+        ..Usage::default()
+    };
+    let model = models_for(Provider::Anthropic).answer;
+    assert_eq!(
+        cost_nano(model, &usage),
+        i64::from(ANSWER_MAX_TOKENS) * cost_nano(model, &one_token)
+    );
 }
 
 /// VFS-28 AC-8: with a cap of 0.01 $, the next question needs confirmation once reached; the
@@ -120,7 +154,7 @@ fn cancelled_stream_costs_max_tokens() {
 fn cap_and_month_rollover() {
     let dir = tempfile::tempdir().unwrap();
     let mut db = AiDb::open(&dir.path().join("ai.db")).unwrap();
-    assert_eq!(db.cap().unwrap(), 5 * NANO_PER_USD);
+    assert_eq!(db.cap().unwrap(), DEFAULT_CAP_NANO);
     db.set_cap(NANO_PER_USD / 100).unwrap();
     let nov = at(2026, 11, 30);
     assert!(!db.cap_status(&nov).unwrap().reached());

@@ -272,10 +272,10 @@ impl Keys {
     /// Deletes the key everywhere it may be kept («Borrar», R1).
     pub fn delete(&self, provider: Provider) -> Result<(), KeyError> {
         self.forget_fallbacks(provider)?;
-        self.os.delete(provider.id()).map_err(|e| match e {
-            StoreError::NoEntry => KeyError::Unreadable("no entry".into()),
-            StoreError::Failure(why) => KeyError::Unreadable(why),
-        })
+        match self.os.delete(provider.id()) {
+            Ok(()) | Err(StoreError::NoEntry) => Ok(()),
+            Err(StoreError::Failure(why)) => Err(KeyError::Unreadable(why)),
+        }
     }
 
     fn forget_fallbacks(&self, provider: Provider) -> Result<(), KeyError> {
@@ -420,7 +420,7 @@ mod tests {
             Err(StoreError::NoEntry)
         }
         fn delete(&self, _: &str) -> Result<(), StoreError> {
-            Ok(())
+            Err(StoreError::NoEntry)
         }
     }
 

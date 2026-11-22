@@ -11,8 +11,8 @@ use chrono::Local;
 use common::*;
 use vfs_ai::mock::{MockResponse, MockServer};
 use vfs_ai::{
-    cost_nano, AiDb, ApiKey, CallKind, CallRecord, CancelToken, Fallback, Keys, Provider,
-    RewriteRequest, SentPassage, SentRecord, Usage,
+    cost_nano, models_for, AiDb, ApiKey, CallKind, CallRecord, CancelToken, Fallback, Keys,
+    Provider, RewriteRequest, SentPassage, SentRecord, Usage,
 };
 
 /// Collects every log line into a buffer the test reads.
@@ -102,9 +102,9 @@ fn key_never_leaks() {
         }],
         calls: vec![CallRecord {
             kind: CallKind::Answer,
-            model: "claude-sonnet-5-5".into(),
+            model: models_for(Provider::Anthropic).answer.into(),
             usage,
-            cost_nano: cost_nano("claude-sonnet-5-5", &usage),
+            cost_nano: cost_nano(models_for(Provider::Anthropic).answer, &usage),
         }],
     })
     .unwrap();

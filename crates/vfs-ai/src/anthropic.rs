@@ -154,7 +154,6 @@ impl ChatModel for Anthropic {
         let mut blocks: Vec<AnswerBlock> = Vec::new();
         let mut current: Option<AnswerBlock> = None;
         let mut stop_reason = None;
-        let mut served_model = model.to_owned();
         loop {
             if cancel.is_cancelled() {
                 return Err(AiError::Cancelled {
@@ -169,9 +168,6 @@ impl ChatModel for Anthropic {
                 "message_start" => {
                     usage = usage_of(&v["message"]["usage"]);
                     reported = true;
-                    if let Some(m) = v["message"]["model"].as_str() {
-                        served_model = m.to_owned();
-                    }
                 }
                 "content_block_start" => {
                     let block = &v["content_block"];
@@ -228,7 +224,7 @@ impl ChatModel for Anthropic {
             ));
         }
         Ok(Answer {
-            model: served_model,
+            model: model.to_owned(),
             blocks,
             usage,
             stop_reason,

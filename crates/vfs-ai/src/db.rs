@@ -13,6 +13,9 @@ use crate::provider::Provider;
 /// The default monthly cap: 5 $ (D4).
 pub const DEFAULT_CAP_NANO: i64 = 5 * NANO_PER_USD;
 
+/// The `settings` key of the monthly cap.
+const CAP_KEY: &str = "monthly_cap_nano";
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS questions (
@@ -289,8 +292,8 @@ impl AiDb {
         let value: Option<String> = self
             .conn
             .query_row(
-                "SELECT value FROM settings WHERE key = 'monthly_cap_nano'",
-                [],
+                "SELECT value FROM settings WHERE key = ?1",
+                [CAP_KEY],
                 |r| r.get(0),
             )
             .optional()?;
@@ -302,9 +305,9 @@ impl AiDb {
     /// Sets the monthly cap from Ajustes (R10). Negative values are stored as zero.
     pub fn set_cap(&self, cap_nano: i64) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('monthly_cap_nano', ?1)
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [cap_nano.max(0).to_string()],
+            params![CAP_KEY, cap_nano.max(0).to_string()],
         )?;
         Ok(())
     }
