@@ -469,7 +469,10 @@ fn scan_root(
             if walk::behind_link(Path::new(&root.path), &rel_path) {
                 Err(std::io::Error::from(std::io::ErrorKind::NotFound))
             } else {
-                walk::list_dir(&abs, skip, &excl.children_of(&abs))
+                walk::list_dir(&abs, skip, &excl.children_of(&abs)).map(|entries| {
+                    let unpopulated = entries.is_empty() && walk::unpopulated(&abs);
+                    (entries, unpopulated)
+                })
             }
         });
         let open = match tx.take() {
@@ -500,7 +503,7 @@ fn scan_root(
             retries.remove(&dir_id);
         }
         match listing {
-            Ok(entries) => {
+            Ok((entries, unpopulated)) => {
                 rows += apply::apply_listing(
                     t,
                     root.id,
@@ -510,6 +513,9 @@ fn scan_root(
                     &entries,
                     &mut pass.summary,
                 )?;
+                if unpopulated {
+                    ingest::mark_unpopulated(t, dir_id)?;
+                }
                 if rel_path.is_empty() {
                     let mtime = walk::unix_secs(std::fs::metadata(&abs).and_then(|m| m.modified()));
                     ingest::set_dir_mtime(t, dir_id, mtime)?;
@@ -604,6 +610,7 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
         // A link file that could not be read (locked, antivirus) is read again by the next
         // deferred pass after each full walk (VFS-18 R9).
         ingest::retry_unreadable_links(&tx, root.id)?;
+        refresh_flag_counts(&tx, root.id)?;
         exclude::stamp(&tx, root.id)?;
         tx.execute(
             "INSERT INTO files_fts(files_fts, rank) VALUES('merge', 500)",
@@ -633,6 +640,20 @@ fn refresh_counts(conn: &Connection, root_id: Option<i64>) -> Result<()> {
            dirs_count = (SELECT COUNT(*) FROM dirs WHERE dirs.root_id = roots.id) \
          WHERE (?1 IS NULL AND status <> ?2) OR id = ?1",
         params![root_id, RootStatus::Ready.code()],
+    )?;
+    Ok(())
+}
+
+/// Stores a root's cloud-only files and links (VFS-37 R3): one pass over its file rows, so
+/// it runs only at the end of a full walk, which has just listed every folder anyway.
+fn refresh_flag_counts(conn: &Connection, root_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE roots SET (cloud_only_count, links_count) = \
+           (SELECT COUNT(CASE WHEN flags & ?2 <> 0 THEN 1 END), \
+                   COUNT(CASE WHEN flags & ?3 <> 0 THEN 1 END) \
+            FROM files WHERE dir_id IN (SELECT id FROM dirs WHERE dirs.root_id = ?1)) \
+         WHERE id = ?1",
+        params![root_id, ingest::FLAG_CLOUD_ONLY, ingest::FLAG_LINK],
     )?;
     Ok(())
 }

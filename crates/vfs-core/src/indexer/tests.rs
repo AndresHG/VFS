@@ -2604,6 +2604,52 @@ fn a_walk_the_switch_changed_halfway_stays_stale() {
     assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
 }
 
+/// The root as `list_roots` reads it (VFS-37 counts included).
+fn root_row(fx: &Fx) -> crate::types::Root {
+    crate::roots::list_roots(&fx.conn).unwrap().remove(0)
+}
+
+/// VFS-37 AC-3 (R3): the end of a full walk stores the root's links and cloud-only files;
+/// a cloud-only file (only Windows marks one while listing) is counted by the same pass.
+#[cfg(unix)]
+#[test]
+fn a_full_walk_stores_cloud_only_and_link_counts() {
+    let mut fx = fixture(&["A", "B"]);
+    std::os::unix::fs::symlink(fx.root().join("A"), fx.root().join("enlace")).unwrap();
+    fx.scan();
+    let r = root_row(&fx);
+    assert_eq!((r.cloud_only, r.links), (Some(0), Some(1)));
+    fx.conn
+        .execute(
+            "UPDATE files SET flags = flags | ?1 WHERE name = 'archivo.txt' \
+             AND dir_id = (SELECT id FROM dirs WHERE rel_path = 'A')",
+            [ingest::FLAG_CLOUD_ONLY],
+        )
+        .unwrap();
+    refresh_flag_counts(&fx.conn, fx.root_id).unwrap();
+    let r = root_row(&fx);
+    assert_eq!((r.cloud_only, r.links), (Some(1), Some(1)));
+}
+
+/// VFS-37 AC-5 (R2): a folder marked unpopulated loses the mark when it lists again with
+/// entries; off Windows an empty folder is never marked.
+#[test]
+fn a_folder_that_lists_with_entries_is_not_unpopulated() {
+    let mut fx = fixture(&["A"]);
+    fs::create_dir(fx.root().join("Vacía")).unwrap();
+    fx.scan();
+    assert_eq!(root_row(&fx).unpopulated, 0);
+    fx.conn
+        .execute(
+            "UPDATE dirs SET unpopulated = 1, scan_state = ?1 WHERE rel_path = 'A'",
+            [ScanState::PendingShallow as i64],
+        )
+        .unwrap();
+    assert_eq!(root_row(&fx).unpopulated, 1);
+    fx.scan();
+    assert_eq!(root_row(&fx).unpopulated, 0);
+}
+
 /// A Cloud Files sync root as OneDrive makes one, registered for the test's life and
 /// unregistered on drop (issue 170).
 #[cfg(windows)]
@@ -2783,7 +2829,8 @@ mod cloud_files {
 /// VFS-1 AC-4, VFS-25 R1 (Windows, issue 170): below a real Cloud Files sync root, as
 /// OneDrive makes one, cloud-only files and folders, populated or not, are indexed by name
 /// with the cloud-only flag, none is taken for a link, and none is downloaded by the scan;
-/// a folder its provider fails to fill in is still indexed as a folder.
+/// a folder its provider fails to fill in is still indexed as a folder. VFS-37 AC-4 (R2, R6):
+/// that folder alone is marked unpopulated.
 #[cfg(windows)]
 #[test]
 fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
@@ -2798,6 +2845,7 @@ fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
     sync.place(&root, "SinPoblar", true, false);
     sync.place(&root.join("SinPoblar"), "examen.docx", false, false);
     sync.place(&root, "Vacía", true, false);
+    sync.place(&root, "VacíaPoblada", true, true);
     sync.connect_failing();
     fx.scan();
 
@@ -2828,6 +2876,18 @@ fn cloud_files_placeholders_are_indexed_by_name_and_never_downloaded() {
         )
         .unwrap();
     assert_eq!(vacia, 1);
+    // VFS-37 AC-4: only the empty folder its provider never filled in is marked unpopulated,
+    // not the populated empty one nor the unpopulated one holding a placeholder.
+    let marked: Vec<String> = fx
+        .conn
+        .prepare("SELECT rel_path FROM dirs WHERE unpopulated IS NOT NULL")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(marked, ["OneDrive/Vacía"]);
+    assert_eq!(root_row(&fx).unpopulated, 1);
     // RECALL_ON_DATA_ACCESS stays set: the scan opened no placeholder.
     for f in [
         root.join("apuntes.pdf"),

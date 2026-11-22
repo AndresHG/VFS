@@ -269,7 +269,9 @@ fn migration_queues_existing_shortcuts() {
         }
         // Back to version 4: without the `links` table and version 6's `dirs.error`.
         tx.execute_batch(
-            "DROP TABLE links; DROP INDEX dirs_unreadable; ALTER TABLE dirs DROP COLUMN error; \
+            "DROP INDEX dirs_unpopulated; ALTER TABLE dirs DROP COLUMN unpopulated; \
+             ALTER TABLE roots DROP COLUMN cloud_only_count; ALTER TABLE roots DROP COLUMN links_count; \
+             DROP TABLE links; DROP INDEX dirs_unreadable; ALTER TABLE dirs DROP COLUMN error; \
              UPDATE dirs SET scan_state = 0;",
         )
         .unwrap();

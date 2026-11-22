@@ -14,7 +14,9 @@ fn migration_adds_the_reason_column() {
         let tx = conn.transaction().unwrap();
         ingest::insert_root(&tx, "/", "/a").unwrap();
         tx.execute_batch(
-            "DROP INDEX dirs_unreadable; ALTER TABLE dirs DROP COLUMN error; \
+            "DROP INDEX dirs_unpopulated; ALTER TABLE dirs DROP COLUMN unpopulated; \
+             ALTER TABLE roots DROP COLUMN cloud_only_count; ALTER TABLE roots DROP COLUMN links_count; \
+             DROP INDEX dirs_unreadable; ALTER TABLE dirs DROP COLUMN error; \
              UPDATE dirs SET scan_state = 0;",
         )
         .unwrap();

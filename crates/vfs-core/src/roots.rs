@@ -14,11 +14,14 @@ use crate::types::{Root, RootStatus, UnreadableDir, UnreadableReason};
 
 /// Column 6 counts the root's unreadable folders on the partial index `dirs_unreadable`
 /// (its condition is spelled out so SQLite uses it, VFS-10 R4); column 7 is its pause key
-/// (VFS-32 R1).
+/// (VFS-32 R1); column 8 counts its unpopulated folders on `dirs_unpopulated` the same way,
+/// and 9 and 10 are its cloud-only files and links at its last full walk (VFS-37 R3, R4).
 const ROOT_COLS: &str = concat!(
     "id, path, status, files_count, dirs_count, last_full_scan_at, \
     (SELECT COUNT(*) FROM dirs d WHERE d.root_id = roots.id AND d.error IS NOT NULL), EXISTS ",
-    paused_key_sql!("roots.id")
+    paused_key_sql!("roots.id"),
+    ", (SELECT COUNT(*) FROM dirs d WHERE d.root_id = roots.id AND d.unpopulated IS NOT NULL), \
+    cloud_only_count, links_count"
 );
 
 /// Prefix of a root's pause key in `meta`, `paused/<root id>` (VFS-32 R1). Every key and SQL
@@ -55,6 +58,9 @@ fn read_root(r: &Row<'_>) -> rusqlite::Result<Root> {
         last_full_scan: r.get(5)?,
         unreadable: r.get::<_, i64>(6)?.max(0) as u64,
         paused: r.get(7)?,
+        unpopulated: r.get::<_, i64>(8)?.max(0) as u64,
+        cloud_only: r.get::<_, Option<i64>>(9)?.map(|n| n.max(0) as u64),
+        links: r.get::<_, Option<i64>>(10)?.map(|n| n.max(0) as u64),
     })
 }
 

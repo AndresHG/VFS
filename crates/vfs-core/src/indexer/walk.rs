@@ -189,7 +189,7 @@ fn list_entries(
 /// Attribute bits of a cloud placeholder whose data is not on the disk (VFS-25 R1):
 /// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, `FILE_ATTRIBUTE_RECALL_ON_OPEN`,
 /// `FILE_ATTRIBUTE_OFFLINE`.
-const CLOUD_ONLY_ATTRIBUTES: u32 = 0x0040_0000 | 0x0004_0000 | 0x0000_1000;
+const CLOUD_ONLY_ATTRIBUTES: u32 = RECALL_ON_DATA_ACCESS | 0x0004_0000 | 0x0000_1000;
 
 /// True when Windows file attributes mark a cloud-only file (VFS-25 R1).
 pub(crate) fn cloud_only_attributes(attributes: u32) -> bool {
@@ -207,6 +207,26 @@ fn cloud_only(meta: &fs::Metadata) -> bool {
     #[cfg(not(windows))]
     {
         let _ = meta;
+        false
+    }
+}
+
+/// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`: on a folder, some of its contents are not
+/// present locally (a cloud placeholder not filled in).
+const RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+
+/// Whether the folder `dir`, which just listed empty, is still marked as not all present
+/// locally (VFS-37 R2): on Windows from its own attributes, read from metadata without
+/// opening it for data, so nothing is downloaded (R6); never elsewhere.
+pub(crate) fn unpopulated(dir: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        fs::symlink_metadata(dir).is_ok_and(|m| m.file_attributes() & RECALL_ON_DATA_ACCESS != 0)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
         false
     }
 }
