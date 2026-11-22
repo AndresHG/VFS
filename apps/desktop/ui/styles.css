@@ -140,22 +140,32 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   /* Notices give way before the results (VFS-35 R3): they scroll once the list is down to
-     three rows. */
-  grid-template-rows: auto auto minmax(0, auto) minmax(14rem, 1fr) auto;
+     three rows, plus the results header while it shows (VFS-38 R9). */
+  grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(14rem + var(--results-head, 0rem)), 1fr) auto;
 }
+.app:has(> .results > .results-head:not([hidden])) { --results-head: 3.25rem; }
+/* Explicit rows: the line of filters in use (VFS-38 R8) is often hidden, and a hidden child
+   must not move the others into its row. */
+.app > .top { grid-row: 1; }
+.app > .filters { grid-row: 2; }
+.app > .active-filters { grid-row: 3; }
+.app > .notices { grid-row: 4; }
+.app > .results { grid-row: 5; }
+.app > .bottom { grid-row: 6; }
 .app > * {
   justify-self: center;
   inline-size: min(100% - 2 * var(--gutter), var(--measure));
 }
 
 .app[data-view="start"] {
-  grid-template-rows: minmax(var(--s4), 1fr) auto auto auto auto minmax(var(--s4), 1.4fr) auto;
+  grid-template-rows: minmax(var(--s4), 1fr) auto auto auto auto auto minmax(var(--s4), 1.4fr) auto;
 }
 .app[data-view="start"] > .top { grid-row: 2; }
 .app[data-view="start"] > .filters { grid-row: 3; justify-content: center; }
-.app[data-view="start"] > .notices { grid-row: 4; }
-.app[data-view="start"] > .results { grid-row: 5; }
-.app[data-view="start"] > .bottom { grid-row: 7; }
+.app[data-view="start"] > .active-filters { grid-row: 4; justify-content: center; }
+.app[data-view="start"] > .notices { grid-row: 5; }
+.app[data-view="start"] > .results { grid-row: 6; }
+.app[data-view="start"] > .bottom { grid-row: 8; }
 
 /* ---------- Buttons */
 
@@ -318,10 +328,61 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .filter-select.is-on::after { background: var(--accent); }
 .filter-select option { font-weight: 400; color: var(--ink); background: var(--surface); }
 
+/* VFS-38 R1: the scope group, one pill of radios. The chosen one is bold on a bordered surface,
+   and in the accent tint when it narrows the search (anything but «Todo»), like a filter. */
+.scope {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--target);
+  border-radius: 999px;
+  background: var(--sunk);
+  font-size: var(--t-meta);
+}
+.scope-label { padding-inline: var(--s4) var(--s1); color: var(--ink-2); white-space: nowrap; }
+.scope-btn {
+  min-block-size: var(--target);
+  padding: 0 var(--s4);
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+.scope-btn:hover { background: var(--sunk-2); }
+.scope-btn[aria-checked="true"] { background: var(--surface); border-color: var(--line-strong); font-weight: 700; }
+.scope.is-on .scope-btn[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); }
+
+/* VFS-38 R8: the filters in use, below the line; the filters behind «Más filtros» as removable
+   chips, then «Quitar filtros (N)». */
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  padding-block-end: var(--s3);
+}
+.filter-tags { display: contents; }
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-block-size: var(--target);
+  padding: 0 var(--s3) 0 var(--s4);
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: var(--t-meta);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+.filter-tag:hover { background: var(--sunk-2); }
+.filter-tag svg { width: 1em; height: 1em; color: var(--accent); }
 #f-clear { min-block-size: var(--target); font-size: var(--t-meta); }
 
 /* The type checklist: large one-click rows with a real checkbox each. */
-.type-pop {
+.type-pop, .more-pop {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -334,7 +395,7 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .type-pop:popover-open { animation: pop-in 120ms ease-out; }
+  .type-pop:popover-open, .more-pop:popover-open { animation: pop-in 120ms ease-out; }
   @keyframes pop-in { from { opacity: 0; translate: 0 -0.25rem; } }
 }
 .kinds { border: 0; margin: 0; padding: 0; min-width: 0; }
@@ -371,6 +432,28 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .filters[data-types="inline"] .chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
 .filters[data-types="inline"] .chip { border-radius: 999px; background: var(--sunk); font-size: var(--t-meta); }
 .filters[data-types="inline"] .chip:has(input:checked) { background: var(--accent-soft); }
+
+/* «Más filtros» (VFS-38 R7): labelled selects in the popover, or in a row unfolded below the
+   line where the Popover API is missing. */
+.more-pop { gap: var(--s3); padding: var(--s3) var(--s4) var(--s4); }
+.more-pop:popover-open { display: grid; min-inline-size: 18rem; }
+.more-pop select {
+  min-block-size: var(--target);
+  max-inline-size: 22rem;
+  padding: 0 var(--s3);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--t-meta);
+  text-overflow: ellipsis;
+}
+.filters[data-more="inline"] .more-pop {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+  box-shadow: none;
+}
 
 .range {
   flex-basis: 100%;
@@ -416,15 +499,28 @@ input[type="date"] {
 
 .results {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   min-height: 0;
 }
 /* With hits inside documents below, the name list keeps room for a few rows (VFS-27 R12). */
-.results:has(> .content-hits:not([hidden])) { grid-template-rows: auto minmax(7rem, 1fr) auto auto; }
-/* Explicit rows: a hidden fuzzy note must not move the list into an auto-sized row. */
-.fuzzy-note { grid-row: 1; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
-.results > .list-wrap { grid-row: 2; }
-.results > .content-hits { grid-row: 3; }
+.results:has(> .content-hits:not([hidden])) { grid-template-rows: auto auto minmax(7rem, 1fr) auto auto; }
+/* VFS-38 R9: the count with «Orden» beside it. */
+.results-head {
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s1) var(--s3);
+  padding-block-end: var(--s2);
+}
+.summary-line { flex: 1 1 14rem; margin: 0; font-size: var(--t-meta); }
+.summary { color: var(--ink); }
+/* Explicit rows: a hidden note or header must not move the list into an auto-sized row. */
+.fuzzy-note { grid-row: 2; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
+.results > .list-wrap { grid-row: 3; }
+.results > .content-hits { grid-row: 4; }
 .results > .details { grid-row: 4; }
 
 .list-wrap {
@@ -685,9 +781,6 @@ input[type="date"] {
 }
 .status-text { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); }
 .status-text p { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
-.summary { color: var(--ink); }
-/* One separator, only when both parts have words. */
-.summary:not(:empty) + #status-text:not(:empty)::before { content: " · "; }
 .bottom .btn { font-size: var(--t-meta); }
 #scan-progress { width: 3rem; flex: none; }
 
@@ -829,15 +922,27 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .filters > * { flex: none; }
   .app[data-view="start"] > .filters { justify-content: safe center; }
   /* A scroller in an auto grid row may shrink to nothing; keep one pill row. */
-  .filters:not(:has(> .range:not([hidden]))) { min-block-size: calc(var(--target) + 5px + var(--s1)); }
+  .filters:not(:has(> .range:not([hidden]))):not([data-more="inline"]:has(> .more-pop:not([hidden]))) {
+    min-block-size: calc(var(--target) + 5px + var(--s1));
+  }
   /* A custom date range the user just asked for gets its own line, as on tall windows. */
-  .filters:has(> .range:not([hidden])) { flex-wrap: wrap; overflow-x: visible; }
-  .filters > .range { flex: 1 0 100%; }
+  .filters:has(> .range:not([hidden])),
+  .filters[data-more="inline"]:has(> .more-pop:not([hidden])) { flex-wrap: wrap; overflow-x: visible; }
+  .filters > .range, .filters[data-more="inline"] > .more-pop { flex: 1 0 100%; }
+  .active-filters { padding-block-end: var(--s1); }
+  /* The results header is compact, like the bottom bar's buttons: one line, the count cut
+     short if it must be (its whole text is its tooltip and is announced). */
+  .results-head { flex-wrap: nowrap; padding-block-end: 0; }
+  .summary-line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .results-head .filter, .results-head .filter-select select { min-block-size: 2.25rem; }
+  /* That header takes a row from the list; the status gives one line back (its whole text
+     is its tooltip). */
+  .app:has(.results-head:not([hidden])) .status-text p { -webkit-line-clamp: 1; }
   .bottom { padding-block: var(--s1); }
   .bottom .btn { min-block-size: 2.25rem; padding-inline: var(--s3); }
   .status-text p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .status-text { flex: 1 1 0; min-width: 7rem; }
-  .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto minmax(0, 1.4fr) auto; }
+  .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto auto minmax(0, 1.4fr) auto; }
   .app[data-view="start"] .empty { padding-block-start: var(--s1); }
   .app[data-view="start"] .empty .empty-art { display: none; }
 }
@@ -882,6 +987,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .row[aria-selected="true"] { outline: 3px solid Highlight; outline-offset: -3px; }
   .filter, .filter-select select { border: 1px solid ButtonText; }
   .filter.is-on, .filter-select.is-on { outline: 2px solid Highlight; }
+  .scope-btn[aria-checked="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .filter-select::after { background: ButtonText; }
   .row mark { forced-color-adjust: none; background: Mark; color: MarkText; }
   /* VFS-24 AC-3: forced colours drop backgrounds, which would erase the folder state dots and

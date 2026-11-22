@@ -22,8 +22,10 @@ import {
   SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
-  DateChoice, LanguageChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
+  DateChoice, LanguageChoice, OFFERED_SCOPES, ScopeChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View,
+  scopeFor, typeChecklistMode,
 } from './choices.js';
+import { PrefKey, readPref, webStorage, writePref } from './prefs.js';
 import {
   PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sortChoices, sortFor,
   sourcesFor,
@@ -94,6 +96,7 @@ async function loadLocale() {
 function main(L) {
   const { S, N } = L;
   document.documentElement.lang = L.lang;
+  const store = webStorage();
   const state = {
     coreReady: false, // VFS-39 R2: false until wait_core resolves; searches wait for it
     text: '',
@@ -116,7 +119,9 @@ function main(L) {
     terms: [],
     searchState: SearchState.IDLE,
     unavailableDismissed: '',
-    source: SourceChoice.BOTH, // VFS-6 D7: both sources at every start
+    // VFS-38 R6: remembered; source and sort are read once the bookmark setting is known.
+    scope: readPref(store, PrefKey.SCOPE, OFFERED_SCOPES, ScopeChoice.ALL),
+    source: SourceChoice.BOTH,
     sort: SortOrder.RELEVANCE,
     bookmarks: null, // BookmarkStatus, null until known
     pickedBookmarkFolder: null, // {id, title} chosen with "Ver su contenido"
@@ -167,21 +172,110 @@ function main(L) {
     $('f-type').classList.toggle(ON, names.length > 0);
   }
 
-  // The checklist opens under its button. Placed from the button's box so it also works where
-  // CSS anchor positioning is missing (older WKWebView). Without the Popover API at all, the
-  // chips are shown inline instead.
+  // A popover opens under its button. Placed from the button's box so it also works where
+  // CSS anchor positioning is missing (older WKWebView).
+  function placeUnder(pop, button) {
+    pop.addEventListener('beforetoggle', (e) => {
+      if (e.newState !== 'open') return;
+      const r = button.getBoundingClientRect();
+      pop.style.top = `${r.bottom + 6}px`;
+      pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
+    });
+  }
+
+  // Without the Popover API at all, the type chips are shown inline instead.
   const typePop = $('f-type-pop');
-  $('filters').dataset.types = typeChecklistMode(HTMLElement.prototype);
-  if ($('filters').dataset.types === TypeChecklist.INLINE) $('f-type').hidden = true;
-  typePop.addEventListener('beforetoggle', (e) => {
-    if (e.newState !== 'open') return;
-    const r = $('f-type').getBoundingClientRect();
-    typePop.style.top = `${r.bottom + 6}px`;
-    typePop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - typePop.offsetWidth - 8))}px`;
-  });
+  const popoverMode = typeChecklistMode(HTMLElement.prototype);
+  $('filters').dataset.types = popoverMode;
+  if (popoverMode === TypeChecklist.INLINE) $('f-type').hidden = true;
+  placeUnder(typePop, $('f-type'));
   typePop.addEventListener('toggle', (e) => {
     if (e.newState === 'open') chips.querySelector('input')?.focus();
   });
+
+  // VFS-38 R7: «Más filtros» opens a popover, or without the Popover API unfolds its fields as a
+  // row below the line (same test as the type checklist). Changes there apply at once.
+  const morePop = $('f-more-pop');
+  $('filters').dataset.more = popoverMode;
+  const firstMoreField = () => [...morePop.querySelectorAll('select')].find((s) => !s.disabled && s.offsetParent);
+  if (popoverMode === TypeChecklist.INLINE) {
+    morePop.removeAttribute('popover');
+    $('f-more').removeAttribute('popovertarget');
+    morePop.hidden = true;
+    $('f-more').setAttribute('aria-expanded', 'false');
+    $('f-more').addEventListener('click', () => {
+      morePop.hidden = !morePop.hidden;
+      $('f-more').setAttribute('aria-expanded', String(!morePop.hidden));
+      if (!morePop.hidden) firstMoreField()?.focus();
+    });
+  }
+  placeUnder(morePop, $('f-more'));
+  morePop.addEventListener('toggle', (e) => {
+    if (e.newState === 'open') firstMoreField()?.focus();
+  });
+
+  /* VFS-38 R1: the scope group, a radio group with one tab stop; the arrow keys move the choice
+     and every change runs the search again (the newer query drops the older, VFS-1 S6). */
+  const scopeGroup = $('f-scope');
+  for (const choice of OFFERED_SCOPES) {
+    const b = el('button', 'scope-btn', S.scopeOptions[choice]);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.dataset.scope = choice;
+    scopeGroup.append(b);
+  }
+  const scopeRadios = () => [...scopeGroup.querySelectorAll('[role="radio"]')];
+
+  function renderScope() {
+    for (const b of scopeRadios()) {
+      const chosen = b.dataset.scope === state.scope;
+      b.setAttribute('aria-checked', String(chosen));
+      b.tabIndex = chosen ? 0 : -1;
+    }
+    scopeGroup.classList.toggle(ON, state.scope !== ScopeChoice.ALL);
+  }
+
+  function setScope(choice) {
+    if (choice === state.scope) return;
+    state.scope = choice;
+    writePref(store, PrefKey.SCOPE, choice);
+    renderScope();
+    filtersChanged();
+  }
+
+  scopeGroup.addEventListener('click', (e) => {
+    const b = e.target.closest('[role="radio"]');
+    if (b) setScope(b.dataset.scope);
+  });
+  /** Arrow keys step through the radios (wrapping), Home and End jump to the ends. */
+  const SCOPE_STEPS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+  scopeGroup.addEventListener('keydown', (e) => {
+    const radios = scopeRadios();
+    const at = radios.indexOf(e.target);
+    if (at < 0) return;
+    let next;
+    if (e.key in SCOPE_STEPS) next = (at + SCOPE_STEPS[e.key] + radios.length) % radios.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = radios.length - 1;
+    else return;
+    e.preventDefault();
+    radios[next].focus();
+    setScope(radios[next].dataset.scope);
+  });
+  renderScope();
+
+  /** VFS-38 R10: «Buscar en» shows while the filter line fits on one row with it; otherwise
+   *  it is kept for screen readers only, and no other control shrinks. */
+  function fitScopeLabel() {
+    const label = $('f-scope-label');
+    const form = $('filters');
+    label.classList.remove('visually-hidden');
+    const first = scopeGroup.getBoundingClientRect();
+    const last = $('f-more').getBoundingClientRect();
+    if (Math.round(last.top) !== Math.round(first.top) || form.scrollWidth > form.clientWidth) label.classList.add('visually-hidden');
+  }
+  new ResizeObserver(fitScopeLabel).observe($('filters'));
+  document.fonts?.ready.then(fitScopeLabel);
 
   function fillSelect(select, options) {
     select.replaceChildren(...Object.entries(options).map(([v, t]) => new Option(t, v)));
@@ -190,8 +284,13 @@ function main(L) {
   fillSelect($('f-size'), S.sizeOptions);
   fillSelect($('f-source'), S.sourceOptions);
   $('f-source').value = state.source;
-  $('f-source').addEventListener('change', (e) => { state.source = e.target.value; renderSources(); filtersChanged(); });
-  $('f-sort').addEventListener('change', (e) => { state.sort = e.target.value; filtersChanged(); });
+  $('f-source').addEventListener('change', (e) => { setSource(e.target.value); filtersChanged(); });
+  $('f-sort').addEventListener('change', (e) => {
+    state.sort = e.target.value;
+    writePref(store, PrefKey.SORT, state.sort);
+    renderSources();
+    filtersChanged();
+  });
   // The "Orden" options before the bookmark setting is known (VFS-12).
   renderSources();
 
@@ -199,18 +298,34 @@ function main(L) {
     return !!state.bookmarks?.enabled;
   }
 
-  /** "Buscar en" shows only while bookmarks are included, and "Orden" offers "by source" only
+  /** The source choice (VFS-6), remembered (VFS-38 R6). */
+  function setSource(choice) {
+    state.source = choice;
+    writePref(store, PrefKey.SOURCE, choice);
+    renderSources();
+  }
+
+  /** VFS-38 R6: the remembered source and sort, once the bookmark setting is known; a choice
+   *  not offered now gives the default. */
+  function restoreChoices() {
+    const on = bookmarksOn();
+    state.source = on ? readPref(store, PrefKey.SOURCE, Object.values(SourceChoice), SourceChoice.BOTH) : SourceChoice.BOTH;
+    state.sort = readPref(store, PrefKey.SORT, sortChoices(on), SortOrder.RELEVANCE);
+    renderSources();
+    renderClearButton();
+  }
+
+  /** «Origen» shows only while bookmarks are included, and "Orden" offers "by source" only
    *  then (VFS-12); the size filter does not apply to bookmarks alone (VFS-6 R7). */
   function renderSources() {
     const on = bookmarksOn();
-    $('f-source-pill').hidden = !on;
+    $('f-source-field').hidden = !on;
     state.sort = sortFor(state.sort, on);
     const sorts = $('f-sort');
     sorts.replaceChildren(...sortChoices(on).map((o) => new Option(S.sortOptions[o], o)));
     sorts.value = state.sort;
     $('f-source').value = state.source;
     $('f-size').disabled = !sizeFilterApplies(state.source, on);
-    $('f-source-pill').classList.toggle(ON, on && state.source !== SourceChoice.BOTH);
     $('f-sort-pill').classList.toggle(ON, state.sort !== SortOrder.RELEVANCE);
   }
 
@@ -252,21 +367,60 @@ function main(L) {
     return sizeFilterApplies(state.source, bookmarksOn());
   }
 
-  function activeFilterCount() {
+  /** The filters that narrow the files: type, date, size and folder. Any of them makes a
+   *  search without words list files. */
+  function narrowingCount() {
     const size = sizeApplies() && state.size !== SizeChoice.ANY;
     return state.kinds.size + (state.date !== DateChoice.ANY) + size + (state.folder !== '');
   }
 
+  /** The name a «Carpeta» chip shows: a disk folder's last segment, or a bookmark folder's. */
+  function folderName() {
+    const id = bookmarkFolderOf(state.folder);
+    if (id == null) return F.baseName(state.folder);
+    if (state.pickedBookmarkFolder?.id === id) return state.pickedBookmarkFolder.title;
+    const root = state.bookmarks?.roots?.find((r) => r.id === id);
+    return root ? bookmarkPathParts({ root: root.root, folder: [], profile: root.profile }, S.bookmarkRoots).join(PATH_SEPARATOR) : '';
+  }
+
+  /** VFS-38 R7, R8: the active filters behind «Más filtros», each with its chip text and how
+   *  to clear it alone. */
+  function moreFilters() {
+    const out = [];
+    if (sizeApplies() && state.size !== SizeChoice.ANY) {
+      out.push({ text: S.chipSize(S.sizeOptions[state.size]), clear: () => { state.size = SizeChoice.ANY; $('f-size').value = state.size; } });
+    }
+    if (state.folder !== '') {
+      out.push({ text: S.chipFolder(folderName()), clear: () => { state.folder = ''; $('f-folder').value = ''; } });
+    }
+    if (bookmarksOn() && state.source !== SourceChoice.BOTH) {
+      out.push({ text: S.sourceChips[state.source], clear: () => setSource(SourceChoice.BOTH) });
+    }
+    return out;
+  }
+
+  /** VFS-38 R8: every active filter, the source and the scope included. */
+  function activeFilterCount() {
+    return state.kinds.size + (state.date !== DateChoice.ANY) + moreFilters().length + (state.scope !== ScopeChoice.ALL);
+  }
+
   function renderClearButton() {
+    const more = moreFilters();
     const n = activeFilterCount();
-    const b = $('f-clear');
-    b.hidden = n === 0; // nothing to clear
-    b.textContent = n ? S.clearFiltersN(n) : S.clearFilters;
+    $('active-filters').hidden = n === 0; // nothing to clear
+    $('f-clear').textContent = n ? S.clearFiltersN(n) : S.clearFilters;
+    $('filter-tags').replaceChildren(...more.map(({ text, clear }) => {
+      const b = button(text, 'filter-tag', () => { clear(); filtersChanged(); q.focus(); });
+      b.setAttribute('aria-label', S.removeFilter(text));
+      b.append(icon('close'));
+      return b;
+    }));
+    $('f-more-text').textContent = more.length ? S.moreFiltersN(more.length) : S.moreFilters;
     renderTypeButton();
     // A filter that narrows the list looks chosen.
     $('f-date').parentElement.classList.toggle(ON, state.date !== DateChoice.ANY);
-    $('f-size').parentElement.classList.toggle(ON, state.size !== SizeChoice.ANY);
-    $('f-folder').parentElement.classList.toggle(ON, state.folder !== '');
+    $('f-more').classList.toggle(ON, more.length > 0);
+    fitScopeLabel();
   }
 
   /** Local midnight of a yyyy-mm-dd value, in unix seconds. */
@@ -307,7 +461,7 @@ function main(L) {
 
   /** One page of the current query over the chosen sources (VFS-6). */
   function fetchPage(offset) {
-    const query = { text: state.text.trim(), filters: filters(), limit: PAGE, offset };
+    const query = { text: state.text.trim(), filters: filters(), limit: PAGE, offset, scope: scopeFor(state.scope) };
     return api.searchSources(query, {
       sources: sourcesFor(state.source, bookmarksOn()),
       bookmarkFolder: bookmarkFolderOf(state.folder),
@@ -338,7 +492,8 @@ function main(L) {
       if (p) { state.pickedFolder = p; state.folder = p; renderFolderSelect(); filtersChanged(); }
     } catch (err) { showError(errorText(err)); }
   });
-  /** Clears type, date, size and folder; a suggestion (VFS-13) keeps a bookmark folder. */
+  /** «Quitar filtros» (VFS-38 R8): clears type, date, size, folder, source and scope and keeps
+   *  the sort; a suggestion (VFS-13) keeps a bookmark folder. */
   function clearFilters({ keepBookmarkFolder = false } = {}) {
     state.kinds.clear();
     for (const c of chips.querySelectorAll('input')) c.checked = false;
@@ -348,6 +503,12 @@ function main(L) {
     state.size = SizeChoice.ANY; $('f-size').value = SizeChoice.ANY;
     state.folder = folderAfterClear(state.folder, keepBookmarkFolder);
     $('f-folder').value = state.folder;
+    if (state.source !== SourceChoice.BOTH) setSource(SourceChoice.BOTH);
+    if (state.scope !== ScopeChoice.ALL) {
+      state.scope = ScopeChoice.ALL;
+      writePref(store, PrefKey.SCOPE, state.scope);
+      renderScope();
+    }
     filtersChanged();
     $('q').focus();
   }
@@ -381,8 +542,9 @@ function main(L) {
     runSearch();
   }
 
+  /** Words, or a filter that narrows the files; the scope and source alone list nothing. */
   function hasQuery() {
-    return state.text.trim() !== '' || activeFilterCount() > 0;
+    return state.text.trim() !== '' || narrowingCount() > 0;
   }
 
   let loadingTimer = 0;
@@ -438,7 +600,7 @@ function main(L) {
   /** VFS-13 R1, R5: asks the core for one suggestion; shown only while no newer search
    *  started. A failure leaves the empty state as it is. */
   async function askSuggestion(seq) {
-    const query = { text: state.text.trim(), filters: filters(), limit: 1, offset: 0 };
+    const query = { text: state.text.trim(), filters: filters(), limit: 1, offset: 0, scope: scopeFor(state.scope) };
     try {
       const s = await api.suggest(query);
       if (seq !== state.seq) return;
@@ -832,10 +994,20 @@ function main(L) {
 
   /* ---------------------------------------------------------------- summary, empty, details */
 
+  /** The results header (VFS-38 R9): the count, and «Orden» while there are results. */
   function renderSummary() {
     const s = $('summary');
     const fuzzy = $('fuzzy-note');
     fuzzy.hidden = true;
+    renderSummaryText(s);
+    s.title = s.textContent;
+    // «Orden» stays while a newer search is loading, so the header does not jump.
+    $('f-sort-pill').hidden = !state.total;
+    $('results-head').hidden = !s.textContent && !state.total;
+    if (state.searchState === SearchState.DONE && state.total) fuzzy.hidden = hitAt(0)?.matched !== MatchKind.FUZZY;
+  }
+
+  function renderSummaryText(s) {
     if (state.searchState === SearchState.LOADING) { s.textContent = S.searching; return; }
     if (state.searchState !== SearchState.DONE || !state.total) { s.textContent = ''; return; }
     const n = N.count(state.total);
@@ -843,7 +1015,6 @@ function main(L) {
     else if (state.truncatedBy === TruncatedBy.CAP) s.textContent = S.resultsCapped(n);
     else if (state.truncatedBy === TruncatedBy.DEADLINE) s.textContent = S.resultsPartial(n);
     else s.textContent = S.results(n, state.total === 1);
-    fuzzy.hidden = hitAt(0)?.matched !== MatchKind.FUZZY;
   }
 
   function firstScanRunning() {
@@ -893,10 +1064,14 @@ function main(L) {
         actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
       } else {
         const sg = state.suggestion;
-        mode = `no-hits:${activeFilterCount() > 0}:${sg ? sg.kind + sg.text : ''}`;
+        const namesOnly = state.scope === ScopeChoice.NAMES;
+        const filtered = activeFilterCount() - namesOnly;
+        mode = `no-hits:${filtered > 0}:${namesOnly}:${sg ? sg.kind + sg.text : ''}`;
         parts.push(icon('search'), el('h3', null, S.emptyNoHitsTitle(state.text.trim())));
+        // VFS-38 R13: a names-only search says so; «Quitar filtros» also brings back «Todo».
+        if (namesOnly) parts.push(el('p', null, S.emptyNamesOnly));
         if (activeFilterCount()) {
-          parts.push(el('p', null, S.emptyNoHitsFilters));
+          if (filtered) parts.push(el('p', null, S.emptyNoHitsFilters));
           // A "drop filters" suggestion is this same action with its count.
           if (!sg?.clearFilters) actions = [button(S.clearFilters, sg ? 'btn' : 'btn btn-primary', () => $('f-clear').click())];
         } else {
@@ -1040,10 +1215,12 @@ function main(L) {
     bar.hidden = true;
     pause.hidden = true;
     $('rescan-now').hidden = true;
+    text.title = '';
     if (api.missing) { text.textContent = ''; return; }
     if (!state.rootsLoaded) { text.textContent = S.statusConnecting; return; }
     if (!state.roots.length) { text.textContent = S.statusNoRoots; return; }
     text.textContent = statusText(L, p, state.roots);
+    text.title = text.textContent; // clamped to one line on short windows with results
     const actions = footerActions(p);
     bar.hidden = p?.state !== IndexerState.SCANNING;
     pause.hidden = !actions.pause;
@@ -1690,6 +1867,7 @@ function main(L) {
     await api.onIndexChanged(onIndexChanged);
     await api.onBookmarksChanged(onBookmarksChanged);
     try { setBookmarks(await api.getBookmarksStatus()); } catch { /* files only */ }
+    restoreChoices();
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();

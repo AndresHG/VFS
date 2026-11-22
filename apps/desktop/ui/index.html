@@ -51,15 +51,14 @@
       <span id="dev-badge" class="dev-badge" hidden data-s="devBadge"></span>
     </header>
 
-    <!-- Filters stay on screen (VFS-1 R9) as one quiet line: a type checklist in a popover and
-         three native selects. Labels are kept for screen readers; the chosen value is the text. -->
+    <!-- The filter line (VFS-38 R7): the scope group, «Tipo», «Fecha» and «Más filtros», one
+         quiet row. Labels are kept for screen readers; the chosen value is the text. -->
     <form class="filters" id="filters" aria-labelledby="filters-title">
       <h2 id="filters-title" class="visually-hidden" data-s="filtersTitle"></h2>
-      <!-- VFS-6: where to search, first in the line, only while Firefox bookmarks are included. -->
-      <label class="filter filter-select" id="f-source-pill" hidden>
-        <span class="visually-hidden" data-s="fSource"></span>
-        <select id="f-source"></select>
-      </label>
+      <!-- VFS-38 R1: one choice, one tab stop; main.js adds a radio per offered scope. -->
+      <div id="f-scope" class="scope" role="radiogroup" aria-labelledby="f-scope-label">
+        <span id="f-scope-label" class="scope-label" data-s="fScope"></span>
+      </div>
       <button id="f-type" class="filter" type="button" popovertarget="f-type-pop" aria-describedby="f-type-label">
         <span id="f-type-text"></span>
         <svg aria-hidden="true"><use href="#i-chevron"/></svg>
@@ -75,20 +74,26 @@
         <span class="visually-hidden" data-s="fDate"></span>
         <select id="f-date"></select>
       </label>
-      <label class="filter filter-select">
-        <span class="visually-hidden" data-s="fSize"></span>
-        <select id="f-size"></select>
-      </label>
-      <label class="filter filter-select field-folder">
-        <span class="visually-hidden" data-s="fFolder"></span>
-        <select id="f-folder"></select>
-      </label>
-      <!-- VFS-12: always on screen; "by source" is offered only while bookmarks are included. -->
-      <label class="filter filter-select" id="f-sort-pill">
-        <span class="visually-hidden" data-s="fSort"></span>
-        <select id="f-sort"></select>
-      </label>
-      <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" hidden data-s="clearFilters"></button>
+      <!-- VFS-38 R7: size, folder and, while bookmarks are included, the source; a popover, or a
+           row unfolded below the line where the Popover API is missing. -->
+      <button id="f-more" class="filter" type="button" popovertarget="f-more-pop" aria-controls="f-more-pop">
+        <span id="f-more-text"></span>
+        <svg aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <div id="f-more-pop" class="more-pop" popover>
+        <div class="field">
+          <label for="f-size" data-s="fSize"></label>
+          <select id="f-size"></select>
+        </div>
+        <div class="field">
+          <label for="f-folder" data-s="fFolder"></label>
+          <select id="f-folder"></select>
+        </div>
+        <div class="field" id="f-source-field" hidden>
+          <label for="f-source" data-s="fSource"></label>
+          <select id="f-source"></select>
+        </div>
+      </div>
       <div class="range" id="date-range" hidden>
         <div class="field">
           <label for="f-from" data-s="fFrom"></label>
@@ -101,6 +106,13 @@
         <p id="range-error" class="range-error" role="alert"></p>
       </div>
     </form>
+
+    <!-- VFS-38 R8: while any filter is on, the ones behind «Más filtros» as removable chips,
+         then «Quitar filtros (N)», which clears every filter and the scope. -->
+    <div class="active-filters" id="active-filters" role="group" data-s-label="activeFiltersTitle" hidden>
+      <div class="filter-tags" id="filter-tags"></div>
+      <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" data-s="clearFilters"></button>
+    </div>
 
     <div class="notices" id="notices">
       <div id="banner-error" class="banner banner-error" role="alert" hidden>
@@ -142,6 +154,14 @@
 
     <main class="results" id="main">
       <h2 class="visually-hidden" data-s="resultsTitle"></h2>
+      <!-- VFS-38 R9: the result count with «Orden» beside it (VFS-12), while there are results. -->
+      <div class="results-head" id="results-head" hidden>
+        <p class="summary-line"><strong id="summary" class="summary"></strong></p>
+        <label class="filter filter-select" id="f-sort-pill">
+          <span class="visually-hidden" data-s="fSort"></span>
+          <select id="f-sort"></select>
+        </label>
+      </div>
       <p id="fuzzy-note" class="fuzzy-note" hidden data-s="fuzzyNote"></p>
       <div class="list-wrap">
         <div id="results" class="list" role="listbox" tabindex="-1" data-s-label="resultsTitle">
@@ -162,7 +182,7 @@
     <footer class="bottom">
       <div class="status-text">
         <progress id="scan-progress" hidden></progress>
-        <p><strong id="summary" class="summary"></strong><span id="status-text"></span></p>
+        <p id="status-text"></p>
       </div>
       <button id="pause" class="btn btn-quiet" type="button" hidden></button>
       <!-- VFS-27 R8, R15: content progress, with «Pausar» / «Reanudar» or «Reintentar». -->

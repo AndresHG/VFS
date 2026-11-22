@@ -1,19 +1,16 @@
 // VFS-35: the window fits small and low-resolution screens. The real page runs in a headless
 // Chrome against the development fake backend, at the content size of a maximised window on
 // common laptop screens, at normal and large text. Chrome is driven over the DevTools
-// protocol with Node built-ins only (no npm packages).
+// protocol (browser.mjs). VFS-38 AC-8: the filter line stays one row.
 // Run: node --test apps/desktop/ui-dev/layout.test.mjs   (needs Google Chrome or Chromium)
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url)); // apps/desktop
+import { startBrowser } from './browser.mjs';
+import { CATALOGS, Lang } from '../ui/strings.js';
+import { FileKind } from '../ui/contract.js';
+import { DateChoice, ScopeChoice, SizeChoice, SourceChoice } from '../ui/choices.js';
 
 /** Content area of a maximised window on Windows 11 (taskbar 48 px and title bar 32 px, in
  *  CSS px) for each screen and scaling, plus the minimum window of tauri.conf.json. */
@@ -28,122 +25,23 @@ const VIEWPORTS = [
 ];
 const TEXT = [{ name: 'normal text', root: '100%' }, { name: 'large text', root: '125%' }];
 
-const CHROME = [
-  process.env.CHROME_PATH,
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
-].find((p) => p && existsSync(p));
-
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.ttf': 'font/ttf', '.svg': 'image/svg+xml' };
-
-/** Serves apps/desktop on 127.0.0.1, so ui/api.js loads the fake backend (VFS-1 U5). */
-function serve() {
-  const server = createServer((req, res) => {
-    const path = normalize(join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname)));
-    const file = path.endsWith('/') || path.endsWith('\\') ? join(path, 'index.html') : path;
-    if (!file.startsWith(ROOT) || !existsSync(file) || !statSync(file).isFile()) {
-      res.writeHead(404).end();
-      return;
-    }
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-    res.end(readFileSync(file));
-  });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
-}
-
-/** Starts headless Chrome and returns a minimal DevTools client for its first page. */
-async function launch() {
-  const profile = mkdtempSync(join(tmpdir(), 'vfs-layout-'));
-  const proc = spawn(CHROME, [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-    '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars=false', 'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const browserUrl = await new Promise((resolve, reject) => {
-    let err = '';
-    proc.stderr.on('data', (d) => {
-      err += d;
-      const m = err.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (m) resolve(m[1]);
-    });
-    proc.on('exit', () => reject(new Error(`Chrome exited: ${err}`)));
-  });
-  const port = new URL(browserUrl).port;
-  const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const ws = new WebSocket(pages.find((p) => p.type === 'page').webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  let id = 0;
-  const pending = new Map();
-  const waiters = [];
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.id && pending.has(msg.id)) {
-      const { resolve, reject } = pending.get(msg.id);
-      pending.delete(msg.id);
-      if (msg.error) reject(new Error(msg.error.message));
-      else resolve(msg.result);
-    } else if (msg.method) {
-      for (const w of waiters.splice(0)) if (w.method === msg.method) w.resolve(); else waiters.push(w);
-    }
-  };
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    pending.set(++id, { resolve, reject });
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-  const once = (method) => new Promise((resolve) => waiters.push({ method, resolve }));
-  const close = () => {
-    ws.close();
-    proc.kill();
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* Chrome may still hold it */ }
-  };
-  return { send, once, close };
-}
-
-let server;
-let chrome;
-let base;
+let page;
 
 test.before(async () => {
-  assert.ok(CHROME, 'Google Chrome or Chromium is needed for the layout tests (set CHROME_PATH)');
-  server = await serve();
-  base = `http://127.0.0.1:${server.address().port}/ui/?fake`;
-  chrome = await launch();
-  await chrome.send('Page.enable');
-  await chrome.send('Runtime.enable');
+  page = await startBrowser();
 });
 
-test.after(() => {
-  chrome?.close();
-  server?.close();
-});
+test.after(() => page?.close());
 
-/** Evaluates an expression in the page and returns its value. */
-async function evaluate(expression) {
-  const { result, exceptionDetails } = await chrome.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-  if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
-  return result.value;
-}
+const evaluate = (expression) => page.evaluate(expression);
+const until = (expression, what) => page.until(expression, what);
 
-/** Waits until `expression` is truthy in the page. */
-async function until(expression, what) {
-  for (let i = 0; i < 100; i++) {
-    if (await evaluate(expression)) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
-/** Loads the page at a viewport and text size. */
-async function open(viewport, text, scenario = '') {
-  await chrome.send('Emulation.setDeviceMetricsOverride', {
+/** Loads the page at a viewport and text size, with extra URL options (`&scenario=…`). */
+async function open(viewport, text, options = '') {
+  await page.send('Emulation.setDeviceMetricsOverride', {
     width: viewport.width, height: viewport.height, deviceScaleFactor: viewport.scale, mobile: false,
   });
-  const loaded = chrome.once('Page.loadEventFired');
-  await chrome.send('Page.navigate', { url: scenario ? `${base}&scenario=${scenario}` : base });
-  await loaded;
-  await until(`document.getElementById('open-folders').textContent.trim() !== ''`, 'the bottom bar');
+  await page.load(options);
   // The system text size, as the UI sees it: the root font size its rem units follow.
   await evaluate(`document.documentElement.style.fontSize = '${text.root}'`);
   await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
@@ -175,7 +73,7 @@ async function assertNoSideScroll(where) {
 
 const FOOTER = ['#open-folders', '#open-settings'];
 /** The first filter pill: covered or squashed filters fail here (VFS-35 AC-6). */
-const FILTER = '#f-type';
+const FILTER = '#f-scope';
 
 for (const viewport of VIEWPORTS) {
   for (const text of TEXT) {
@@ -203,7 +101,7 @@ for (const viewport of VIEWPORTS) {
 
       const short = await evaluate(`document.getElementById('app').clientHeight < 40 * parseFloat(getComputedStyle(document.documentElement).fontSize)`);
       if (short) {
-        const tops = await evaluate(`[...document.querySelectorAll('#filters > .filter, #filters > #f-clear')].filter((el) => el.offsetParent !== null).map((el) => Math.round(el.getBoundingClientRect().top))`);
+        const tops = await evaluate(`[...document.querySelectorAll('#filters > .filter, #filters > .scope')].filter((el) => el.offsetParent !== null).map((el) => Math.round(el.getBoundingClientRect().top))`);
         assert.equal(new Set(tops).size, 1, `filter pills on one row ${JSON.stringify(tops)} (${where})`);
       }
 
@@ -237,11 +135,122 @@ for (const viewport of VIEWPORTS) {
 
     /** VFS-35 AC-4, AC-5: no folders yet, the empty state offers "Añadir carpeta…". */
     test(`first-run add-folder button fits at ${where}`, async () => {
-      await open(viewport, text, 'empty');
+      await open(viewport, text, '&scenario=empty');
       await until(`document.querySelector('#empty .actions .btn-primary')`, 'the empty state');
       await assertVisible('#empty .actions .btn-primary', `no folders, ${where}`);
       for (const s of FOOTER) await assertVisible(s, `no folders, ${where}`);
       await assertNoSideScroll(`no folders, ${where}`);
     });
   }
+}
+
+/* ---------------------------------------------------------------- VFS-38 AC-8 */
+
+/** The widest label of a set of choices, to test the line at its widest. */
+function widest(labels, keys) {
+  return keys.reduce((a, b) => (labels[b].length > labels[a].length ? b : a));
+}
+
+/** The filter states of AC-8 for one language: the type set whose button reads longest, the
+ *  longest date and size choices, a folder, files only (so size applies) and «Solo nombres». */
+function filterStates(S) {
+  const typeSets = [[FileKind.DOCUMENT, FileKind.FOLDER], [FileKind.DOCUMENT, FileKind.PHOTO, FileKind.VIDEO], [FileKind.VIDEO, FileKind.FOLDER]];
+  const types = typeSets.reduce((a, b) => (S.typeButton(...b.map((k) => S.kindsPlural[k])).length > S.typeButton(...a.map((k) => S.kindsPlural[k])).length ? b : a));
+  const date = widest(S.dateOptions, [DateChoice.WEEK, DateChoice.MONTH, DateChoice.YEAR]);
+  const size = widest(S.sizeOptions, [SizeChoice.SMALL, SizeChoice.MEDIUM, SizeChoice.LARGE, SizeChoice.HUGE]);
+  const some = { types, date, scope: ScopeChoice.NAMES };
+  return [
+    { name: 'no filters', types: [], date: DateChoice.ANY, scope: ScopeChoice.ALL, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
+    { name: 'type, date and names only', ...some, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
+    { name: 'every filter', ...some, size, folder: 'D:\\Archivo familiar', source: SourceChoice.FILES },
+  ];
+}
+
+/** Opens the results view with bookmarks on and a third scope button, as VFS-27 27c will add. */
+async function openFilterLine(viewport, text, lang) {
+  await open(viewport, text, lang === Lang.EN ? '&bookmarks&locale=en-US' : '&bookmarks');
+  await until(`[...document.getElementById('f-folder').options].some((o) => o.value === 'D:\\\\Archivo familiar')
+    && !document.getElementById('f-source-field').hidden`, 'roots and bookmarks');
+  const label = JSON.stringify(CATALOGS[lang].scopeOptions[ScopeChoice.DOCUMENTS]);
+  await evaluate(`(() => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'scope-btn'; b.textContent = ${label};
+    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', 'false'); b.tabIndex = -1;
+    b.dataset.scope = ${JSON.stringify(ScopeChoice.DOCUMENTS)};
+    document.getElementById('f-scope').append(b);
+  })()`);
+  await page.type('a');
+  await until(`document.getElementById('app').dataset.view === 'list'`, 'results view');
+}
+
+async function applyState(state) {
+  await page.scope(state.scope);
+  await page.kinds(state.types);
+  await page.choose('f-date', state.date);
+  await page.choose('f-source', state.source);
+  await page.choose('f-size', state.size);
+  await page.choose('f-folder', state.folder);
+  await until(`document.querySelectorAll('#results .row').length > 0 || !document.getElementById('empty').hidden`, 'the search');
+  await evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+}
+
+/** The filter line's controls and how they sit: their tops, the line's width, the room. */
+const LINE = `(() => {
+  const form = document.getElementById('filters');
+  const controls = ['f-scope', 'f-type', 'f-date', 'f-more'].map((id) => document.getElementById(id))
+    .map((el) => (el.tagName === 'SELECT' ? el.parentElement : el)).filter((el) => el.offsetParent !== null);
+  const rects = controls.map((el) => el.getBoundingClientRect());
+  const style = getComputedStyle(form);
+  const room = form.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return {
+    tops: rects.map((r) => Math.round(r.top)),
+    width: Math.round(rects.at(-1).right - rects[0].left),
+    room: Math.round(room),
+    fits: rects.at(-1).right <= form.getBoundingClientRect().right - parseFloat(style.paddingRight) + 0.5,
+    scrolls: form.scrollWidth > form.clientWidth,
+    label: getComputedStyle(document.getElementById('f-scope-label')).position !== 'absolute',
+    measure: parseFloat(getComputedStyle(document.documentElement).fontSize) * 60,
+  };
+})()`;
+
+const LINE_VIEWPORTS = [maximised(1280, 720, 1.25), maximised(1366, 768, 1.25), maximised(1920, 1080, 1)];
+
+for (const viewport of LINE_VIEWPORTS) {
+  for (const lang of [Lang.ES, Lang.EN]) {
+    const where = `${viewport.name}, ${viewport.width}x${viewport.height}, normal text, ${lang}`;
+
+    /** VFS-38 AC-8 (R9, R10): with bookmarks on and three scope buttons, the filter line is one
+     *  row inside the 60rem column with no sideways scroll in every filter state, and «Orden»
+     *  sits in the results header. */
+    test(`filter line is one row and «Orden» is in the results header at ${where}`, async (t) => {
+      await openFilterLine(viewport, TEXT[0], lang);
+      for (const state of filterStates(CATALOGS[lang])) {
+        await applyState(state);
+        const line = await evaluate(LINE);
+        t.diagnostic(`${state.name}: line ${line.width}px of ${line.room}px (measure ${line.measure}px), «${CATALOGS[lang].fScope}» shown: ${line.label}`);
+        assert.equal(new Set(line.tops).size, 1, `one row ${JSON.stringify(line.tops)} (${state.name}, ${where})`);
+        assert.ok(line.fits && !line.scrolls, `inside the line, no sideways scroll: ${line.width}px of ${line.room}px (${state.name}, ${where})`);
+        assert.ok(line.room <= line.measure + 0.5, `the line keeps to the 60rem column (${where})`);
+        if (await evaluate(`document.querySelectorAll('#results .row').length > 0`)) {
+          assert.ok(await evaluate(`!!document.getElementById('f-sort-pill').closest('.results-head')`), `«Orden» in the results header (${where})`);
+          await assertVisible('#f-sort-pill', `${state.name}, ${where}`);
+          await assertVisible('#summary', `${state.name}, ${where}`);
+        }
+        await assertNoSideScroll(`${state.name}, ${where}`);
+      }
+    });
+  }
+}
+
+/** VFS-38 AC-8 (R10, VFS-35 R5): at the minimum window and with large text, every filter set,
+ *  bookmarks on and three scope buttons, nothing is wider than the window. */
+for (const [viewport, text] of [[VIEWPORTS[6], TEXT[0]], [VIEWPORTS[6], TEXT[1]], [VIEWPORTS[1], TEXT[1]], [VIEWPORTS[4], TEXT[1]]]) {
+  const where = `${viewport.name}, ${viewport.width}x${viewport.height}, ${text.name}`;
+  test(`every filter set does not widen the page at ${where}`, async () => {
+    await openFilterLine(viewport, text, Lang.ES);
+    await applyState(filterStates(CATALOGS[Lang.ES]).at(-1));
+    await assertVisible(FILTER, where);
+    await assertVisible('#f-clear', where);
+    await assertNoSideScroll(where);
+  });
 }

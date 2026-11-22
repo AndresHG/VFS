@@ -38,16 +38,22 @@ ordinary or fast machines. The product spec is
   20 results. Shorter words match exactly.
 - Shows folders as results too, marked as folders.
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
-- "Orden" sorts by relevance (the default), newest, oldest, name or size, applied before the
-  2,000-result cap (spec [VFS-12](specs/vfs-12-sort/spec.md)).
+  The filter line holds "Buscar en" ("Todo", the default, or "Solo nombres": words are
+  matched in file and folder names only, not in folder paths), "Tipo", "Fecha" and "Más
+  filtros", which opens size, folder and the bookmark source. Filters in use show as
+  removable chips below it, with "Quitar filtros", which also brings back "Todo" (spec
+  [VFS-38](specs/vfs-38-search-modes/spec.md)).
+- "Orden", beside the result count, sorts by relevance (the default), newest, oldest, name or
+  size, applied before the 2,000-result cap (spec [VFS-12](specs/vfs-12-sort/spec.md)). The
+  scope, the source and the order are remembered across restarts; filters start empty.
 - "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected, on Windows
   also for paths over 259 characters; only if the Shell cannot address one does the nearest
   folder open.
 - Optionally includes Firefox bookmarks ("Incluir marcadores de Firefox" in the "Carpetas"
   panel, off by default; spec [VFS-6](specs/vfs-6-bookmarks/spec.md)). Bookmarks are found by
   title, address, folder path, tags and keyword with the same rules as files; bookmark
-  folders are results and can be chosen as the "Carpeta" filter; "Buscar en" picks files,
-  bookmarks or both, and "Orden" adds files first, then bookmarks. "Abrir en Firefox"
+  folders are results and can be chosen as the "Carpeta" filter; "Origen" in "Más filtros"
+  picks files, bookmarks or both, and "Orden" adds files first, then bookmarks. "Abrir en Firefox"
   opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
   place, never written, and only bookmark tables are read (no history, passwords or
   cookies).

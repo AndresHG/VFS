@@ -1,4 +1,4 @@
-// Search sources on the screen (VFS-6): which sources a "Buscar en" choice covers, bookmark
+// Search sources on the screen (VFS-6): which sources an «Origen» choice covers, bookmark
 // folders in the "Carpeta" select, and the folder path of a bookmark row. Pure functions,
 // tested in ui-dev/sources.test.mjs.
 

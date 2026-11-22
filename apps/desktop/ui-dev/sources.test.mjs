@@ -1,4 +1,4 @@
-// The bookmark source on the screen (VFS-6 AC-11, AC-13): which sources each "Buscar en"
+// The bookmark source on the screen (VFS-6 AC-11, AC-13): which sources each «Origen»
 // choice covers, bookmark folders in the "Carpeta" select, the folder path of a bookmark row,
 // and Spanish copy for every new closed-set value.
 // Run: node --test apps/desktop/ui-dev/sources.test.mjs
@@ -59,15 +59,16 @@ test('site of a bookmark address', () => {
   for (const none of ['file:///C:/a.pdf', 'data:text/html,hola', '', null]) assert.equal(site(none), '', String(none));
 });
 
-/** VFS-6 AC-11: every choice, root, read state and sort order has Spanish copy; "Buscar en"
- *  starts hidden (shown only while the setting is on). VFS-12 AC-5: "Orden" is always shown. */
+/** VFS-6 AC-11: every choice, root, read state and sort order has Spanish copy; the source
+ *  choice («Origen» in «Más filtros», VFS-38 R7) starts hidden (shown only while the setting is
+ *  on). VFS-38 R9: "Orden" sits in the results header. */
 test('copy and markup for the bookmark source', () => {
   assert.deepEqual(Object.keys(S.sourceOptions).sort(), Object.values(SourceChoice).sort());
   assert.deepEqual(Object.keys(S.sortOptions).sort(), Object.values(SortOrder).sort());
   for (const r of Object.values(BookmarkRoot)) assert.ok(S.bookmarkRoots[r], r);
   assert.deepEqual(Object.keys(S.bookmarksState).sort(), Object.values(ReadState).sort());
-  assert.match(html, /<label class="filter filter-select" id="f-source-pill" hidden>/);
-  assert.match(html, /<label class="filter filter-select" id="f-sort-pill">/);
+  assert.match(html, /<div id="f-more-pop"[^>]*>[\s\S]*<div class="field" id="f-source-field" hidden>[\s\S]*?<\/div>\s*<\/div>/);
+  assert.match(html, /<div class="results-head" id="results-head" hidden>[\s\S]*?<label class="filter filter-select" id="f-sort-pill">/);
   assert.match(html, /id="bookmarks-on"/);
   for (const key of ['bookmarksToggle', 'folderContentsButton', 'bookmarkKind', 'bookmarkFolderKind', 'fSource', 'fSort']) {
     assert.equal(typeof S[key], 'string', key);
