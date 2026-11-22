@@ -1495,6 +1495,20 @@ fn overflow_indexer(fx: &mut Fx) -> (IndexerHandle, Arc<FakeHistory>) {
 
 /// `overflow_indexer` with a given schedule (a recording one for diagnostics).
 fn overflow_indexer_with(fx: &mut Fx, sched: Sched) -> (IndexerHandle, Arc<FakeHistory>) {
+    let timing = Timing {
+        cursor_every: Duration::from_millis(50),
+        replay_quiet: Duration::from_millis(300),
+        replay_max: Duration::from_millis(1500),
+    };
+    overflow_indexer_timed(fx, sched, timing)
+}
+
+/// `overflow_indexer_with` and given clocks.
+fn overflow_indexer_timed(
+    fx: &mut Fx,
+    sched: Sched,
+    timing: Timing,
+) -> (IndexerHandle, Arc<FakeHistory>) {
     fx.scan();
     cursor::store(&fx.conn, fx.root_id, Some("fake:boot")).unwrap();
     let history = Arc::new(FakeHistory::default());
@@ -1505,11 +1519,7 @@ fn overflow_indexer_with(fx: &mut Fx, sched: Sched) -> (IndexerHandle, Arc<FakeH
         sched,
         None,
         Box::new(Arc::clone(&history)),
-        Timing {
-            cursor_every: Duration::from_millis(50),
-            replay_quiet: Duration::from_millis(300),
-            replay_max: Duration::from_millis(1500),
-        },
+        timing,
     )
     .unwrap();
     wait_for("the start-up replay", || {
@@ -1580,7 +1590,14 @@ fn overflow_burst_gives_one_replay() {
     // FSEvents assigns ids late: events of these writes could reach the live watcher after
     // it is armed and list C again.
     std::thread::sleep(Duration::from_millis(1100));
-    let (h, history) = overflow_indexer(&mut fx);
+    // A quiet delay far longer than the checks below take, even on a slow runner, so the
+    // replay cannot land inside them.
+    let timing = Timing {
+        cursor_every: Duration::from_millis(50),
+        replay_quiet: Duration::from_secs(2),
+        replay_max: Duration::from_secs(4),
+    };
+    let (h, history) = overflow_indexer_timed(&mut fx, Sched::inert(), timing);
     let checked = fx.last_scan();
     wait_for("the cursor advanced", || {
         stored_cursor(&fx.db_path, fx.root_id).is_some_and(|c| c != "fake:started")
@@ -1595,8 +1612,9 @@ fn overflow_burst_gives_one_replay() {
         h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
         std::thread::sleep(Duration::from_millis(50));
     }
-    let frozen = stored_cursor(&fx.db_path, fx.root_id);
-    std::thread::sleep(Duration::from_millis(150)); // three cursor checks
+    // Read once the overflows froze the cursor (unchanged for six checks), then three more.
+    let frozen = settled_cursor(&fx);
+    std::thread::sleep(Duration::from_millis(150));
     assert_eq!(
         stored_cursor(&fx.db_path, fx.root_id),
         frozen,
@@ -1618,7 +1636,10 @@ fn overflow_burst_gives_one_replay() {
     *history.replay.lock().unwrap() = Some(Ok((vec![fx.root().join("C")], "fake:second".into())));
     let started = Instant::now();
     while !has_row(&fx, "c.txt") {
-        assert!(started.elapsed() < Duration::from_secs(5), "never replayed");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "never replayed"
+        );
         h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -1691,12 +1712,21 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     drop(h);
 
     // No cursor at all: no replay is attempted, none is stored, a walk is owed.
+    // The overflow freezes the cursor first (a long quiet delay), so no check stores one
+    // after the test deletes it.
     let mut fx = fixture(&["A"]);
-    let (h, history) = overflow_indexer(&mut fx);
-    cursor::store(&db::open_rw(&fx.db_path).unwrap(), fx.root_id, None).unwrap();
+    let timing = Timing {
+        cursor_every: Duration::from_millis(50),
+        replay_quiet: Duration::from_secs(2),
+        replay_max: Duration::from_secs(4),
+    };
+    let (h, history) = overflow_indexer_timed(&mut fx, Sched::inert(), timing);
     let before = history.replays.load(Ordering::SeqCst);
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
-    std::thread::sleep(Duration::from_millis(600));
+    settled_cursor(&fx);
+    cursor::store(&db::open_rw(&fx.db_path).unwrap(), fx.root_id, None).unwrap();
+    // Past the replay's due time (2 s after the overflow).
+    std::thread::sleep(Duration::from_millis(2500));
     assert_eq!(history.replays.load(Ordering::SeqCst), before);
     assert_eq!(
         stored_cursor(&fx.db_path, fx.root_id),
@@ -1709,7 +1739,8 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
     // Unreachable when the replay is due: no replay, the cursor holds, a walk is owed.
     let mut fx = fixture(&["A"]);
     let (h, history) = overflow_indexer(&mut fx);
-    let away = fx.root().with_file_name("lejos");
+    // A name of its own: other test processes may run the same test in the same folder.
+    let away = PathBuf::from(format!("{}-lejos", fx.root().display()));
     fs::rename(fx.root(), &away).unwrap();
     let before = history.replays.load(Ordering::SeqCst);
     h.send(Cmd::Watch(watch::WatchEvent::Overflow(fx.root_id)));
