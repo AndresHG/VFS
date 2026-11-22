@@ -49,8 +49,9 @@ same query the screen searched (files only). `Suggestion` (camelCase in JSON):
 - R4. THE core SHALL spend at most 1.5 s per call (`SearchConfig::suggest_budget`): each
   try's deadline (soft and hard) is the budget left; a try cut by it counts as finding
   nothing, and no try starts once the budget is spent. A newer search interrupts the call,
-  which then returns no suggestion (a search generation checked between tries and by the
-  running try's progress handler, so an interrupt that reached no statement is not lost). `suggest`
+  which then returns no suggestion (a search generation and a count of searches waiting for
+  the lock, checked between tries and by the running try's progress handler, so an
+  interrupt that reached no statement is not lost). `suggest`
   never interrupts a search: it waits for a running one, then runs.
 - R5. WHEN a suggestion exists and no other search started since the empty one (the screen's
   sequence number), THE screen SHALL show one button with the suggestion's copy and count;

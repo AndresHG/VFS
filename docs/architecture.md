@@ -420,9 +420,10 @@ one term, last first. The first try that finds anything wins. Each try is
 `search::count`: relevance, no page resolved, no S7 cache entry, both deadlines at the end
 of `SearchConfig::suggest_budget` (1.5 s); a cut try counts as nothing. `suggest` takes the
 search lock without interrupting; every `search` bumps a generation counter before it
-interrupts, and a changed generation ends the suggestion with none, checked between tries
-and by the running try's progress handler (an interrupt sent before that try's first
-statement reaches nothing). On 2 M synthetic files a suggestion takes 1–24 ms. The
+interrupts and counts itself as waiting until it holds the lock; a changed generation or a
+waiting search ends the suggestion with none, checked between tries and by the running
+try's progress handler (an interrupt sent before that try's first statement reaches
+nothing). On 2 M synthetic files a suggestion takes 1–24 ms. The
 `Suggestion` carries the box text to run (typed words replaced or removed in place), whether
 to clear filters, the changed word and the grouped, capped count; the empty state shows it
 as its one primary button.

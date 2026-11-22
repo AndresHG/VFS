@@ -126,24 +126,28 @@ pub(crate) fn search(
     response
 }
 
-/// Whether a newer search started since this was made: the search counter moved past the
-/// generation it read (VFS-13 R4).
+/// Whether a newer search started since this was made (the search counter moved past the
+/// generation it read) or a search waits for the search lock (VFS-13 R4). The second covers
+/// a search that bumped the counter just before this was made and then lost the lock race.
 #[derive(Clone)]
 pub(crate) struct Cancel {
     searches: Arc<AtomicU64>,
+    waiting: Arc<AtomicU64>,
     generation: u64,
 }
 
 impl Cancel {
-    pub(crate) fn new(searches: &Arc<AtomicU64>) -> Cancel {
+    pub(crate) fn new(searches: &Arc<AtomicU64>, waiting: &Arc<AtomicU64>) -> Cancel {
         Cancel {
             searches: searches.clone(),
+            waiting: waiting.clone(),
             generation: searches.load(Ordering::SeqCst),
         }
     }
 
     pub(crate) fn is_set(&self) -> bool {
         self.searches.load(Ordering::SeqCst) != self.generation
+            || self.waiting.load(Ordering::SeqCst) > 0
     }
 }
 
@@ -2087,7 +2091,8 @@ mod tests {
     /// VFS-13 AC-5 (R4): a newer search that started after a suggestion's last check, its
     /// interrupt spent before the count's first statement (the lost-interrupt race), still
     /// stops the count: here the generation moved and no interrupt is ever sent, yet a count
-    /// with a minute of budget returns `None` at once; with nothing newer it counts.
+    /// with a minute of budget returns `None` at once; so does one while a search waits for
+    /// the lock; with nothing newer it counts.
     #[test]
     fn a_newer_search_stops_a_count_without_an_interrupt() {
         let dir = tempfile::tempdir().unwrap();
@@ -2121,7 +2126,8 @@ mod tests {
             sort: Default::default(),
         };
         let searches = Arc::new(AtomicU64::new(7));
-        let cancel = Cancel::new(&searches);
+        let waiting = Arc::new(AtomicU64::new(0));
+        let cancel = Cancel::new(&searches, &waiting);
         let budget = Instant::now() + Duration::from_secs(60);
         assert_eq!(
             count(&mut conn, &q, budget, &cancel).unwrap(),
@@ -2132,6 +2138,14 @@ mod tests {
         assert_eq!(count(&mut conn, &q, budget, &cancel).unwrap(), None);
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(conn.is_autocommit());
+        let cancel = Cancel::new(&searches, &waiting);
+        waiting.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(count(&mut conn, &q, budget, &cancel).unwrap(), None);
+        waiting.fetch_sub(1, Ordering::SeqCst);
+        assert_eq!(
+            count(&mut conn, &q, budget, &cancel).unwrap(),
+            Some((1_500, false))
+        );
     }
 
     /// VFS-4 AC-5 (R5): once the list is full and marked truncated by the cap, no further
