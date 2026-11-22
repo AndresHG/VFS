@@ -109,6 +109,10 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
   range, page, BM25 score, and a snippet with highlight offsets. The CLI, the app (VFS-27),
   the questions (VFS-28) and hybrid search (VFS-29) SHALL all use this call. None of them
   SHALL query `content.db` directly.
+- R16. WHEN a document's format carries metadata, THE content store SHALL keep its title, its
+  author(s), and its creation date as reported by the extractor, next to the document row.
+  It SHALL return them with each `retrieve` hit, for VFS-28's bibliography. Formats without
+  metadata store none; nothing is guessed from the text.
 
 ## Acceptance scenarios
 
@@ -182,6 +186,9 @@ Tests cite these ids (`VFS-2 AC-<m>`) in their doc comments.
   public-domain test corpus in `bench/` (see D17), When the golden test runs in CI, Then the
   expected document is in the top 5 for at least the share recorded in the test file. That
   share is fixed by the first run, and it can only go up.
+- AC-18 (R16) Given a PDF and a DOCX whose metadata holds a title, an author and a creation
+  date, and a TXT, When they are content-indexed and retrieved, Then the PDF and DOCX hits
+  carry those three values and the TXT hit carries none.
 
 ## Phased PRs
 
@@ -190,7 +197,7 @@ Each PR leaves `main` releasable, and the `content` feature stays off by default
 | PR | Scope | Proves | Effort |
 |---|---|---|---|
 | 2a | Resume PR 98. Rebase it on `main`, get the Windows and macOS CI green, implement D12 (R12), and pin the toolchain for the extractor (D16). | AC-1–AC-13 | 2–3 days **[estimate]** |
-| 2b | Query semantics and the retrieval API: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` (R15), and the content golden set (AC-17, D17). | AC-14–AC-17 | 2–3 days **[estimate]** |
+| 2b | Query semantics and the retrieval API: AND by default with an OR fallback (R13), the frequency guard (R14), `retrieve` (R15), document metadata (R16), and the content golden set (AC-17, D17). | AC-14–AC-18 | 2–3 days **[estimate]** |
 
 ## Budgets
 
@@ -264,6 +271,7 @@ tuned on the real PC.
 | D13 | Q5: OCR | A later, optional step: off by default, per folder, after normal extraction. Scanned PDFs are marked "no text (scanned)". | owner | 2026-11-21 |
 | D14 | Q6: chunk size | Keep chunks of ~2,000 characters (≈ 450–550 Spanish tokens), tiling, never crossing a page, without stored overlap; neighbours are joined at retrieval time. Fixed now, before any vector exists. | agent (owner delegated) | 2026-11-21 |
 | D15 | Embeddings and AI (for the later phases) | BM25 by default and offline. Hybrid search is opt-in, using an embedding API key (OpenAI or Voyage, separate from the answer key) or a local model downloaded from Settings. Without a connection, search falls back to BM25. Per question, only the passages used leave the PC, visibly. | owner | 2026-11-21 |
+| D17 | Content golden set | About 40 Spanish queries over committed public documents: BOE PDFs (free reuse with attribution), Spanish Wikipedia rendered to PDF/DOCX (CC BY-SA), and the synthetic personal documents of `bench/content-corpus/make_corpus.py`. The format and the per-case contract follow VFS-11. The corpus is shared with VFS-28's RAG golden set (D9 there). | agent | 2026-11-22 |
 
 ## Owner answers (former open questions Q1–Q6)
 
