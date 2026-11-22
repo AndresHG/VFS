@@ -1966,3 +1966,32 @@ fn replayed_paths_are_matched_to_the_root_ignoring_case_on_windows() {
     );
     assert_eq!(under_root(Path::new("/Datos"), root, true), None);
 }
+
+/// VFS-9 R7, VFS-1 AC-8: a replayed folder named with the Windows `\\?\` prefix (its path is
+/// over 260 characters) is spelled under the plain stored root; without the Windows rule it
+/// matches nothing. The prefix is dropped for a drive path and turned back into `\\` for a
+/// network share.
+#[test]
+fn verbatim_replayed_paths_are_matched_to_the_plain_root() {
+    let root = Path::new("/Datos/Fotos");
+    assert_eq!(
+        under_root(Path::new(r"\\?\/datos/Fotos/Boda/2003"), root, true),
+        Some(PathBuf::from("/Datos/Fotos/Boda/2003"))
+    );
+    assert_eq!(
+        under_root(Path::new(r"\\?\/Datos/Fotos/Boda"), root, false),
+        None
+    );
+    assert_eq!(
+        plain_form(Path::new(r"\\?\C:\Archivo\año")),
+        PathBuf::from(r"C:\Archivo\año")
+    );
+    assert_eq!(
+        plain_form(Path::new(r"\\?\UNC\nas\fotos\boda")),
+        PathBuf::from(r"\\nas\fotos\boda")
+    );
+    assert_eq!(
+        plain_form(Path::new(r"C:\Archivo")),
+        PathBuf::from(r"C:\Archivo")
+    );
+}
