@@ -173,7 +173,10 @@ A directory that cannot be listed keeps its rows, stays pending and is retried a
 minute, doubling, until 6 failures; then it waits for the next full walk (spec I11). A
 folder briefly locked by the sync client or the antivirus would otherwise be marked current
 with stale contents until the next weekly walk. Rejected: marking it clean with the error
-counted, the previous behaviour.
+counted, the previous behaviour. A "no permission" failure is the exception: it is retried
+once, then waits for a full walk (VFS-33 R1). A TCC or ACL denial does not heal by waiting,
+and retrying ~140 protected macOS folders kept every pass in walk mode; the one retry
+covers denials that pass (a folder being deleted on Windows, a filter driver).
 
 ## One exclusion list for walker and watcher
 

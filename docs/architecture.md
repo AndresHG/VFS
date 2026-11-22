@@ -228,8 +228,9 @@ walked again at its new place; the Windows watcher's rename pairs avoid that (se
 If a directory cannot be listed because of a permission or I/O error, what is indexed
 stays, the error is counted, and the directory stays pending: it is retried after 1
 minute, then after doubling delays, and after 6 failures it waits for the next full walk
-(I11). Its reason (`walk::unreadable_reason`, from the error alone) is stored in
-`dirs.error` at the first "no permission" failure, or when the retries of any other failure
+(I11); a "no permission" failure is retried once, and hints never mark such a folder,
+so a protected folder is listed once per full walk (VFS-33). Its reason
+(`walk::unreadable_reason`, from the error alone) is stored in `dirs.error` at the first "no permission" failure, or when the retries of any other failure
 are exhausted, and cleared by the next successful listing (`ingest::mark_listed`); the
 folders panel lists them per root (VFS-10). If it is gone, its subtree is deleted — unless the root itself is unreachable, in
 which case the root becomes `unavailable` and nothing is deleted.
@@ -249,8 +250,9 @@ folders that changed since it become pending shallow, stored with the new cursor
 transaction. A root with no cursor, or whose history is lost, owes a catch-up re-walk
 instead (I4). Then it continues with whatever is pending (AC-6). The catch-up is resumable,
 runs at low priority, and the user can search meanwhile; the status bar says "Comprobando
-cambios…" while it runs (U6). A full walk stores the cursor taken just before it starts;
-while running, a watched root's cursor advances every 5 min to the position taken at the
+cambios…" while it runs (U6), and during any batch of more than 64 folders; smaller
+background updates publish no scanning state (VFS-33 R4). A full walk stores the cursor
+taken just before it starts; while running, a watched root's cursor advances every 5 min to the position taken at the
 previous check, unless the watcher lost events for it meanwhile.
 
 ### The indexer thread
