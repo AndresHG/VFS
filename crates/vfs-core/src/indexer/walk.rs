@@ -522,6 +522,48 @@ mod cloud_probe {
         out.push_str(&format!("  behind_link={}\n", behind_link(dir, "")));
     }
 
+    fn raw_first(dir: &Path, out: &mut String) {
+        use windows_sys::Win32::Foundation::GetLastError;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
+            WIN32_FIND_DATAW,
+        };
+        let star = wide(&dir.join("*"));
+        let mut wfd: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+        let h = unsafe {
+            FindFirstFileExW(
+                star.as_ptr(),
+                FindExInfoBasic,
+                (&raw mut wfd).cast(),
+                FindExSearchNameMatch,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if h == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            out.push_str(&format!("  raw FindFirst err={}\n", unsafe {
+                GetLastError()
+            }));
+            return;
+        }
+        let mut names = vec![String::from_utf16_lossy(&wfd.cFileName)
+            .trim_end_matches('\0')
+            .to_owned()];
+        loop {
+            if unsafe { FindNextFileW(h, &mut wfd) } == 0 {
+                out.push_str(&format!("  raw end err={}\n", unsafe { GetLastError() }));
+                break;
+            }
+            names.push(
+                String::from_utf16_lossy(&wfd.cFileName)
+                    .trim_end_matches('\0')
+                    .to_owned(),
+            );
+        }
+        unsafe { FindClose(h) };
+        out.push_str(&format!("  raw names {names:?}\n"));
+    }
+
     #[test]
     fn probe() {
         let tmp = tempfile::tempdir().unwrap();
@@ -700,6 +742,11 @@ mod cloud_probe {
         out.push_str(&format!("connect hr={hr:#x}\n"));
         dump(&root, "root", &mut out);
         dump(&root.join("Falla"), "Falla", &mut out);
+        raw_first(&root.join("Falla"), &mut out);
+        raw_first(&root.join("FallaConHijo"), &mut out);
+        raw_first(&root, &mut out);
+        let empty = root.join("FallaConHijo");
+        let _ = empty;
         dump(&root.join("FallaConHijo"), "FallaConHijo", &mut out);
         unsafe { CfDisconnectSyncRoot(key) };
         let hr = unsafe { CfUnregisterSyncRoot(r.as_ptr()) };
