@@ -38,7 +38,10 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 ```
 
 `crates/vfs-cli` uses the same `Vfs` facade, with its own index file. Firefox bookmarks
-(VFS-6) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below.
+(VFS-6) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below. Document content
+search (VFS-2) is the crate `crates/vfs-content`, reachable only from the CLI's `content`
+feature for now: an extraction worker process (`vfs-extract`) and `content.db` next to
+`index.db` ([design](content-search-design.md)).
 
 The app is one process. The core opens these SQLite connections to the same file
 (`core/lib.rs`, `core/db.rs`):
@@ -75,7 +78,7 @@ uncompacted. An index from a newer build fails with
 | `volumes` | one row per volume key (Windows: volume GUID path; macOS: mount point) |
 | `roots` | the folders the user chose: `path` (absolute, native separators), `path_key`, `status` (0 pending, 1 scanning, 2 ready, 3 unavailable, 4 removing), `last_full_scan_at`, counts |
 | `dirs` | every directory once, empty ones included: `rel_path` (original names, `/`-separated, `''` for the root), `path_key`, `name_key`, `mtime`, `scan_state`, `error` (version 6, VFS-10: why the folder could not be listed, 0 no permission, 1 not available, 2 cloud-only, 3 disk error; NULL once it lists; partial index `dirs_unreadable ON dirs(root_id) WHERE error IS NOT NULL`) |
-| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18; bit 2: cloud-only, a placeholder whose data reading would download, VFS-25), `content_state` (document content search, milestone Fase 3; always 0) |
+| `files` | one row per file: `dir_id`, original `name`, `name_key`, `kind` (0 other, 1 document, 2 photo, 3 video, 4 audio), `size`, `mtime`, `flags` (bit 0: name was not valid Unicode; bit 1: a symbolic link or junction, VFS-18; bit 2: cloud-only, a placeholder whose data reading would download, VFS-25), `content_state` (document content search, VFS-2: 0 unless the content indexer of `crates/vfs-content` has run; it then mirrors `content.db`, a separate store next to `index.db`) |
 | `files_fts` | version 3: FTS5 trigram index over U+0001 + `files.name_key`, `detail=none` (rowids only), `rowid = files.id`; the marker's trigrams find names starting with a term |
 | `dirs_fts` | FTS5 trigram index over `dirs.path_key` and `dirs.name_key`, `rowid = dirs.id` |
 | `file_paths_fts` | version 2: FTS5 trigram index over each file's folded relative path and name (`<dir path_key>/<name_key>`, or `name_key` alone in the root directory), `detail=none` (rowids only, no positions), `rowid = files.id` |

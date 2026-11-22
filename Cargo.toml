@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/vfs-core", "crates/vfs-bookmarks", "crates/vfs-ai", "crates/vfs-cli", "apps/desktop/src-tauri"]
+members = ["crates/vfs-core", "crates/vfs-bookmarks", "crates/vfs-ai", "crates/vfs-content", "crates/vfs-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.2.2"
 edition = "2021"
-rust-version = "1.90"
+rust-version = "1.99"  # Xberg 1.4 (vfs-content) needs 1.99; VFS-2 D16
 publish = false
 
 [workspace.dependencies]
@@ -30,3 +30,12 @@ proptest = "1"
 opt-level = 3
 lto = "thin"
 strip = true
+
+# The extraction worker `vfs-extract` (VFS-2 D16): built for size, unwinding panics kept
+# because the worker answers a panicking extraction as a failure. Build with
+# `cargo build -p vfs-content --bin vfs-extract --profile extract`.
+[profile.extract]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1

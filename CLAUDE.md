@@ -116,6 +116,9 @@ is silent on success or when Rust is not installed. Hooks fail open.
 
 - Check whether a function exists before writing one (`grep` first); check signatures before
   calling.
+- A SQLite transaction that reads before it writes starts `Immediate`: SQLite never waits to
+  upgrade a read to a write, so a concurrent writer fails it with "database is locked"
+  (VFS-2 D18).
 - Simple over clever; no abstractions for one caller; nothing for hypothetical requirements.
 - Code, identifiers, comments and specs are English; user-facing copy goes in both catalogs,
   `apps/desktop/ui/strings.es.js` and `strings.en.js`, same keys (VFS-22).

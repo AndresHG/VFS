@@ -2,6 +2,8 @@
 //! synthetic index (`gen-db`) and run the AC-9 benchmark on it (`bench`).
 
 mod bench;
+#[cfg(feature = "content")]
+mod content;
 mod gen;
 mod sources;
 
@@ -110,6 +112,67 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Extract and index the text of the indexed documents (VFS-2 prototype; switches
+    /// content search on for this index).
+    #[cfg(feature = "content")]
+    ContentIndex {
+        #[arg(long)]
+        db: PathBuf,
+        /// Wall-clock limit per file, in seconds.
+        #[arg(long, default_value_t = 30)]
+        timeout: u64,
+        /// Stop after this many files (the next run resumes).
+        #[arg(long)]
+        max_files: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search inside documents (VFS-2 prototype), with the same filters as `search`.
+    #[cfg(feature = "content")]
+    ContentSearch {
+        #[arg(long)]
+        db: PathBuf,
+        /// Words; "quoted words" form a phrase.
+        query: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        kind: Vec<KindArg>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        min_size: Option<String>,
+        #[arg(long)]
+        max_size: Option<String>,
+        #[arg(long)]
+        folder: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+        /// How content hits sit next to name hits.
+        #[arg(long, value_enum, default_value = "content")]
+        layout: content::Layout,
+        /// Repeat the query this many times on one connection and report the median time.
+        #[arg(long, default_value_t = 1)]
+        runs: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Switch content search off: delete the content store (VFS-2 prototype).
+    #[cfg(feature = "content")]
+    ContentOff {
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Extraction worker (started by `content-index`; not for direct use).
+    #[cfg(feature = "content")]
+    #[command(hide = true)]
+    ContentWorker {
+        /// Test hooks, passed through to the worker.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        rest: Vec<String>,
+    },
     /// Run the fixed AC-9 query set and report latency, peak RSS and PASS/FAIL.
     Bench {
         #[arg(long)]
@@ -180,6 +243,24 @@ fn parse_size(s: &str) -> AnyResult<u64> {
         .parse()
         .map_err(|_| format!("invalid size {s:?}, expected e.g. 500K, 10M, 4G"))?;
     Ok((n * mult as f64) as u64)
+}
+
+fn build_filters(
+    kind: Vec<KindArg>,
+    from: Option<String>,
+    to: Option<String>,
+    min_size: Option<String>,
+    max_size: Option<String>,
+    folder: Option<String>,
+) -> AnyResult<SearchFilters> {
+    Ok(SearchFilters {
+        kinds: kind.into_iter().map(FileKind::from).collect(),
+        modified_from: from.as_deref().map(parse_date).transpose()?,
+        modified_to: to.as_deref().map(parse_date).transpose()?,
+        size_min: min_size.as_deref().map(parse_size).transpose()?,
+        size_max: max_size.as_deref().map(parse_size).transpose()?,
+        folder,
+    })
 }
 
 fn human_size(b: u64) -> String {
@@ -369,14 +450,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             source,
             sort,
         } => {
-            let filters = SearchFilters {
-                kinds: kind.into_iter().map(FileKind::from).collect(),
-                modified_from: from.as_deref().map(parse_date).transpose()?,
-                modified_to: to.as_deref().map(parse_date).transpose()?,
-                size_min: min_size.as_deref().map(parse_size).transpose()?,
-                size_max: max_size.as_deref().map(parse_size).transpose()?,
-                folder,
-            };
+            let filters = build_filters(kind, from, to, min_size, max_size, folder)?;
             let q = SearchQuery {
                 text: query.join(" "),
                 filters,
@@ -399,6 +473,43 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             action,
             firefox_root,
         } => sources::cmd_bookmarks(&db, action, firefox_root)?,
+        #[cfg(feature = "content")]
+        Cmd::ContentIndex {
+            db,
+            timeout,
+            max_files,
+            json,
+        } => content::index(&db, timeout, max_files, json)?,
+        #[cfg(feature = "content")]
+        Cmd::ContentSearch {
+            db,
+            query,
+            kind,
+            from,
+            to,
+            min_size,
+            max_size,
+            folder,
+            limit,
+            offset,
+            layout,
+            runs,
+            json,
+        } => {
+            let filters = build_filters(kind, from, to, min_size, max_size, folder)?;
+            let q = SearchQuery {
+                text: query.join(" "),
+                filters,
+                limit,
+                offset,
+                sort: Default::default(),
+            };
+            content::search(&db, &q, layout, runs, json)?;
+        }
+        #[cfg(feature = "content")]
+        Cmd::ContentOff { db } => content::off(&db)?,
+        #[cfg(feature = "content")]
+        Cmd::ContentWorker { .. } => content::worker(),
         Cmd::GenDb {
             files,
             out,
