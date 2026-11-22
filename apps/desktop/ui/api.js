@@ -12,7 +12,8 @@
 //                   cloudOnly?: true}  (VFS-25: its data is only in the cloud; left out when false)
 //   FileCopy       {id, dir, modified, cloudOnly?}  (another place of the same file; id is a files.id)
 //   Root           {id, path, status: RootStatus, files, dirs, lastFullScan, drive: DriveKind,
-//                   unreadable}  (VFS-10: folders that could not be listed)
+//                   unreadable, paused, unpopulated, cloudOnly, links}  (VFS-10: folders that
+//                   could not be listed; VFS-32; VFS-37: cloudOnly and links null before a full walk)
 //   UnreadableDir  {id, path, reason: UnreadableReason}  (id is a dirs.id; list_unreadable)
 //   IndexProgress  {state: IndexerState, filesIndexed, roots: RootProgress[]}
 //   RootProgress   {rootId, path, status, dirsDone, dirsPending, filesIndexed, currentDir}

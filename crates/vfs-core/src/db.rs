@@ -1175,6 +1175,16 @@ mod tests {
             .unwrap()
     }
 
+    /// VFS-37: the README and the architecture doc name the current schema version, so a
+    /// schema change that leaves them behind fails here.
+    #[test]
+    fn docs_name_the_schema_version() {
+        let readme = include_str!("../../../README.md");
+        assert!(readme.contains(&format!("schema version {SCHEMA_VERSION} ")));
+        let arch = include_str!("../../../docs/architecture.md");
+        assert!(arch.contains(&format!("`core/schema_v{SCHEMA_VERSION}.sql`")));
+    }
+
     /// A version-2 index at 4 KB pages: file 3 `Año 2019/Banco.pdf` and 2,901 more files,
     /// with their version-2 FTS rows.
     fn version_2_index(path: &Path) {
