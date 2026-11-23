@@ -38,6 +38,9 @@ from; they are stack-agnostic.
   payloads (Rust's own messages quote values in backticks), bare names and search terms, and
   names holding delimiters or line breaks; a fixture of today's `warn!` formats alone misses
   them (VFS-30).
+- **R9. A command added to `NO_CORE`** (`apps/desktop/ui/coregate.js`) never reads
+  `AppState::vfs()` or the content service: those reject while the index opens, so the UI
+  sends them only after `wait_core` (VFS-39 R2).
 
 ## Worth flagging — not blocking
 

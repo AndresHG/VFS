@@ -50,9 +50,11 @@
 // Dev use: serve `apps/desktop/` and open http://localhost:<port>/ui/?fake
 
 import { UiErrorCode } from './contract.js';
+import { gateOnCore } from './coregate.js';
 
 function tauriBackend(t) {
-  const { invoke } = t.core;
+  // VFS-39 R2: index commands wait for the index to open (coregate.js).
+  const invoke = gateOnCore(t.core.invoke);
   const { listen } = t.event;
   return {
     isFake: false,
