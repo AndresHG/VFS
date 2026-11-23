@@ -489,8 +489,13 @@ fn content_commands_over_ipc() {
     let retried = invoke(&webview, "content_retry", json!({})).unwrap();
     assert_eq!(retried["settings"]["enabled"], json!(true));
 
-    // «Borrar lo leído de los documentos» (AC-5).
+    // «Borrar lo leído de los documentos» (AC-5): name search is not touched.
+    let names = json!({ "query": { "text": "carta", "filters": {} } });
+    let before = invoke(&webview, "search", names.clone()).unwrap()["hits"].clone();
+    assert!(!before.as_array().unwrap().is_empty(), "{before}");
     let deleted = invoke(&webview, "content_delete_store", json!({})).unwrap();
+    let after = invoke(&webview, "search", names).unwrap()["hits"].clone();
+    assert_eq!(after, before, "name search returns the same hits");
     assert_eq!(deleted["settings"]["enabled"], json!(false));
     assert_eq!(deleted["phase"]["kind"], json!("off"));
     let gone = invoke(

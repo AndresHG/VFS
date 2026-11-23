@@ -1565,7 +1565,7 @@ function main(L) {
     if (key === offerKey) return;
     offerKey = key;
     let offer;
-    try { offer = await api.contentOffer(); } catch { return; }
+    try { offer = await api.contentOffer(); } catch { offerKey = ''; return; } // asked again next time
     // Nothing to read yet: no offer, and not marked as offered.
     if (!offer.documents || !offerDue(state.content, state.roots)) return;
     const { text, warn } = offerText(L, offer);

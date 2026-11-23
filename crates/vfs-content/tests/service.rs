@@ -593,3 +593,25 @@ fn not_now_survives_a_restart() {
     assert_eq!(st.phase, Phase::Off);
     assert!(!store::exists(&s.db), "nothing was read");
 }
+
+/// VFS-27 AC-5 (R5, D4): a paused run, switched off and on again, resumes: the switch clears
+/// the pause and the rest is read.
+#[test]
+fn switch_off_and_on_resumes_a_paused_run() {
+    let s = setup(8);
+    let mut cfg = s.config(Vec::new());
+    // The PC in use, with a short gap, so the run can be paused part way.
+    cfg.pace.in_use_gap = Duration::from_millis(400);
+    let (svc, _rec) = s.start(cfg, Some(Duration::from_secs(5)));
+    svc.set_enabled(true);
+    wait_for(&svc, "two read", |st| st.done >= 2);
+    svc.pause();
+    wait_for(&svc, "paused", |st| st.phase == Phase::Paused);
+    svc.set_enabled(false);
+    wait_for(&svc, "off", |st| st.phase == Phase::Off);
+    svc.set_enabled(true);
+    let st = svc.status();
+    assert!(st.settings.enabled && !st.settings.paused, "{st:?}");
+    let fin = wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    assert_eq!((fin.done, fin.total), (8, 8), "{fin:?}");
+}
