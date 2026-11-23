@@ -25,8 +25,12 @@ pub const SETTINGS_FILE: &str = "content.json";
 /// cleanly (R11).
 pub const RUN_MARKER: &str = "content-run-open";
 
-/// Time per document before 200 have been read: the middle of VFS-27 D3's 0.17–0.55 s.
-const ESTIMATE_MS_PER_DOC: u64 = 360;
+/// VFS-27 D3: time per document on the target PC, as a range (replaced by 27m's numbers).
+const MS_PER_DOC: (u64, u64) = (170, 550);
+/// VFS-27 D3: store growth per document, as a range (13–16 MB per 1,000 documents).
+const BYTES_PER_DOC: (u64, u64) = (13_000, 16_000);
+/// Time per document before 200 have been read: the middle of D3's range.
+const ESTIMATE_MS_PER_DOC: u64 = (MS_PER_DOC.0 + MS_PER_DOC.1) / 2;
 /// Documents the time left is computed from, once read (R8).
 const RATE_WINDOW: usize = 200;
 /// After a finished run, how long to wait for new documents before looking anyway (R10).
@@ -439,6 +443,50 @@ impl ContentService {
 impl Drop for ContentService {
     fn drop(&mut self) {
         self.shutdown(Duration::from_secs(10));
+    }
+}
+
+/// What the offer shows (R4, R6): the documents a run would read, the time and the disk it
+/// would take, as ranges from D3, and whether the app-data drive is short of space.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Offer {
+    /// Documents in the index, cloud-only files excluded.
+    pub documents: u64,
+    pub seconds: (u64, u64),
+    pub bytes: (u64, u64),
+    pub free_bytes: Option<u64>,
+    /// Free space is below the larger of 2 GB and twice the estimated store (R6).
+    pub low_space: bool,
+}
+
+/// The offer's numbers for the index at `index_db`, with `free_bytes` on the app-data drive.
+pub fn offer(index_db: &Path, free_bytes: Option<u64>) -> Offer {
+    let documents = Connection::open_with_flags(index_db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|c| {
+            c.query_row(
+                "SELECT count(*) FROM files WHERE kind = ?1 AND flags & ?2 = 0",
+                rusqlite::params![
+                    vfs_core::FileKind::Document.code(),
+                    vfs_core::db::ingest::FLAG_CLOUD_ONLY
+                ],
+                |r| r.get::<_, i64>(0),
+            )
+        })
+        .unwrap_or(0)
+        .max(0) as u64;
+    let bytes = (documents * BYTES_PER_DOC.0, documents * BYTES_PER_DOC.1);
+    // The offer's floor is the low-space rule's resume level: 2 GB.
+    let floor = PaceConfig::default().low_space_resume.max(2 * bytes.1);
+    Offer {
+        documents,
+        seconds: (
+            documents * MS_PER_DOC.0 / 1000,
+            documents * MS_PER_DOC.1 / 1000,
+        ),
+        bytes,
+        free_bytes,
+        low_space: free_bytes.is_some_and(|f| f < floor),
     }
 }
 

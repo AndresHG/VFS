@@ -65,6 +65,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::content::content_retry,
         crate::content::content_rebuild,
         crate::content::content_mark_offered,
+        crate::content::content_offer,
         crate::content::content_delete_store,
         crate::content::content_search,
         crate::content::content_unread_counts,

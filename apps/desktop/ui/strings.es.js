@@ -2,8 +2,11 @@
 // "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values. Every
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import {
+  BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
+  ContentStop, ContentWait, UnreadReason,
+} from './contract.js';
 
 export const es = {
   appName: 'Buscador de archivos',
@@ -246,6 +249,76 @@ export const es = {
     [ReadState.NO_FIREFOX]: 'No se han encontrado marcadores de Firefox en este equipo.',
     [ReadState.FAILED]: 'No se pudieron leer los marcadores de Firefox. Se volverá a intentar más tarde.',
   },
+  // VFS-27: content search, the words inside documents.
+  contentSetTitle: 'Dentro de los documentos',
+  contentToggle: 'Buscar también dentro de los documentos',
+  contentIntro: 'VFS lee el texto de sus documentos (PDF, Word, Excel, PowerPoint, OpenDocument, RTF y texto) para encontrarlos por una palabra que contengan. Lee despacio mientras usa el equipo, nunca abre los archivos que solo están en la nube y nada sale de este equipo.',
+  contentStore: (size) => `Lo leído ocupa ${size} en el disco.`,
+  contentUnreadTitle: 'Documentos cuyo texto no se ha leído:',
+  contentUnread: {
+    [UnreadReason.CLOUD]: 'en la nube',
+    [UnreadReason.SCANNED]: 'sin texto (escaneado)',
+    [UnreadReason.PASSWORD]: 'protegido con contraseña',
+    [UnreadReason.TOO_LARGE]: 'demasiado grande',
+    [UnreadReason.UNSUPPORTED]: 'formato no compatible',
+    [UnreadReason.FAILED]: 'no se pudo leer',
+  },
+  contentUnreadLine: (label, n) => `${label}: ${n}`,
+  contentPending: (n) => `pendientes: ${n}`,
+  contentDelete: 'Borrar lo leído de los documentos',
+  contentDeleteTitle: '¿Borrar lo leído de los documentos?',
+  contentDeleteBody: 'Se borra el texto que VFS ha leído de sus documentos y se desactiva la búsqueda dentro de ellos. Sus documentos no se tocan y la búsqueda por nombre sigue igual.',
+  contentDeleteConfirm: 'Borrar',
+  contentDeleted: 'Se ha borrado lo leído de los documentos.',
+  contentOffer: (docs, time, disk) => `¿Buscar también dentro de los documentos? VFS puede leer el texto de ${docs} documentos para encontrarlos por una palabra que contengan. Tardará ${time} con el equipo sin usar, más mientras lo use, y ocupará ${disk} en el disco.`,
+  contentOfferLowSpace: (free) => `Queda poco espacio libre en el disco (${free}).`,
+  contentOfferYes: 'Activar',
+  contentOfferNo: 'Ahora no',
+  timeRange: {
+    [TimeUnit.MINUTES]: (a, b) => (a !== b ? `entre ${a} y ${b} minutos` : a === '1' ? 'un minuto' : `unos ${a} minutos`),
+    [TimeUnit.HOURS]: (a, b) => (a !== b ? `entre ${a} y ${b} horas` : a === '1' ? 'una hora' : `unas ${a} horas`),
+    [TimeUnit.DAYS]: (a, b) => (a !== b ? `entre ${a} y ${b} días` : a === '1' ? 'un día' : `unos ${a} días`),
+  },
+  sizeRange: (a, b) => (a === b ? `unos ${a}` : `entre ${a} y ${b}`),
+  timeLeft: {
+    [TimeUnit.MINUTES]: (n) => (n === '1' ? 'queda un minuto' : `quedan unos ${n} minutos`) + ' con el equipo sin usar',
+    [TimeUnit.HOURS]: (n) => (n === '1' ? 'queda una hora' : `quedan unas ${n} horas`) + ' con el equipo sin usar',
+    [TimeUnit.DAYS]: (n) => (n === '1' ? 'queda un día' : `quedan unos ${n} días`) + ' con el equipo sin usar',
+  },
+  contentReading: (done, total) => `Leyendo documentos: ${done} de ${total}`,
+  contentRate: (n) => `${n} por hora`,
+  contentWaiting: {
+    [ContentWait.NAME_INDEXING]: 'espera a que termine la revisión de carpetas',
+    [ContentWait.DISK_BUSY]: 'espera: el disco está ocupado',
+    [ContentWait.LOW_SPACE]: 'en pausa: poco espacio en disco',
+    [ContentWait.IN_USE]: '',
+  },
+  contentPaused: (done, total) => `Lectura de documentos en pausa: ${done} de ${total}`,
+  contentChecking: 'Comprobando lo leído de los documentos…',
+  contentFinishedPart: (done, total) => `Documentos leídos: ${done} de ${total}. El resto está en carpetas sin conexión o en pausa y se leerá cuando vuelvan.`,
+  contentPause: 'Pausar la lectura',
+  contentResume: 'Reanudar la lectura',
+  contentRetry: 'Reintentar',
+  contentStopped: {
+    [ContentStop.WORKER_CANNOT_START]: 'No se pueden leer los documentos: falta el lector de documentos o algo lo bloquea, como el antivirus.',
+    [ContentStop.VERSION_MISMATCH]: 'No se pueden leer los documentos: el lector de documentos no es de esta versión. Vuelva a instalar VFS.',
+    [ContentStop.WORKER_UNSTABLE]: 'Se ha dejado de leer documentos porque el lector de documentos falló varias veces seguidas.',
+    [ContentStop.STORE_WRITE]: 'No se puede guardar lo leído de los documentos. Compruebe que queda espacio en el disco.',
+    [ContentStop.INDEX_WRITE]: 'No se puede guardar el avance de la lectura de documentos.',
+  },
+  contentDamaged: 'Lo leído de los documentos está dañado y no se puede usar. La búsqueda por nombre sigue funcionando.',
+  contentRebuild: 'Volver a leer los documentos',
+  contentDisable: 'Desactivar',
+  contentTitle: 'En el contenido de los documentos',
+  contentSearching: 'Buscando dentro de los documentos…',
+  contentStillReading: (done, total) => `Todavía leyendo documentos: ${done} de ${total}`,
+  contentReadPart: (done, total) => `Se han leído ${done} de ${total} documentos; el resto está en carpetas sin conexión o en pausa.`,
+  contentPartial: 'Ningún documento tiene todas las palabras; estos tienen alguna',
+  contentNone: 'Ningún documento contiene estas palabras.',
+  contentFailed: 'No se ha podido buscar dentro de los documentos.',
+  contentMore: 'Ver más',
+  contentPage: (n) => `pág. ${n}`,
+  contentHitLabel: (name, dir, page) => `${name}, en ${dir}${page ? `, página ${page}` : ''}`,
   settingsButton: 'Ajustes',
   settingsTitle: 'Ajustes',
   languageLabel: 'Idioma',

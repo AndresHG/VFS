@@ -1,8 +1,11 @@
 // The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
 // words, no "index" jargon. Functions take already-formatted values.
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import {
+  BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
+  ContentStop, ContentWait, UnreadReason,
+} from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -244,6 +247,76 @@ export const en = {
     [ReadState.NO_FIREFOX]: 'No Firefox bookmarks were found on this computer.',
     [ReadState.FAILED]: 'The Firefox bookmarks could not be read. It will be tried again later.',
   },
+  // VFS-27: content search, the words inside documents.
+  contentSetTitle: 'Inside documents',
+  contentToggle: 'Also search inside documents',
+  contentIntro: 'VFS reads the text of your documents (PDF, Word, Excel, PowerPoint, OpenDocument, RTF and text) so you can find them by a word they contain. It reads slowly while you use the computer, never opens files that are only in the cloud, and nothing leaves this computer.',
+  contentStore: (size) => `What has been read takes ${size} on the disk.`,
+  contentUnreadTitle: 'Documents whose text was not read:',
+  contentUnread: {
+    [UnreadReason.CLOUD]: 'in the cloud',
+    [UnreadReason.SCANNED]: 'no text (scanned)',
+    [UnreadReason.PASSWORD]: 'password-protected',
+    [UnreadReason.TOO_LARGE]: 'too large',
+    [UnreadReason.UNSUPPORTED]: 'unsupported format',
+    [UnreadReason.FAILED]: 'could not be read',
+  },
+  contentUnreadLine: (label, n) => `${label}: ${n}`,
+  contentPending: (n) => `pending: ${n}`,
+  contentDelete: 'Delete what was read from documents',
+  contentDeleteTitle: 'Delete what was read from documents?',
+  contentDeleteBody: 'The text VFS has read from your documents is deleted and searching inside them is turned off. Your documents are not touched and searching by name stays the same.',
+  contentDeleteConfirm: 'Delete',
+  contentDeleted: 'What was read from documents has been deleted.',
+  contentOffer: (docs, time, disk) => `Also search inside documents? VFS can read the text of ${docs} documents so you can find them by a word they contain. It will take ${time} while the computer is idle, longer while you use it, and will use ${disk} on the disk.`,
+  contentOfferLowSpace: (free) => `There is little free space left on the disk (${free}).`,
+  contentOfferYes: 'Turn on',
+  contentOfferNo: 'Not now',
+  timeRange: {
+    [TimeUnit.MINUTES]: (a, b) => (a !== b ? `between ${a} and ${b} minutes` : a === '1' ? 'about a minute' : `about ${a} minutes`),
+    [TimeUnit.HOURS]: (a, b) => (a !== b ? `between ${a} and ${b} hours` : a === '1' ? 'about an hour' : `about ${a} hours`),
+    [TimeUnit.DAYS]: (a, b) => (a !== b ? `between ${a} and ${b} days` : a === '1' ? 'about a day' : `about ${a} days`),
+  },
+  sizeRange: (a, b) => (a === b ? `about ${a}` : `between ${a} and ${b}`),
+  timeLeft: {
+    [TimeUnit.MINUTES]: (n) => `${n === '1' ? 'about a minute' : `about ${n} minutes`} left while the computer is idle`,
+    [TimeUnit.HOURS]: (n) => `${n === '1' ? 'about an hour' : `about ${n} hours`} left while the computer is idle`,
+    [TimeUnit.DAYS]: (n) => `${n === '1' ? 'about a day' : `about ${n} days`} left while the computer is idle`,
+  },
+  contentReading: (done, total) => `Reading documents: ${done} of ${total}`,
+  contentRate: (n) => `${n} per hour`,
+  contentWaiting: {
+    [ContentWait.NAME_INDEXING]: 'waiting for the folder check to finish',
+    [ContentWait.DISK_BUSY]: 'waiting: the disk is busy',
+    [ContentWait.LOW_SPACE]: 'paused: low disk space',
+    [ContentWait.IN_USE]: '',
+  },
+  contentPaused: (done, total) => `Reading documents paused: ${done} of ${total}`,
+  contentChecking: 'Checking what was read from documents…',
+  contentFinishedPart: (done, total) => `Documents read: ${done} of ${total}. The rest are in folders that are offline or paused and will be read when they are back.`,
+  contentPause: 'Pause reading',
+  contentResume: 'Resume reading',
+  contentRetry: 'Try again',
+  contentStopped: {
+    [ContentStop.WORKER_CANNOT_START]: 'Documents cannot be read: the document reader is missing or something, such as the antivirus, blocks it.',
+    [ContentStop.VERSION_MISMATCH]: 'Documents cannot be read: the document reader is not from this version. Reinstall VFS.',
+    [ContentStop.WORKER_UNSTABLE]: 'Reading documents stopped because the document reader failed several times in a row.',
+    [ContentStop.STORE_WRITE]: 'What was read from documents cannot be saved. Check that there is space left on the disk.',
+    [ContentStop.INDEX_WRITE]: 'The progress of reading documents cannot be saved.',
+  },
+  contentDamaged: 'What was read from documents is damaged and cannot be used. Searching by name keeps working.',
+  contentRebuild: 'Read the documents again',
+  contentDisable: 'Turn off',
+  contentTitle: 'In the content of documents',
+  contentSearching: 'Searching inside documents…',
+  contentStillReading: (done, total) => `Still reading documents: ${done} of ${total}`,
+  contentReadPart: (done, total) => `${done} of ${total} documents have been read; the rest are in folders that are offline or paused.`,
+  contentPartial: 'No document has all the words; these have some',
+  contentNone: 'No document contains these words.',
+  contentFailed: 'Could not search inside documents.',
+  contentMore: 'See more',
+  contentPage: (n) => `p. ${n}`,
+  contentHitLabel: (name, dir, page) => `${name}, in ${dir}${page ? `, page ${page}` : ''}`,
   settingsButton: 'Settings',
   settingsTitle: 'Settings',
   languageLabel: 'Language',

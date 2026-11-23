@@ -404,10 +404,11 @@ fn content_status_until(webview: &WebviewWindow<MockRuntime>, f: impl Fn(&Value)
     }
 }
 
-/// VFS-27 AC-2, AC-5, AC-14 over IPC: the content commands with their exact payloads and
+/// VFS-27 AC-2, AC-4, AC-5, AC-14 over IPC: the content commands with their exact payloads and
 /// camelCase shapes. Off by default, nothing has a reason and search reports off; switched
 /// on with no worker next to the test binary, the run stops with the worker reason and no
-/// document changes state; «Borrar lo leído» removes the store and switches off.
+/// document changes state; the offer counts documents and the counts carry the store size;
+/// «Borrar lo leído» removes the store and switches off.
 #[test]
 fn content_commands_over_ipc() {
     use vfs_desktop_lib::content::ContentRuns;
@@ -434,6 +435,26 @@ fn content_commands_over_ipc() {
         st.get("done").is_some() && st.get("perHour").is_some(),
         "{st}"
     );
+    // The offer's numbers (AC-4), read from the name index alone, once the folder's name
+    // scan has found its one document.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let offer = loop {
+        let offer = invoke(&webview, "content_offer", json!({})).unwrap();
+        if offer["documents"] == json!(1) {
+            break offer;
+        }
+        assert!(Instant::now() < deadline, "offer: {offer}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(
+        offer["seconds"].is_array() && offer["bytes"].is_array(),
+        "{offer}"
+    );
+    assert!(offer["lowSpace"].is_boolean(), "{offer}");
+    // «Ahora no» (AC-4): offered, still off.
+    let not_now = invoke(&webview, "content_mark_offered", json!({})).unwrap();
+    assert_eq!(not_now["settings"]["offered"], json!(true));
+    assert_eq!(not_now["settings"]["enabled"], json!(false));
     let unread = invoke(&webview, "content_unread", json!({ "fileIds": [1, 2] })).unwrap();
     assert_eq!(unread, json!([[1, null], [2, null]]));
     let off = invoke(
@@ -456,6 +477,7 @@ fn content_commands_over_ipc() {
     assert_eq!(counts["byReason"], json!([]));
     let pending = stopped["total"].as_u64().unwrap() - stopped["done"].as_u64().unwrap();
     assert_eq!(counts["pending"], json!(pending));
+    assert!(counts["storeBytes"].as_u64().unwrap() > 0, "{counts}");
     let page = invoke(
         &webview,
         "content_search",
@@ -467,8 +489,13 @@ fn content_commands_over_ipc() {
     let retried = invoke(&webview, "content_retry", json!({})).unwrap();
     assert_eq!(retried["settings"]["enabled"], json!(true));
 
-    // «Borrar lo leído de los documentos» (AC-5).
+    // «Borrar lo leído de los documentos» (AC-5): name search is not touched.
+    let names = json!({ "query": { "text": "carta", "filters": {} } });
+    let before = invoke(&webview, "search", names.clone()).unwrap()["hits"].clone();
+    assert!(!before.as_array().unwrap().is_empty(), "{before}");
     let deleted = invoke(&webview, "content_delete_store", json!({})).unwrap();
+    let after = invoke(&webview, "search", names).unwrap()["hits"].clone();
+    assert_eq!(after, before, "name search returns the same hits");
     assert_eq!(deleted["settings"]["enabled"], json!(false));
     assert_eq!(deleted["phase"]["kind"], json!("off"));
     let gone = invoke(

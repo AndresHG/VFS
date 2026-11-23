@@ -45,3 +45,7 @@ export const SourceChoice = Object.freeze({
   FILES: 'files',
   BOOKMARKS: 'bookmarks',
 });
+
+/** Units of the rough times in the content offer and status (VFS-27): keys of `S.timeRange`
+ *  and `S.timeLeft`. */
+export const TimeUnit = Object.freeze({ MINUTES: 'minutes', HOURS: 'hours', DAYS: 'days' });

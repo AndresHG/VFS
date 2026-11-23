@@ -120,6 +120,20 @@
         <button type="button" class="btn btn-primary" id="update-action" hidden></button>
         <button type="button" class="btn btn-quiet" id="update-later" data-s="updateLater"></button>
       </div>
+      <!-- VFS-27 R4: content search is offered once, after the first name scan. -->
+      <div id="banner-content-offer" class="banner banner-info" hidden>
+        <svg aria-hidden="true"><use href="#i-info"/></svg>
+        <p><span id="content-offer-text"></span> <strong id="content-offer-warn"></strong></p>
+        <button type="button" class="btn btn-primary" id="content-offer-yes" data-s="contentOfferYes"></button>
+        <button type="button" class="btn btn-quiet" id="content-offer-no" data-s="contentOfferNo"></button>
+      </div>
+      <!-- VFS-27 R11: nothing is deleted without one of these choices. -->
+      <div id="banner-content-damaged" class="banner banner-warn" hidden>
+        <svg aria-hidden="true"><use href="#i-warn"/></svg>
+        <p data-s="contentDamaged"></p>
+        <button type="button" class="btn btn-primary" id="content-rebuild" data-s="contentRebuild"></button>
+        <button type="button" class="btn btn-quiet" id="content-disable" data-s="contentDisable"></button>
+      </div>
       <div id="banner-scan" class="banner banner-info" hidden>
         <svg aria-hidden="true"><use href="#i-info"/></svg>
         <p data-s="firstScanNote"></p>
@@ -135,6 +149,13 @@
         </div>
         <div id="empty" class="empty" hidden></div>
       </div>
+      <!-- VFS-27 R12, R13: hits inside documents, below the name hits. -->
+      <section id="content-hits" class="content-hits" aria-labelledby="content-title" hidden>
+        <h3 id="content-title" data-s="contentTitle"></h3>
+        <div id="content-notes" class="content-notes" aria-live="polite"></div>
+        <ul id="content-list" class="content-list" role="list"></ul>
+        <button id="content-more" class="link-btn" type="button" hidden data-s="contentMore"></button>
+      </section>
       <p class="details" id="details" aria-live="off"></p>
     </main>
 
@@ -144,6 +165,9 @@
         <p><strong id="summary" class="summary"></strong><span id="status-text"></span></p>
       </div>
       <button id="pause" class="btn btn-quiet" type="button" hidden></button>
+      <!-- VFS-27 R8, R15: content progress, with «Pausar» / «Reanudar» or «Reintentar». -->
+      <p id="content-line" class="content-line" hidden></p>
+      <button id="content-action" class="btn btn-quiet" type="button" hidden data-s="contentPause"></button>
       <button id="rescan-now" class="btn btn-quiet" type="button" hidden data-s="rescanAll"></button>
       <button id="open-feedback" class="btn btn-quiet" type="button" data-s="feedbackButton"></button>
       <button id="open-folders" class="btn btn-quiet" type="button"></button>
@@ -197,6 +221,18 @@
       <h3 id="updates-title" data-s="updatesTitle"></h3>
       <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
       <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
+    </section>
+    <!-- VFS-27 R5, R14: the content switch, the store's size, unread counts and delete. -->
+    <section class="setting" aria-labelledby="content-set-title">
+      <h3 id="content-set-title" data-s="contentSetTitle"></h3>
+      <label class="toggle"><input type="checkbox" id="content-on"> <span data-s="contentToggle"></span></label>
+      <p class="bookmarks-intro bookmarks-status" data-s="contentIntro"></p>
+      <p class="bookmarks-status" id="content-store" hidden></p>
+      <div id="content-unread" class="content-unread" hidden>
+        <p class="bookmarks-status" data-s="contentUnreadTitle"></p>
+        <ul id="content-unread-list" role="list"></ul>
+      </div>
+      <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
     </section>
     <!-- VFS-33: the default folder exclusions; almost nobody needs this, so it stays folded. -->
     <details class="setting setting-advanced">
@@ -295,6 +331,15 @@
     <form method="dialog" class="confirm-actions">
       <button class="btn" value="cancel" autofocus data-s="cancel"></button>
       <button class="btn btn-primary" value="add" data-s="fileFilterConfirmAdd"></button>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-content-delete" class="confirm" aria-labelledby="confirm-content-title" aria-describedby="confirm-content-desc">
+    <h2 id="confirm-content-title" data-s="contentDeleteTitle"></h2>
+    <p id="confirm-content-desc" data-s="contentDeleteBody"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-danger" value="delete" data-s="contentDeleteConfirm"></button>
     </form>
   </dialog>
 

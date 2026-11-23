@@ -57,6 +57,30 @@ SIZE_MEDIUM, SIZE_LARGE, SIZE_HUGE = "medium", "large", "huge"
 EXPECT_SELECT = "select"
 EXPECT_PARENT = "parent"
 
+# VFS-27 AC-16: documents of the VFS-2 golden corpus, each with a query that must find it
+# through the app's `content_search` command (from crates/vfs-content/tests/golden.rs).
+GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "crates",
+                      "vfs-content", "tests", "golden")
+CONTENT_CASES = [
+    ("fianza dos mensualidades", "escaneo0034.docx"),
+    ("potencia contratada", "doc_2020_07.txt"),
+    ("caldera presión", "nota_rapida.txt"),
+    ("cocido garbanzos", "receta_abuela.docx"),
+    ("derrama ascensor", "acta.pdf"),
+    ("renovación póliza hogar", "carta_seguro.docx"),
+    ("declaración renta devolver", "renta2022.pdf"),
+    ("euríbor amortización anticipada", "hipoteca_bbva.pdf"),
+    ("metformina glucosa", "medico.txt"),
+    ("Covadonga Cares", "viaje_asturias.docx"),
+    ("garantía lavadora Bosch", "garantia_lavadora.pdf"),
+    ("excursión Segovia autorización", "colegio.txt"),
+    ("impuesto bienes inmuebles", "ibi.pdf"),
+    ("vacunas perro", "perro.docx"),
+    ("pensión jubilación cotizados", "jubilacion.txt"),
+]
+# The content section shows the top hits first; the expected document must be among these.
+CONTENT_TOP = 5
+
 
 def scan_done(p):
     """True when a `get_progress` answer says every root is scanned and the indexer is idle."""
@@ -677,6 +701,46 @@ class Journey:
         r.update(self.metrics["catch_up"])
         return r
 
+    def s_content_search(self):
+        """VFS-27 AC-16: a folder of the golden documents is added, content search is
+        accepted from the offer, the run finishes, and each document is found by a word in
+        its text. The big tree is removed first, so the run reads only these documents."""
+        for r in self.wd.invoke("list_roots"):
+            self.wd.invoke("remove_root", {"id": r["id"]})
+        dest = os.path.join(os.path.dirname(os.path.abspath(self.args.manifest)), "Contenido")
+        os.makedirs(dest, exist_ok=True)
+        for _, name in CONTENT_CASES:
+            shutil.copy(os.path.join(GOLDEN, name), os.path.join(dest, name))
+        self.wd.invoke("add_root", {"path": dest})
+        wait_for(lambda: scan_done(self.progress()), self.args.scan_timeout, 0.5, "scan of the documents")
+        # R4: the offer shows once every folder has finished its first scan; AC-16 accepts it
+        # there, so a missing offer fails the step.
+        wait_for(lambda: self.visible("#banner-content-offer"), 30, 0.5, "content offer")
+        self.shoot("content-offer")
+        self.wd.click(self.wd.find("#content-offer-yes"))
+
+        def finished():
+            st = self.wd.invoke("content_status")
+            return st if st["phase"]["kind"] == "finished" and st["done"] >= st["total"] else None
+        st, read_s = wait_for(finished, 900, 1, "content run to finish")
+        self.shoot("content-finished")
+        missing = []
+        for query, name in CONTENT_CASES:
+            r = self.wd.invoke("content_search", {"query": query, "filters": NO_FILTERS, "offset": 0})
+            names = [h["name"] for h in r["hits"][:CONTENT_TOP]]
+            if name not in names:
+                missing.append(f"{query!r} -> want {name}, got {names}")
+        self.type_query(CONTENT_CASES[0][0])
+        wait_for(lambda: self.visible("#content-hits") and self.wd.js(
+            "return document.querySelectorAll('#content-list .chit').length") > 0,
+            20, 0.25, "content section on screen")
+        self.shoot("content-section")
+        result = {"documents": st["total"], "read_s": round(read_s, 1),
+                  "missing": missing}
+        if missing:
+            raise AssertionError(f"content queries missed: {missing}")
+        return result
+
     def run(self):
         short = self.args.short
         self.step("first-run", self.s_first_run, critical=True)
@@ -729,6 +793,7 @@ class Journey:
         if not short:
             self.step("closed-and-changed", self.s_close_and_change)
             self.step("reopen-catch-up", self.s_reopen_catch_up)
+        self.step("content-search", self.s_content_search)
         self.app.stop()
         self.save()
         failed = [s["step"] for s in self.steps if not s["ok"]]

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use vfs_content::indexer::StopReason;
 use vfs_content::pace::PaceConfig;
 use vfs_content::service::{
-    ContentService, Events, Phase, Probes, ServiceConfig, Status, RUN_MARKER,
+    offer, ContentService, Events, Phase, Probes, ServiceConfig, Status, RUN_MARKER,
 };
 use vfs_content::{store, IndexOptions};
 use vfs_core::Vfs;
@@ -536,4 +536,82 @@ fn paused_folder_is_read_when_resumed() {
     wait_for(&svc, "read once resumed", |st| {
         st.phase == Phase::Finished && st.done == 4
     });
+}
+
+/// VFS-27 AC-4 (R4, R6): the offer counts the documents a run would read, cloud-only files
+/// excluded, gives D3's time and disk ranges, warns below 2 GB free, and creates no store.
+#[test]
+fn offer_counts_documents_without_cloud_only_files() {
+    let s = setup(10);
+    let conn = rusqlite::Connection::open(&s.db).unwrap();
+    conn.execute(
+        "UPDATE files SET flags = flags | ?1
+         WHERE id IN (SELECT id FROM files WHERE kind = ?2 ORDER BY id LIMIT 3)",
+        rusqlite::params![
+            vfs_core::db::ingest::FLAG_CLOUD_ONLY,
+            vfs_core::FileKind::Document.code()
+        ],
+    )
+    .unwrap();
+    drop(conn);
+    let o = offer(&s.db, Some(100 << 30));
+    assert_eq!(o.documents, 7);
+    assert!(0 < o.seconds.0 && o.seconds.0 < o.seconds.1, "{o:?}");
+    assert!(0 < o.bytes.0 && o.bytes.0 < o.bytes.1, "{o:?}");
+    assert!(!o.low_space);
+    // The ranges grow with the documents: three more documents, a longer and larger run.
+    let more = setup(10);
+    let m = offer(&more.db, Some(100 << 30));
+    assert_eq!(m.documents, 10);
+    assert!(
+        m.seconds.1 > o.seconds.1 && m.bytes.1 > o.bytes.1,
+        "{m:?} vs {o:?}"
+    );
+    // R6: the warning floor is the larger of 2 GB and twice the estimated store.
+    let floor = (2u64 << 30).max(2 * o.bytes.1);
+    assert!(offer(&s.db, Some(floor - 1)).low_space);
+    assert!(!offer(&s.db, Some(floor)).low_space);
+    assert!(
+        !offer(&s.db, None).low_space,
+        "unknown free space warns of nothing"
+    );
+    assert!(!store::exists(&s.db), "the offer opens no store (R2)");
+}
+
+/// VFS-27 AC-4 (R4): «Ahora no» is remembered across a restart: the offer is not due again,
+/// content search stays off, and nothing is read.
+#[test]
+fn not_now_survives_a_restart() {
+    let s = setup(3);
+    let (svc, _rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.mark_offered();
+    drop(svc);
+    let (svc, _rec) = s.start(s.config(Vec::new()), IDLE);
+    let st = svc.status();
+    assert!(st.settings.offered, "{st:?}");
+    assert!(!st.settings.enabled, "the switch in Ajustes is off");
+    assert_eq!(st.phase, Phase::Off);
+    assert!(!store::exists(&s.db), "nothing was read");
+}
+
+/// VFS-27 AC-5 (R5, D4): a paused run, switched off and on again, resumes: the switch clears
+/// the pause and the rest is read.
+#[test]
+fn switch_off_and_on_resumes_a_paused_run() {
+    let s = setup(8);
+    let mut cfg = s.config(Vec::new());
+    // The PC in use, with a short gap, so the run can be paused part way.
+    cfg.pace.in_use_gap = Duration::from_millis(400);
+    let (svc, _rec) = s.start(cfg, Some(Duration::from_secs(5)));
+    svc.set_enabled(true);
+    wait_for(&svc, "two read", |st| st.done >= 2);
+    svc.pause();
+    wait_for(&svc, "paused", |st| st.phase == Phase::Paused);
+    svc.set_enabled(false);
+    wait_for(&svc, "off", |st| st.phase == Phase::Off);
+    svc.set_enabled(true);
+    let st = svc.status();
+    assert!(st.settings.enabled && !st.settings.paused, "{st:?}");
+    let fin = wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    assert_eq!((fin.done, fin.total), (8, 8), "{fin:?}");
 }

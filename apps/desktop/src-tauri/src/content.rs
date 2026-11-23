@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use vfs_content::pace::PaceConfig;
-use vfs_content::service::{ContentService, Events, Probes, ServiceConfig, Status};
+use vfs_content::service::{ContentService, Events, Offer, Probes, ServiceConfig, Status};
 use vfs_content::{ContentResponse, IndexOptions, Query, Searcher, UnreadReason};
 use vfs_core::api::ApiError;
 use vfs_core::probes::DiskSampler;
@@ -149,13 +149,17 @@ impl ContentRuns {
         }
     }
 
+    /// The name index the service reads; `None` until it is open.
+    fn index_db(&self) -> Option<PathBuf> {
+        self.lock().as_ref().map(|(_, db)| db.clone())
+    }
+
     /// A searcher over the content store; `Off` when content search was never switched on.
     fn searcher(&self) -> Result<Searcher, vfs_content::Error> {
-        let db = match self.lock().as_ref() {
-            Some((_, db)) => db.clone(),
-            None => return Err(vfs_content::Error::Off),
-        };
-        Searcher::open(&db)
+        match self.index_db() {
+            Some(db) => Searcher::open(&db),
+            None => Err(vfs_content::Error::Off),
+        }
     }
 
     /// The name indexer changed the index: new or changed documents are read (R10).
@@ -254,6 +258,14 @@ pub fn content_mark_offered(runs: State<'_, ContentRuns>) -> Result<Status, ApiE
     })
 }
 
+/// The offer's numbers (R4, R6): documents, time and disk ranges, and the low-space warning.
+#[tauri::command(async)]
+pub fn content_offer(runs: State<'_, ContentRuns>) -> Result<Offer, ApiError> {
+    let db = runs.index_db().ok_or_else(unavailable)?;
+    let free = db.parent().and_then(vfs_core::probes::free_space);
+    Ok(vfs_content::service::offer(&db, free))
+}
+
 /// «Borrar lo leído de los documentos» (R5).
 #[tauri::command(async)]
 pub fn content_delete_store(runs: State<'_, ContentRuns>) -> Result<Status, ApiError> {
@@ -275,12 +287,13 @@ pub fn content_search(
         .map_err(store_error)
 }
 
-/// Unread counts by reason (R14), and the documents not read yet.
+/// Unread counts by reason (R14), the documents not read yet, and the store's size (R5).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnreadCounts {
     pub by_reason: Vec<(UnreadReason, u64)>,
     pub pending: u64,
+    pub store_bytes: u64,
 }
 
 #[tauri::command(async)]
@@ -290,9 +303,14 @@ pub fn content_unread_counts(runs: State<'_, ContentRuns>) -> Result<UnreadCount
         .and_then(|s| s.unread_counts())
         .map_err(store_error)?;
     let status = runs.with(ContentService::status)?;
+    let store_bytes = runs
+        .index_db()
+        .and_then(|db| vfs_content::indexer::stats(&db).ok())
+        .map_or(0, |s| s.store_bytes);
     Ok(UnreadCounts {
         by_reason: counts.into_iter().collect(),
         pending: status.total.saturating_sub(status.done),
+        store_bytes,
     })
 }
 

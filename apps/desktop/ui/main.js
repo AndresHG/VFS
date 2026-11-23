@@ -14,8 +14,12 @@ import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, ro
 import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
 import {
-  DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus, SortOrder,
-  Source, TruncatedBy, UiErrorCode,
+  ContentAction, contentOn, contentStatusLine, createContentSearch, hitPage, offerDue, offerText, sectionNotes, snippetRuns,
+  unreadCandidates, unreadLabel,
+} from './content.js';
+import {
+  ContentPhase, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus,
+  SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
   DateChoice, LanguageChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
@@ -116,6 +120,8 @@ function main(L) {
     sort: SortOrder.RELEVANCE,
     bookmarks: null, // BookmarkStatus, null until known
     pickedBookmarkFolder: null, // {id, title} chosen with "Ver su contenido"
+    content: null, // VFS-27: ContentStatus, null until known
+    unread: new Map(), // VFS-27 R14: file id -> UnreadReason|null, for the pages on screen
   };
 
   /* ---------------------------------------------------------------- static copy */
@@ -387,6 +393,7 @@ function main(L) {
     // A live refresh keeps the suggestion on screen until its own answer replaces it.
     if (!quiet) state.suggestion = null;
     clearTimeout(loadingTimer);
+    if (!quiet) runContentQuery();
     if (!hasQuery()) {
       state.searchState = SearchState.IDLE;
       setResults(0, null, new Map());
@@ -455,6 +462,8 @@ function main(L) {
     state.approximateOrder = approximateOrder;
     state.pages = pages;
     state.pagesPending = new Set();
+    state.unread = new Map();
+    loadUnread(pages.get(0) || []);
     state.active = total ? Math.min(Math.max(active, 0), total - 1) : -1;
     list.reset(total);
     if (state.active > 0) list.reveal(state.active);
@@ -477,6 +486,7 @@ function main(L) {
       const res = await fetchPage(p * PAGE);
       if (seq !== state.seq) return;
       state.pages.set(p, res.hits);
+      loadUnread(res.hits);
       const idx = [];
       for (let i = p * PAGE; i < Math.min(state.total, (p + 1) * PAGE); i++) idx.push(i);
       list.refresh(idx);
@@ -561,6 +571,10 @@ function main(L) {
     }
     const link = hit.link;
     if (link) nameParts.push(el('span', 'badge badge-link', S.linkBadge[link.kind]));
+    // VFS-27 R14: why its text was not read; a cloud-only file already says so.
+    const unread = state.unread.get(hit.id);
+    const unreadText = unreadLabel(S, hit, unread);
+    if (unreadText) nameParts.push(el('span', 'badge badge-unread', unreadText));
     nameEl.replaceChildren(...nameParts);
 
     // A link's second line is where it leads (VFS-18 D2, D9): text only, nothing on the
@@ -582,7 +596,8 @@ function main(L) {
     kind.textContent = kindLabel;
     date.textContent = dateText;
     size.textContent = sizeText;
-    const label = S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable, places);
+    const base = S.rowLabel(hit.name, kindLabel, hit.dir, dateText, sizeText, !!unavailable, places);
+    const label = unreadText ? `${base}, ${unreadText}` : base;
     row.setAttribute('aria-label', link ? `${label}, ${S.linkRowLabel(S.linkBadge[link.kind], link.target)}` : label);
   }
 
@@ -866,6 +881,11 @@ function main(L) {
         mode = SearchState.IDLE;
         parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(N.count(filesIndexed))), el('p', null, S.emptyIdleBody));
       }
+    } else if (state.searchState === SearchState.DONE && !state.total && contentSearch.view()?.hits.length) {
+      // No name hits, but hits inside documents below: no "nothing found" over them (R12).
+      box.hidden = true;
+      setView();
+      return;
     } else if (state.searchState === SearchState.DONE && !state.total) {
       if (state.truncatedBy === TruncatedBy.DEADLINE) {
         mode = TruncatedBy.DEADLINE;
@@ -1050,6 +1070,7 @@ function main(L) {
   fillSelect($('language'), S.languageOptions);
   $('open-settings').addEventListener('click', () => {
     $('language').value = choiceFor(savedLanguage());
+    refreshContentStore();
     settingsDialog.showModal();
   });
   // A new language redraws the whole screen in it: the page reloads with the new choice.
@@ -1396,8 +1417,8 @@ function main(L) {
   });
   api.getFileExclusions().then(renderFilter, () => {});
 
-  // VFS-34 R6: the content size limit, shown only while content search is on (VFS-27
-  // calls showContentLimit from its switch).
+  // VFS-34 R6: the content size limit, shown only while content search is on (setContent
+  // follows the switch).
   const contentMax = $('content-max-mb');
   showContentLimit($('content-max-row'), false);
   api.getContentMaxMb().then((mb) => { contentMax.value = String(mb); }, () => {});
@@ -1416,6 +1437,194 @@ function main(L) {
     } catch { /* the toggle stays as rendered */ }
     try { await api.onUpdateProgress((p) => updates.onProgress(p)); } catch { /* no progress bar */ }
     updates.start();
+  }
+
+  /* ---------------------------------------------------------------- content search (VFS-27) */
+
+  const contentSearch = createContentSearch({ api, render: renderContentHits });
+  let shownContentHits = null;
+
+  /** The content section applies to file searches with content search on (R12). */
+  function contentApplies() {
+    return contentOn(state.content) && sourcesFor(state.source, bookmarksOn()).includes(Source.FILES)
+      && bookmarkFolderOf(state.folder) == null;
+  }
+
+  function runContentQuery() {
+    contentSearch.query(state.text, filters(), contentApplies());
+  }
+
+  function renderContentHits(view) {
+    const sec = $('content-hits');
+    sec.hidden = !view;
+    if (!view) { shownContentHits = null; renderEmpty(); return; }
+    const notes = [];
+    if (view.loading && !view.hits.length) notes.push(S.contentSearching);
+    if (view.failed) notes.push(S.contentFailed);
+    notes.push(...sectionNotes(L, state.content, view.partial));
+    if (!view.loading && !view.failed && !view.hits.length) notes.push(S.contentNone);
+    $('content-notes').replaceChildren(...notes.map((t) => el('p', null, t)));
+    $('content-more').hidden = !view.more;
+    if (view.hits === shownContentHits) return;
+    shownContentHits = view.hits;
+    $('content-list').replaceChildren(...view.hits.map(contentHitItem));
+    renderEmpty();
+  }
+
+  /** One hit inside a document: name, folder, the highlighted fragment, its page, and
+   *  «Mostrar en carpeta» (R12). */
+  function contentHitItem(hit) {
+    const li = el('li', 'chit');
+    const ico = el('span', 'ico');
+    ico.setAttribute('aria-hidden', 'true');
+    ico.append(icon(FileKind.DOCUMENT));
+    const main = el('div', 'main');
+    const name = el('span', 'name');
+    F.appendHighlighted(name, hit.name, F.matchRanges(hit.name, state.terms));
+    const path = el('span', 'path', hit.dir);
+    path.title = hit.dir;
+    const fragment = el('p', 'fragment');
+    for (const run of snippetRuns(hit.snippet, hit.highlights)) {
+      fragment.append(run.hit ? el('mark', null, run.text) : run.text);
+    }
+    const page = hitPage(hit);
+    if (page != null) fragment.append(' ', el('span', 'page', S.contentPage(N.count(page))));
+    main.append(name, path, fragment);
+    const show = button(S.revealButton, 'btn', () => revealFile(hit.id, false));
+    show.setAttribute('aria-label', `${S.revealButton}: ${S.contentHitLabel(hit.name, hit.dir, page && N.count(page))}`);
+    li.append(ico, main, show);
+    return li;
+  }
+  $('content-more').addEventListener('click', () => contentSearch.more());
+
+  /** R14: the unread reasons of the document hits on a page just shown. */
+  async function loadUnread(hits) {
+    if (!contentOn(state.content)) return;
+    const ids = unreadCandidates(hits).filter((id) => !state.unread.has(id));
+    if (!ids.length) return;
+    const unread = state.unread;
+    try {
+      const pairs = await api.contentUnread(ids);
+      if (unread !== state.unread) return; // a newer search replaced the list
+      for (const [id, reason] of pairs) unread.set(id, reason);
+      if (pairs.some(([, reason]) => reason)) list.refresh();
+    } catch { /* no labels */ }
+  }
+
+  function setContent(st) {
+    const before = state.content;
+    state.content = st;
+    if (contentOn(before) !== contentOn(st)) {
+      runContentQuery();
+      if (contentOn(st)) loadUnread([...state.pages.values()].flat());
+      else { state.unread = new Map(); list.refresh(); }
+    } else {
+      const view = contentSearch.view();
+      if (view) renderContentHits(view); // the "still reading" line follows the run
+    }
+    renderContentStatus();
+    $('banner-content-damaged').hidden = st?.phase.kind !== ContentPhase.DAMAGED;
+    $('content-on').checked = contentOn(st);
+    showContentLimit($('content-max-row'), contentOn(st)); // VFS-34 R6
+    if (settingsDialog.open && before?.phase.kind !== st?.phase.kind) refreshContentStore();
+    maybeOffer();
+  }
+
+  async function contentCall(call) {
+    try { setContent(await call()); } catch (err) { showError(errorText(err)); }
+  }
+
+  /** R8, R15: progress, «Pausar la lectura» / «Reanudar la lectura», or the reason with
+   *  «Reintentar». */
+  function renderContentStatus() {
+    const line = api.missing ? null : contentStatusLine(L, state.content);
+    $('content-line').hidden = !line;
+    $('content-line').textContent = line?.text || '';
+    const action = $('content-action');
+    action.hidden = !line?.action;
+    action.dataset.action = line?.action || '';
+    if (line?.action === ContentAction.PAUSE) action.textContent = S.contentPause;
+    else if (line?.action === ContentAction.RESUME) action.textContent = S.contentResume;
+    else if (line?.action === ContentAction.RETRY) action.textContent = S.contentRetry;
+  }
+
+  $('content-action').addEventListener('click', (e) => {
+    const action = e.currentTarget.dataset.action;
+    if (action === ContentAction.RETRY) contentCall(() => api.contentRetry());
+    else contentCall(() => api.contentSetPaused(action === ContentAction.PAUSE));
+  });
+  $('content-rebuild').addEventListener('click', () => contentCall(() => api.contentRebuild()));
+  $('content-disable').addEventListener('click', () => contentCall(() => api.contentSetEnabled(false)));
+
+  /* The offer (R4): asked once the folders have finished their first scan, and again only when
+     the folders change before it was answered. */
+  let offerKey = '';
+  async function maybeOffer() {
+    if (!offerDue(state.content, state.roots)) { $('banner-content-offer').hidden = true; return; }
+    const key = state.roots.map((r) => `${r.id}:${r.lastFullScan}`).join(',');
+    if (key === offerKey) return;
+    offerKey = key;
+    let offer;
+    try { offer = await api.contentOffer(); } catch { offerKey = ''; return; } // asked again next time
+    // Nothing to read yet: no offer, and not marked as offered.
+    if (!offer.documents || !offerDue(state.content, state.roots)) return;
+    const { text, warn } = offerText(L, offer);
+    $('content-offer-text').textContent = text;
+    $('content-offer-warn').textContent = warn;
+    $('banner-content-offer').hidden = false;
+  }
+  $('content-offer-yes').addEventListener('click', () => {
+    $('banner-content-offer').hidden = true;
+    contentCall(() => api.contentSetEnabled(true));
+  });
+  $('content-offer-no').addEventListener('click', () => {
+    $('banner-content-offer').hidden = true;
+    contentCall(() => api.contentMarkOffered());
+    q.focus();
+  });
+
+  /* Ajustes (R5, R14): the switch, the store's size, the unread counts and the delete. */
+  const contentToggle = $('content-on');
+  contentToggle.addEventListener('change', async () => {
+    try {
+      setContent(await api.contentSetEnabled(contentToggle.checked));
+      refreshContentStore();
+    } catch (err) {
+      contentToggle.checked = contentOn(state.content);
+      showError(errorText(err));
+    }
+  });
+
+  async function refreshContentStore() {
+    let counts = null;
+    try { counts = await api.contentUnreadCounts(); } catch { /* no store */ }
+    $('content-store').hidden = !counts;
+    $('content-delete').hidden = !counts;
+    $('content-store').textContent = counts ? S.contentStore(N.size(counts.storeBytes)) : '';
+    const lines = (counts?.byReason || []).filter(([, n]) => n > 0)
+      .map(([reason, n]) => S.contentUnreadLine(S.contentUnread[reason] || reason, N.count(n)));
+    if (counts?.pending) lines.push(S.contentPending(N.count(counts.pending)));
+    $('content-unread').hidden = !lines.length;
+    $('content-unread-list').replaceChildren(...lines.map((t) => el('li', null, t)));
+  }
+
+  const contentDeleteDialog = $('confirm-content-delete');
+  $('content-delete').addEventListener('click', () => {
+    contentDeleteDialog.returnValue = '';
+    contentDeleteDialog.showModal();
+  });
+  contentDeleteDialog.addEventListener('close', async () => {
+    if (contentDeleteDialog.returnValue !== 'delete') return;
+    try {
+      setContent(await api.contentDeleteStore());
+      toast(S.contentDeleted);
+    } catch (err) { showError(errorText(err)); }
+    refreshContentStore();
+  });
+
+  async function startContent() {
+    try { await api.onContentStatus(setContent); } catch { /* status on request only */ }
+    try { setContent(await api.contentStatus()); } catch { /* not started yet; asked again with the folders */ }
   }
 
   /* ---------------------------------------------------------------- live data */
@@ -1439,6 +1648,9 @@ function main(L) {
     if (foldersDialog.open) renderRoots();
     if (state.searchState === SearchState.IDLE || !state.total) renderEmpty();
     list.refresh(); // unavailable badges depend on the roots
+    // VFS-27: the service starts with the index; the offer waits for the first scans (R4).
+    if (!state.content) api.contentStatus().then(setContent, () => {});
+    else maybeOffer();
   }
 
   function statusKey(roots) {
@@ -1481,6 +1693,7 @@ function main(L) {
     await refreshRoots();
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
+    startContent();
     if (hasQuery()) runSearch();
   }
 
