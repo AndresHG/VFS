@@ -743,6 +743,17 @@ impl Searcher {
         }))
     }
 
+    /// Every chunk of `file_id` with its 1-based page (`None` for formats without pages), in
+    /// ordinal order; empty when the document is unknown. VFS-28 uses it to tell which pages a
+    /// passage covers.
+    pub fn chunk_pages(&self, file_id: i64) -> Result<Vec<(u32, Option<u32>)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ordinal, page FROM c.chunks WHERE file_id = ?1 ORDER BY ordinal",
+        )?;
+        let rows = st.query_map([file_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Each file's unread reason (R15): `None` for an indexed file and for one not processed
     /// yet (queued, or not seen).
     pub fn unread(&self, file_ids: &[i64]) -> Result<Vec<(i64, Option<UnreadReason>)>> {

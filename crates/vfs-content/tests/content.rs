@@ -1355,6 +1355,13 @@ fn ac16_retrieve_and_passage_text() {
     let first = searcher.passage_text(id, 0, 1, 1).unwrap().unwrap();
     assert_eq!((first.first_ordinal, first.last_ordinal), (0, 1));
     assert!(searcher.passage_text(id, 999, 0, 0).unwrap().is_none());
+
+    // VFS-28 AC-12: `chunk_pages` lists every chunk in order; a TXT has no pages.
+    let pages = searcher.chunk_pages(id).unwrap();
+    let ordinals: Vec<u32> = pages.iter().map(|p| p.0).collect();
+    assert_eq!(ordinals, (0..=all.last_ordinal).collect::<Vec<_>>());
+    assert!(pages.iter().all(|p| p.1.is_none()));
+    assert!(searcher.chunk_pages(-1).unwrap().is_empty());
 }
 
 /// VFS-2 AC-16: no crate other than `vfs-content` opens `content.db`; the others go through

@@ -135,38 +135,18 @@ fn retrieve(corpus: &dyn Corpus, rewrite: &Rewrite) -> (Vec<Source>, Vec<String>
     (sources, found.hits.iter().map(|h| h.name.clone()).collect())
 }
 
-/// Chunk ordinals per (file name, page), read from `content.db`, to tell whether a sent
-/// passage covers a gold page.
-fn page_ordinals(db: &Path) -> BTreeMap<(String, u32), Vec<u32>> {
-    let conn = rusqlite::Connection::open(db.with_file_name("content.db")).unwrap();
-    let mut st = conn
-        .prepare(
-            "SELECT d.name, c.page, c.ordinal FROM chunks c JOIN docs d USING(file_id)
-             WHERE c.page IS NOT NULL",
-        )
-        .unwrap();
-    let mut map: BTreeMap<(String, u32), Vec<u32>> = BTreeMap::new();
-    let rows = st
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?)))
-        .unwrap();
-    for row in rows {
-        let (name, page, ordinal) = row.unwrap();
-        map.entry((name, page)).or_default().push(ordinal);
-    }
-    map
-}
-
-fn covers(s: &Source, gold: &Gold, pages: &BTreeMap<(String, u32), Vec<u32>>) -> bool {
+/// Whether sent passage `s` covers `gold`: same file and, for a gold page, a chunk of that page
+/// inside the passage's chunk range.
+fn covers(s: &Source, gold: &Gold, searcher: &vfs_content::Searcher) -> bool {
     if s.name != gold.file {
         return false;
     }
-    match gold.page {
-        None => true,
-        Some(p) => pages.get(&(gold.file.clone(), p)).is_some_and(|ords| {
-            ords.iter()
-                .any(|o| (s.first_ordinal..=s.last_ordinal).contains(o))
-        }),
-    }
+    let Some(page) = gold.page else { return true };
+    searcher
+        .chunk_pages(s.file_id)
+        .unwrap()
+        .iter()
+        .any(|&(o, p)| p == Some(page) && (s.first_ordinal..=s.last_ordinal).contains(&o))
 }
 
 fn blocks_of(r: &Recorded) -> Vec<AnswerBlock> {
@@ -240,14 +220,13 @@ fn golden_retrieval_sends_every_gold_passage() {
         searcher: &searcher,
         vfs: &vfs,
     };
-    let pages = page_ordinals(db);
     let rec = recorded();
     let mut misses = Vec::new();
     for c in cases().iter().filter(|c| c.answerable) {
         let (sources, _) = retrieve(&corpus, &rec[&c.id].rewrite);
         assert!(sources.len() <= ask::MAX_PASSAGES);
         for g in &c.gold {
-            if !sources.iter().any(|s| covers(s, g, &pages)) {
+            if !sources.iter().any(|s| covers(s, g, &searcher)) {
                 let sent: Vec<String> = sources.iter().map(Source::title).collect();
                 misses.push(format!("{}: {g:?} not sent; sent {sent:?}", c.id));
             }
@@ -315,29 +294,32 @@ fn golden_recorded_answers_check_offline() {
 fn dump(out: &Path, db: &Path) {
     std::fs::create_dir_all(out).unwrap();
     let searcher = vfs_content::Searcher::open(db).unwrap();
-    let conn = rusqlite::Connection::open(db.with_file_name("content.db")).unwrap();
-    let mut st = conn
-        .prepare(
-            "SELECT d.file_id, d.name, c.ordinal, c.page FROM chunks c JOIN docs d USING(file_id)
-             ORDER BY d.name, c.ordinal",
-        )
+    let vfs = Vfs::open(db).unwrap();
+    let docs = vfs
+        .search(&vfs_core::SearchQuery {
+            text: String::new(),
+            filters: SearchFilters {
+                kinds: vec![vfs_core::FileKind::Document],
+                ..SearchFilters::default()
+            },
+            limit: 500,
+            offset: 0,
+            sort: vfs_core::SortOrder::Name,
+            scope: Default::default(),
+        })
         .unwrap();
-    let rows: Vec<(i64, String, u32, Option<u32>)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-        .unwrap()
-        .map(Result::unwrap)
-        .collect();
     let mut text = String::new();
-    for (id, name, ordinal, page) in rows {
-        let t = searcher.passage_text(id, ordinal, 0, 0).unwrap().unwrap();
-        text += &format!(
-            "=== {name} · chunk {ordinal} · page {page:?}\n{}\n\n",
-            t.text
-        );
+    for h in &docs.hits {
+        for (ordinal, page) in searcher.chunk_pages(h.id).unwrap() {
+            let t = searcher.passage_text(h.id, ordinal, 0, 0).unwrap().unwrap();
+            text += &format!(
+                "=== {} · chunk {ordinal} · page {page:?}\n{}\n\n",
+                h.name, t.text
+            );
+        }
     }
     std::fs::write(out.join("corpus.txt"), text).unwrap();
 
-    let vfs = Vfs::open(db).unwrap();
     let corpus = LocalCorpus {
         searcher: &searcher,
         vfs: &vfs,
