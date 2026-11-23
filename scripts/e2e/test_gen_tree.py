@@ -201,5 +201,37 @@ class ReadyProbeTest(unittest.TestCase):
         self.assertEqual([t[2] for t in app.ready_trace["UI ready"]], [False, True])
 
 
+class PinSpanishTest(unittest.TestCase):
+    class Page:
+        def __init__(self, lang):
+            self.lang, self.calls = lang, []
+
+        def js(self, script, *args, timeout=None):
+            self.calls.append(("js", script, timeout))
+            return self.lang
+
+        def s(self, method, path, body=None, timeout=None):
+            self.calls.append((method, path, timeout))
+
+    def pin(self, lang):
+        app = App.__new__(App)
+        app.wd = self.Page(lang)
+        app.pin_spanish()
+        return app.wd.calls
+
+    def test_an_english_page_is_refreshed_by_webdriver_not_by_the_script(self):
+        """VFS-8 AC-5, AC-6: the language script answers before any reload; the reload is
+        WebDriver's refresh."""
+        calls = self.pin("en")
+        self.assertEqual([c[0] for c in calls], ["js", "POST"])
+        self.assertNotIn("reload", calls[0][1])
+        self.assertEqual(calls[0][2], 10)
+        self.assertEqual(calls[1][1], "/refresh")
+
+    def test_a_spanish_page_is_not_reloaded(self):
+        """VFS-8 AC-5: a page already in Spanish is left as it is."""
+        self.assertEqual([c[0] for c in self.pin("es")], ["js"])
+
+
 if __name__ == "__main__":
     unittest.main()

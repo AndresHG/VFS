@@ -142,17 +142,25 @@ class App:
             " && document.querySelector('#open-folders').textContent.length > 0", "UI ready")
         # VFS-22: the steps below read Spanish copy and the Spanish folder picker title, and
         # the runner's OS may be English: pin the app to Spanish and wait for the redraw.
-        # 'vfs.language' is LANGUAGE_KEY in apps/desktop/ui/main.js. A page already in
-        # Spanish is not reloaded, so the wait below never sees a page about to go away.
-        self.wd.js("localStorage.setItem('vfs.language', 'es');"
-                   " if (document.documentElement.lang !== 'es') setTimeout(() => location.reload(), 0);"
-                   " return true")
+        # 'vfs.language' is LANGUAGE_KEY in apps/desktop/ui/main.js.
+        self.pin_spanish()
         self.ready_probe(
             "return document.documentElement.lang === 'es'"
             " && document.querySelector('#open-folders') !== null"
             " && document.querySelector('#open-folders').textContent.length > 0",
             "UI ready in Spanish")
         return now() - t0
+
+    def pin_spanish(self):
+        """Stores Spanish as the UI language and reloads the page only when it is not Spanish
+        yet. The reload is WebDriver's own refresh, after the script has answered: a reload the
+        script schedules itself can wipe the page global the WebDriver server reads the
+        script's answer from, and that call then waits out its timeout (busy slow-disk run)."""
+        lang, _ = wait_for(lambda: self.wd.js(
+            "localStorage.setItem('vfs.language', 'es'); return document.documentElement.lang",
+            timeout=10), 60, what="UI language stored")
+        if lang != "es":
+            self.wd.s("POST", "/refresh", {}, timeout=60)
 
     def ready_probe(self, script, what, timeout=60, per_call=10):
         """Polls `script` until it is true. Each call gets `per_call` seconds, so one script
