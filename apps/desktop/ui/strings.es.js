@@ -2,7 +2,7 @@
 // "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values. Every
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason,
@@ -275,15 +275,15 @@ export const es = {
   contentOfferYes: 'Activar',
   contentOfferNo: 'Ahora no',
   timeRange: {
-    minutes: (a, b) => (a !== b ? `entre ${a} y ${b} minutos` : a === '1' ? 'un minuto' : `unos ${a} minutos`),
-    hours: (a, b) => (a !== b ? `entre ${a} y ${b} horas` : a === '1' ? 'una hora' : `unas ${a} horas`),
-    days: (a, b) => (a !== b ? `entre ${a} y ${b} días` : a === '1' ? 'un día' : `unos ${a} días`),
+    [TimeUnit.MINUTES]: (a, b) => (a !== b ? `entre ${a} y ${b} minutos` : a === '1' ? 'un minuto' : `unos ${a} minutos`),
+    [TimeUnit.HOURS]: (a, b) => (a !== b ? `entre ${a} y ${b} horas` : a === '1' ? 'una hora' : `unas ${a} horas`),
+    [TimeUnit.DAYS]: (a, b) => (a !== b ? `entre ${a} y ${b} días` : a === '1' ? 'un día' : `unos ${a} días`),
   },
   sizeRange: (a, b) => (a === b ? `unos ${a}` : `entre ${a} y ${b}`),
   timeLeft: {
-    minutes: (n) => (n === '1' ? 'queda un minuto' : `quedan unos ${n} minutos`) + ' con el equipo sin usar',
-    hours: (n) => (n === '1' ? 'queda una hora' : `quedan unas ${n} horas`) + ' con el equipo sin usar',
-    days: (n) => (n === '1' ? 'queda un día' : `quedan unos ${n} días`) + ' con el equipo sin usar',
+    [TimeUnit.MINUTES]: (n) => (n === '1' ? 'queda un minuto' : `quedan unos ${n} minutos`) + ' con el equipo sin usar',
+    [TimeUnit.HOURS]: (n) => (n === '1' ? 'queda una hora' : `quedan unas ${n} horas`) + ' con el equipo sin usar',
+    [TimeUnit.DAYS]: (n) => (n === '1' ? 'queda un día' : `quedan unos ${n} días`) + ' con el equipo sin usar',
   },
   contentReading: (done, total) => `Leyendo documentos: ${done} de ${total}`,
   contentRate: (n) => `${n} por hora`,

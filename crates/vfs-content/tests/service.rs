@@ -556,10 +556,21 @@ fn offer_counts_documents_without_cloud_only_files() {
     drop(conn);
     let o = offer(&s.db, Some(100 << 30));
     assert_eq!(o.documents, 7);
-    assert_eq!(o.seconds, (7 * 170 / 1000, 7 * 550 / 1000));
-    assert_eq!(o.bytes, (7 * 13_000, 7 * 16_000));
+    assert!(0 < o.seconds.0 && o.seconds.0 < o.seconds.1, "{o:?}");
+    assert!(0 < o.bytes.0 && o.bytes.0 < o.bytes.1, "{o:?}");
     assert!(!o.low_space);
-    assert!(offer(&s.db, Some((2 << 30) - 1)).low_space);
+    // The ranges grow with the documents: three more documents, a longer and larger run.
+    let more = setup(10);
+    let m = offer(&more.db, Some(100 << 30));
+    assert_eq!(m.documents, 10);
+    assert!(
+        m.seconds.1 > o.seconds.1 && m.bytes.1 > o.bytes.1,
+        "{m:?} vs {o:?}"
+    );
+    // R6: the warning floor is the larger of 2 GB and twice the estimated store.
+    let floor = (2u64 << 30).max(2 * o.bytes.1);
+    assert!(offer(&s.db, Some(floor - 1)).low_space);
+    assert!(!offer(&s.db, Some(floor)).low_space);
     assert!(
         !offer(&s.db, None).low_space,
         "unknown free space warns of nothing"

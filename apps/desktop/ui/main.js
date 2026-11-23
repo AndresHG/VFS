@@ -15,11 +15,11 @@ import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
 import {
   ContentAction, contentOn, contentStatusLine, createContentSearch, hitPage, offerDue, offerText, sectionNotes, snippetRuns,
-  unreadCandidates,
+  unreadCandidates, unreadLabel,
 } from './content.js';
 import {
   ContentPhase, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus,
-  SortOrder, Source, TruncatedBy, UiErrorCode, UnreadReason,
+  SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
   DateChoice, LanguageChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
@@ -573,7 +573,7 @@ function main(L) {
     if (link) nameParts.push(el('span', 'badge badge-link', S.linkBadge[link.kind]));
     // VFS-27 R14: why its text was not read; a cloud-only file already says so.
     const unread = state.unread.get(hit.id);
-    const unreadText = unread && !(unread === UnreadReason.CLOUD && showsCloudBadge(hit)) ? S.contentUnread[unread] : '';
+    const unreadText = unreadLabel(S, hit, unread);
     if (unreadText) nameParts.push(el('span', 'badge badge-unread', unreadText));
     nameEl.replaceChildren(...nameParts);
 

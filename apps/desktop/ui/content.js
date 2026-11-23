@@ -3,15 +3,16 @@
 // sequence numbers. No DOM here, so it is tested outside the browser
 // (`apps/desktop/ui-dev/content.test.mjs`).
 
-import { ContentPhase, ContentStop, ContentWait, FileKind, RootStatus, Source } from './contract.js';
+import { TimeUnit } from './choices.js';
+import { ContentPhase, ContentStop, ContentWait, FileKind, RootStatus, Source, UnreadReason } from './contract.js';
+import { showsCloudBadge } from './copies.js';
+
+export { TimeUnit };
 
 /** R12: the content query starts this long after typing stops… */
 export const CONTENT_DEBOUNCE_MS = 300;
 /** …and only for queries of at least this many characters. */
 export const CONTENT_MIN_CHARS = 3;
-
-/** Units of `S.timeRange` and `S.timeLeft`. */
-export const TimeUnit = Object.freeze({ MINUTES: 'minutes', HOURS: 'hours', DAYS: 'days' });
 
 /** What the content part of the status area offers (R8, R15). */
 export const ContentAction = Object.freeze({ PAUSE: 'pause', RESUME: 'resume', RETRY: 'retry' });
@@ -144,6 +145,13 @@ export function unreadCandidates(hits) {
   return hits
     .filter((h) => h && h.source !== Source.BOOKMARKS && !h.isDir && h.kind === FileKind.DOCUMENT)
     .map((h) => h.id);
+}
+
+/** R14: the label of a name hit with unread reason `reason` (or null): none for a cloud-only
+ *  file that already has its cloud badge. */
+export function unreadLabel(S, hit, reason) {
+  if (!reason || (reason === UnreadReason.CLOUD && showsCloudBadge(hit))) return '';
+  return S.contentUnread[reason] || '';
 }
 
 /**

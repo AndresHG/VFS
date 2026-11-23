@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
-  CONTENT_DEBOUNCE_MS, ContentAction, TimeUnit, contentQueryDue, contentStatusLine, createContentSearch, hitPage,
+  CONTENT_DEBOUNCE_MS, ContentAction, TimeUnit, contentQueryDue, unreadLabel, contentStatusLine, createContentSearch, hitPage,
   offerDue, offerText, roughTime, sectionNotes, snippetRuns, unreadCandidates,
 } from '../ui/content.js';
 import { CATALOGS, Lang, localeFor } from '../ui/strings.js';
@@ -54,6 +54,10 @@ test('the offer shows the count, a time range and the disk use', () => {
 });
 
 test('times are rounded to one unit', () => {
+  for (const unit of Object.values(TimeUnit)) {
+    assert.equal(typeof S.timeRange[unit], 'function', unit);
+    assert.equal(typeof S.timeLeft[unit], 'function', unit);
+  }
   assert.deepEqual(roughTime(30), { unit: TimeUnit.MINUTES, lo: 1, hi: 1 });
   assert.deepEqual(roughTime(600, 3000), { unit: TimeUnit.MINUTES, lo: 10, hi: 50 });
   assert.deepEqual(roughTime(2000, 7200), { unit: TimeUnit.HOURS, lo: 1, hi: 2 });
@@ -225,7 +229,14 @@ test('unread labels and counts', () => {
     'en la nube', 'sin texto (escaneado)', 'protegido con contraseña', 'demasiado grande', 'formato no compatible', 'no se pudo leer',
   ]);
   assert.equal(S.contentPending('3'), 'pendientes: 3');
-  assert.match(mainJs, /badge badge-unread/);
+  // A name hit carries its reason; a cloud-only file keeps only its cloud badge.
+  const doc = { id: 1, kind: FileKind.DOCUMENT, isDir: false, source: Source.FILES };
+  assert.equal(unreadLabel(S, doc, UnreadReason.SCANNED), 'sin texto (escaneado)');
+  assert.equal(unreadLabel(S, doc, UnreadReason.CLOUD), 'en la nube');
+  assert.equal(unreadLabel(S, { ...doc, cloudOnly: true }, UnreadReason.CLOUD), '');
+  assert.equal(unreadLabel(S, { ...doc, cloudOnly: true }, UnreadReason.PASSWORD), 'protegido con contraseña');
+  assert.equal(unreadLabel(S, doc, null), '');
+  assert.match(mainJs, /const unreadText = unreadLabel\(S, hit, unread\);[\s\S]*?badge badge-unread/);
 });
 
 /** VFS-27 AC-5 (R5): the switch, the store size and «Borrar lo leído de los documentos» with

@@ -1,7 +1,7 @@
 // The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
 // words, no "index" jargon. Functions take already-formatted values.
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason,
@@ -273,15 +273,15 @@ export const en = {
   contentOfferYes: 'Turn on',
   contentOfferNo: 'Not now',
   timeRange: {
-    minutes: (a, b) => (a !== b ? `between ${a} and ${b} minutes` : a === '1' ? 'about a minute' : `about ${a} minutes`),
-    hours: (a, b) => (a !== b ? `between ${a} and ${b} hours` : a === '1' ? 'about an hour' : `about ${a} hours`),
-    days: (a, b) => (a !== b ? `between ${a} and ${b} days` : a === '1' ? 'about a day' : `about ${a} days`),
+    [TimeUnit.MINUTES]: (a, b) => (a !== b ? `between ${a} and ${b} minutes` : a === '1' ? 'about a minute' : `about ${a} minutes`),
+    [TimeUnit.HOURS]: (a, b) => (a !== b ? `between ${a} and ${b} hours` : a === '1' ? 'about an hour' : `about ${a} hours`),
+    [TimeUnit.DAYS]: (a, b) => (a !== b ? `between ${a} and ${b} days` : a === '1' ? 'about a day' : `about ${a} days`),
   },
   sizeRange: (a, b) => (a === b ? `about ${a}` : `between ${a} and ${b}`),
   timeLeft: {
-    minutes: (n) => `${n === '1' ? 'about a minute' : `about ${n} minutes`} left while the computer is idle`,
-    hours: (n) => `${n === '1' ? 'about an hour' : `about ${n} hours`} left while the computer is idle`,
-    days: (n) => `${n === '1' ? 'about a day' : `about ${n} days`} left while the computer is idle`,
+    [TimeUnit.MINUTES]: (n) => `${n === '1' ? 'about a minute' : `about ${n} minutes`} left while the computer is idle`,
+    [TimeUnit.HOURS]: (n) => `${n === '1' ? 'about an hour' : `about ${n} hours`} left while the computer is idle`,
+    [TimeUnit.DAYS]: (n) => `${n === '1' ? 'about a day' : `about ${n} days`} left while the computer is idle`,
   },
   contentReading: (done, total) => `Reading documents: ${done} of ${total}`,
   contentRate: (n) => `${n} per hour`,
