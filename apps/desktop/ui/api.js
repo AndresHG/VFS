@@ -123,6 +123,12 @@ function tauriBackend(t) {
     aiSetCap: (capNano) => invoke('ai_set_cap', { capNano }),
     aiRecords: () => invoke('ai_records'),
     aiClearRecords: () => invoke('ai_clear_records'),
+    aiAsk: (askId, question, filters, confirmed, lang) => invoke('ai_ask', { askId, question, filters, confirmed, lang }),
+    aiFollowUp: (threadId, askId, question, confirmed, lang) => invoke('ai_follow_up', { threadId, askId, question, confirmed, lang }),
+    aiCancel: (askId) => invoke('ai_cancel', { askId }),
+    aiBibliography: (threadId, all) => invoke('ai_bibliography', { threadId, all }),
+    aiExportRis: (threadId, all) => invoke('ai_export_ris', { threadId, all }),
+    onAnswerText: (cb) => listen('ai-answer-text', (e) => cb(e.payload)),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -155,6 +161,8 @@ function missingBackend() {
     contentUnreadCounts: fail, contentUnread: fail, onContentStatus: async () => () => {},
     aiStatus: fail, aiSetSettings: fail, aiNoticeSeen: fail, aiSaveKey: fail, aiSaveKeyFallback: fail,
     aiDeleteKey: fail, aiTestKey: fail, aiSetCap: fail, aiRecords: fail, aiClearRecords: fail,
+    aiAsk: fail, aiFollowUp: fail, aiCancel: fail, aiBibliography: fail, aiExportRis: fail,
+    onAnswerText: async () => () => {},
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
     onBookmarksChanged: async () => () => {},
   };

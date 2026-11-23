@@ -1084,3 +1084,33 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 #ai-record > .bookmarks-intro, #ai-record > .bookmarks-status, #ai-record > .btn { margin-inline: var(--s5); }
 #ai-record-empty[hidden], #ai-record-clear[hidden] { display: none; }
 #ai-open-record, #ai-record-clear { justify-self: start; }
+
+/* VFS-28: «Preguntar», the answer and «Bibliografía». */
+#ask-open[hidden] { display: none; }
+.ai-ask-body { display: grid; gap: var(--s3); padding: 0 var(--s5) var(--s4); overflow-y: auto; flex: 1; align-content: start; }
+.ai-ask-form { display: grid; gap: var(--s1); }
+.ai-ask-form label { font-weight: 700; }
+.ai-ask-form textarea {
+  font: inherit; inline-size: 100%; padding: var(--s2); resize: vertical;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+}
+.ai-ask-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.ai-ask-actions [hidden], .ai-after[hidden], #ai-bib-empty[hidden] { display: none; }
+.ai-after { display: grid; gap: var(--s3); }
+.ai-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s4); }
+.ai-turn { display: grid; gap: var(--s2); border-block-end: 1px solid var(--line); padding-block-end: var(--s3); }
+.ai-turn-question { font-weight: 700; margin: 0; }
+.ai-status, .ai-cost, .ai-closest { color: var(--ink-2); font-size: var(--t-meta); margin: 0; }
+.ai-stream, .ai-answer-text, .ai-not-found, .ai-error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-error { color: var(--danger); }
+.ai-marker {
+  font: inherit; font-size: var(--t-meta); padding: 0 var(--s1); margin-inline-start: 2px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--accent, var(--ink));
+}
+.ai-source { display: grid; gap: var(--s1); padding: var(--s2) var(--s3); border: 1px solid var(--line); border-radius: var(--radius); }
+.ai-source .btn { justify-self: start; }
+.ai-source-title { font-weight: 700; margin: 0; }
+.ai-source-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.ai-closest-list, .ai-bib-list { margin: 0; padding-inline-start: var(--s5); display: grid; gap: var(--s1); }
+.ai-closest-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.ai-bib-entry { overflow-wrap: anywhere; }

@@ -58,6 +58,8 @@ impl Lang {
 pub struct Strings {
     pub window_title: &'static str,
     pub choose_folder: &'static str,
+    /// The file name offered by «Exportar RIS» (VFS-28 R12).
+    pub bibliography_file: &'static str,
     pub splash: &'static str,
     /// `{detail}` stands for the error.
     pub startup_failed: &'static str,
@@ -91,6 +93,7 @@ pub struct MenuStrings {
 static ES: Strings = Strings {
     window_title: "VFS — Buscador de archivos",
     choose_folder: "Elegir carpeta",
+    bibliography_file: "bibliografia.ris",
     splash: "Preparando VFS…",
     startup_failed: "No se ha podido iniciar VFS.\n\nDetalle: {detail}\n\n\
         Cierre el programa y vuelva a abrirlo. Si el problema continúa, \
@@ -121,6 +124,7 @@ static ES: Strings = Strings {
 static EN: Strings = Strings {
     window_title: "VFS — File Finder",
     choose_folder: "Choose folder",
+    bibliography_file: "bibliography.ris",
     splash: "Getting VFS ready…",
     startup_failed: "VFS could not start.\n\nDetails: {detail}\n\n\
         Close the app and open it again. If the problem continues, \

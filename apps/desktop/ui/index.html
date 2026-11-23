@@ -48,6 +48,8 @@
         </div>
         <p id="q-hint" class="visually-hidden" data-s="searchHint"></p>
       </div>
+      <!-- VFS-28 R5: only while AI is on, a key is saved and content search has a store. -->
+      <button id="ask-open" class="btn" type="button" hidden data-s="askOpen"></button>
       <span id="dev-badge" class="dev-badge" hidden data-s="devBadge"></span>
     </header>
 
@@ -444,6 +446,80 @@
       <button class="btn" value="cancel" autofocus data-s="cancel"></button>
       <button class="btn" value="session_only" data-s="aiFallbackSession"></button>
       <button class="btn btn-primary" value="protected_file" data-s="aiFallbackFile"></button>
+    </form>
+  </dialog>
+  <!-- VFS-28 R6–R9: a question, its answer as plain text with markers, and follow-ups. -->
+  <dialog id="ai-ask" class="drawer ai-ask" aria-labelledby="ai-ask-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="ai-ask-title" data-s="aiAskTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <div class="ai-ask-body">
+      <form id="ai-ask-form" class="ai-ask-form">
+        <label for="ai-question" data-s="aiAskLabel"></label>
+        <textarea id="ai-question" rows="2" maxlength="2000" spellcheck="true"></textarea>
+        <div class="ai-ask-actions">
+          <button class="btn btn-primary" type="submit" data-s="aiAskSubmit"></button>
+          <button id="ai-cancel" class="btn" type="button" hidden data-s="cancel"></button>
+        </div>
+      </form>
+      <ol id="ai-turns" class="ai-turns" aria-live="polite"></ol>
+      <div id="ai-after" class="ai-after" hidden>
+        <div class="ai-ask-actions">
+          <button id="ai-copy" class="btn btn-quiet" type="button" data-s="aiCopy"></button>
+          <button id="ai-bib-open" class="btn btn-quiet" type="button" data-s="aiBibOpen"></button>
+        </div>
+        <form id="ai-follow-form" class="ai-ask-form">
+          <label for="ai-follow" data-s="aiFollowLabel"></label>
+          <textarea id="ai-follow" rows="2" maxlength="2000" spellcheck="true"></textarea>
+          <div class="ai-ask-actions">
+            <button id="ai-follow-submit" class="btn" type="submit" data-s="aiFollowSubmit"></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- VFS-28 R12: «Bibliografía». -->
+  <dialog id="ai-bib" class="drawer" aria-labelledby="ai-bib-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="ai-bib-title" data-s="aiBibTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <div class="ai-ask-body">
+      <label class="toggle"><input type="checkbox" id="ai-bib-all"> <span data-s="aiBibAll"></span></label>
+      <p id="ai-bib-empty" class="bookmarks-status" data-s="aiBibEmpty" hidden></p>
+      <ul id="ai-bib-list" class="ai-bib-list" role="list"></ul>
+      <div class="ai-ask-actions">
+        <button id="ai-bib-copy" class="btn" type="button" data-s="aiBibCopy"></button>
+        <button id="ai-bib-export" class="btn" type="button" data-s="aiBibExport"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- VFS-28 R6: the one-time notice before the first question. -->
+  <dialog id="ai-notice" class="confirm" aria-labelledby="ai-notice-title" aria-describedby="ai-notice-body">
+    <h2 id="ai-notice-title" data-s="aiNoticeTitle"></h2>
+    <p id="ai-notice-body"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" data-s="cancel"></button>
+      <button class="btn btn-primary" value="ok" autofocus data-s="aiNoticeOk"></button>
+    </form>
+  </dialog>
+
+  <!-- VFS-28 R10: the month's cap is reached. -->
+  <dialog id="confirm-ai-cap" class="confirm" aria-labelledby="confirm-ai-cap-title" aria-describedby="confirm-ai-cap-desc">
+    <h2 id="confirm-ai-cap-title" data-s="aiCapTitle"></h2>
+    <p id="confirm-ai-cap-desc"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-primary" value="ask" data-s="aiCapConfirm"></button>
     </form>
   </dialog>
 </body>
