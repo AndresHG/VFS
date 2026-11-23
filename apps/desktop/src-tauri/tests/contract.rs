@@ -14,6 +14,7 @@ use vfs_core::{
     DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, Scope,
     SuggestionKind, TruncatedBy, UnreadableReason,
 };
+use vfs_desktop_lib::ai;
 
 /// `export const Name = Object.freeze({ KEY: 'value', ... });` of contract.js, as
 /// name -> values in source order.
@@ -349,6 +350,17 @@ fn all_unread_reasons() -> Vec<UnreadReason> {
     all
 }
 
+/// VFS-28: both providers (D1).
+fn all_providers() -> Vec<vfs_ai::Provider> {
+    let all = vec![vfs_ai::Provider::Anthropic, vfs_ai::Provider::OpenAi];
+    for p in &all {
+        match p {
+            vfs_ai::Provider::Anthropic | vfs_ai::Provider::OpenAi => {}
+        }
+    }
+    all
+}
+
 /// VFS-1 X1, AC-12: every set of contract.js equals the serde values of its Rust enum, and
 /// contract.js has no set this test does not check (besides the UI's own `UiErrorCode`).
 /// VFS-38 R14: `Scope` is checked like VFS-6 AC-11's `Source`.
@@ -378,6 +390,11 @@ fn contract_js_matches_the_rust_enums() {
         ("ContentWait", serde_names(&all_content_waits())),
         ("ContentStop", serde_names(&all_content_stops())),
         ("UnreadReason", serde_names(&all_unread_reasons())),
+        ("Provider", serde_names(&all_providers())),
+        ("AiErrorCode", serde_names(&ai::AiErrorCode::all())),
+        ("KeyState", ai::key_states()),
+        ("KeyPlace", serde_names(&ai::KeyPlace::all())),
+        ("KeyFallback", serde_names(&ai::KeyFallback::all())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

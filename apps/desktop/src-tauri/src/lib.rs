@@ -2,6 +2,7 @@
 //! the background indexer, and exposes the command and event contract of `vfs_core::api` to
 //! the static frontend in `apps/desktop/ui`.
 
+pub mod ai;
 pub mod bookmarks;
 pub mod commands;
 pub mod content;
@@ -509,6 +510,7 @@ pub fn run() {
                 .map_err(|e| e.to_string())
                 .and_then(|dir| {
                     app.manage(updates::UpdateState::new(&dir));
+                    app.manage(ai::AiState::new(&dir));
                     if let Err(e) = install_logger(&handle, &dir) {
                         eprintln!("VFS: log file unavailable: {e}");
                     }

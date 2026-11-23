@@ -112,6 +112,17 @@ function tauriBackend(t) {
     contentUnreadCounts: () => invoke('content_unread_counts'),
     contentUnread: (fileIds) => invoke('content_unread', { fileIds }),
     onContentStatus: (cb) => listen('content-status', (e) => cb(e.payload)),
+    // VFS-28: «Preguntar a sus documentos». The key is sent once, when typed; nothing returns it.
+    aiStatus: () => invoke('ai_status'),
+    aiSetSettings: (enabled, provider, cheap) => invoke('ai_set_settings', { enabled, provider, cheap }),
+    aiNoticeSeen: () => invoke('ai_notice_seen'),
+    aiSaveKey: (provider, key) => invoke('ai_save_key', { provider, key }),
+    aiSaveKeyFallback: (provider, key, fallback) => invoke('ai_save_key_fallback', { provider, key, fallback }),
+    aiDeleteKey: (provider) => invoke('ai_delete_key', { provider }),
+    aiTestKey: (provider) => invoke('ai_test_key', { provider }),
+    aiSetCap: (capNano) => invoke('ai_set_cap', { capNano }),
+    aiRecords: () => invoke('ai_records'),
+    aiClearRecords: () => invoke('ai_clear_records'),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -142,6 +153,8 @@ function missingBackend() {
     contentStatus: fail, contentSetEnabled: fail, contentSetPaused: fail, contentRetry: fail, contentRebuild: fail,
     contentMarkOffered: fail, contentOffer: fail, contentDeleteStore: fail, contentSearch: fail,
     contentUnreadCounts: fail, contentUnread: fail, onContentStatus: async () => () => {},
+    aiStatus: fail, aiSetSettings: fail, aiNoticeSeen: fail, aiSaveKey: fail, aiSaveKeyFallback: fail,
+    aiDeleteKey: fail, aiTestKey: fail, aiSetCap: fail, aiRecords: fail, aiClearRecords: fail,
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
     onBookmarksChanged: async () => () => {},
   };

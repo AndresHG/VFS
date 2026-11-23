@@ -10,6 +10,7 @@ import { SecondAction, secondActionOf } from './links.js';
 import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
+import { setupAiSettings } from './ai.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
@@ -1291,6 +1292,7 @@ function main(L) {
   $('open-settings').addEventListener('click', () => {
     $('language').value = choiceFor(savedLanguage());
     refreshContentStore();
+    ai.refresh();
     settingsDialog.showModal();
   });
   // A new language redraws the whole screen in it: the page reloads with the new choice.
@@ -1302,6 +1304,10 @@ function main(L) {
   /* ---------------------------------------------------------------- feedback (VFS-20) */
 
   setupFeedback({ api, S, $, errorText });
+
+  /* ---------------------------------------------------------------- AI (VFS-28) */
+
+  const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast });
 
   /* ---------------------------------------------------------------- folder panel */
 

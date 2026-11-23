@@ -70,6 +70,16 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::content::content_search,
         crate::content::content_unread_counts,
         crate::content::content_unread,
+        crate::ai::ai_status,
+        crate::ai::ai_set_settings,
+        crate::ai::ai_notice_seen,
+        crate::ai::ai_save_key,
+        crate::ai::ai_save_key_fallback,
+        crate::ai::ai_delete_key,
+        crate::ai::ai_test_key,
+        crate::ai::ai_set_cap,
+        crate::ai::ai_records,
+        crate::ai::ai_clear_records,
     ]
 }
 
