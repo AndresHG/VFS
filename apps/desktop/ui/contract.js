@@ -69,6 +69,9 @@ export const SuggestionKind = Object.freeze({
   DROP_FILTERS: 'dropFilters', SPELLING: 'spelling', DROP_TERM: 'dropTerm',
 });
 
+/** `SearchQuery.scope`: what the words are matched against (VFS-38); left out means `all`. */
+export const Scope = Object.freeze({ ALL: 'all', NAMES: 'names' });
+
 /** Order of a search over several sources (VFS-6). */
 export const SortOrder = Object.freeze({
   RELEVANCE: 'relevance', NEWEST: 'newest', OLDEST: 'oldest', NAME: 'name', SIZE: 'size', SOURCE: 'source',

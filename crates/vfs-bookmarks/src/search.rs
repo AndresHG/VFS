@@ -148,11 +148,13 @@ impl Entry {
     }
 
     /// Every term in a key; with `fuzzy`, terms that tolerate a typo may be within one edit.
-    /// A folder also needs one term in its own name (VFS-1 D1); a root has none.
-    fn matches(&self, terms: &[String], fuzzy: bool) -> Option<MatchKind> {
+    /// A folder also needs one term in its own name (VFS-1 D1); a root has none. With
+    /// `names`, only the title counts (VFS-38 R3, D5).
+    fn matches(&self, terms: &[String], fuzzy: bool, names: bool) -> Option<MatchKind> {
         if self.is_folder && self.title_key.is_empty() {
             return None;
         }
+        let others: &[String] = if names { &[] } else { &self.other_keys };
         let near = |k: &str, t: &str| fuzzy && tolerates_typo(t) && contains_within_one(k, t);
         let mut elsewhere = false;
         let mut typo = false;
@@ -160,12 +162,12 @@ impl Entry {
         for t in terms {
             if self.title_key.contains(t.as_str()) {
                 in_name = true;
-            } else if self.other_keys.iter().any(|k| k.contains(t.as_str())) {
+            } else if others.iter().any(|k| k.contains(t.as_str())) {
                 elsewhere = true;
             } else if near(&self.title_key, t) {
                 typo = true;
                 in_name = true;
-            } else if self.other_keys.iter().any(|k| near(k, t)) {
+            } else if others.iter().any(|k| near(k, t)) {
                 typo = true;
             } else {
                 return None;
@@ -217,6 +219,7 @@ pub(crate) fn search(
     f: &SearchFilters,
     inside: Option<i64>,
     multi_profile: bool,
+    names: bool,
 ) -> (Vec<Ranked>, bool) {
     let has_date = f.modified_from.is_some() || f.modified_to.is_some();
     if q.terms.is_empty() && !has_date && inside.is_none() {
@@ -248,14 +251,14 @@ pub(crate) fn search(
             )
         };
         for e in &candidates {
-            if let Some(m) = e.matches(&q.terms, false) {
+            if let Some(m) = e.matches(&q.terms, false, names) {
                 out.push(rank(e, m, key(e, m)));
             }
         }
         if out.len() < FUZZY_TRIGGER {
             for e in &candidates {
-                if e.matches(&q.terms, false).is_none() {
-                    if let Some(m) = e.matches(&q.terms, true) {
+                if e.matches(&q.terms, false, names).is_none() {
+                    if let Some(m) = e.matches(&q.terms, true, names) {
                         out.push(rank(e, m, key(e, m)));
                     }
                 }

@@ -412,6 +412,7 @@ pub fn found_by_name(vfs: &Vfs, name: &str, id: i64, is_dir: bool) -> bool {
                 limit: 500,
                 offset,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap();
         // A file may be listed as a copy of another hit with the same name and size

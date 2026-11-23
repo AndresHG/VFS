@@ -89,6 +89,10 @@ enum Cmd {
         /// Order of the results (VFS-6).
         #[arg(long, value_enum, default_value = "relevance")]
         sort: sources::SortArg,
+        /// Match the words against names only: file names, folder names, bookmark titles
+        /// (VFS-38 R3).
+        #[arg(long)]
+        names_only: bool,
     },
     /// Firefox bookmarks as a search source (VFS-6), stored next to the index.
     Bookmarks {
@@ -449,6 +453,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             json,
             source,
             sort,
+            names_only,
         } => {
             let filters = build_filters(kind, from, to, min_size, max_size, folder)?;
             let q = SearchQuery {
@@ -457,6 +462,11 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 limit,
                 offset,
                 sort: vfs_bookmarks::SortOrder::from(sort).files(),
+                scope: if names_only {
+                    vfs_core::Scope::Names
+                } else {
+                    vfs_core::Scope::All
+                },
             };
             // Without a bookmark store (`vfs bookmarks on` never ran), plain file output.
             let files_only = source == sources::SourceArg::Files
@@ -503,6 +513,7 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 limit,
                 offset,
                 sort: Default::default(),
+                scope: Default::default(),
             };
             content::search(&db, &q, layout, runs, json)?;
         }

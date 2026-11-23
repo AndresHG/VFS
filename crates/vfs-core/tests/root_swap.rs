@@ -73,6 +73,7 @@ impl Env {
                 limit: 100,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
     }

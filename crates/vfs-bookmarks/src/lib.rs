@@ -238,6 +238,7 @@ impl Bookmarks {
             &query.filters,
             inside,
             st.multi_profile,
+            query.scope == vfs_core::Scope::Names,
         )
     }
 

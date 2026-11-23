@@ -11,7 +11,7 @@ use std::time::Duration;
 use rusqlite::Transaction;
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
-use vfs_core::{SearchConfig, SearchFilters, SearchHit, SearchQuery, Vfs};
+use vfs_core::{SearchConfig, SearchHit, SearchQuery, SearchResponse, Vfs};
 
 /// The root folder of the golden archive.
 const ROOT: &str = "/archivo";
@@ -434,19 +434,20 @@ fn rel(hit: &SearchHit) -> String {
     format!("{}{slash}", full.nfc().collect::<String>())
 }
 
+/// The response for `text`, as the frontend sends it: with `scope` when given, else without
+/// the field (VFS-38 R14).
+fn respond(g: &Golden, text: &str, scope: Option<&str>) -> SearchResponse {
+    let mut q = serde_json::json!({ "text": text, "limit": 50 });
+    if let Some(scope) = scope {
+        q["scope"] = scope.into();
+    }
+    let q: SearchQuery = serde_json::from_value(q).unwrap();
+    g.vfs.search(&q).unwrap()
+}
+
 /// The ranked results of `text`, as `rel` names them.
 fn ranked(g: &Golden, text: &str) -> Vec<String> {
-    let r = g
-        .vfs
-        .search(&SearchQuery {
-            text: text.into(),
-            filters: SearchFilters::default(),
-            limit: 50,
-            offset: 0,
-            sort: Default::default(),
-        })
-        .unwrap();
-    r.hits.iter().map(rel).collect()
+    respond(g, text, None).hits.iter().map(rel).collect()
 }
 
 /// VFS-11 AC-1, AC-2, AC-3: every golden query finds its expected file or folder among
@@ -502,5 +503,27 @@ fn golden_set_is_well_formed() {
             c.expected
         );
         assert!(c.within >= 1 && c.within <= TOP, "«{}»", c.query);
+    }
+}
+
+/// VFS-38 AC-1 (R2, R14): every golden query gives the same hits, order, total and
+/// truncation with no `scope` and with `scope: "all"`. Each scope runs over the whole set in
+/// turn, so no answer is the other's cached list.
+#[test]
+fn golden_results_are_the_same_with_no_scope_and_scope_all() {
+    let g = golden();
+    let run = |scope: Option<&str>| -> Vec<(Vec<String>, u32, bool)> {
+        CASES
+            .iter()
+            .map(|c| {
+                let r = respond(&g, c.query, scope);
+                (r.hits.iter().map(rel).collect(), r.total, r.truncated)
+            })
+            .collect()
+    };
+    let before = run(None);
+    let all = run(Some("all"));
+    for ((c, a), b) in CASES.iter().zip(&before).zip(&all) {
+        assert_eq!(a, b, "«{}»", c.query);
     }
 }

@@ -1,4 +1,5 @@
-//! One suggestion for a search with no hits (VFS-13): the same text without filters, a
+//! One suggestion for a search with no hits (VFS-13): the same text without filters (and,
+//! for a names-only search, over names and paths: VFS-38 R13), a
 //! short word with two adjacent letters swapped or one letter removed, or the query without
 //! one word; the first try that finds something wins. Every try only counts, within one
 //! budget, and stops when a newer search starts.
@@ -12,7 +13,7 @@ use crate::fold::fold_key;
 use crate::matching::parse_query;
 use crate::search::{self, has_filter, Cancel};
 use crate::types::{
-    SearchConfig, SearchFilters, SearchQuery, SortOrder, Suggestion, SuggestionKind,
+    Scope, SearchConfig, SearchFilters, SearchQuery, SortOrder, Suggestion, SuggestionKind,
 };
 
 /// Terms of this many characters get spelling tries (shorter ones have 2-letter deletions,
@@ -41,7 +42,7 @@ pub(crate) fn suggest(
     cancel: &Cancel,
 ) -> Result<Option<Suggestion>> {
     let end = Instant::now() + config.suggest_budget;
-    for t in tries(&query.text, &query.filters) {
+    for t in tries(&query.text, &query.filters, query.scope) {
         if cancel.is_set() || Instant::now() >= end {
             return Ok(None);
         }
@@ -55,6 +56,12 @@ pub(crate) fn suggest(
             limit: 1,
             offset: 0,
             sort: SortOrder::Relevance,
+            // VFS-38 R13: dropping the filters drops the scope too; the other tries keep it.
+            scope: if t.clear_filters {
+                Scope::All
+            } else {
+                query.scope
+            },
         };
         if let Some((count, capped)) = search::count(conn, &q, end, cancel)? {
             if cancel.is_set() {
@@ -74,11 +81,12 @@ pub(crate) fn suggest(
     Ok(None)
 }
 
-/// Every try for a query, in the order R2 gives.
-fn tries(text: &str, filters: &SearchFilters) -> Vec<Try> {
+/// Every try for a query, in the order R2 gives. A names-only scope counts as a filter
+/// (VFS-38 R13).
+fn tries(text: &str, filters: &SearchFilters, scope: Scope) -> Vec<Try> {
     let terms = parse_query(text).terms;
     let mut out = Vec::new();
-    if !terms.is_empty() && has_filter(filters) {
+    if !terms.is_empty() && (has_filter(filters) || scope == Scope::Names) {
         out.push(Try {
             kind: SuggestionKind::DropFilters,
             text: text.to_string(),
@@ -224,18 +232,35 @@ mod tests {
             kinds: vec![crate::types::FileKind::Photo],
             ..SearchFilters::default()
         };
-        let kinds: Vec<_> = tries("boda 2019", &photos).iter().map(|t| t.kind).collect();
+        let kinds: Vec<_> = tries("boda 2019", &photos, Scope::All)
+            .iter()
+            .map(|t| t.kind)
+            .collect();
         assert_eq!(kinds[0], SuggestionKind::DropFilters);
         assert!(kinds[1..4].iter().all(|k| *k == SuggestionKind::Spelling));
-        let drops: Vec<_> = tries("boda 2019", &photos)
+        let drops: Vec<_> = tries("boda 2019", &photos, Scope::All)
             .into_iter()
             .filter(|t| t.kind == SuggestionKind::DropTerm)
             .map(|t| t.text)
             .collect();
         assert_eq!(drops, ["boda", "2019"]);
-        assert!(tries("", &photos).is_empty());
-        assert!(tries("boda", &SearchFilters::default())
+        assert!(tries("", &photos, Scope::All).is_empty());
+        assert!(tries("boda", &SearchFilters::default(), Scope::All)
             .iter()
             .all(|t| t.kind == SuggestionKind::Spelling));
+    }
+
+    /// VFS-38 AC-11 (R13): under names only, dropping the filters is tried first even with
+    /// no type, date, size or folder filter; with no words it is not.
+    #[test]
+    fn names_only_counts_as_a_filter() {
+        let none = SearchFilters::default();
+        let kinds: Vec<_> = tries("boda", &none, Scope::Names)
+            .iter()
+            .map(|t| t.kind)
+            .collect();
+        assert_eq!(kinds[0], SuggestionKind::DropFilters);
+        assert!(kinds[1..].iter().all(|k| *k == SuggestionKind::Spelling));
+        assert!(tries("", &none, Scope::Names).is_empty());
     }
 }

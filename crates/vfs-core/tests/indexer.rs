@@ -145,6 +145,7 @@ impl Fixture {
                 limit: 500,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
     }
@@ -991,6 +992,7 @@ fn link_pass_reads_targets_after_the_walk() {
                 limit: 50,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
     };
@@ -1054,6 +1056,7 @@ fn symlinks_are_link_rows_never_entered() {
                 limit: 50,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
             .hits

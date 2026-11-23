@@ -30,6 +30,7 @@ fn the_switch_is_stored_and_walks_again() {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         })
         .unwrap()
         .hits

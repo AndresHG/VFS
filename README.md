@@ -91,7 +91,7 @@ in [`docs/vision.md`](docs/vision.md).
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
 | `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`. Not yet wired into the app. |
 | `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app comes with VFS-27 27c. |
-| `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off`. |
+| `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`, `--names-only`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off`. |
 | `bench/` | Standalone evaluation and measurement tools for content search (extractors, engines, corpus); outside the workspace. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
 | `apps/desktop/ui` | The screen, in Spanish and English (`strings.es.js`, `strings.en.js`): static HTML, CSS and JavaScript, no npm build. |

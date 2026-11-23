@@ -425,6 +425,7 @@ mod tests {
                 limit: 10,
                 offset: 0,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
             .hits

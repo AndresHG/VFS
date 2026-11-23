@@ -1485,6 +1485,7 @@ fn offline_attribute_marks_a_file_cloud_only() {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         })
         .unwrap()
         .hits;

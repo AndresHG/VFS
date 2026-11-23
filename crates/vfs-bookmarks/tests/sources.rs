@@ -1,4 +1,5 @@
-//! Searching files and bookmarks together (VFS-6 AC-6, AC-7, AC-8, AC-12).
+//! Searching files and bookmarks together (VFS-6 AC-6, AC-7, AC-8, AC-12), and the
+//! names-only scope over both (VFS-38 AC-1, AC-2).
 
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
@@ -7,7 +8,7 @@ use rusqlite::Connection;
 use vfs_bookmarks::sources::search_sources;
 use vfs_bookmarks::testing::{FakeFirefox, Places, MENU, UNFILED};
 use vfs_bookmarks::{Bookmarks, ReadState, SortOrder, Source, SourceHit, SourceOptions};
-use vfs_core::{Error, FileKind, MatchKind, SearchFilters, SearchQuery, Vfs};
+use vfs_core::{Error, FileKind, MatchKind, Scope, SearchFilters, SearchQuery, Vfs};
 
 struct World {
     _tmp: tempfile::TempDir,
@@ -88,6 +89,7 @@ fn q(text: &str) -> SearchQuery {
         limit: 100,
         offset: 0,
         sort: Default::default(),
+        scope: Default::default(),
     }
 }
 
@@ -431,4 +433,119 @@ fn vfs12_ac5_date_name_and_size_orders_with_bookmarks() {
         assert_eq!(names(&second.hits), names(&all.hits[5..10]), "{sort:?}");
         assert_eq!(all.total, oldest.total);
     }
+}
+
+/// VFS-38 AC-1 (R2, R14): the VFS-6 searches give the same hits, order and total with no
+/// `scope` and with `scope: "all"`, for every source choice and order. Each scope runs over
+/// every search in turn, so no answer is the other's cached list.
+#[test]
+fn vfs38_ac1_sources_are_the_same_with_no_scope_and_scope_all() {
+    let w = world();
+    let sorts = [
+        SortOrder::Relevance,
+        SortOrder::Newest,
+        SortOrder::Oldest,
+        SortOrder::Name,
+        SortOrder::Size,
+        SortOrder::Source,
+    ];
+    let choices: [&[Source]; 3] = [&[], &[Source::Files], &[Source::Bookmarks]];
+    let run = |scope: Option<&str>| -> Vec<(Vec<String>, u32)> {
+        let mut out = Vec::new();
+        for text in ["recetas", "receta", "banco", "flan", "recteas"] {
+            for sources in choices {
+                for sort in sorts {
+                    let mut query = serde_json::json!({ "text": text, "limit": 100 });
+                    if let Some(scope) = scope {
+                        query["scope"] = scope.into();
+                    }
+                    let query: SearchQuery = serde_json::from_value(query).unwrap();
+                    let options = SourceOptions {
+                        sources: sources.to_vec(),
+                        sort,
+                        ..Default::default()
+                    };
+                    let r = search_sources(&w.vfs, Some(&w.bm), &query, &options).unwrap();
+                    out.push((names(&r.hits), r.total));
+                }
+            }
+        }
+        out
+    };
+    let before = run(None);
+    assert!(before.iter().any(|(hits, _)| !hits.is_empty()));
+    assert_eq!(before, run(Some("all")));
+}
+
+/// VFS-38 AC-2 (R3, D5): `peñalara` with both sources: under names only, the document named
+/// so, the folder `Peñalara julio` and the bookmark titled «Ruta a Peñalara» are hits; the
+/// photo inside that folder and the bookmark only tagged «peñalara» are not. Under «Todo» all
+/// five are. `penalra` under names finds the document through one edit.
+#[test]
+fn vfs38_ac2_names_only_over_files_and_bookmarks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("D");
+    std::fs::create_dir_all(data.join("Fotos/Sierra")).unwrap();
+    std::fs::create_dir_all(data.join("Fotos/Peñalara julio")).unwrap();
+    for f in [
+        "Fotos/Sierra/Excursión Peñalara.docx",
+        "Fotos/Peñalara julio/IMG_0412.jpg",
+    ] {
+        std::fs::write(data.join(f), "x").unwrap();
+    }
+    let vfs = Vfs::open(&tmp.path().join("app/index.db")).unwrap();
+    vfs.add_root(&data).unwrap();
+    vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    let mut ff = FakeFirefox::new(&tmp.path().join("Firefox"));
+    let dir = ff.add_profile("default", "p.default");
+    {
+        let conn = Connection::open(dir.join("places.sqlite")).unwrap();
+        let p = Places { conn: &conn };
+        p.bookmark(MENU, Some("Ruta a Peñalara"), "https://rutas.es/1", 10);
+        p.bookmark(MENU, Some("Ruta de montaña"), "https://montes.es/2", 10);
+        p.tag("https://montes.es/2", "peñalara");
+    }
+    let bm = Bookmarks::open(
+        &vfs_bookmarks::bookmarks_db_path(&tmp.path().join("app/index.db")),
+        ff.locator(),
+    )
+    .unwrap();
+    bm.set_enabled(true).unwrap();
+    assert_eq!(bm.refresh().unwrap().state, ReadState::Ok);
+
+    let found = |text: &str, scope: Scope| -> HashSet<String> {
+        let query = SearchQuery { scope, ..q(text) };
+        let r = search_sources(&vfs, Some(&bm), &query, &only(&[])).unwrap();
+        // Folded: the file names come back from the disk, maybe decomposed (NFD).
+        names(&r.hits)
+            .iter()
+            .map(|n| vfs_core::fold_key(n))
+            .collect()
+    };
+    let set = |v: &[&str]| {
+        v.iter()
+            .map(|s| vfs_core::fold_key(s))
+            .collect::<HashSet<_>>()
+    };
+    assert_eq!(
+        found("peñalara", Scope::Names),
+        set(&[
+            "F:Excursión Peñalara.docx",
+            "F:Peñalara julio",
+            "B:Ruta a Peñalara"
+        ])
+    );
+    assert_eq!(
+        found("peñalara", Scope::All),
+        set(&[
+            "F:Excursión Peñalara.docx",
+            "F:Peñalara julio",
+            "F:IMG_0412.jpg",
+            "B:Ruta a Peñalara",
+            "B:Ruta de montaña"
+        ])
+    );
+    let typo = found("penalra", Scope::Names);
+    assert!(typo.contains("f:excursion penalara.docx"), "{typo:?}");
+    assert!(!typo.contains("f:img_0412.jpg"), "{typo:?}");
 }

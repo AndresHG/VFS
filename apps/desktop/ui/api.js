@@ -3,7 +3,8 @@
 //
 // Payload shapes (camelCase structs, snake_case enums; ids are numbers, times unix seconds;
 // the enum values are the sets of contract.js):
-//   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset}
+//   SearchQuery    {text, filters: {kinds: FileKind[], modifiedFrom, modifiedTo, sizeMin, sizeMax, folder}, limit, offset,
+//                  scope?: Scope}  (VFS-38; left out = 'all')
 //                  (the order travels in search_sources' options.sort; VFS-12)
 //   SearchResponse {hits: SearchHit[], total, truncated, truncatedBy: TruncatedBy|null, elapsedMs, approximateOrder}
 //   SearchHit      {id, name, dir, kind: FileKind, size, modified, matched: MatchKind, isDir,

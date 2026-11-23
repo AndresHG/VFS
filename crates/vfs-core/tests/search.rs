@@ -9,8 +9,8 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 use vfs_core::db::{self, ingest};
 use vfs_core::{
-    FileKind, MatchKind, RootStatus, SearchConfig, SearchFilters, SearchQuery, SearchResponse,
-    TruncatedBy, Vfs,
+    FileKind, MatchKind, RootStatus, Scope, SearchConfig, SearchFilters, SearchQuery,
+    SearchResponse, TruncatedBy, Vfs,
 };
 
 struct Fixture {
@@ -47,6 +47,10 @@ impl Fixture {
     }
 
     fn search(&self, text: &str, filters: SearchFilters) -> SearchResponse {
+        self.scoped(text, filters, Scope::All)
+    }
+
+    fn scoped(&self, text: &str, filters: SearchFilters, scope: Scope) -> SearchResponse {
         self.vfs
             .search(&SearchQuery {
                 text: text.into(),
@@ -54,6 +58,7 @@ impl Fixture {
                 limit: 500,
                 offset: 0,
                 sort: Default::default(),
+                scope,
             })
             .unwrap()
     }
@@ -493,6 +498,7 @@ fn ac9_truncation_by_cap_is_reported() {
                 limit,
                 offset,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap()
     };
@@ -649,6 +655,7 @@ fn vfs7_capped_path_hits_are_read_by_file_id() {
                 limit: 500,
                 offset,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap();
         for h in page.hits.iter().filter(|h| !h.is_dir) {
@@ -845,6 +852,7 @@ fn huge_term_returns_within_the_deadline() {
             limit: 100,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         });
         let _ = tx.send(r.map(|r| r.total));
     });
@@ -894,6 +902,7 @@ fn vfs4_every_page_names_the_folder_of_its_hits() {
                     limit: 1,
                     offset,
                     sort: Default::default(),
+                    scope: Default::default(),
                 })
                 .unwrap();
             for h in &r.hits {
@@ -1014,6 +1023,7 @@ fn vfs19_pages_count_results_and_copies_name_their_folder() {
                 limit: 7,
                 offset,
                 sort: Default::default(),
+                scope: Default::default(),
             })
             .unwrap();
         assert_eq!(r.total, 30, "thirty results for sixty files");
@@ -1059,4 +1069,105 @@ fn cloud_only_state_travels_with_each_place() {
     assert_eq!(hit.copies.len(), 1);
     assert_eq!(hit.copies[0].id, local);
     assert!(!hit.copies[0].cloud_only);
+}
+
+/// VFS-38 AC-2, AC-3: root `/D` with `Fotos/Sierra/Excursión Peñalara.docx` and
+/// `Fotos/Peñalara julio/IMG_0412.jpg`: (fixture, docx, jpg, folder `Peñalara julio`).
+fn penalara() -> (Fixture, i64, i64, i64) {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/D");
+    let fotos = w.dir(root, top, "Fotos", 1);
+    let sierra = w.dir(root, fotos, "Fotos/Sierra", 1);
+    let julio = w.dir(root, fotos, "Fotos/Peñalara julio", 1);
+    let docx = w.file(sierra, "Excursión Peñalara.docx", 1, 1);
+    let jpg = w.file(julio, "IMG_0412.jpg", 1, 1);
+    drop(w);
+    (fx, docx, jpg, julio)
+}
+
+/// VFS-38 AC-2 (R3): `peñalara` under names only finds the document named so and the folder
+/// `Peñalara julio`, not the photo inside it; under «Todo» all three; `penalra` under names
+/// finds the document through one edit. The same text runs under both scopes back to back,
+/// so the S7 cache must key on the scope (VFS-38 R14).
+#[test]
+fn vfs38_ac2_names_only_matches_file_and_folder_names() {
+    let (fx, docx, jpg, julio) = penalara();
+    let none = SearchFilters::default;
+    let names = fx.scoped("peñalara", none(), Scope::Names);
+    assert_eq!(ids(&names), vec![(false, docx), (true, julio)]);
+    assert!(names.hits.iter().all(|h| h.matched == MatchKind::Name));
+    let all = fx.scoped("peñalara", none(), Scope::All);
+    assert_eq!(ids(&all), vec![(false, docx), (false, jpg), (true, julio)]);
+    let typo = fx.scoped("penalra", none(), Scope::Names);
+    let hit = typo
+        .hits
+        .iter()
+        .find(|h| !h.is_dir && h.id == docx)
+        .unwrap();
+    assert_eq!(hit.matched, MatchKind::Fuzzy);
+    assert!(!ids(&typo).contains(&(false, jpg)));
+}
+
+/// VFS-38 AC-3 (R3, S5): a term under 3 characters is scanned against names only: `cv`
+/// finds `cv.pdf` and the folder `cv`, not `x.pdf` inside that folder (which «Todo» finds).
+#[test]
+fn vfs38_ac3_short_terms_scan_names_only() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (root, top) = w.root("/datos");
+    let cv_dir = w.dir(root, top, "cv", 1);
+    let cv = w.file(top, "cv.pdf", 1, 1);
+    let x = w.file(cv_dir, "x.pdf", 1, 1);
+    drop(w);
+    let names = fx.scoped("cv", SearchFilters::default(), Scope::Names);
+    assert_eq!(ids(&names), vec![(false, cv), (true, cv_dir)]);
+    let all = fx.scoped("cv", SearchFilters::default(), Scope::All);
+    assert!(ids(&all).contains(&(false, x)));
+}
+
+/// VFS-38 AC-3 (R3): a filter-only query (type «Fotos», empty box) lists exactly what «Todo»
+/// lists, in the same order.
+#[test]
+fn vfs38_ac3_filter_only_query_ignores_the_scope() {
+    let (fx, _, jpg, _) = penalara();
+    let photos = || SearchFilters {
+        kinds: vec![FileKind::Photo],
+        ..SearchFilters::default()
+    };
+    let names = fx.scoped("", photos(), Scope::Names);
+    let all = fx.scoped("", photos(), Scope::All);
+    let order = |r: &SearchResponse| r.hits.iter().map(|h| h.id).collect::<Vec<_>>();
+    assert_eq!(order(&names), vec![jpg]);
+    assert_eq!(order(&names), order(&all));
+}
+
+/// VFS-38 AC-3 (R3): inside a «Carpeta» filter on `/D/Fotos`, `julio` under names only does
+/// not find `IMG_0412.jpg` (its folder holds the word, its name does not); «Todo» does.
+#[test]
+fn vfs38_ac3_folder_filter_checks_names_only() {
+    let (fx, _, jpg, julio) = penalara();
+    let inside = || SearchFilters {
+        folder: Some("/D/Fotos".into()),
+        ..SearchFilters::default()
+    };
+    let names = fx.scoped("julio", inside(), Scope::Names);
+    assert_eq!(ids(&names), vec![(true, julio)]);
+    let all = fx.scoped("julio", inside(), Scope::All);
+    assert!(ids(&all).contains(&(false, jpg)));
+}
+
+/// VFS-38 AC-3 (R3, D8): the VFS-1 S1 rule does not apply under names only: with a root
+/// `/D/Peñalara`, `peñalara julio` does not find `julio.jpg` in it, while «Todo» does.
+#[test]
+fn vfs38_ac3_root_path_terms_still_count_under_names() {
+    let fx = fixture();
+    let mut w = fx.writer();
+    let (_, top) = w.root("/D/Peñalara");
+    let julio = w.file(top, "julio.jpg", 1, 1);
+    drop(w);
+    let names = fx.scoped("peñalara julio", SearchFilters::default(), Scope::Names);
+    assert!(names.hits.is_empty(), "{:?}", names.hits);
+    let all = fx.scoped("peñalara julio", SearchFilters::default(), Scope::All);
+    assert_eq!(only(&all).id, julio);
 }
