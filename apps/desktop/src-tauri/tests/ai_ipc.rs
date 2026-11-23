@@ -11,7 +11,10 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::webview::InvokeRequest;
 use tauri::{App, Manager, WebviewWindow, WebviewWindowBuilder};
 use vfs_ai::mock::{MockResponse, MockServer};
-use vfs_ai::{CredentialBackend, Keys, StoreError};
+use vfs_ai::{
+    AiDb, CallKind, CallRecord, CredentialBackend, Keys, Provider, SentPassage, SentRecord,
+    StoreError, Usage,
+};
 use vfs_desktop_lib::ai::{AiState, DB_FILE, SETTINGS_FILE};
 use vfs_desktop_lib::commands;
 
@@ -175,6 +178,13 @@ fn refused_store_offers_the_fallbacks() {
         )
         .unwrap();
     assert_eq!(st["key"]["place"], "session_only");
+    let st = h
+        .invoke(
+            "ai_save_key_fallback",
+            json!({"provider": "openai", "key": KEY, "fallback": "protected_file"}),
+        )
+        .unwrap();
+    assert_eq!(st["key"]["place"], "protected_file");
 }
 
 /// VFS-28 AC-4 (R4): «Probar» resolves for a correct key and rejects with the mapped code for
@@ -217,4 +227,79 @@ fn cap_and_record_over_ipc() {
     assert_eq!(st["store"], false, "no content store in this folder");
     assert_eq!(h.invoke("ai_records", json!({})).unwrap(), json!([]));
     assert_eq!(h.invoke("ai_clear_records", json!({})), Ok(Value::Null));
+}
+
+fn call(kind: CallKind, input: u64, cached: u64, output: u64, cost: i64) -> CallRecord {
+    CallRecord {
+        kind,
+        model: "m".into(),
+        usage: Usage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cached,
+            ..Usage::default()
+        },
+        cost_nano: cost,
+    }
+}
+
+/// VFS-28 AC-9 (R11): «Qué se ha enviado» lists both questions over IPC with every passage
+/// as sent, each call's tokens and cost, and which call was the rewrite or a follow-up;
+/// «Borrar todo» empties it.
+#[test]
+fn record_lists_both_questions_and_clears() {
+    let h = harness(FakeStore::default(), None);
+    {
+        let mut db = AiDb::open(&h.dir.path().join(DB_FILE)).unwrap();
+        let now = chrono::Local::now();
+        let passage = SentPassage {
+            file_name: "Contrato.pdf".into(),
+            page: Some(4),
+            text: "La fianza asciende a 1.200 euros.".into(),
+        };
+        db.record(&SentRecord {
+            asked_at: now,
+            provider: Provider::Anthropic,
+            question: "¿fianza?".into(),
+            rewrite: Some("{\"keywords\":[\"fianza\"]}".into()),
+            passages: vec![passage.clone()],
+            calls: vec![
+                call(CallKind::Rewrite, 800, 100, 60, 1_000),
+                call(CallKind::Answer, 9_000, 0, 500, 20_000),
+            ],
+        })
+        .unwrap();
+        db.record(&SentRecord {
+            asked_at: now,
+            provider: Provider::Anthropic,
+            question: "¿Y el año?".into(),
+            rewrite: None,
+            passages: vec![passage],
+            calls: vec![call(CallKind::FollowUp, 9_100, 0, 80, 18_000)],
+        })
+        .unwrap();
+    }
+    let records = h.invoke("ai_records", json!({})).unwrap();
+    let r = records.as_array().unwrap();
+    assert_eq!(r.len(), 2);
+    assert_eq!(r[0]["question"], "¿fianza?");
+    assert_eq!(r[0]["rewrite"], "{\"keywords\":[\"fianza\"]}");
+    assert_eq!(
+        r[0]["passages"],
+        json!([{"fileName": "Contrato.pdf", "page": 4, "text": "La fianza asciende a 1.200 euros."}])
+    );
+    assert_eq!(
+        r[0]["calls"][0],
+        json!({"followUp": false, "rewrite": true, "model": "m", "inputTokens": 900, "outputTokens": 60, "costNano": 1_000})
+    );
+    assert_eq!(r[0]["calls"][1]["rewrite"], false);
+    assert_eq!(r[0]["costNano"], 21_000);
+    assert_eq!(r[1]["rewrite"], Value::Null);
+    assert_eq!(r[1]["calls"][0]["followUp"], true);
+    assert_eq!(r[1]["costNano"], 18_000);
+
+    let st = h.invoke("ai_status", json!({})).unwrap();
+    assert_eq!(st["monthNano"], 39_000);
+    h.invoke("ai_clear_records", json!({})).unwrap();
+    assert_eq!(h.invoke("ai_records", json!({})).unwrap(), json!([]));
 }

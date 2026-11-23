@@ -386,7 +386,7 @@ export const en = {
   aiDeleteBody: 'The key is deleted from this computer. To ask again you will have to enter it again.',
   aiDeleteConfirm: 'Delete',
   aiKeyDeleted: 'The key has been deleted.',
-  aiTestHelp: 'A correct key can belong to an account with no credit: questions then fail even though the test says the key is correct. The key is kept in the system password store, which any program running as your user can read.',
+  aiTestHelp: 'A correct key can belong to an account with no credit: questions then fail even though the test says the key is correct. A key kept in the system password store can be read by any program running as your user.',
   aiCapLabel: 'Monthly spending limit (dollars)',
   aiCapInvalid: 'Type an amount of dollars, for example 5.',
   aiMonth: (spent, cap) => `This month: ${spent} of ${cap}.`,

@@ -367,7 +367,6 @@ export const es = {
   overlapInside: (p) => `Esa carpeta ya está incluida, porque está dentro de «${p}».`,
   overlapGeneric: 'Esa carpeta ya está en la lista o está dentro de otra de la lista.',
 
-  // ApiError.code -> text, per action. Unknown codes fall back to `generic`.
   // VFS-28: «Preguntar a sus documentos (IA)».
   aiSetTitle: 'Preguntar a sus documentos (IA)',
   aiToggle: 'Responder preguntas con sus documentos',
@@ -390,7 +389,7 @@ export const es = {
   aiDeleteBody: 'Se borra la clave de este equipo. Para volver a preguntar tendrá que introducirla de nuevo.',
   aiDeleteConfirm: 'Borrar',
   aiKeyDeleted: 'Se ha borrado la clave.',
-  aiTestHelp: 'Una clave correcta puede ser de una cuenta sin saldo: entonces las preguntas fallarán aunque la prueba diga que es correcta. La clave se guarda en el almacén de contraseñas del sistema, que puede leer cualquier programa que se ejecute con su usuario.',
+  aiTestHelp: 'Una clave correcta puede ser de una cuenta sin saldo: entonces las preguntas fallarán aunque la prueba diga que es correcta. Una clave guardada en el almacén de contraseñas del sistema la puede leer cualquier programa que se ejecute con su usuario.',
   aiCapLabel: 'Límite de gasto al mes (dólares)',
   aiCapInvalid: 'Escriba una cantidad de dólares, por ejemplo 5.',
   aiMonth: (spent, cap) => `Este mes lleva ${spent} de ${cap}.`,
@@ -433,6 +432,7 @@ export const es = {
     [AiErrorCode.STORE_UNAVAILABLE]: 'El almacén de contraseñas del sistema no acepta la clave.',
     [AiErrorCode.STORAGE]: 'No se pueden guardar los datos de las preguntas en este equipo.',
   },
+  // ApiError.code -> text, per action. Unknown codes fall back to `generic`.
   errors: {
     generic: 'Ha ocurrido un error. Inténtelo de nuevo.',
     reveal: {
