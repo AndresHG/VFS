@@ -77,11 +77,29 @@ mod tests {
             ),
             (Error::Unavailable("x".into()), "unavailable"),
             (Error::SchemaTooNew, "schema_too_new"),
+            (
+                Error::InvalidPattern(crate::PatternError::Duplicate),
+                "invalid_pattern",
+            ),
             (Error::Db(rusqlite::Error::InvalidQuery), "db"),
             (Error::Io(std::io::Error::other("x")), "io"),
         ];
         for (e, code) in cases {
             assert_eq!(ApiError::from(e).code, code);
+        }
+    }
+
+    /// VFS-34 R2: a refused pattern carries its reason as the message, for the UI to word.
+    #[test]
+    fn pattern_reasons() {
+        use crate::PatternError::*;
+        for (reason, text) in [
+            (Empty, "empty"),
+            (Separator, "separator"),
+            (NoLiteral, "no_literal"),
+            (Duplicate, "duplicate"),
+        ] {
+            assert_eq!(ApiError::from(Error::InvalidPattern(reason)).message, text);
         }
     }
 }

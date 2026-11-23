@@ -42,6 +42,13 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         set_paused,
         get_include_all_folders,
         set_include_all_folders,
+        get_file_exclusions,
+        count_file_exclusion,
+        add_file_exclusion,
+        remove_file_exclusion,
+        reset_file_exclusions,
+        get_content_max_mb,
+        set_content_max_mb,
         crate::bookmarks::search_sources,
         crate::bookmarks::get_bookmarks_status,
         crate::bookmarks::set_bookmarks_enabled,
@@ -256,6 +263,54 @@ pub fn get_include_all_folders(state: State<'_, AppState>) -> CmdResult<bool> {
 pub fn set_include_all_folders(state: State<'_, AppState>, on: bool) -> CmdResult<bool> {
     state.vfs()?.set_include_all_folders(on)?;
     Ok(state.vfs()?.include_all_folders()?)
+}
+
+/// «Filtro de archivos» (VFS-34 R1): the user's patterns.
+#[tauri::command(async)]
+pub fn get_file_exclusions(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
+    Ok(state.vfs()?.file_exclusions()?)
+}
+
+/// Indexed files `pattern` matches, before it is added; rejects with `invalid_pattern` and
+/// the reason as the message (VFS-34 R2).
+#[tauri::command(async)]
+pub fn count_file_exclusion(state: State<'_, AppState>, pattern: String) -> CmdResult<u64> {
+    Ok(state.vfs()?.count_file_exclusion(&pattern)?)
+}
+
+/// Adds a pattern and returns the list; the matching files leave the index in the
+/// background (VFS-34 R4).
+#[tauri::command(async)]
+pub fn add_file_exclusion(state: State<'_, AppState>, pattern: String) -> CmdResult<Vec<String>> {
+    Ok(state.vfs()?.add_file_exclusion(&pattern)?)
+}
+
+/// Removes a pattern and returns the list; every folder is checked again (VFS-34 R5).
+#[tauri::command(async)]
+pub fn remove_file_exclusion(
+    state: State<'_, AppState>,
+    pattern: String,
+) -> CmdResult<Vec<String>> {
+    Ok(state.vfs()?.remove_file_exclusion(&pattern)?)
+}
+
+/// «Restablecer la lista» (VFS-34 R7).
+#[tauri::command(async)]
+pub fn reset_file_exclusions(state: State<'_, AppState>) -> CmdResult<Vec<String>> {
+    Ok(state.vfs()?.reset_file_exclusions()?)
+}
+
+/// «Tamaño máximo para leer el contenido (MB)»; 0 means no limit (VFS-34 R6).
+#[tauri::command(async)]
+pub fn get_content_max_mb(state: State<'_, AppState>) -> CmdResult<u64> {
+    Ok(state.vfs()?.content_max_mb()?)
+}
+
+/// Stores it and returns the stored value (VFS-34 R6).
+#[tauri::command(async)]
+pub fn set_content_max_mb(state: State<'_, AppState>, mb: u64) -> CmdResult<u64> {
+    state.vfs()?.set_content_max_mb(mb)?;
+    Ok(state.vfs()?.content_max_mb()?)
 }
 
 #[cfg(test)]

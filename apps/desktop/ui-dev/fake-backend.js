@@ -21,7 +21,7 @@
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 
 import {
-  BookmarkRoot, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
+  BookmarkRoot, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
   RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason,
 } from '../ui/contract.js';
 
@@ -225,6 +225,17 @@ export function createFakeBackend(params) {
   const changedCbs = new Set();
   const updateSettings = { checkOnOpen: true };
   let includeAllFolders = false;
+  // VFS-34: the file filter (the real checks are in Rust; enough of them here to try the UI).
+  const DEFAULT_PATTERNS = ['*.tmp', '*.temp', '*.swp', '*.crdownload', '*.part'];
+  let fileExclusions = [...DEFAULT_PATTERNS];
+  let contentMaxMb = 100;
+  const checkPattern = (p) => {
+    const fail = (message) => { throw { code: ErrorCode.INVALID_PATTERN, message }; };
+    if (!p) fail(PatternReason.EMPTY);
+    if (/[/\\]/.test(p)) fail(PatternReason.SEPARATOR);
+    if (/^[*?.]+$/.test(p)) fail(PatternReason.NO_LITERAL);
+    if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail(PatternReason.DUPLICATE);
+  };
   const updateCbs = new Set();
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
@@ -506,6 +517,14 @@ export function createFakeBackend(params) {
     // VFS-21: `?update` offers 0.9.0; `?update=fail` makes the download fail halfway.
     async getIncludeAllFolders() { return includeAllFolders; },
     async setIncludeAllFolders(on) { includeAllFolders = on; return includeAllFolders; },
+    async getFileExclusions() { return [...fileExclusions]; },
+    // `*.bak` matches 1,500 files here, to try the confirmation (VFS-34 R2).
+    async countFileExclusion(p) { p = p.trim(); checkPattern(p); return p.toLowerCase() === '*.bak' ? 1500 : 3; },
+    async addFileExclusion(p) { p = p.trim(); checkPattern(p); fileExclusions.push(p); return [...fileExclusions]; },
+    async removeFileExclusion(p) { fileExclusions = fileExclusions.filter((x) => x !== p); return [...fileExclusions]; },
+    async resetFileExclusions() { fileExclusions = [...DEFAULT_PATTERNS]; return [...fileExclusions]; },
+    async getContentMaxMb() { return contentMaxMb; },
+    async setContentMaxMb(mb) { contentMaxMb = mb; return contentMaxMb; },
     async getUpdateSettings() { return { ...updateSettings }; },
     async setUpdateCheck(enabled) { updateSettings.checkOnOpen = enabled; return { ...updateSettings }; },
     async checkForUpdate() {

@@ -19,7 +19,7 @@ mod search;
 mod suggest;
 mod types;
 
-pub use error::{Error, OverlapRelation, Result};
+pub use error::{Error, OverlapRelation, PatternError, Result};
 pub use fold::fold_key;
 pub use indexer::{IndexerOptions, DIAG_TARGET};
 pub use kind::file_kind;
@@ -300,6 +300,80 @@ impl Vfs {
         }
         indexer::set_include_all(&conn, on)?;
         drop(conn);
+        self.rescan_if_running()
+    }
+
+    /// The user's file filter, as stored (VFS-34 R1); the defaults on a fresh install (R7).
+    pub fn file_exclusions(&self) -> Result<Vec<String>> {
+        indexer::patterns::list(&lock(&self.inner.reader))
+    }
+
+    /// Indexed files `pattern` would exclude, shown before it is added (VFS-34 R2). Fails
+    /// with `InvalidPattern` when it cannot be added.
+    pub fn count_file_exclusion(&self, pattern: &str) -> Result<u64> {
+        indexer::patterns::count_matches(&lock(&self.inner.reader), pattern)
+    }
+
+    /// Adds `pattern` to the file filter and wakes the indexer, which deletes the matching
+    /// files in the background with no walk (VFS-34 R2, R4). Returns the list.
+    pub fn add_file_exclusion(&self, pattern: &str) -> Result<Vec<String>> {
+        // Read, change and store the list in one write transaction (CLAUDE.md, VFS-2 D18).
+        let mut conn = db::open_rw(&self.inner.db_path)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        indexer::patterns::add(&tx, pattern)?;
+        let list = indexer::patterns::list(&tx)?;
+        tx.commit()?;
+        drop(conn);
+        if let Some(h) = lock(&self.inner.indexer).as_ref() {
+            h.wake();
+        }
+        Ok(list)
+    }
+
+    /// Removes `pattern` from the file filter; every root then owes a full walk, after which
+    /// the files it hid are found again (VFS-34 R5). Returns the list.
+    pub fn remove_file_exclusion(&self, pattern: &str) -> Result<Vec<String>> {
+        // Read, change and store the list in one write transaction (CLAUDE.md, VFS-2 D18).
+        let mut conn = db::open_rw(&self.inner.db_path)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let removed = indexer::patterns::remove(&tx, pattern)?;
+        let list = indexer::patterns::list(&tx)?;
+        tx.commit()?;
+        drop(conn);
+        if removed {
+            self.rescan_if_running()?;
+        }
+        Ok(list)
+    }
+
+    /// «Restablecer la lista»: the default patterns again, and a full walk of every root
+    /// (VFS-34 R5, R7). Returns the list.
+    pub fn reset_file_exclusions(&self) -> Result<Vec<String>> {
+        // Read, change and store the list in one write transaction (CLAUDE.md, VFS-2 D18).
+        let mut conn = db::open_rw(&self.inner.db_path)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        indexer::patterns::reset(&tx)?;
+        let list = indexer::patterns::list(&tx)?;
+        tx.commit()?;
+        drop(conn);
+        self.rescan_if_running()?;
+        Ok(list)
+    }
+
+    /// «Tamaño máximo para leer el contenido (MB)»; 0 means no limit (VFS-34 R6).
+    pub fn content_max_mb(&self) -> Result<u64> {
+        content::content_max_mb(&lock(&self.inner.reader))
+    }
+
+    /// Stores the content size limit, which the next content run reads (VFS-34 R6, VFS-2
+    /// R21). The name index has no size limit (D1).
+    pub fn set_content_max_mb(&self, mb: u64) -> Result<()> {
+        content::set_content_max_mb(&db::open_rw(&self.inner.db_path)?, mb)
+    }
+
+    /// Queues a full walk of every root when the indexer runs; without it, the stale stamps
+    /// owe the walk at its next start (VFS-33 R8).
+    fn rescan_if_running(&self) -> Result<()> {
         match self.rescan(None) {
             Err(Error::Unavailable(_)) | Ok(()) => Ok(()),
             Err(e) => Err(e),

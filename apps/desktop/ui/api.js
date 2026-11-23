@@ -66,6 +66,14 @@ function tauriBackend(t) {
     // VFS-33: «Incluir carpetas del sistema y de programas» -> boolean.
     getIncludeAllFolders: () => invoke('get_include_all_folders'),
     setIncludeAllFolders: (on) => invoke('set_include_all_folders', { on }),
+    // VFS-34: «Filtro de archivos»; the list calls return the patterns, count -> number.
+    getFileExclusions: () => invoke('get_file_exclusions'),
+    countFileExclusion: (pattern) => invoke('count_file_exclusion', { pattern }),
+    addFileExclusion: (pattern) => invoke('add_file_exclusion', { pattern }),
+    removeFileExclusion: (pattern) => invoke('remove_file_exclusion', { pattern }),
+    resetFileExclusions: () => invoke('reset_file_exclusions'),
+    getContentMaxMb: () => invoke('get_content_max_mb'),
+    setContentMaxMb: (mb) => invoke('set_content_max_mb', { mb }),
     searchSources: (query, options) => invoke('search_sources', { query, options }),
     getBookmarksStatus: () => invoke('get_bookmarks_status'),
     setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),

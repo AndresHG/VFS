@@ -113,7 +113,8 @@ pub(crate) fn behind_link(root: &Path, rel: &str) -> bool {
 /// one instead of being marked clean without those entries (issue 170).
 ///
 /// `rules` are the default exclusions for this folder (VFS-33 R5): excluded subfolders are
-/// left out; a marker entry empties the listing or drops the subfolders it names.
+/// left out; a marker entry empties the listing or drops the subfolders it names. Files
+/// matching the user's file filter are left out (VFS-34 R3).
 pub(crate) fn list_dir(
     dir: &Path,
     skip: Option<&Path>,
@@ -165,6 +166,10 @@ fn list_entries(
             }
             EntryKind::Dir { mtime }
         } else if file_type.is_file() {
+            // The user's file filter: by name, no file-system call (VFS-34 R3).
+            if rules.skips_file(&name) {
+                continue;
+            }
             EntryKind::File {
                 size: meta.len(),
                 mtime,

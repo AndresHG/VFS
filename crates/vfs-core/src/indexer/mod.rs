@@ -21,6 +21,7 @@
 mod apply;
 mod cursor;
 mod exclude;
+pub(crate) mod patterns;
 pub(crate) mod sched;
 mod walk;
 mod watch;
@@ -421,7 +422,8 @@ fn scan_root(
         exclude::Exclusions::none(root_path)
     } else {
         exclude::Exclusions::for_root(root_path, exclude::home().as_deref())
-    };
+    }
+    .with_files(Arc::new(patterns::load(conn)?));
     loop {
         if stop() {
             commit(&mut tx, sched)?;
@@ -1059,6 +1061,7 @@ impl IndexerHandle {
             published: None,
             last_progress: None,
             last_changed: Instant::now(),
+            purging: false,
             last_periodic: Instant::now(),
             sched,
             catchup_at: Instant::now() + catchup_delay,
@@ -1170,6 +1173,8 @@ struct Worker {
     published: Option<IndexerState>,
     last_progress: Option<Instant>,
     last_changed: Instant,
+    /// The file filter's purge has batches left and its last batch succeeded (VFS-34 R4).
+    purging: bool,
     last_periodic: Instant,
     sched: Sched,
     /// The start-up catch-up re-walks in `catchup` are requested at `catchup_at`, once the
@@ -1267,6 +1272,9 @@ impl Worker {
                 Ok(on) => self.filter.set_include_all(on),
                 Err(e) => log::warn!("indexer: {e}"),
             }
+            let r = self.purge_batch();
+            self.purging = r.is_ok() && patterns::purge_owed(&self.conn).unwrap_or(false);
+            self.log_err(r);
             let shared = Arc::clone(&self.shared);
             let stop = move || {
                 shared.stop.load(Ordering::SeqCst)
@@ -1349,6 +1357,10 @@ impl Worker {
                     if walking(&self.conn).is_ok_and(|w| !w.is_empty()) {
                         continue;
                     }
+                    // The file filter's purge goes on batch by batch (VFS-34 R4).
+                    if self.purging {
+                        continue;
+                    }
                     // VFS-18 D7: shortcut targets are read once the walks are done.
                     let shared = &self.shared;
                     let yield_now = || {
@@ -1415,6 +1427,23 @@ impl Worker {
         }
     }
 
+    /// One batch of the file filter's owed purge, in its own transaction; search stops
+    /// showing the batch's files once it commits (VFS-34 R4).
+    fn purge_batch(&mut self) -> Result<()> {
+        if !patterns::purge_owed(&self.conn)? {
+            return Ok(());
+        }
+        let tx = begin(&self.conn)?;
+        let deleted = patterns::purge_batch(&tx)?;
+        tx.commit()?;
+        if deleted.unwrap_or(0) > 0 {
+            self.sink.on_index_changed();
+            self.last_changed = Instant::now();
+            self.published = None;
+        }
+        Ok(())
+    }
+
     /// Finishes removals and starts watching; then replays each root's change cursor and
     /// owes a catch-up re-walk to every root whose history is missing or lost: changes made
     /// while the app was closed are not otherwise seen (VFS-1 I4, VFS-9 R2, R3). Watching
@@ -1424,6 +1453,11 @@ impl Worker {
     /// scanned are walked at once.
     fn init(&mut self) -> Result<()> {
         finish_removing(&self.conn, &|| false)?;
+        // Read and written in one write transaction: a pattern the user adds meanwhile is
+        // never overwritten (CLAUDE.md, VFS-2 D18).
+        let tx = begin(&self.conn)?;
+        patterns::init(&tx)?;
+        tx.commit()?;
         refresh_counts(&self.conn, None)?;
         self.filter
             .set_include_all(exclude::include_all(&self.conn)?);

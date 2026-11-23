@@ -2,7 +2,7 @@
 // words, no "index" jargon. Functions take already-formatted values.
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice } from './choices.js';
-import { BookmarkRoot, ErrorCode, FileKind, LinkKind, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
+import { BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason } from './contract.js';
 
 const files = (n) => `${n} files`;
 
@@ -205,6 +205,28 @@ export const en = {
   advancedTitle: 'Advanced',
   includeAllToggle: 'Include system and program folders',
   includeAllIntro: 'Normally VFS skips folders that only the system and programs use: system files, app data (Library on Mac, AppData on Windows), development folders (node_modules, .git, Python environments) and other programs\' caches. If you add one of those folders to your list, it is checked. Changing this option checks all your folders again.',
+  // VFS-34: "File filter", inside "Advanced".
+  fileFilterTitle: 'File filter',
+  fileFilterIntro: 'VFS does not show files whose name matches this list, in any of your folders. Use * for any text and ? for a single letter: *.tmp leaves out every file that ends in .tmp.',
+  fileFilterPlaceholder: 'Name or extension (for example *.tmp)',
+  fileFilterAdd: 'Add to the list',
+  fileFilterRemove: (p) => `Remove “${p}” from the list`,
+  fileFilterReset: 'Restore the list',
+  fileFilterBuiltIn: 'VFS always ignores system and lock files: Thumbs.db, .DS_Store, desktop.ini, ~$…',
+  fileFilterAdded: (p, n, none) => (none ? `Added “${p}”. No file in your folders matches it now.` : `Added “${p}”. ${n} files will no longer be shown.`),
+  fileFilterComeBack: 'The files will show again after the next full check.',
+  fileFilterConfirmTitle: 'Stop showing these files?',
+  fileFilterConfirmBody: (p, n) => `“${p}” matches ${n} files in your folders. They will no longer appear in searches; the files themselves are not touched.`,
+  fileFilterConfirmAdd: 'Add',
+  fileFilterErrors: {
+    [PatternReason.EMPTY]: 'Type a name or an extension.',
+    [PatternReason.SEPARATOR]: 'Type a file name only, without folders (no / or \\).',
+    [PatternReason.NO_LITERAL]: 'That would leave out almost every file. Type part of the name too, for example *.tmp.',
+    [PatternReason.DUPLICATE]: 'It is already in the list.',
+  },
+  contentMaxLabel: 'Largest size to read contents (MB)',
+  contentMaxHint: 'Larger documents are found by name, but what they contain is not read. 0 means no limit.',
+  contentMaxInvalid: 'Type a whole number of MB, from 0 to 100,000.',
   updateAvailable: (version) => `A new version of VFS is available (${version}).`,
   updateInstall: 'Update',
   updateLater: 'Not now',

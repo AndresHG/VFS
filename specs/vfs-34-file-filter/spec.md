@@ -1,13 +1,13 @@
 # VFS-34 — File filter: excluded names and extensions, and a size limit for reading content
 
-- **Status**: approved. The planning session relayed the owner's request and recommended D1
+- **Status**: implemented (PR #183); approved before that. The planning session relayed the owner's request and recommended D1
   and D2, which the spec takes. An independent critic review asked for revisions; all of
   them are made here.
 - **Size**: M. One subsystem: the indexer's exclusion matcher, plus one Ajustes section and
   one setting read by VFS-2. There is no index schema change: the list and the setting are
   `meta` keys.
 - **Links**:
-  - Issue #165, Synology Drive's «Filtro de archivos».
+  - Issue #165, the feature users asked for.
   - [VFS-33](../vfs-33-bigroot/spec.md) R5–R8: the exclusion matcher, and the per-root
     `exclusions/<id>` stamp.
   - VFS-1 I8: the built-in list `walk::is_excluded`, used by the walker and the watcher.
@@ -22,8 +22,8 @@ The owner's archive is full of files nobody looks for: editor swap files (`*.swp
 half-finished downloads (`*.crdownload`, `*.part`), application temporary files (`*.tmp`).
 VFS already ignores a fixed set of system and lock files (`Thumbs.db`, `.DS_Store`,
 `desktop.ini`, `~$*`, `.~lock.*#`, `~*.tmp`, `._*`; VFS-1 I8). The user cannot add to that
-set. Synology Drive, which the owner already uses, lets the user exclude files by name or
-extension and skip files over a size. With content search coming in v0.3, very large
+set. Users asked to exclude files by name or extension and to skip files over a size
+(#165). With content search coming in v0.3, very large
 documents also cost minutes of extraction each on the target PC for little value.
 
 ## Requirements (EARS)
@@ -154,10 +154,14 @@ One PR, built after VFS-2 2a: R6 needs VFS-2 R21's `content_max_mb`. 2–3 days
 
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
-| D1 | What does the size limit apply to? | Content extraction only. Big files stay findable by name, which is the app's first promise (VFS-1). Synology's limit is about sync traffic; VFS's cost is reading. | planning session's recommendation, taken by the agent | 2026-11-22 |
-| D2 | Global or per folder? | Global, for simplicity. Synology sets it per sync task, but VFS's users set it once. | planning session's recommendation, taken by the agent | 2026-11-22 |
+| D1 | What does the size limit apply to? | Content extraction only. Big files stay findable by name, which is the app's first promise (VFS-1). VFS's cost for a big file is reading it, not finding it. | planning session's recommendation, taken by the agent | 2026-11-22 |
+| D2 | Global or per folder? | Global, for simplicity: VFS's users set it once. | planning session's recommendation, taken by the agent | 2026-11-22 |
 | D3 | Built-ins and defaults | `walk::is_excluded` stays fixed and is not editable: removing a system or lock-file pattern would only add noise. Ajustes names it (R1). The user list's defaults are the temporary and partial-download kinds it does not cover: `*.tmp`, `*.temp`, `*.swp`, `*.crdownload`, `*.part`. Left out: `*.lnk` (VFS-18), and `*.pst`, `*.bak` and `*.log`, which a user may want to find by name. | agent | 2026-11-22 |
 | D4 | How a change is applied | Adding a pattern purges the matches from the index without a walk. Removing one bumps the user-list generation in VFS-33's stamp and costs a full walk, because those files were never indexed. | agent | 2026-11-22 |
+| D5 | Where the section sits | Inside Ajustes › «Avanzado», after VFS-33's switch: almost nobody needs it, and it keeps the panel short for non-technical users. | agent | 2026-11-22 |
+| D6 | Reading R2's edge cases | `.` is not a literal character, so `*.*` is refused as the spec lists. A duplicate is equal after NFC and case folding (`*.TMP` repeats `*.tmp`). The pattern is trimmed. The count is shown when the pattern is added; above 1,000 a dialog asks first. | agent | 2026-11-22 |
+| D7 | Indexes from before VFS-34 | When the indexer first starts, it stores the defaults and owes their purge (R4), so old `*.tmp`-style rows leave with no walk. The generation stays 0, so no root goes stale (R5). | agent | 2026-11-22 |
+| D8 | The size field before VFS-27's switch exists | The field ships hidden; the UI exposes `showContentLimit(row, on)` for 27c's switch to call. The setting itself already works (`content_max_mb`), and 0 means no limit in `vfs-content`. | agent | 2026-11-22 |
 
 ## Open questions
 

@@ -2986,3 +2986,226 @@ fn stop_does_not_wait_for_a_long_deletion() {
     assert_eq!(files_in(&fx.conn, "big"), 0);
     assert_eq!(files_in(&fx.conn, "keep"), 1);
 }
+
+/// Names of the files indexed in the folder `rel`, sorted.
+fn names_in(fx: &Fx, rel: &str) -> Vec<String> {
+    let (id, _) = fx.dir(rel).expect("folder indexed");
+    let mut st = fx
+        .conn
+        .prepare("SELECT name FROM files WHERE dir_id = ?1 ORDER BY name")
+        .unwrap();
+    st.query_map([id], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+}
+
+/// VFS-34 AC-2, R3, R7: with the default list, a walk indexes `nota.txt` and none of the
+/// temporary or partial-download files; a re-listing after a change (what a watcher event
+/// triggers) does not index a new `borrador.swp`; a folder named `fotos.part` and its files
+/// are indexed, as a pattern never matches a folder.
+#[test]
+fn the_default_file_filter_applies_to_walks_and_relistings() {
+    let mut fx = fixture(&["fotos.part"]);
+    let root = fx.root();
+    for name in [
+        "nota.txt",
+        "nota.txt.swp",
+        "video.mp4.part",
+        "informe.pdf.crdownload",
+    ] {
+        fs::write(root.join(name), b"x").unwrap();
+    }
+    fx.scan();
+    assert_eq!(names_in(&fx, ""), vec!["nota.txt"]);
+    assert_eq!(names_in(&fx, "fotos.part"), vec!["archivo.txt"]);
+
+    fs::write(root.join("borrador.swp"), b"x").unwrap();
+    fs::write(root.join("nuevo.txt"), b"x").unwrap();
+    mark_dirty(&mut fx.conn, &[root.join("borrador.swp")]).unwrap();
+    fx.scan();
+    assert_eq!(names_in(&fx, ""), vec!["nota.txt", "nuevo.txt"]);
+}
+
+/// Inserts `n` files named by `name(i)` into the root folder's index row, as a walk would.
+fn insert_files(fx: &mut Fx, n: usize, name: impl Fn(usize) -> String) {
+    let (top, _) = fx.dir("").unwrap();
+    let tx = fx.conn.transaction().unwrap();
+    for i in 0..n {
+        let name = name(i);
+        let file = ingest::NewFile {
+            name: &name,
+            size: 1,
+            mtime: 0,
+            lossy: false,
+        };
+        ingest::insert_file(&tx, top, &file).unwrap();
+    }
+    tx.commit().unwrap();
+}
+
+fn count_files(conn: &Connection, like: &str) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM files WHERE name LIKE ?1",
+        [like],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// VFS-34 AC-3, AC-1, R4: adding `*.bak` over 25,000 indexed files of which 12,000 match
+/// counts them first, then purges them in batches of 10,000 with no walk and no stale stamp.
+/// Stopped after the first batch (the app killed), the purge resumes from its cursor and
+/// finishes (search: `tests/file_filter.rs`).
+#[test]
+fn adding_a_pattern_purges_in_resumable_batches_without_a_walk() {
+    let mut fx = fixture(&[]);
+    fx.scan();
+    insert_files(&mut fx, 25_000, |i| {
+        if i % 25 < 12 {
+            format!("copia {i}.bak")
+        } else {
+            format!("foto {i}.jpg")
+        }
+    });
+    refresh_counts(&fx.conn, Some(fx.root_id)).unwrap();
+    let last_scan = fx.last_scan();
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+    assert_eq!(patterns::count_matches(&fx.conn, "*.BAK").unwrap(), 12_000);
+
+    patterns::add(&fx.conn, " *.bak ").unwrap();
+    assert!(patterns::list(&fx.conn)
+        .unwrap()
+        .contains(&"*.bak".to_string()));
+    let batch = |fx: &Fx| {
+        let tx = begin(&fx.conn).unwrap();
+        let n = patterns::purge_batch(&tx).unwrap();
+        tx.commit().unwrap();
+        n
+    };
+    // The first batch, then the app is killed: the cursor is kept.
+    assert!(batch(&fx).unwrap() > 0);
+    assert!(patterns::purge_owed(&fx.conn).unwrap());
+    let left = count_files(&fx.conn, "%.bak");
+    assert!(left > 0 && left < 12_000, "{left}");
+
+    // Restarted: it resumes and ends, removing its keys.
+    let mut batches = 0;
+    while batch(&fx).is_some() {
+        batches += 1;
+        assert!(batches < 10, "the purge never ends");
+    }
+    assert!(!patterns::purge_owed(&fx.conn).unwrap());
+    assert_eq!(count_files(&fx.conn, "%.bak"), 0);
+    assert_eq!(count_files(&fx.conn, "%.jpg"), 13_000);
+    assert_eq!(root_row(&fx).files, 13_000);
+    assert_eq!(fx.last_scan(), last_scan, "no walk ran");
+    assert_eq!(fx.pending_dirs(), 0, "no folder was queued");
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+}
+
+/// VFS-34 AC-4, R5: removing a pattern bumps the generation, so the root owes a full walk;
+/// after it, the file the pattern hid is indexed. Adding one does not.
+#[test]
+fn removing_a_pattern_owes_a_walk_that_brings_files_back() {
+    let mut fx = fixture(&[]);
+    fs::write(fx.root().join("copia.bak"), b"x").unwrap();
+    patterns::add(&fx.conn, "*.bak").unwrap();
+    fx.scan();
+    assert!(names_in(&fx, "").is_empty());
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+    assert_eq!(patterns::generation(&fx.conn).unwrap(), 0);
+
+    assert!(patterns::remove(&fx.conn, "*.bak").unwrap());
+    assert_eq!(patterns::generation(&fx.conn).unwrap(), 1);
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+    assert!(queue_rewalk(&fx.conn, &OsHistory, fx.root_id).unwrap());
+    fx.scan();
+    assert_eq!(names_in(&fx, ""), vec!["copia.bak"]);
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+
+    patterns::add(&fx.conn, "*.bak").unwrap();
+    assert!(
+        exclude::stale_roots(&fx.conn).unwrap().is_empty(),
+        "adding owes no walk"
+    );
+    patterns::reset(&fx.conn).unwrap();
+    assert_eq!(
+        patterns::list(&fx.conn).unwrap(),
+        patterns::DEFAULT_PATTERNS
+    );
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+}
+
+/// VFS-34 R5: a stamp written before VFS-34 (`VERSION:include`) reads as generation 0, so
+/// upgrading leaves the root current; once the generation moves, it is stale.
+#[test]
+fn a_stamp_from_before_the_file_filter_is_current() {
+    let mut fx = fixture(&["A"]);
+    fx.scan();
+    fx.conn
+        .execute(
+            "UPDATE meta SET value = ?1 WHERE key = ?2",
+            params![
+                format!("{}:0", exclude::VERSION),
+                format!("exclusions/{}", fx.root_id)
+            ],
+        )
+        .unwrap();
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+    patterns::reset(&fx.conn).unwrap();
+    assert_eq!(exclude::stale_roots(&fx.conn).unwrap(), vec![fx.root_id]);
+}
+
+/// VFS-34 R4, R7: an index from before VFS-34 stores the defaults when the indexer starts
+/// and owes their purge, without making any root stale.
+#[test]
+fn the_defaults_are_stored_and_purged_once() {
+    let mut fx = fixture(&[]);
+    fx.scan();
+    insert_files(&mut fx, 3, |i| format!("viejo {i}.tmp"));
+    assert!(!patterns::purge_owed(&fx.conn).unwrap());
+    patterns::init(&fx.conn).unwrap();
+    assert!(patterns::purge_owed(&fx.conn).unwrap());
+    let tx = begin(&fx.conn).unwrap();
+    assert_eq!(patterns::purge_batch(&tx).unwrap(), Some(3));
+    tx.commit().unwrap();
+    assert!(!patterns::purge_owed(&fx.conn).unwrap());
+    patterns::init(&fx.conn).unwrap();
+    assert!(!patterns::purge_owed(&fx.conn).unwrap(), "only once");
+    assert!(exclude::stale_roots(&fx.conn).unwrap().is_empty());
+}
+
+/// VFS-34 AC-1, R2: the count before adding a pattern agrees with the exact matcher on
+/// names whose folded form differs from their own: NFD accents, `ß`, a ligature that folds to
+/// two letters, and literal `%` and `_`, which the SQL narrowing must not read as wildcards.
+#[test]
+fn the_count_before_adding_matches_the_exact_matcher() {
+    let mut fx = fixture(&[]);
+    fx.scan();
+    let names = [
+        "Informe e\u{301}xito.doc", // NFD
+        "INFORME ÉXITO.doc",
+        "Straße.txt",
+        "\u{fb01}cha.pdf", // "ﬁ" ligature
+        "ficha.pdf",
+        "100%_listo.txt",
+        "100ab_listo.txt",
+    ];
+    insert_files(&mut fx, names.len(), |i| names[i].to_string());
+    for (pattern, want) in [
+        ("*éxito.doc", 2),
+        ("*ß*", 1),
+        ("\u{fb01}*", 1),
+        ("fi*", 1),
+        ("100%_*", 1),
+        ("100??_*", 1),
+        ("100?_*", 1),
+    ] {
+        assert_eq!(
+            patterns::count_matches(&fx.conn, pattern).unwrap(),
+            want,
+            "{pattern}"
+        );
+    }
+}

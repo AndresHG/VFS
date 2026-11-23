@@ -196,8 +196,16 @@ followed, and a root that has become a link is unavailable. It skips:
   `Scripts`, `include`). `Exclusions::for_root` drops the path rules that are the root or
   contain it, so a folder added as a root is indexed; per listing it costs one map lookup
   and a name scan per subfolder. The watcher filter and replays drop changes inside them.
-  Each root records the list version and setting its last full walk started under (`meta`
-  `exclusions/<id>`); a mismatch at start owes a full walk;
+  Each root records the list version, the setting and the file filter's generation its last
+  full walk started under (`meta` `exclusions/<id>`, `VERSION:include:gen`; a stamp in the
+  older `VERSION:include` form reads as generation 0); a mismatch at start owes a full walk;
+- files whose name matches the user's file filter (`indexer/patterns.rs`, VFS-34; `meta`
+  `user_exclusions`, defaults `*.tmp`, `*.temp`, `*.swp`, `*.crdownload`, `*.part`): `*` and
+  `?` globs on the name only, after NFC and case folding, with no file-system call, whether
+  or not the folder exclusions apply. Adding a pattern deletes the indexed matches in
+  batches of 10,000 by `files.id`, resumable through `meta` `user_exclusions_purge` and
+  `user_exclusions_cursor`, with no walk; removing one or restoring the list bumps
+  `user_exclusions_gen`, so every root owes a full walk;
 - the app's own data directory;
 - entries that vanish, or fail with an error other than permission denied, while being
   listed. An entry whose metadata is denied fails the whole listing, so the folder is
@@ -554,8 +562,9 @@ list unless the index changed (S7).
 
 `apps/desktop/src-tauri/src/commands.rs`. Every command is `async` (off the main thread)
 and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is one of
-`not_found`, `not_a_directory`, `overlapping_root`, `unavailable`, `schema_too_new`, `db`,
-`io`. Payloads are the camelCase serde types of `core/types.rs`.
+`not_found`, `not_a_directory`, `overlapping_root`, `unavailable`, `schema_too_new`,
+`invalid_pattern` (VFS-34; its `message` is a `PatternReason`: `empty`, `separator`,
+`no_literal`, `duplicate`), `db`, `io`. Payloads are the camelCase serde types of `core/types.rs`.
 
 | Command | Arguments | Returns |
 |---|---|---|
@@ -573,6 +582,13 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `get_progress` | — | `IndexProgress` |
 | `rescan` | `id \| null` | `null` (`unavailable` if the indexer is not running) |
 | `set_paused` | `paused` | `null` |
+| `get_include_all_folders` / `set_include_all_folders` | — / `on` | `boolean`; a change re-walks every folder (VFS-33) |
+| `get_file_exclusions` | — | `string[]`: the file filter's patterns (VFS-34) |
+| `count_file_exclusion` | `pattern` | `number`: indexed files it matches; `invalid_pattern` when it cannot be added |
+| `add_file_exclusion` | `pattern` | `string[]`; the matches leave the index in the background, with no walk |
+| `remove_file_exclusion` | `pattern` | `string[]`; every folder owes a full walk |
+| `reset_file_exclusions` | — | `string[]`: the defaults; every folder owes a full walk |
+| `get_content_max_mb` / `set_content_max_mb` | — / `mb` | `number`: the content size limit in MB, 0 for none (VFS-34 R6) |
 | `search_sources` | `query: SearchQuery`, `options: { sources: Source[] (empty = all), bookmarkFolder, sort: SortOrder }` (optional) | `SourcesResponse` (VFS-6) |
 | `get_bookmarks_status` | — | `BookmarkStatus` |
 | `set_bookmarks_enabled` | `enabled` | `BookmarkStatus`; off deletes every stored bookmark |

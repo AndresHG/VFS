@@ -213,6 +213,28 @@ for (const viewport of VIEWPORTS) {
       await assertNoSideScroll(`folders panel, ${where}`);
     });
 
+    /** VFS-34 AC-6, VFS-35 AC-5: in Ajustes › Avanzado, the file filter shows the five
+     *  defaults (none a shortcut), its add field, add button and reset button fit and are
+     *  not covered once scrolled to, and the size field is hidden while content search is
+     *  off. */
+    test(`file filter fits in the settings at ${where}`, async () => {
+      await open(viewport, text);
+      await evaluate(`document.getElementById('open-settings').click()`);
+      await until(`document.getElementById('settings').open`, 'the settings panel');
+      // The drawer slides in from 2rem to the right (160 ms): measure once it stops.
+      await until(`document.getElementById('settings').getAnimations().every((a) => a.playState === 'finished')`, 'the slide-in');
+      await evaluate(`document.querySelector('#settings .setting-advanced').open = true`);
+      await until(`document.querySelectorAll('#file-filter-list li').length === 5`, 'the default list');
+      const items = await evaluate(`[...document.querySelectorAll('#file-filter-list code')].map((c) => c.textContent)`);
+      for (const p of items) assert.doesNotMatch(p, /lnk|url/i, 'no default hides a shortcut');
+      for (const s of ['#file-filter-pattern', '#file-filter-add', '#file-filter-reset', '#file-filter-list li .icon-btn']) {
+        await evaluate(`document.querySelector(${JSON.stringify(s)}).scrollIntoView({ block: 'center' })`);
+        await assertVisible(s, `settings, ${where}`);
+      }
+      assert.equal(await evaluate(`document.getElementById('content-max-row').offsetParent === null`), true, 'size field hidden');
+      await assertNoSideScroll(`settings, ${where}`);
+    });
+
     /** VFS-35 AC-4, AC-5: no folders yet, the empty state offers "Añadir carpeta…". */
     test(`first-run add-folder button fits at ${where}`, async () => {
       await open(viewport, text, 'empty');
