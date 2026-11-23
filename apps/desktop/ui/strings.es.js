@@ -215,7 +215,7 @@ export const es = {
   fileFilterRemove: (p) => `Quitar «${p}» de la lista`,
   fileFilterReset: 'Restablecer la lista',
   fileFilterBuiltIn: 'VFS siempre ignora los archivos de sistema y de bloqueo: Thumbs.db, .DS_Store, desktop.ini, ~$…',
-  fileFilterAdded: (p, n) => (n === '0' ? `Se añadió «${p}». Ningún archivo de sus carpetas coincide ahora.` : `Se añadió «${p}». Se dejarán de mostrar ${n} archivos.`),
+  fileFilterAdded: (p, n, none) => (none ? `Se añadió «${p}». Ningún archivo de sus carpetas coincide ahora.` : `Se añadió «${p}». Se dejarán de mostrar ${n} archivos.`),
   fileFilterComeBack: 'Los archivos volverán a aparecer tras la próxima revisión completa.',
   fileFilterConfirmTitle: '¿Dejar de mostrar estos archivos?',
   fileFilterConfirmBody: (p, n) => `«${p}» coincide con ${n} archivos de sus carpetas. Dejarán de aparecer en las búsquedas; los archivos no se tocan.`,

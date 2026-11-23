@@ -1382,7 +1382,7 @@ function main(L) {
       if (r.cancelled) return;
       renderFilter(r.list);
       filterInput.value = '';
-      filterMessage(S.fileFilterAdded(pattern, N.count(r.count)));
+      filterMessage(S.fileFilterAdded(pattern, N.count(r.count), r.count === 0));
     } catch (err) {
       filterMessage(patternErrorText(err, S) ?? errorText(err), true);
     }

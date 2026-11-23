@@ -213,7 +213,7 @@ export const en = {
   fileFilterRemove: (p) => `Remove “${p}” from the list`,
   fileFilterReset: 'Restore the list',
   fileFilterBuiltIn: 'VFS always ignores system and lock files: Thumbs.db, .DS_Store, desktop.ini, ~$…',
-  fileFilterAdded: (p, n) => (n === '0' ? `Added “${p}”. No file in your folders matches it now.` : `Added “${p}”. ${n} files will no longer be shown.`),
+  fileFilterAdded: (p, n, none) => (none ? `Added “${p}”. No file in your folders matches it now.` : `Added “${p}”. ${n} files will no longer be shown.`),
   fileFilterComeBack: 'The files will show again after the next full check.',
   fileFilterConfirmTitle: 'Stop showing these files?',
   fileFilterConfirmBody: (p, n) => `“${p}” matches ${n} files in your folders. They will no longer appear in searches; the files themselves are not touched.`,
