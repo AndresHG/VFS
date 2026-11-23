@@ -577,3 +577,19 @@ fn offer_counts_documents_without_cloud_only_files() {
     );
     assert!(!store::exists(&s.db), "the offer opens no store (R2)");
 }
+
+/// VFS-27 AC-4 (R4): «Ahora no» is remembered across a restart: the offer is not due again,
+/// content search stays off, and nothing is read.
+#[test]
+fn not_now_survives_a_restart() {
+    let s = setup(3);
+    let (svc, _rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.mark_offered();
+    drop(svc);
+    let (svc, _rec) = s.start(s.config(Vec::new()), IDLE);
+    let st = svc.status();
+    assert!(st.settings.offered, "{st:?}");
+    assert!(!st.settings.enabled, "the switch in Ajustes is off");
+    assert_eq!(st.phase, Phase::Off);
+    assert!(!store::exists(&s.db), "nothing was read");
+}

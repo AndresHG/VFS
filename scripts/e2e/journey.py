@@ -713,15 +713,11 @@ class Journey:
             shutil.copy(os.path.join(GOLDEN, name), os.path.join(dest, name))
         self.wd.invoke("add_root", {"path": dest})
         wait_for(lambda: scan_done(self.progress()), self.args.scan_timeout, 0.5, "scan of the documents")
-        # R4: the offer shows once every folder has finished its first scan.
-        try:
-            wait_for(lambda: self.visible("#banner-content-offer"), 30, 0.5, "content offer")
-            self.shoot("content-offer")
-            self.wd.click(self.wd.find("#content-offer-yes"))
-            how = "offer"
-        except Exception as e:  # noqa: BLE001 - recorded, then switched on directly
-            self.wd.invoke("content_set_enabled", {"on": True})
-            how = f"content_set_enabled (offer not seen: {e})"
+        # R4: the offer shows once every folder has finished its first scan; AC-16 accepts it
+        # there, so a missing offer fails the step.
+        wait_for(lambda: self.visible("#banner-content-offer"), 30, 0.5, "content offer")
+        self.shoot("content-offer")
+        self.wd.click(self.wd.find("#content-offer-yes"))
 
         def finished():
             st = self.wd.invoke("content_status")
@@ -739,7 +735,7 @@ class Journey:
             "return document.querySelectorAll('#content-list .chit').length") > 0,
             20, 0.25, "content section on screen")
         self.shoot("content-section")
-        result = {"enabled_via": how, "documents": st["total"], "read_s": round(read_s, 1),
+        result = {"documents": st["total"], "read_s": round(read_s, 1),
                   "missing": missing}
         if missing:
             raise AssertionError(f"content queries missed: {missing}")

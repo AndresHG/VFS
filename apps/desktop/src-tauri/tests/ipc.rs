@@ -443,6 +443,10 @@ fn content_commands_over_ipc() {
         "{offer}"
     );
     assert!(offer["lowSpace"].is_boolean(), "{offer}");
+    // «Ahora no» (AC-4): offered, still off.
+    let not_now = invoke(&webview, "content_mark_offered", json!({})).unwrap();
+    assert_eq!(not_now["settings"]["offered"], json!(true));
+    assert_eq!(not_now["settings"]["enabled"], json!(false));
     let unread = invoke(&webview, "content_unread", json!({ "fileIds": [1, 2] })).unwrap();
     assert_eq!(unread, json!([[1, null], [2, null]]));
     let off = invoke(
