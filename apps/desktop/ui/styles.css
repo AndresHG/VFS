@@ -521,7 +521,7 @@ input[type="date"] {
 .fuzzy-note { grid-row: 2; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
 .results > .list-wrap { grid-row: 3; }
 .results > .content-hits { grid-row: 4; }
-.results > .details { grid-row: 4; }
+.results > .details { grid-row: 5; }
 
 .list-wrap {
   position: relative;

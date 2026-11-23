@@ -247,11 +247,19 @@ test('the words stay highlighted and no row has a match label', async () => {
 
 /** VFS-38 AC-2 (R3, UI part): with content search on, «Solo nombres» runs no content search,
  *  so the section «En el contenido de los documentos» goes away; «Todo» brings it back. */
-test('«Solo nombres» hides the content section', async () => {
+test('«Solo nombres» hides the content section; details sit below it', async () => {
   await start('&content=on');
   await page.type('peñalara');
   const shown = `!document.getElementById('content-hits').hidden`;
   await until(shown, 'the content section under «Todo»');
+  // VFS-38 R9: the results header adds a grid row; the selected file's details stay below the
+  // content section instead of on top of it.
+  await until(`${rowCount} > 0`, 'the name hits');
+  await evaluate(`document.querySelector('#results .row:not(.loading)').click()`);
+  await until(`document.getElementById('details').textContent.trim() !== ''`, 'the details line');
+  const gap = await evaluate(`document.getElementById('details').getBoundingClientRect().top
+    - document.getElementById('content-hits').getBoundingClientRect().bottom`);
+  assert.ok(gap >= 0, `details ${gap}px below the content section`);
   await page.scope(ScopeChoice.NAMES);
   await until(`!(${shown})`, 'no content section under «Solo nombres»');
   await page.scope(ScopeChoice.ALL);
