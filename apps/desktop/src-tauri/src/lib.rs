@@ -511,6 +511,7 @@ pub fn run() {
                 .map_err(|e| e.to_string())
                 .and_then(|dir| {
                     app.manage(updates::UpdateState::new(&dir));
+                    #[cfg(feature = "ai")]
                     app.manage(ai::AiState::new(&dir));
                     if let Err(e) = install_logger(&handle, &dir) {
                         eprintln!("VFS: log file unavailable: {e}");

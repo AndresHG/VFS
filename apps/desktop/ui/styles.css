@@ -1114,3 +1114,4 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .ai-closest-list, .ai-bib-list { margin: 0; padding-inline-start: var(--s5); display: grid; gap: var(--s1); }
 .ai-closest-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .ai-bib-entry { overflow-wrap: anywhere; }
+#ai-section[hidden] { display: none; }

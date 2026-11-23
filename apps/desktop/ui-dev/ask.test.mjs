@@ -148,6 +148,42 @@ test('the cap prompt, then the cost line', async () => {
   }
 });
 
+/** VFS-28 (0.3.0 ships without AI): a build without the `ai` feature has no AI command, and
+ *  the screen shows nothing about AI: no Ajustes section, no «Preguntar». */
+test('without the ai feature nothing about AI shows', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=off');
+    await b.evaluate(`document.getElementById('open-settings').click()`);
+    await b.until(`document.getElementById('settings').open`, 'Ajustes');
+    const r = await b.evaluate(`({
+      section: document.getElementById('ai-section').hidden,
+      shown: getComputedStyle(document.getElementById('ai-section')).display,
+      ask: document.getElementById('ask-open').hidden,
+      visibleText: document.getElementById('settings').innerText,
+    })`);
+    assert.equal(r.section, true);
+    assert.equal(r.shown, 'none');
+    assert.equal(r.ask, true);
+    assert.doesNotMatch(r.visibleText, /IA|Preguntar|Anthropic|OpenAI/);
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-28: with the AI built in, the Ajustes section shows once the shell answers. */
+test('with the ai feature the Ajustes section shows', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('');
+    await b.evaluate(`document.getElementById('open-settings').click()`);
+    await b.until(`!document.getElementById('ai-section').hidden`, 'the AI section');
+    assert.notEqual(await b.evaluate(`getComputedStyle(document.getElementById('ai-section')).display`), 'none');
+  } finally {
+    b.close();
+  }
+});
+
 /** VFS-28 AC-13 (rendering part, R7a): an answer echoing an instruction, an <img> tag and a
  *  Markdown image appears as literal text: no element is made from it and nothing is fetched. */
 test('a hostile answer stays text and loads nothing', async () => {

@@ -326,6 +326,7 @@ Total ≈ 14–19 working days **[estimate]**.
 | D11 | File names in what is sent | Each passage is sent with its file name and page, but no folder path. File names carry meaning that helps the answer. They are shown in the first-use notice and in «Qué se ha enviado». | agent (within the owner's P1, "only what is needed, visibly") | 2026-11-22 |
 | D12 | Certificate continuity | A self-signed certificate valid for ≥ 10 years, kept as a CI secret with an offline backup. Losing it means one re-entry of each key (R3), never a crash. The release that switches the identity says that macOS may ask once again for folder access. | agent | 2026-11-22 |
 | D13 | Flow details left open by R6 | A `folder_hint` that names no indexed folder, or several, is dropped (the filter takes one folder). The rewrite's `kind` is one of `document`, `photo`, `video`, `audio`. The third retrieval round is skipped when the rewrite added no filter, since it would repeat the second. A cancelled or failed answer is still recorded (R11) with what was sent and the cost of a cancelled stream (R10). | agent | 2026-11-23 |
+| D14 | Release | 0.3.0 ships from a main that holds VFS-28, with all its UI hidden: the desktop crate's `ai` Cargo feature is off by default, so no AI command is registered and the screen shows the Ajustes section and «Preguntar» only when `ai_status` answers. Tests turn it on through a dev-dependency. The flip for 0.4 is one line in `apps/desktop/src-tauri/Cargo.toml`: `default = ["ai"]`. | owner | 2026-11-24 |
 
 ## Open questions
 

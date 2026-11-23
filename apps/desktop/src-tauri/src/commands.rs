@@ -20,56 +20,67 @@ fn io_error(e: impl std::fmt::Display) -> ApiError {
     vfs_core::Error::Io(std::io::Error::other(e.to_string())).into()
 }
 
-/// Every command of the contract, for `Builder::invoke_handler`.
+/// The app's command list, plus `$extra` commands, as one `generate_handler!`.
+macro_rules! app_commands {
+    ($($extra:path),* $(,)?) => {
+        tauri::generate_handler![
+            system_locale,
+            set_language,
+            wait_core,
+            list_roots,
+            list_unreadable,
+            pick_folder,
+            add_root,
+            remove_root,
+            set_root_paused,
+            search,
+            suggest,
+            reveal,
+            reveal_target,
+            open_link_url,
+            get_progress,
+            rescan,
+            set_paused,
+            get_include_all_folders,
+            set_include_all_folders,
+            get_file_exclusions,
+            count_file_exclusion,
+            add_file_exclusion,
+            remove_file_exclusion,
+            reset_file_exclusions,
+            get_content_max_mb,
+            set_content_max_mb,
+            crate::bookmarks::search_sources,
+            crate::bookmarks::get_bookmarks_status,
+            crate::bookmarks::set_bookmarks_enabled,
+            crate::bookmarks::open_bookmark,
+            crate::updates::get_update_settings,
+            crate::updates::set_update_check,
+            crate::updates::check_for_update,
+            crate::updates::install_update,
+            crate::feedback::feedback_report,
+            crate::feedback::feedback_save,
+            crate::content::content_status,
+            crate::content::content_set_enabled,
+            crate::content::content_set_paused,
+            crate::content::content_retry,
+            crate::content::content_rebuild,
+            crate::content::content_mark_offered,
+            crate::content::content_offer,
+            crate::content::content_delete_store,
+            crate::content::content_search,
+            crate::content::content_unread_counts,
+            crate::content::content_unread,
+            $($extra),*
+        ]
+    };
+}
+
+/// Every command of the contract, for `Builder::invoke_handler`. The AI commands (VFS-28) are
+/// registered only with the `ai` feature, so with it off the UI cannot reach them.
+#[cfg(feature = "ai")]
 pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![
-        system_locale,
-        set_language,
-        wait_core,
-        list_roots,
-        list_unreadable,
-        pick_folder,
-        add_root,
-        remove_root,
-        set_root_paused,
-        search,
-        suggest,
-        reveal,
-        reveal_target,
-        open_link_url,
-        get_progress,
-        rescan,
-        set_paused,
-        get_include_all_folders,
-        set_include_all_folders,
-        get_file_exclusions,
-        count_file_exclusion,
-        add_file_exclusion,
-        remove_file_exclusion,
-        reset_file_exclusions,
-        get_content_max_mb,
-        set_content_max_mb,
-        crate::bookmarks::search_sources,
-        crate::bookmarks::get_bookmarks_status,
-        crate::bookmarks::set_bookmarks_enabled,
-        crate::bookmarks::open_bookmark,
-        crate::updates::get_update_settings,
-        crate::updates::set_update_check,
-        crate::updates::check_for_update,
-        crate::updates::install_update,
-        crate::feedback::feedback_report,
-        crate::feedback::feedback_save,
-        crate::content::content_status,
-        crate::content::content_set_enabled,
-        crate::content::content_set_paused,
-        crate::content::content_retry,
-        crate::content::content_rebuild,
-        crate::content::content_mark_offered,
-        crate::content::content_offer,
-        crate::content::content_delete_store,
-        crate::content::content_search,
-        crate::content::content_unread_counts,
-        crate::content::content_unread,
+    app_commands![
         crate::ai::ai_status,
         crate::ai::ai_set_settings,
         crate::ai::ai_notice_seen,
@@ -86,6 +97,12 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::ai::ai_bibliography,
         crate::ai::ai_export_ris,
     ]
+}
+
+/// Every command of the contract, for `Builder::invoke_handler` (VFS-28: AI off).
+#[cfg(not(feature = "ai"))]
+pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+    app_commands![]
 }
 
 /// Resolves once the index is open, or rejects with `Unavailable` when it could not open
