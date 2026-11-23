@@ -173,6 +173,9 @@ enum TestHook {
     OpenLog(PathBuf),
     /// Write the worker's process id to the file `arg` at start (VFS-27 AC-3).
     PidFile(PathBuf),
+    /// Take `arg` milliseconds longer over every file, so a run lasts long enough to pause
+    /// part way (VFS-27 AC-5, AC-8).
+    Slow(u64),
 }
 
 fn test_hooks() -> Vec<TestHook> {
@@ -188,6 +191,7 @@ fn test_hooks() -> Vec<TestHook> {
                 "version" => Some(TestHook::Version(arg)),
                 "openlog" => Some(TestHook::OpenLog(arg.into())),
                 "pidfile" => Some(TestHook::PidFile(arg.into())),
+                "slow" => arg.parse().ok().map(TestHook::Slow),
                 _ => None,
             }
         })
@@ -209,6 +213,7 @@ fn run_hooks(hooks: &[TestHook], path: &Path) {
                 }
             }
             TestHook::Crash(n) if is(n) => std::process::abort(),
+            TestHook::Slow(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
             _ => {}
         }
     }

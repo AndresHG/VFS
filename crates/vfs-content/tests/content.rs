@@ -1654,6 +1654,54 @@ fn paused_run_resumes_with_the_rest() {
     );
 }
 
+/// A gate that admits `reads` documents, then answers 1 s waits, as a back-off or a name
+/// walk does; on its fourth wait it counts the documents in the store, then stops the run.
+struct WaitsAfter {
+    db: PathBuf,
+    reads: usize,
+    waits: usize,
+    stored_while_waiting: Option<i64>,
+}
+
+impl vfs_content::Gate for WaitsAfter {
+    fn before_document(&mut self, _path: &Path) -> vfs_content::Admit {
+        if self.reads > 0 {
+            self.reads -= 1;
+            return vfs_content::Admit::Read;
+        }
+        self.waits += 1;
+        if self.waits < 4 {
+            return vfs_content::Admit::Wait(Duration::from_secs(1));
+        }
+        let conn = store::open_index_ro(&self.db).unwrap();
+        self.stored_while_waiting = Some(
+            conn.query_row("SELECT count(*) FROM c.docs", [], |r| r.get(0))
+                .unwrap(),
+        );
+        vfs_content::Admit::Stop
+    }
+    fn after_document(&mut self, _outcome: OutcomeKind, _worker_ms: u64) {}
+}
+
+/// VFS-27 AC-7 (R7): documents read before a run of short waits reach the store during the
+/// waits, not only when reading goes on, so a long back-off never holds them unsearchable.
+#[test]
+fn documents_read_before_a_back_off_are_stored_during_it() {
+    let s = setup();
+    for i in 0..6 {
+        s.write(&format!("a/doc{i}.txt"), format!("documento número {i}"));
+    }
+    s.scan();
+    let mut gate = WaitsAfter {
+        db: s.db.clone(),
+        reads: 3,
+        waits: 0,
+        stored_while_waiting: None,
+    };
+    vfs_content::index_with(&s.db, &s.opts(), &AtomicBool::new(false), &mut gate).unwrap();
+    assert_eq!(gate.stored_while_waiting, Some(3));
+}
+
 /// VFS-2 AC-15 (R14): a long-lived `Searcher` opened before any document was read does not
 /// keep its empty count, which would make every word "common": once documents are indexed,
 /// a rare word still ranks.

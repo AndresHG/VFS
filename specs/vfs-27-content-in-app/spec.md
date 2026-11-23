@@ -73,24 +73,37 @@ Offer and settings
   2 GB, or when the user resumes it. On macOS, free space is the volume's available capacity
   for important usage (it counts purgeable space), not `statvfs`.
 
-Background pace (owner decision T1)
+Background pace (owner decision T2, which replaces T1)
 
 - R7. WHILE content indexing runs, THE app SHALL extract one document at a time through the
-  worker at the lowest priority (VFS-2 R5), and SHALL apply these rules in order:
+  worker at the lowest priority (VFS-2 R5). It SHALL read documents back to back while the
+  machine has room, and SHALL apply these rules in order:
   1. WHILE a name walk runs, or a name pass of more than `incremental_max_dirs` folders,
      content indexing waits.
-  2. On Windows, the content scheduler samples the `DiskLoad` probe (VFS-5) for the drive
-     being read, between documents only (so the worker's own read is not counted). It uses
-     VFS-5's busy rule (`window` / `busy_in_window`, 3 of the last 5 samples) and its
-     guarantee: after waiting `max_backoff`, it reads for at least `min_work` before it may
-     wait again. So a disk that a sync client keeps busy slows content down but never stops
-     it. macOS has no disk probe, so this rule does not apply there.
-  3. IF the last keyboard or mouse input was 60 s ago or less, THEN there is a pause of 15 s
-     between documents. Over 60 s, there is no pause.
-  4. IF the idle probe fails, THEN the user counts as active.
+  2. WHERE there is a `DiskLoad` probe (VFS-5; Windows today), the content scheduler samples
+     it for the drive being read, between documents only (so the worker's own read is not
+     counted). It uses VFS-5's busy rule (`window` / `busy_in_window`, 3 of the last 5
+     samples) and its guarantee: after waiting `max_backoff`, it reads for at least
+     `min_work` before it may wait again. So a disk that a sync client keeps busy slows
+     content down but never stops it.
+  3. The content scheduler samples the processor use of the whole machine once a second
+     (`GetSystemTimes` on Windows, `host_statistics(HOST_CPU_LOAD_INFO)` on macOS), less the
+     most the worker itself can explain (one processor for the time it worked). WHEN other
+     programs use 70 % or more of all processors in 3 of the last 5 samples, content waits
+     under the same `max_backoff` / `min_work` guarantee. IF the probe fails, this rule does
+     not apply.
+  4. IF the last keyboard or mouse input was 60 s ago or less, or the idle probe fails, THEN
+     each document is followed by a gap as long as it took, at most 1 s. Over 60 s, there is
+     no gap. The gap is part of reading: the status area shows progress, not a wait.
   The idle probe is `GetLastInputInfo` against `GetTickCount64` on Windows, and
   `CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateHIDSystemState,
-  kCGAnyInputEventType)` on macOS. Neither needs administrator rights.
+  kCGAnyInputEventType)` on macOS. No probe needs administrator rights.
+  WHILE content waits under rules 1–3, THE status area SHALL say what it waits for, in plain
+  words: «esperando a que termine la revisión de carpetas», «esperando: el disco está
+  ocupado», «esperando: el ordenador está ocupado con otros programas».
+  Expected rates: on a fast machine in light use (SSD, 100 ms documents) at least 250
+  documents a minute; on the target PC with its disk kept busy, under half its calm rate and
+  at least one document per back-off cycle (`max_backoff` + `min_work`, 10 s).
 - R8. THE app SHALL show content progress in the status area:
   - documents read out of the total;
   - documents per hour, computed over working time only, not pauses or waits;
@@ -176,14 +189,24 @@ Tests cite these ids (`VFS-27 AC-<m>`) in their doc comments.
 - AC-6 (R6) Given a simulated free space of 0.9 GB, When content indexing runs, Then it
   pauses with the low-space reason. At a simulated 1.5 GB it stays paused. At 2.5 GB it
   resumes.
-- AC-7 (R7) Given a fake clock and fake idle and `DiskLoad` probes:
+- AC-7 (R7) Given a fake clock and fake idle, `DiskLoad` and processor probes:
   - When a name walk is running, Then no document is extracted.
-  - On Windows, when 3 of the last 5 probe samples are busy, Then no document is extracted.
-    When the probe stays busy for longer than `max_backoff`, Then a document is still
-    extracted within `max_backoff` + `min_work`.
-  - When input happened 10 s or 60 s ago, Then documents are extracted at least 15 s apart.
-  - When input happened 61 s ago, Then they are extracted back to back.
-  - When the idle probe errors, Then the 15 s pause applies.
+  - When 3 of the last 5 disk samples are busy, Then no document is extracted. When the
+    probe stays busy for longer than `max_backoff`, Then a document is still extracted within
+    `max_backoff` + `min_work`.
+  - Given a fast machine (no busy disk, 8 processors with 5 % used by others, 100 ms
+    documents), When input happened 10 s ago or the idle probe errors, Then at least 250
+    documents are read in a minute. When input happened 61 s ago, Then they are read back to
+    back.
+  - Given two processors and 400 ms documents, Then the worker's own use never counts as a
+    busy processor.
+  - When other programs use 90 % of the processors, Then content waits with the processor
+    reason, reads less than half its calm rate, and still reads.
+  - Given the target PC (1 s documents, the disk at queue depth 3, the PC in use), Then over 5
+    minutes content reads less than half its calm rate and at least one document per
+    back-off cycle.
+  - A 5 s document in light use is followed by a 1 s gap.
+  - The status line names a busy disk and a busy processor in both catalogs.
 - AC-8 (R8, R9) Given a content run of 1,000 documents, When the user pauses after 300 and
   restarts the app, Then it stays paused with 300 of 1,000 shown. When resumed, Then it reads
   only the 700 left, and the rate shown excludes the pause. Given a folder paused through
@@ -275,7 +298,7 @@ Total ≈ 12–16 working days, plus the field measurement **[estimate]**.
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
 | D1 | How does `vfs-extract` reach the user? | Inside the installer as a Tauri sidecar. Content search then works with no connection and updates in lockstep. The cost is ≈ 6.6 MB compressed, so the NSIS installer goes from 6 MB to about 12.5 MB **[measured size, estimated installer]**. Downloading on demand would save that but break offline use. It would also leave an unsigned exe in a user-writable folder. | owner | 2026-11-22 |
-| D2 | Pace numbers | Input within the last 60 s means "in use": 15 s between documents (Copernic's published setting). Over 60 s, full pace. Name walks and, on Windows, the busy disk always win. Tuned later from the diagnostic log. | agent (owner set the policy, T1) | 2026-11-22 |
+| D2 | Pace numbers | Headroom, not the keyboard: back to back at background priority while the disk and processor have room; back off when the disk probe is busy (3 of 5 samples, VFS-5 numbers) or other programs use 70 % or more of the processors; input within 60 s adds a gap as long as the last document, at most 1 s. Replaces T1 (15 s between documents after any input in the last 60 s), which read 3.5 documents a minute on a lightly used Mac (owner test of 0.3.0). | owner (T2) | 2026-11-23 |
 | D3 | Estimates in the offer | Time: 0.17–0.55 s per document. Disk: 13–16 MB per 1,000 documents (VFS-2 measurements, target-PC estimate). Replaced by 27m's numbers, and by the measured rate after 200 documents. | agent | 2026-11-22 |
 | D4 | Switch off vs delete | The switch stops the run and hides the section but keeps the store. Turning it on again resumes. Deleting is a separate confirmed button. | agent | 2026-11-22 |
 | D5 | Cancelling a stale content query | Discard by sequence number. `retrieve` runs to completion (VFS-2 R14 bounds it), so the engine interface needs no cancel token. | agent | 2026-11-22 |

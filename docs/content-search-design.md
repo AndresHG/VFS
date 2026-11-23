@@ -112,8 +112,9 @@ search: name/path pass as today, plus a content pass; results merged
   documents only. `vfs_content::pace` decides from probe readings, in order: low space on the
   app-data drive pauses (below 1 GB, resumed above 2 GB or by the user), a name walk or large
   name pass waits, a busy disk waits under VFS-5's back-off (Windows; never more than
-  `max_backoff` without `min_work` of reading), and input within 60 s spaces documents 15 s
-  apart. The probes are `vfs_core::probes`. Paused folders (VFS-32) are passed over and keep
+  `max_backoff` without `min_work` of reading), a processor that other programs keep busy
+  waits under the same back-off, and input within 60 s adds a gap as long as the last
+  document, at most 1 s. Otherwise documents are read back to back (owner decision T2). The probes are `vfs_core::probes`. Paused folders (VFS-32) are passed over and keep
   their state; time asleep does not count against a document's limit.
 - The app's background indexer (VFS-27 27b): `vfs_content::service` keeps the switch and the
   pause in `content.json`, runs the engine on one thread while content search is on, waits

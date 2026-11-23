@@ -41,6 +41,9 @@ from; they are stack-agnostic.
 - **R9. A command added to `NO_CORE`** (`apps/desktop/ui/coregate.js`) never reads
   `AppState::vfs()` or the content service: those reject while the index opens, so the UI
   sends them only after `wait_core` (VFS-39 R2).
+- **R10. A rule that throttles background work** (pace, back-off, idle detection) is checked
+  on a fast machine as well as the slow target PC: its spec gives the expected rate on both,
+  and the PR carries a measured rate on the dev machine before and after (VFS-27 T2).
 
 ## Worth flagging — not blocking
 

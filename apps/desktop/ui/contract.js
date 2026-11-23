@@ -116,6 +116,7 @@ export const ContentPhase = Object.freeze({
 export const ContentWait = Object.freeze({
   NAME_INDEXING: 'nameIndexing',
   DISK_BUSY: 'diskBusy',
+  CPU_BUSY: 'cpuBusy',
   IN_USE: 'inUse',
   LOW_SPACE: 'lowSpace',
 });
