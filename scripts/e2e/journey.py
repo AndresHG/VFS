@@ -124,6 +124,7 @@ class App:
         self.args = args
         self.proc = None
         self.wd = None
+        self.ready_trace = {}
 
     def start(self):
         t0 = now()
@@ -136,10 +137,9 @@ class App:
         wait_for(lambda: self.try_session(), 180, 1.0, "the webview window")
         self.wd.set_script_timeout(120_000)
         # The page is ready when main.js has rendered the status line.
-        wait_for(lambda: self.wd.js(
+        self.ready_probe(
             "return !!window.__TAURI__ && document.querySelector('#status-text') !== null"
-            " && document.querySelector('#open-folders').textContent.length > 0"),
-            60, what="UI ready")
+            " && document.querySelector('#open-folders').textContent.length > 0", "UI ready")
         # VFS-22: the steps below read Spanish copy and the Spanish folder picker title, and
         # the runner's OS may be English: pin the app to Spanish and wait for the redraw.
         # 'vfs.language' is LANGUAGE_KEY in apps/desktop/ui/main.js. A page already in
@@ -147,12 +147,33 @@ class App:
         self.wd.js("localStorage.setItem('vfs.language', 'es');"
                    " if (document.documentElement.lang !== 'es') setTimeout(() => location.reload(), 0);"
                    " return true")
-        wait_for(lambda: self.wd.js(
+        self.ready_probe(
             "return document.documentElement.lang === 'es'"
             " && document.querySelector('#open-folders') !== null"
-            " && document.querySelector('#open-folders').textContent.length > 0"),
-            60, what="UI ready in Spanish")
+            " && document.querySelector('#open-folders').textContent.length > 0",
+            "UI ready in Spanish")
         return now() - t0
+
+    def ready_probe(self, script, what, timeout=60, per_call=10):
+        """Polls `script` until it is true. Each call gets `per_call` seconds, so one script
+        whose answer never comes back (seen on the macOS runner) costs one try, not the whole
+        wait; every try's latency and answer goes into `ready_trace` for the record."""
+        trace = self.ready_trace.setdefault(what, [])
+        t0 = now()
+
+        def probe():
+            t = now()
+            try:
+                v = self.wd.js(script, timeout=per_call)
+                trace.append([round(t - t0, 1), round(now() - t, 2), v])
+                return v
+            except Exception as e:
+                trace.append([round(t - t0, 1), round(now() - t, 2), f"{type(e).__name__}: {e}"[:120]])
+                raise
+        try:
+            wait_for(probe, timeout, what=what)
+        except TimeoutError as e:
+            raise TimeoutError(f"{e}; tries [start s, call s, answer]: {trace[-8:]}") from None
 
     def try_session(self):
         try:
@@ -373,6 +394,7 @@ class Journey:
     def s_first_run(self):
         secs = self.app.start()
         self.metrics["launch_to_ui_s"] = round(secs, 2)
+        self.metrics["ready_trace"] = self.app.ready_trace
         # The empty state renders after the first list_roots answer.
         wait_for(lambda: "Añada una carpeta" in nfc(self.text_of("#empty")), 30,
                  what="first-run empty state")

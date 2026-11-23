@@ -3,13 +3,16 @@
 import json
 import os
 import sys
+import subprocess
 import tempfile
+import time
 import unicodedata
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_tree  # noqa: E402
 from wd import WebDriverError, element_id  # noqa: E402
+import measure  # noqa: E402
 
 
 def listing(root):
@@ -143,6 +146,22 @@ class WebDriverTest(unittest.TestCase):
         self.assertEqual(element_id({"element-6066-11e4-a52e-4f735466cecf": "b"}), "b")
         with self.assertRaises(WebDriverError):
             element_id({"other": "c"})
+
+
+class BetweenTest(unittest.TestCase):
+    def test_a_child_left_running_does_not_hold_the_measurement(self):
+        """VFS-8 AC-6: the busy run's `between` command leaves DiskSpd running with its output
+        handle; the measurement goes on once the command itself exits."""
+        child = ("import subprocess, sys; print('remounted'); sys.stdout.flush();"
+                 " subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(15)'],"
+                 " stdout=sys.stdout, stderr=sys.stderr)")
+        cmd = subprocess.list2cmdline([sys.executable, "-c", child])
+        with tempfile.TemporaryDirectory() as d:
+            t = time.monotonic()
+            r = measure.run_between(cmd, os.path.join(d, "between.txt"))
+            self.assertLess(time.monotonic() - t, 10)
+        self.assertEqual(r["exit"], 0)
+        self.assertIn("remounted", r["out"])
 
 
 if __name__ == "__main__":

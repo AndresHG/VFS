@@ -35,6 +35,21 @@ def scanned(wd):
     return scan_done(wd.invoke("get_progress"))
 
 
+def run_between(cmd, log_path, timeout=600):
+    """Runs `cmd` and returns its exit code and the tail of its output. The output goes to a
+    file, never a pipe: `slow-disk.ps1 -Action cycle -Busy` leaves DiskSpd running for two
+    hours with the caller's stderr handle, and a pipe read would wait for it (VFS-8 AC-6)."""
+    with open(log_path, "w+", encoding="utf-8", errors="replace") as log:
+        try:
+            code = subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL, stdout=log,
+                                  stderr=subprocess.STDOUT, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            code = "timeout"
+        log.seek(0)
+        out = log.read()
+    return {"cmd": cmd, "exit": code, "out": out[-500:]}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--app", required=True)
@@ -113,9 +128,7 @@ def main(argv=None):
                                 time.time())
         os.remove(gen_tree.fs_path(victim))
         if args.between:
-            r = subprocess.run(args.between, shell=True, capture_output=True, text=True)
-            res["between"] = {"cmd": args.between, "exit": r.returncode,
-                              "out": (r.stdout + r.stderr)[-500:]}
+            res["between"] = run_between(args.between, os.path.join(args.out, f"between-{args.label}.txt"))
         t0 = now()
         launch = app.start()
         wd = app.wd
