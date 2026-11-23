@@ -560,8 +560,8 @@ returned. The UI marks such a result "en N sitios" and lists every place, each w
 
 The whole ranked list (at most 2,000 results) is computed once; `offset` and `limit` (default 100,
 at most 500) slice it. The last list is cached on the search connection, keyed by the folded
-query, the filters and SQLite's `PRAGMA data_version`, so the next page comes from the same
-list unless the index changed (S7).
+query, the filters, the sort, the scope (VFS-38) and SQLite's `PRAGMA data_version`, so the
+next page comes from the same list unless the index changed (S7).
 
 ## Tauri command contract
 
