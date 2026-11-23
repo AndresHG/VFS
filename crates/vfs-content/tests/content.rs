@@ -1780,6 +1780,7 @@ fn ac5_content_size_limit_from_the_file_filter() {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         })
         .unwrap();
     assert_eq!(by_name.hits.len(), 1, "its name is found");

@@ -18,6 +18,7 @@ fn hits(vfs: &Vfs, text: &str) -> usize {
         limit: 100,
         offset: 0,
         sort: Default::default(),
+        scope: Default::default(),
     })
     .unwrap()
     .hits
