@@ -40,7 +40,7 @@ from; they are stack-agnostic.
   them (VFS-30).
 - **R9. A command added to `NO_CORE`** (`apps/desktop/ui/coregate.js`) never reads
   `AppState::vfs()` or the content service: those reject while the index opens, so the UI
-  sends them only after `wait_core` (VFS-39 AC-4).
+  sends them only after `wait_core` (VFS-39 R2).
 
 ## Worth flagging — not blocking
 

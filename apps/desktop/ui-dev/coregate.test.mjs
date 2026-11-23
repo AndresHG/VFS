@@ -21,7 +21,7 @@ function backend() {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-/** VFS-39 AC-4: «Añadir carpeta» while the index opens waits for it, never fails as UNAVAILABLE. */
+/** VFS-39 R2: «Añadir carpeta» while the index opens waits for it, never fails as UNAVAILABLE. */
 test('an index command sent while the index opens runs once it is open', async () => {
   const b = backend();
   const invoke = gateOnCore(b.invoke);
@@ -36,7 +36,7 @@ test('an index command sent while the index opens runs once it is open', async (
   assert.deepEqual(answer, { cmd: 'add_root', args: { path: '/x' } });
 });
 
-/** VFS-39 AC-4: one wait serves every command; later ones go straight through. */
+/** VFS-39 R2: one wait serves every command; later ones go straight through. */
 test('the index wait is asked once', async () => {
   const b = backend();
   const invoke = gateOnCore(b.invoke);
@@ -47,7 +47,7 @@ test('the index wait is asked once', async () => {
   assert.deepEqual(b.calls, ['wait_core', 'list_roots', 'content_status']);
 });
 
-/** VFS-39 AC-4: the folder dialog, language and update commands never wait for the index. */
+/** VFS-39 R2: the folder dialog, language and update commands never wait for the index. */
 test('commands that need no index run at once', async () => {
   const b = backend();
   const invoke = gateOnCore(b.invoke);
@@ -57,7 +57,7 @@ test('commands that need no index run at once', async () => {
   assert.deepEqual(b.calls, [...NO_CORE].filter((c) => c !== 'wait_core'));
 });
 
-/** VFS-39 AC-4: when the index cannot open, index commands reject with that error. */
+/** VFS-39 R2: when the index cannot open, index commands reject with that error. */
 test('a failed open rejects the waiting commands', async () => {
   const b = backend();
   const invoke = gateOnCore(b.invoke);
@@ -68,7 +68,7 @@ test('a failed open rejects the waiting commands', async () => {
   assert.deepEqual(b.calls, ['wait_core']);
 });
 
-/** VFS-39 AC-4: every Tauri command of the app goes through the gate, so a new one cannot skip it. */
+/** VFS-39 R2: every Tauri command of the app goes through the gate, so a new one cannot skip it. */
 test('the backend bridge calls Tauri only through the gate', () => {
   const src = readFileSync(new URL('../ui/api.js', import.meta.url), 'utf8');
   assert.equal(src.match(/t\.core\.invoke/g)?.length, 1);
