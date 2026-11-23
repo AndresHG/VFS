@@ -34,8 +34,9 @@ There are two causes.
   never hang. THE `wait_core` command SHALL resolve once the index is open, or reject with
   `unavailable` when it could not open; it waits on a blocking thread, not an async worker.
   THE UI SHALL show «Preparando la búsqueda…» / «Getting search ready…» in the status line
-  and call `wait_core` before its first index command. It SHALL check for updates without
-  waiting for the index.
+  and send every index command (searches, folders, Ajustes, content, feedback) only after
+  `wait_core` resolves, so an action taken while the index opens waits and then runs. It
+  SHALL check for updates, open the folder dialog and set its language without waiting.
 - R3. WHEN the indexer is asked to stop (window closed, app exiting, update installing) and
   its thread has not ended within 500 ms, THE indexer SHALL interrupt its SQLite work every
   20 ms until the thread ends. The interrupted transaction rolls back (cheap in WAL mode), so
@@ -54,6 +55,10 @@ Tests cite these ids (`VFS-39 AC-<m>`) in their doc comments.
   disk, When a re-walk is deleting that folder's subtree and a stop is requested, Then the
   stop returns within 2 s (it took 6.5 s without R3). When the next scan runs, Then the
   folder's files are gone and the other folders' files remain.
+- AC-4 (R2) Given the index still opening, When the UI sends `add_root` (or any other index
+  command), Then it is sent only after `wait_core` resolves and its answer reaches the UI;
+  When the open fails, Then it rejects with the open's error. The folder dialog, language and
+  update commands are sent at once.
 
 ## Non-goals
 
