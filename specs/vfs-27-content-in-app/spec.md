@@ -3,7 +3,8 @@
 - **Status**: approved. The owner decided D9–D13 of VFS-2 and D1 here. An independent critic
   review asked for revisions, and all of them are made here. PR 27a is implemented. 27b
   ships in two PRs: 27b-1 (the engine's gate and pace policy, the probes, paused folders,
-  sleep) and 27b-2 (the app's background indexer); both are implemented.
+  sleep) and 27b-2 (the app's background indexer); both are implemented. 27c (the interface)
+  is implemented except «Solo documentos», which waits for VFS-38 38b's filter line.
 - **Size**: L. It ships a second executable in both installers, opens user files from the app
   for the first time, and adds platform-specific idle and disk probes. It is multi-PR.
 - **Links**:
@@ -111,7 +112,7 @@ Background pace (owner decision T1)
   app SHALL run SQLite's `quick_check` on the content store in the background (it can take
   tens of seconds on an HDD), and SHALL not start content indexing until it ends. Content
   search is available meanwhile. IF the check fails, or the store's version differs (VFS-2
-  R19), THEN THE app SHALL tell the user «El índice de contenido está dañado», and offer
+  R19), THEN THE app SHALL tell the user «Lo leído de los documentos está dañado» (D6), and offer
   «Volver a leer los documentos» (delete the store and start again) or «Desactivar». Nothing
   is deleted without that choice. Name search keeps working meanwhile.
 
@@ -278,6 +279,7 @@ Total ≈ 12–16 working days, plus the field measurement **[estimate]**.
 | D3 | Estimates in the offer | Time: 0.17–0.55 s per document. Disk: 13–16 MB per 1,000 documents (VFS-2 measurements, target-PC estimate). Replaced by 27m's numbers, and by the measured rate after 200 documents. | agent | 2026-11-22 |
 | D4 | Switch off vs delete | The switch stops the run and hides the section but keeps the store. Turning it on again resumes. Deleting is a separate confirmed button. | agent | 2026-11-22 |
 | D5 | Cancelling a stale content query | Discard by sequence number. `retrieve` runs to completion (VFS-2 R14 bounds it), so the engine interface needs no cancel token. | agent | 2026-11-22 |
+| D6 | Interface copy (27c) | The damage message avoids «índice», which VFS-1 decision 16 keeps out of the interface (a test enforces it). The time left counts reading time only, so it says «con el equipo sin usar». A finished run short of the total says the rest is in folders that are offline or paused. A wait between documents while the PC is in use reads as plain progress, so the line does not change at every document. | agent | 2026-11-23 |
 
 ## Open questions
 

@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
+use vfs_content::indexer::StopReason as ContentStop;
+use vfs_content::service::{Phase, WaitKind};
+use vfs_content::UnreadReason;
 use vfs_core::api::RevealOutcome;
 use vfs_core::{
     DriveKind, Error, FileKind, IndexerState, LinkKind, MatchKind, RootStatus, Scope,
@@ -250,6 +253,102 @@ fn all_error_codes() -> Vec<String> {
     all.iter().map(|e| e.code().to_string()).collect()
 }
 
+/// `Phase` is tagged by `kind`; the set holds the tags (VFS-27 R8).
+fn content_phase_kinds() -> Vec<String> {
+    let all = vec![
+        Phase::Off,
+        Phase::Paused,
+        Phase::Checking,
+        Phase::Damaged,
+        Phase::Reading,
+        Phase::Waiting {
+            reason: WaitKind::InUse,
+        },
+        Phase::Finished,
+        Phase::Stopped {
+            reason: ContentStop::StoreWrite,
+            detail: String::new(),
+        },
+    ];
+    for p in &all {
+        match p {
+            Phase::Off
+            | Phase::Paused
+            | Phase::Checking
+            | Phase::Damaged
+            | Phase::Reading
+            | Phase::Waiting { .. }
+            | Phase::Finished
+            | Phase::Stopped { .. } => {}
+        }
+    }
+    all.iter()
+        .map(|p| {
+            serde_json::to_value(p).unwrap()["kind"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+fn all_content_waits() -> Vec<WaitKind> {
+    let all = vec![
+        WaitKind::NameIndexing,
+        WaitKind::DiskBusy,
+        WaitKind::InUse,
+        WaitKind::LowSpace,
+    ];
+    for w in &all {
+        match w {
+            WaitKind::NameIndexing | WaitKind::DiskBusy | WaitKind::InUse | WaitKind::LowSpace => {}
+        }
+    }
+    all
+}
+
+fn all_content_stops() -> Vec<ContentStop> {
+    let all = vec![
+        ContentStop::WorkerCannotStart,
+        ContentStop::VersionMismatch,
+        ContentStop::WorkerUnstable,
+        ContentStop::StoreWrite,
+        ContentStop::IndexWrite,
+    ];
+    for r in &all {
+        match r {
+            ContentStop::WorkerCannotStart
+            | ContentStop::VersionMismatch
+            | ContentStop::WorkerUnstable
+            | ContentStop::StoreWrite
+            | ContentStop::IndexWrite => {}
+        }
+    }
+    all
+}
+
+fn all_unread_reasons() -> Vec<UnreadReason> {
+    let all = vec![
+        UnreadReason::Cloud,
+        UnreadReason::Scanned,
+        UnreadReason::Password,
+        UnreadReason::TooLarge,
+        UnreadReason::Unsupported,
+        UnreadReason::Failed,
+    ];
+    for r in &all {
+        match r {
+            UnreadReason::Cloud
+            | UnreadReason::Scanned
+            | UnreadReason::Password
+            | UnreadReason::TooLarge
+            | UnreadReason::Unsupported
+            | UnreadReason::Failed => {}
+        }
+    }
+    all
+}
+
 /// VFS-1 X1, AC-12: every set of contract.js equals the serde values of its Rust enum, and
 /// contract.js has no set this test does not check (besides the UI's own `UiErrorCode`).
 /// VFS-38 R14: `Scope` is checked like VFS-6 AC-11's `Source`.
@@ -275,6 +374,10 @@ fn contract_js_matches_the_rust_enums() {
         ("SortOrder", serde_names(&all_sort_orders())),
         ("PatternReason", serde_names(&all_pattern_reasons())),
         ("Scope", serde_names(&all_scopes())),
+        ("ContentPhase", content_phase_kinds()),
+        ("ContentWait", serde_names(&all_content_waits())),
+        ("ContentStop", serde_names(&all_content_stops())),
+        ("UnreadReason", serde_names(&all_unread_reasons())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

@@ -19,10 +19,13 @@
 // "musica" a linked folder. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
 // gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
+// Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
+// scan); `content=on` starts it reading, `content=damaged` and `content=stopped` show those states. A content query with
+// "alguna" is partial.
 
 import {
-  BookmarkRoot, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome,
-  RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason,
+  BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
+  ReadState, RevealOutcome, RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -187,12 +190,99 @@ function withinOneEdit(a, b) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Byte offsets of `word` in `text` (UTF-8), as the content engine reports highlights. */
+function byteRanges(text, word) {
+  const enc = new TextEncoder();
+  const out = [];
+  for (let i = text.toLowerCase().indexOf(word); i >= 0 && word; i = text.toLowerCase().indexOf(word, i + 1)) {
+    const a = enc.encode(text.slice(0, i)).length;
+    out.push([a, a + enc.encode(text.slice(i, i + word.length)).length]);
+  }
+  return out;
+}
+
+/** VFS-27: a content run that reads 1.200 documents, content hits and unread reasons. */
+function fakeContent(mode, files) {
+  const docs = files.filter((f) => f.kind === FileKind.DOCUMENT && !f.isDir);
+  const total = 1200;
+  const st = {
+    settings: { enabled: false, paused: false, offered: false },
+    phase: { kind: ContentPhase.OFF }, done: 0, total, perHour: null, secondsLeft: null,
+  };
+  const cbs = new Set();
+  const emit = () => { for (const cb of cbs) cb(structuredClone(st)); };
+  if (mode === 'on') Object.assign(st, { settings: { enabled: true, paused: false, offered: true }, done: 400 });
+  if (mode === 'damaged') Object.assign(st, { settings: { enabled: true, paused: false, offered: true }, phase: { kind: ContentPhase.DAMAGED } });
+  if (mode === 'stopped') {
+    Object.assign(st, { settings: { enabled: true, paused: false, offered: true }, done: 37 });
+    st.phase = { kind: ContentPhase.STOPPED, reason: ContentStop.WORKER_CANNOT_START, detail: 'not found' };
+  }
+  const reading = () => st.settings.enabled && !st.settings.paused
+    && ![ContentPhase.DAMAGED, ContentPhase.STOPPED].includes(st.phase.kind);
+  setInterval(() => {
+    if (!reading()) return;
+    if (st.done >= total) { if (st.phase.kind !== ContentPhase.FINISHED) { st.phase = { kind: ContentPhase.FINISHED }; emit(); } return; }
+    st.done = Math.min(total, st.done + 3);
+    st.phase = { kind: ContentPhase.READING };
+    st.perHour = 1400;
+    st.secondsLeft = Math.round(((total - st.done) * 3600) / 1400);
+    emit();
+  }, 700);
+  const set = (f) => { f(); if (!st.settings.enabled) st.phase = { kind: ContentPhase.OFF }; else if (st.settings.paused) st.phase = { kind: ContentPhase.PAUSED }; else st.phase = { kind: ContentPhase.READING }; emit(); return structuredClone(st); };
+  const reasons = Object.values(UnreadReason);
+  return {
+    api: {
+      async contentStatus() { await sleep(20); return structuredClone(st); },
+      async onContentStatus(cb) { cbs.add(cb); return () => cbs.delete(cb); },
+      async contentSetEnabled(on) { return set(() => { st.settings.enabled = on; st.settings.offered = true; if (on) st.settings.paused = false; }); },
+      async contentSetPaused(p) { return set(() => { st.settings.paused = p; }); },
+      async contentRetry() { return set(() => {}); },
+      async contentRebuild() { return set(() => { st.done = 0; }); },
+      async contentMarkOffered() { st.settings.offered = true; emit(); return structuredClone(st); },
+      async contentOffer() {
+        await sleep(60);
+        return { documents: total, seconds: [204, 660], bytes: [total * 13_000, total * 16_000], freeBytes: 50e9, lowSpace: false };
+      },
+      async contentDeleteStore() { await sleep(300); return set(() => { st.settings.enabled = false; st.done = 0; }); },
+      async contentSearch(query, filters, offset) {
+        if (!st.settings.enabled) throw { code: ErrorCode.UNAVAILABLE, message: 'content search is off' };
+        await sleep(R_DELAY);
+        const words = fold(query).split(/\s+/).filter(Boolean);
+        const kinds = filters.kinds || [];
+        const pool = docs.filter((d) => (!kinds.length || kinds.includes(FileKind.DOCUMENT))
+          && (!filters.folder || d.dir.startsWith(filters.folder))).slice(0, Math.round((st.done / total) * 57));
+        const hits = pool.slice(offset, offset + 20).map((d, i) => {
+          const snippet = `… según consta en el acta, ${query} aparece en la cláusula tercera del contrato firmado …`;
+          const highlights = words.flatMap((w) => byteRanges(snippet, w)).sort((a, b) => a[0] - b[0]);
+          return {
+            id: d.id, name: d.name, dir: d.dir, kind: d.kind, size: d.size, modified: d.modified, score: 10 - i,
+            snippet, highlights, passages: [{ page: (d.id % 5) ? (d.id % 40) + 1 : null }], title: null, authors: [], created: null,
+          };
+        });
+        return { hits, partial: words.includes('alguna'), total: pool.length, totalCapped: false, elapsedMs: 40 };
+      },
+      async contentUnreadCounts() {
+        if (!st.settings.enabled && st.done === 0) throw { code: ErrorCode.UNAVAILABLE, message: 'content search is off' };
+        return { byReason: [[UnreadReason.CLOUD, 12], [UnreadReason.SCANNED, 31], [UnreadReason.PASSWORD, 2]], pending: total - st.done, storeBytes: st.done * 14_000 };
+      },
+      async contentUnread(ids) {
+        return ids.map((id) => [id, st.settings.enabled && id % 6 === 0 ? reasons[(id / 6) % reasons.length] : null]);
+      },
+    },
+  };
+}
+const R_DELAY = 250;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 export function createFakeBackend(params) {
   const scenario = params.get('scenario') || Scenario.DEFAULT;
   const slow = params.has('slow');
   let roots = scenario === Scenario.EMPTY ? [] : makeRoots(scenario);
+  // `content=offer`: every folder has finished its first scan, so the offer shows (VFS-27 R4).
+  if (params.get('content') === 'offer') {
+    for (const r of roots) if (r.status === RootStatus.SCANNING) Object.assign(r, { status: RootStatus.READY, lastFullScan: NOW });
+  }
   const R = makeRandom(20261120);
   const corpus = buildCorpus(makeRoots(Scenario.DEFAULT), R);
   // A few links (VFS-18): matched by name, folder or target, like the real search.
@@ -237,6 +327,7 @@ export function createFakeBackend(params) {
     if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail(PatternReason.DUPLICATE);
   };
   const updateCbs = new Set();
+  const content = fakeContent(params.get('content'), corpus.files);
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   let lastChanged = 0;
@@ -541,6 +632,8 @@ export function createFakeBackend(params) {
       await new Promise(() => {}); // the real app relaunches here
     },
     async onUpdateProgress(cb) { updateCbs.add(cb); return () => updateCbs.delete(cb); },
+
+    ...content.api,
 
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {

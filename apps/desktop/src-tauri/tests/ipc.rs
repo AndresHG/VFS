@@ -404,10 +404,11 @@ fn content_status_until(webview: &WebviewWindow<MockRuntime>, f: impl Fn(&Value)
     }
 }
 
-/// VFS-27 AC-2, AC-5, AC-14 over IPC: the content commands with their exact payloads and
+/// VFS-27 AC-2, AC-4, AC-5, AC-14 over IPC: the content commands with their exact payloads and
 /// camelCase shapes. Off by default, nothing has a reason and search reports off; switched
 /// on with no worker next to the test binary, the run stops with the worker reason and no
-/// document changes state; «Borrar lo leído» removes the store and switches off.
+/// document changes state; the offer counts documents and the counts carry the store size;
+/// «Borrar lo leído» removes the store and switches off.
 #[test]
 fn content_commands_over_ipc() {
     use vfs_desktop_lib::content::ContentRuns;
@@ -434,6 +435,14 @@ fn content_commands_over_ipc() {
         st.get("done").is_some() && st.get("perHour").is_some(),
         "{st}"
     );
+    // The offer's numbers (AC-4), read from the name index alone.
+    let offer = invoke(&webview, "content_offer", json!({})).unwrap();
+    assert_eq!(offer["documents"], json!(1), "{offer}");
+    assert!(
+        offer["seconds"].is_array() && offer["bytes"].is_array(),
+        "{offer}"
+    );
+    assert!(offer["lowSpace"].is_boolean(), "{offer}");
     let unread = invoke(&webview, "content_unread", json!({ "fileIds": [1, 2] })).unwrap();
     assert_eq!(unread, json!([[1, null], [2, null]]));
     let off = invoke(
@@ -456,6 +465,7 @@ fn content_commands_over_ipc() {
     assert_eq!(counts["byReason"], json!([]));
     let pending = stopped["total"].as_u64().unwrap() - stopped["done"].as_u64().unwrap();
     assert_eq!(counts["pending"], json!(pending));
+    assert!(counts["storeBytes"].as_u64().unwrap() > 0, "{counts}");
     let page = invoke(
         &webview,
         "content_search",

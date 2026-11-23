@@ -28,6 +28,17 @@
 //     setting is off); install_update emits 'update-progress' {downloaded, total|null}
 //   (VFS-20) feedback_report(description, includeNames) -> string;
 //     feedback_save(description, includeNames, github) -> {folder, file}
+//   (VFS-27) ContentStatus {settings: {enabled, paused, offered}, phase: {kind: ContentPhase,
+//                   reason?: ContentWait|ContentStop, detail?}, done, total, perHour|null,
+//                   secondsLeft|null}; the switch, pause, retry, rebuild, mark-offered and delete
+//                   commands answer it, and 'content-status' carries it
+//   ContentOffer   {documents, seconds: [lo, hi], bytes: [lo, hi], freeBytes|null, lowSpace}
+//   content_search(query, filters, offset) -> {hits: ContentHit[], partial, total, totalCapped,
+//                   elapsedMs}, 20 hits a page
+//   ContentHit     {id, name, dir, kind, size, modified, score, snippet, highlights: [start, end][]
+//                   (UTF-8 byte offsets in snippet), passages: {page|null, …}[], title, authors, created}
+//   content_unread_counts() -> {byReason: [UnreadReason, n][], pending, storeBytes}
+//   content_unread(fileIds) -> [id, UnreadReason|null][]
 //
 // Development-only fake backend (VFS-1 U5). It lives in `apps/desktop/ui-dev/`, outside the
 // bundled `ui/` folder (frontendDist), so it is not in the packaged app at all. On top of that
@@ -88,6 +99,19 @@ function tauriBackend(t) {
     checkForUpdate: () => invoke('check_for_update'),
     installUpdate: () => invoke('install_update'),
     onUpdateProgress: (cb) => listen('update-progress', (e) => cb(e.payload)),
+    // VFS-27: content search.
+    contentStatus: () => invoke('content_status'),
+    contentSetEnabled: (on) => invoke('content_set_enabled', { on }),
+    contentSetPaused: (paused) => invoke('content_set_paused', { paused }),
+    contentRetry: () => invoke('content_retry'),
+    contentRebuild: () => invoke('content_rebuild'),
+    contentMarkOffered: () => invoke('content_mark_offered'),
+    contentOffer: () => invoke('content_offer'),
+    contentDeleteStore: () => invoke('content_delete_store'),
+    contentSearch: (query, filters, offset) => invoke('content_search', { query, filters, offset }),
+    contentUnreadCounts: () => invoke('content_unread_counts'),
+    contentUnread: (fileIds) => invoke('content_unread', { fileIds }),
+    onContentStatus: (cb) => listen('content-status', (e) => cb(e.payload)),
     onProgress: (cb) => listen('index-progress', (e) => cb(e.payload)),
     onIndexChanged: (cb) => listen('index-changed', () => cb()),
   };
@@ -115,6 +139,9 @@ function missingBackend() {
     getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,
     onUpdateProgress: async () => () => {},
     feedbackReport: fail, feedbackSave: fail,
+    contentStatus: fail, contentSetEnabled: fail, contentSetPaused: fail, contentRetry: fail, contentRebuild: fail,
+    contentMarkOffered: fail, contentOffer: fail, contentDeleteStore: fail, contentSearch: fail,
+    contentUnreadCounts: fail, contentUnread: fail, onContentStatus: async () => () => {},
     onProgress: async () => () => {}, onIndexChanged: async () => () => {},
     onBookmarksChanged: async () => () => {},
   };

@@ -99,3 +99,42 @@ export const PatternReason = Object.freeze({
 
 /** The UI's own rejection code, when no Tauri runtime answers; never sent by Rust. */
 export const UiErrorCode = Object.freeze({ BACKEND_MISSING: 'backend_missing' });
+
+/** `ContentStatus.phase.kind`: what the content run is doing (VFS-27 R8, R11, R15). */
+export const ContentPhase = Object.freeze({
+  OFF: 'off',
+  PAUSED: 'paused',
+  CHECKING: 'checking',
+  DAMAGED: 'damaged',
+  READING: 'reading',
+  WAITING: 'waiting',
+  FINISHED: 'finished',
+  STOPPED: 'stopped',
+});
+
+/** `phase.reason` of a waiting content run (VFS-27 R6, R7). */
+export const ContentWait = Object.freeze({
+  NAME_INDEXING: 'nameIndexing',
+  DISK_BUSY: 'diskBusy',
+  IN_USE: 'inUse',
+  LOW_SPACE: 'lowSpace',
+});
+
+/** `phase.reason` of a content run stopped for a run-level reason (VFS-27 R15, VFS-2 R17). */
+export const ContentStop = Object.freeze({
+  WORKER_CANNOT_START: 'worker_cannot_start',
+  VERSION_MISMATCH: 'version_mismatch',
+  WORKER_UNSTABLE: 'worker_unstable',
+  STORE_WRITE: 'store_write',
+  INDEX_WRITE: 'index_write',
+});
+
+/** Why a document's text was not read (VFS-2 R15, VFS-27 R14). */
+export const UnreadReason = Object.freeze({
+  CLOUD: 'cloud',
+  SCANNED: 'scanned',
+  PASSWORD: 'password',
+  TOO_LARGE: 'too_large',
+  UNSUPPORTED: 'unsupported',
+  FAILED: 'failed',
+});

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use vfs_content::indexer::StopReason;
 use vfs_content::pace::PaceConfig;
 use vfs_content::service::{
-    ContentService, Events, Phase, Probes, ServiceConfig, Status, RUN_MARKER,
+    offer, ContentService, Events, Phase, Probes, ServiceConfig, Status, RUN_MARKER,
 };
 use vfs_content::{store, IndexOptions};
 use vfs_core::Vfs;
@@ -536,4 +536,33 @@ fn paused_folder_is_read_when_resumed() {
     wait_for(&svc, "read once resumed", |st| {
         st.phase == Phase::Finished && st.done == 4
     });
+}
+
+/// VFS-27 AC-4 (R4, R6): the offer counts the documents a run would read, cloud-only files
+/// excluded, gives D3's time and disk ranges, warns below 2 GB free, and creates no store.
+#[test]
+fn offer_counts_documents_without_cloud_only_files() {
+    let s = setup(10);
+    let conn = rusqlite::Connection::open(&s.db).unwrap();
+    conn.execute(
+        "UPDATE files SET flags = flags | ?1
+         WHERE id IN (SELECT id FROM files WHERE kind = ?2 ORDER BY id LIMIT 3)",
+        rusqlite::params![
+            vfs_core::db::ingest::FLAG_CLOUD_ONLY,
+            vfs_core::FileKind::Document.code()
+        ],
+    )
+    .unwrap();
+    drop(conn);
+    let o = offer(&s.db, Some(100 << 30));
+    assert_eq!(o.documents, 7);
+    assert_eq!(o.seconds, (7 * 170 / 1000, 7 * 550 / 1000));
+    assert_eq!(o.bytes, (7 * 13_000, 7 * 16_000));
+    assert!(!o.low_space);
+    assert!(offer(&s.db, Some((2 << 30) - 1)).low_space);
+    assert!(
+        !offer(&s.db, None).low_space,
+        "unknown free space warns of nothing"
+    );
+    assert!(!store::exists(&s.db), "the offer opens no store (R2)");
 }

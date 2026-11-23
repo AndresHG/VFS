@@ -264,6 +264,12 @@ struct WebviewSuspended(AtomicBool);
 
 /// On a resize, suspends the WebView2 of a minimised window or resumes it once restored.
 fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
+    if let WindowEvent::CloseRequested { .. } = event {
+        // The close then waits up to 7 s for the content run (VFS-27 R3, R11): the window
+        // goes at once, so the app never looks frozen.
+        let _ = window.hide();
+        return;
+    }
     if !matches!(event, WindowEvent::Resized(_)) {
         return;
     }
@@ -534,6 +540,9 @@ pub fn run() {
         if let RunEvent::Exit = event {
             // A clean close ends the content run, so the next start needs no store check
             // (VFS-27 R11) and the log gets its stop record (R16).
+            for w in app.webview_windows().values() {
+                let _ = w.hide();
+            }
             if let Some(runs) = app.try_state::<content::ContentRuns>() {
                 runs.stop_for_update();
             }
