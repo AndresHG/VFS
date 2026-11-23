@@ -51,8 +51,7 @@ those; content, concept and cross-source search do.
   up. Footprint on a slow PC, background-friendliness and a simple interface come before
   features.
 - **Lightweight above all.** VFS is a program centred on optimisation and lightness: it must
-  never weigh on the computer it runs on, from the owner's slow Windows PC with a spinning
-  disk and a busy sync client to a fast laptop. That is why the core is Rust. Every new
+  never weigh on the computer it runs on, from a slow Windows PC with a spinning disk and a busy sync client to a fast laptop. That is why the core is Rust. Every new
   feature, source or research line is judged first by its cost in memory, CPU, disk I/O and
   index size, and background work yields to the user and to other programs by measuring
   real load. Where an open-source framework or library is too heavy or slow for this, we

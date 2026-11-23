@@ -46,8 +46,8 @@ from; they are stack-agnostic.
   and the PR carries a measured rate on the dev machine before and after (VFS-27 T2).
 - **R11. A change that adds weight** (a dependency, background work, a stored table or index,
   a resident cache, a larger installer) states its cost in the PR: binary or installer bytes,
-  memory, disk and index bytes, CPU or I/O. It measures them where it can, and a cost with no
-  figure is a blocker (CLAUDE.md «Lightweight first»).
+  memory, disk and index bytes, CPU or I/O. It measures them where it can, or gives an estimate
+  with its method; a cost with no figure is a blocker (CLAUDE.md «Lightweight first»).
 
 ## Worth flagging — not blocking
 

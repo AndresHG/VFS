@@ -19,9 +19,9 @@ Spanish and English (VFS-22). Product spec: `specs/vfs-1-core-search/spec.md`.
 
 ## Lightweight first
 
-- Footprint and responsiveness outrank features: VFS must never load the user's system. Every
-  change states its cost in CPU, memory, disk I/O and index size, and a feature that cannot be
-  made light waits (`docs/vision.md`, owner).
+- Footprint and responsiveness outrank features: VFS must never load the user's system. A
+  change that adds weight states its cost in CPU, memory, disk I/O and index size (rubric R11);
+  a feature that cannot be made light waits (`docs/vision.md`).
 - Background work paces itself by measured headroom (disk busy, CPU), never by input
   idleness alone, and is checked on both a fast SSD machine and the slow HDD target (VFS-27 T2).
 - When an open-source library is too heavy or slow for the target, measure it and say so;
