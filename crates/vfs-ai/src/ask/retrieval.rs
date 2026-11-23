@@ -97,13 +97,13 @@ pub fn question_filters(
     Ok((f, narrowed))
 }
 
+/// The rewrite's `kind`, read as a [`FileKind`] by its own serde name; `other` and `folder`
+/// name no kind a question can ask for.
 fn kind_of(kind: &str) -> Option<FileKind> {
-    match kind.trim().to_ascii_lowercase().as_str() {
-        "document" => Some(FileKind::Document),
-        "photo" => Some(FileKind::Photo),
-        "video" => Some(FileKind::Video),
-        "audio" => Some(FileKind::Audio),
-        _ => None,
+    let value = serde_json::Value::String(kind.trim().to_ascii_lowercase());
+    match serde_json::from_value(value).ok()? {
+        FileKind::Other | FileKind::Folder => None,
+        k => Some(k),
     }
 }
 

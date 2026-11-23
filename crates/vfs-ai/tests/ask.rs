@@ -12,7 +12,7 @@ use vfs_ai::{
     AiDb, AiError, AnswerBlock, AnswerEvent, CallKind, CancelToken, Provider, RawCitation, Rewrite,
 };
 use vfs_content::{Query, StructuredQuery};
-use vfs_core::SearchFilters;
+use vfs_core::{FileKind, SearchFilters};
 
 fn opts(provider: Provider) -> AskOptions {
     AskOptions {
@@ -204,6 +204,40 @@ fn rewrite_dates_are_intersected_with_the_screen() {
     let (f, narrowed) = ask::question_filters(&rw, &screen, &corpus).unwrap();
     assert_eq!((f.modified_from, f.modified_to), (Some(ts(2020)), None));
     assert!(!narrowed);
+}
+
+/// VFS-28 AC-5 (R6.2): the rewrite's kind narrows a screen with no kind, is kept when the
+/// screen lists it, and is dropped when outside the screen's kinds or unknown.
+#[test]
+fn rewrite_kind_is_intersected_with_the_screen() {
+    let corpus = FakeCorpus::new(household());
+    let mut rw = rewrite(&["fianza"], &[]);
+    rw.kind = Some("document".into());
+    let (f, narrowed) = ask::question_filters(&rw, &SearchFilters::default(), &corpus).unwrap();
+    assert_eq!(f.kinds, [FileKind::Document]);
+    assert!(narrowed);
+
+    let screen = SearchFilters {
+        kinds: vec![FileKind::Document, FileKind::Photo],
+        ..SearchFilters::default()
+    };
+    let (f, narrowed) = ask::question_filters(&rw, &screen, &corpus).unwrap();
+    assert_eq!(f.kinds, [FileKind::Document]);
+    assert!(narrowed);
+
+    let screen = SearchFilters {
+        kinds: vec![FileKind::Photo],
+        ..SearchFilters::default()
+    };
+    let (f, narrowed) = ask::question_filters(&rw, &screen, &corpus).unwrap();
+    assert_eq!(f.kinds, [FileKind::Photo]);
+    assert!(!narrowed);
+
+    for unknown in ["pdf", "folder", "other"] {
+        rw.kind = Some(unknown.into());
+        let (f, narrowed) = ask::question_filters(&rw, &SearchFilters::default(), &corpus).unwrap();
+        assert!(f.kinds.is_empty() && !narrowed, "{unknown}");
+    }
 }
 
 /// VFS-28 AC-5 (R6.3): 2 documents in the first round run the `any` round; 3 in that one run
