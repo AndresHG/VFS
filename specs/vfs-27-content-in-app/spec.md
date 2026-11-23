@@ -4,7 +4,7 @@
   review asked for revisions, and all of them are made here. PR 27a is implemented. 27b
   ships in two PRs: 27b-1 (the engine's gate and pace policy, the probes, paused folders,
   sleep) and 27b-2 (the app's background indexer); both are implemented. 27c (the interface)
-  is implemented except «Solo documentos», which waits for VFS-38 38b's filter line.
+  is implemented, its «Solo documentos» button (VFS-38 R4, R5) included.
 - **Size**: L. It ships a second executable in both installers, opens user files from the app
   for the first time, and adds platform-specific idle and disk probes. It is multi-PR.
 - **Links**:

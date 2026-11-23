@@ -1,7 +1,8 @@
 # VFS-38 — «Buscar en» and a shorter filter line
 
 - **Status**: approved. The owner decided D1–D3. Two independent critic passes asked for
-  revisions; all of them are made here.
+  revisions; all of them are made here. 38a, 38b and the 27c part are implemented; the VFS-29
+  part waits for VFS-29.
 - **Size**: L. It is multi-PR, and two of its pieces ride with other specs' PRs (VFS-27 27c,
   VFS-29). It touches the search request in `vfs-core` and `vfs-bookmarks`, the filter line,
   the result rows, and both string catalogs. It has no index schema change, no new store, and

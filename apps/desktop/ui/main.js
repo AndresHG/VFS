@@ -14,7 +14,7 @@ import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, ro
 import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
 import {
-  ContentAction, contentOn, contentStatusLine, createContentSearch, hitPage, offerDue, offerText, sectionNotes, snippetRuns,
+  ContentAction, contentOn, contentQueryDue, contentStatusLine, createContentSearch, hitPage, offerDue, offerText, sectionNotes, snippetRuns,
   unreadCandidates, unreadLabel,
 } from './content.js';
 import {
@@ -22,8 +22,8 @@ import {
   SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
-  DateChoice, LanguageChoice, OFFERED_SCOPES, ScopeChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View,
-  scopeFor, typeChecklistMode,
+  DateChoice, LanguageChoice, ScopeChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View,
+  scopeFor, scopesFor, typeChecklistMode,
 } from './choices.js';
 import { PrefKey, readPref, webStorage, writePref } from './prefs.js';
 import {
@@ -120,7 +120,8 @@ function main(L) {
     searchState: SearchState.IDLE,
     unavailableDismissed: '',
     // VFS-38 R6: remembered; source and sort are read once the bookmark setting is known.
-    scope: readPref(store, PrefKey.SCOPE, OFFERED_SCOPES, ScopeChoice.ALL),
+    // «Solo documentos» is checked against content search once its status is known (R5).
+    scope: readPref(store, PrefKey.SCOPE, scopesFor(true), ScopeChoice.ALL),
     source: SourceChoice.BOTH,
     sort: SortOrder.RELEVANCE,
     bookmarks: null, // BookmarkStatus, null until known
@@ -217,22 +218,35 @@ function main(L) {
   /* VFS-38 R1: the scope group, a radio group with one tab stop; the arrow keys move the choice
      and every change runs the search again (the newer query drops the older, VFS-1 S6). */
   const scopeGroup = $('f-scope');
-  for (const choice of OFFERED_SCOPES) {
-    const b = el('button', 'scope-btn', S.scopeOptions[choice]);
-    b.type = 'button';
-    b.setAttribute('role', 'radio');
-    b.dataset.scope = choice;
-    scopeGroup.append(b);
-  }
   const scopeRadios = () => [...scopeGroup.querySelectorAll('[role="radio"]')];
 
+  /** The offered scopes: «Solo documentos» while content search is on, and while its status
+   *  is not known yet when it is the remembered choice (R5 decides once it is). */
+  function offeredScopes() {
+    return scopesFor(state.content ? contentOn(state.content) : state.scope === ScopeChoice.DOCUMENTS);
+  }
+
   function renderScope() {
+    const offered = offeredScopes();
+    if (scopeRadios().map((b) => b.dataset.scope).join() !== offered.join()) {
+      const focused = scopeGroup.contains(document.activeElement);
+      for (const b of scopeRadios()) b.remove();
+      for (const choice of offered) {
+        const b = el('button', 'scope-btn', S.scopeOptions[choice]);
+        b.type = 'button';
+        b.setAttribute('role', 'radio');
+        b.dataset.scope = choice;
+        scopeGroup.append(b);
+      }
+      if (focused) scopeGroup.querySelector(`[data-scope="${state.scope}"]`)?.focus();
+    }
     for (const b of scopeRadios()) {
       const chosen = b.dataset.scope === state.scope;
       b.setAttribute('aria-checked', String(chosen));
       b.tabIndex = chosen ? 0 : -1;
     }
     scopeGroup.classList.toggle(ON, state.scope !== ScopeChoice.ALL);
+    $('main').dataset.scope = state.scope; // VFS-38 R4: the layout without a name list
   }
 
   function setScope(choice) {
@@ -240,6 +254,7 @@ function main(L) {
     state.scope = choice;
     writePref(store, PrefKey.SCOPE, choice);
     renderScope();
+    renderSources();
     filtersChanged();
   }
 
@@ -298,6 +313,12 @@ function main(L) {
     return !!state.bookmarks?.enabled;
   }
 
+  /** Whether the source choice applies: bookmarks on, and not under «Solo documentos», which
+   *  searches no bookmarks (VFS-38 R4). */
+  function sourceApplies() {
+    return bookmarksOn() && state.scope !== ScopeChoice.DOCUMENTS;
+  }
+
   /** The source choice (VFS-6), remembered (VFS-38 R6). */
   function setSource(choice) {
     state.source = choice;
@@ -319,13 +340,13 @@ function main(L) {
    *  then (VFS-12); the size filter does not apply to bookmarks alone (VFS-6 R7). */
   function renderSources() {
     const on = bookmarksOn();
-    $('f-source-field').hidden = !on;
+    $('f-source-field').hidden = !sourceApplies();
     state.sort = sortFor(state.sort, on);
     const sorts = $('f-sort');
     sorts.replaceChildren(...sortChoices(on).map((o) => new Option(S.sortOptions[o], o)));
     sorts.value = state.sort;
     $('f-source').value = state.source;
-    $('f-size').disabled = !sizeFilterApplies(state.source, on);
+    $('f-size').disabled = !sizeApplies();
     $('f-sort-pill').classList.toggle(ON, state.sort !== SortOrder.RELEVANCE);
   }
 
@@ -364,7 +385,7 @@ function main(L) {
   }
 
   function sizeApplies() {
-    return sizeFilterApplies(state.source, bookmarksOn());
+    return sizeFilterApplies(state.source, sourceApplies());
   }
 
   /** The filters that narrow the files: type, date, size and folder. Any of them makes a
@@ -393,7 +414,7 @@ function main(L) {
     if (state.folder !== '') {
       out.push({ text: S.chipFolder(folderName()), clear: () => { state.folder = ''; $('f-folder').value = ''; } });
     }
-    if (bookmarksOn() && state.source !== SourceChoice.BOTH) {
+    if (sourceApplies() && state.source !== SourceChoice.BOTH) {
       out.push({ text: S.sourceChips[state.source], clear: () => setSource(SourceChoice.BOTH) });
     }
     return out;
@@ -508,6 +529,7 @@ function main(L) {
       state.scope = ScopeChoice.ALL;
       writePref(store, PrefKey.SCOPE, state.scope);
       renderScope();
+      renderSources();
     }
     filtersChanged();
     $('q').focus();
@@ -558,6 +580,12 @@ function main(L) {
     if (!quiet) runContentQuery();
     if (!hasQuery()) {
       state.searchState = SearchState.IDLE;
+      setResults(0, null, new Map());
+      return;
+    }
+    if (state.scope === ScopeChoice.DOCUMENTS) {
+      // VFS-38 R4: only the content section; no name or path search, no suggestion.
+      state.searchState = SearchState.DONE;
       setResults(0, null, new Map());
       return;
     }
@@ -1051,6 +1079,21 @@ function main(L) {
       } else {
         mode = SearchState.IDLE;
         parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(N.count(filesIndexed))), el('p', null, S.emptyIdleBody));
+      }
+    } else if (state.searchState === SearchState.DONE && state.scope === ScopeChoice.DOCUMENTS) {
+      // VFS-38 R4: content results only. A short query asks for 3 letters; no match offers «Todo».
+      const view = contentSearch.view();
+      if (!contentQueryDue(state.text)) {
+        mode = 'documents-short';
+        parts.push(icon('search'), el('h3', null, S.emptyDocumentsShort));
+      } else if (!view || (!view.loading && !view.failed && !view.hits.length)) {
+        mode = `documents-none:${state.text.trim()}`;
+        parts.push(icon('search'), el('h3', null, S.emptyNoHitsTitle(state.text.trim())), el('p', null, S.contentNone));
+        actions = [button(S.searchEverything, 'btn btn-primary', () => { setScope(ScopeChoice.ALL); q.focus(); })];
+      } else {
+        box.hidden = true;
+        setView();
+        return;
       }
     } else if (state.searchState === SearchState.DONE && !state.total && contentSearch.view()?.hits.length) {
       // No name hits, but hits inside documents below: no "nothing found" over them (R12).
@@ -1622,9 +1665,9 @@ function main(L) {
   let shownContentHits = null;
 
   /** The content section applies to file searches with content search on (R12), never under
-   *  «Solo nombres» (VFS-38 R3). */
+   *  «Solo nombres» (VFS-38 R3); under «Solo documentos» the source choice does not apply (R4). */
   function contentApplies() {
-    return contentOn(state.content) && sourcesFor(state.source, bookmarksOn()).includes(Source.FILES)
+    return contentOn(state.content) && sourcesFor(sourceApplies() ? state.source : SourceChoice.FILES, bookmarksOn()).includes(Source.FILES)
       && bookmarkFolderOf(state.folder) == null && state.scope !== ScopeChoice.NAMES;
   }
 
@@ -1640,7 +1683,8 @@ function main(L) {
     if (view.loading && !view.hits.length) notes.push(S.contentSearching);
     if (view.failed) notes.push(S.contentFailed);
     notes.push(...sectionNotes(L, state.content, view.partial));
-    if (!view.loading && !view.failed && !view.hits.length) notes.push(S.contentNone);
+    // Under «Solo documentos» the empty view says it, with «Buscar en todo» (VFS-38 R4).
+    if (!view.loading && !view.failed && !view.hits.length && state.scope !== ScopeChoice.DOCUMENTS) notes.push(S.contentNone);
     $('content-notes').replaceChildren(...notes.map((t) => el('p', null, t)));
     $('content-more').hidden = !view.more;
     if (view.hits === shownContentHits) return;
@@ -1692,6 +1736,16 @@ function main(L) {
   function setContent(st) {
     const before = state.content;
     state.content = st;
+    // VFS-38 R5: at start, or when content search goes off, «Solo documentos» becomes «Todo».
+    if (state.scope === ScopeChoice.DOCUMENTS && !contentOn(st)) {
+      state.scope = ScopeChoice.ALL;
+      writePref(store, PrefKey.SCOPE, state.scope);
+      renderScope();
+      renderSources();
+      filtersChanged();
+    } else {
+      renderScope();
+    }
     if (contentOn(before) !== contentOn(st)) {
       runContentQuery();
       if (contentOn(st)) loadUnread([...state.pages.values()].flat());

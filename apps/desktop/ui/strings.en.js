@@ -140,6 +140,9 @@ export const en = {
   emptyNoHitsBody: 'Check what you typed or try fewer words.',
   emptyNoHitsFilters: 'Some filters are on and may be hiding results.',
   emptyNamesOnly: 'Searching names only.',
+  // VFS-38 R4: «Solo documentos» with a query under 3 letters, and its no-match action.
+  emptyDocumentsShort: 'Type at least 3 letters to search inside documents.',
+  searchEverything: 'Search everything',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `No results with these filters. Search without filters? (${n})`,
   suggestSpelling: (word, n) => `Did you mean “${word}”? (${n})`,

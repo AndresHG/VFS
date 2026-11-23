@@ -166,19 +166,13 @@ function filterStates(S) {
   ];
 }
 
-/** Opens the results view with bookmarks on and a third scope button, as VFS-27 27c will add. */
+/** Opens the results view with bookmarks on and content search on, so the scope group has its
+ *  three buttons (VFS-38 R1). */
 async function openFilterLine(viewport, text, lang) {
-  await open(viewport, text, lang === Lang.EN ? '&bookmarks&locale=en-US' : '&bookmarks');
+  await open(viewport, text, `${lang === Lang.EN ? '&bookmarks&locale=en-US' : '&bookmarks'}&content=on`);
   await until(`[...document.getElementById('f-folder').options].some((o) => o.value === 'D:\\\\Archivo familiar')
-    && !document.getElementById('f-source-field').hidden`, 'roots and bookmarks');
-  const label = JSON.stringify(CATALOGS[lang].scopeOptions[ScopeChoice.DOCUMENTS]);
-  await evaluate(`(() => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'scope-btn'; b.textContent = ${label};
-    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', 'false'); b.tabIndex = -1;
-    b.dataset.scope = ${JSON.stringify(ScopeChoice.DOCUMENTS)};
-    document.getElementById('f-scope').append(b);
-  })()`);
+    && !document.getElementById('f-source-field').hidden
+    && document.querySelectorAll('#f-scope [role="radio"]').length === 3`, 'roots, bookmarks and the three scope buttons');
   await page.type('a');
   await until(`document.getElementById('app').dataset.view === 'list'`, 'results view');
 }

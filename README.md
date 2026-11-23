@@ -38,9 +38,10 @@ ordinary or fast machines. The product spec is
   20 results. Shorter words match exactly.
 - Shows folders as results too, marked as folders.
 - Filters by type (documento, foto, vídeo, audio, carpeta, otro), date, size and folder.
-  The filter line holds "Buscar en" ("Todo", the default, or "Solo nombres": words are
-  matched in file and folder names only, not in folder paths), "Tipo", "Fecha" and "Más
-  filtros", which opens size, folder and the bookmark source. Filters in use show as
+  The filter line holds "Buscar en" ("Todo", the default; "Solo nombres": words are
+  matched in file and folder names only, not in folder paths; and, while content search is
+  on, "Solo documentos": only the text inside documents; turning content search off brings
+  back "Todo"), "Tipo", "Fecha" and "Más filtros", which opens size, folder and the bookmark source. Filters in use show as
   removable chips below it, with "Quitar filtros", which also brings back "Todo" (spec
   [VFS-38](specs/vfs-38-search-modes/spec.md)).
 - "Orden", beside the result count, sorts by relevance (the default), newest, oldest, name or
@@ -66,8 +67,8 @@ ordinary or fast machines. The product spec is
 
 ## What it deliberately does not do
 
-- Search inside documents. That is planned for milestone Fase 3; the design is in
-  [`docs/content-search-design.md`](docs/content-search-design.md).
+- Search inside documents unless you turn it on. It is offered once after the first scan
+  and switched in "Ajustes" (spec [VFS-27](specs/vfs-27-content-in-app/spec.md)).
 - Understand photos, audio or video. They are found by name, folder and filters only.
 - Open files or show previews. (A bookmark's web page is opened in Firefox on request.)
 - Change anything in a source: no file, and nothing in Firefox (bookmarks are never edited,
@@ -96,7 +97,7 @@ in [`docs/vision.md`](docs/vision.md).
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
 | `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`. Not yet wired into the app. |
-| `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app comes with VFS-27 27c. |
+| `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app is VFS-27. |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`, `--names-only`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off`. |
 | `bench/` | Standalone evaluation and measurement tools for content search (extractors, engines, corpus); outside the workspace. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
@@ -299,8 +300,9 @@ It is designed for 5 million files (a 4–5 TB archive) and tuned to stay light 
 Windows PC with a spinning disk.
 
 **Does it search inside documents?**
-Not yet. VFS finds files by name, folder, type, date and size. Searching inside Word and PDF
-files is planned for phase 3 ([design](docs/content-search-design.md)).
+Only if you turn it on. VFS finds files by name, folder, type, date and size. Searching inside
+documents is off by default; the app offers it once after the first scan, and "Ajustes" turns
+it on or off ([spec](specs/vfs-27-content-in-app/spec.md)).
 
 **Does it send my data anywhere?**
 No. VFS works offline: no account, no cloud service, no LLM. Its only connection is the

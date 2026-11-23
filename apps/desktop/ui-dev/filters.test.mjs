@@ -287,3 +287,62 @@ test('the empty view names the scope and its suggestion brings back «Todo»', a
   await until(`${rowCount} === 2`, 'the names-only hits');
   assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES, 'the scope stays');
 });
+
+const scopeButtons = `[...document.querySelectorAll('#f-scope [role="radio"]')].map((b) => b.dataset.scope)`;
+const emptyBox = `(() => { const e = document.getElementById('empty'); return e.hidden ? null
+  : { title: e.querySelector('h3')?.textContent, body: [...e.querySelectorAll('p')].map((p) => p.textContent),
+    action: e.querySelector('.actions .btn-primary')?.textContent ?? null }; })()`;
+
+/** VFS-38 AC-4 (R1, R4, R5): «Solo documentos» is offered only while content search is on. It
+ *  shows the content section alone: no name list, no «Origen», no «Orden», and no name search
+ *  sent. A short query asks for 3 letters; no match offers «Buscar en todo», which brings back
+ *  «Todo». Turning content search off, or a restart with it off, brings back «Todo». */
+test('«Solo documentos» shows only the content results', async () => {
+  await start(BOOKMARKS);
+  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES], 'content search off');
+
+  await start(`${BOOKMARKS}&content=on`);
+  await until(`${scopeButtons}.length === 3`, 'the third button once content search is on');
+  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES, ScopeChoice.DOCUMENTS]);
+  await until(`!document.getElementById('f-source-field').hidden`, '«Origen» under «Todo» with bookmarks on');
+  await recordSearches();
+  await page.scope(ScopeChoice.DOCUMENTS);
+  assert.equal(await evaluate(checkedScope), ScopeChoice.DOCUMENTS);
+  await page.type('peñalara');
+  await until(`document.querySelectorAll('#content-list .chit').length > 0`, 'the content hits');
+  assert.equal(await evaluate(rowCount), 0, 'no name list');
+  assert.deepEqual(await evaluate('window.searches'), [], 'no name or path search');
+  assert.equal(await evaluate(`document.getElementById('f-source-field').hidden`), true, 'no «Origen»');
+  assert.equal(await evaluate(`document.getElementById('f-sort-pill').hidden`), true, 'no «Orden»');
+  assert.equal(await evaluate(emptyBox), null, 'no empty view over the hits');
+  assert.equal(await evaluate(`document.querySelector('.list-wrap').offsetParent`), null, 'the section takes the name list\'s room');
+  assert.equal(await evaluate(`document.getElementById('content-title').textContent`), S.contentTitle);
+
+  await page.type('pe');
+  await until(`${emptyBox}?.title === ${JSON.stringify(S.emptyDocumentsShort)}`, 'the 3-letter message');
+  assert.equal(await evaluate(`document.getElementById('content-hits').hidden`), true);
+
+  await page.type('zzzz');
+  await until(`${emptyBox}?.action === ${JSON.stringify(S.searchEverything)}`, 'the no-match view');
+  assert.deepEqual(await evaluate(emptyBox), {
+    title: S.emptyNoHitsTitle('zzzz'), body: [S.contentNone], action: S.searchEverything,
+  });
+  assert.ok(!(await evaluate(`document.getElementById('content-notes').textContent`)).includes(S.contentNone), 'said once');
+  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
+  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, '«Buscar en todo» sets «Todo»');
+  await until('window.searches.length > 0', 'the name search under «Todo»');
+
+  await page.scope(ScopeChoice.DOCUMENTS);
+  await evaluate(`(() => { const t = document.getElementById('content-on'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await until(`${scopeButtons}.length === 2`, 'two buttons once content search is off');
+  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, 'off brings back «Todo»');
+  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(PrefKey.SCOPE)})`), ScopeChoice.ALL);
+
+  await start(BOOKMARKS, { [PrefKey.SCOPE]: ScopeChoice.DOCUMENTS });
+  await until(`${checkedScope} === ${JSON.stringify(ScopeChoice.ALL)}`, '«Todo» after a restart with content search off');
+  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES]);
+
+  await start(`${BOOKMARKS}&content=on`, { [PrefKey.SCOPE]: ScopeChoice.DOCUMENTS });
+  await until(`${scopeButtons}.length === 3`, 'the content status');
+  assert.equal(await evaluate(checkedScope), ScopeChoice.DOCUMENTS, 'kept while content search is on');
+});

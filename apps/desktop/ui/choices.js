@@ -57,9 +57,11 @@ export const TimeUnit = Object.freeze({ MINUTES: 'minutes', HOURS: 'hours', DAYS
  *  with the content switch (VFS-27 27c). */
 export const ScopeChoice = Object.freeze({ ...Scope, DOCUMENTS: 'documents' });
 
-/** The scope buttons on the filter line, in order (VFS-38 R1). VFS-27 27c adds DOCUMENTS
- *  while content search is on. */
-export const OFFERED_SCOPES = Object.freeze([ScopeChoice.ALL, ScopeChoice.NAMES]);
+/** The scope buttons on the filter line, in order (VFS-38 R1): «Solo documentos» only while
+ *  content search is on (VFS-38 R5). */
+export function scopesFor(contentOn) {
+  return contentOn ? [ScopeChoice.ALL, ScopeChoice.NAMES, ScopeChoice.DOCUMENTS] : [ScopeChoice.ALL, ScopeChoice.NAMES];
+}
 
 /** The `SearchQuery.scope` of a scope choice. */
 export function scopeFor(choice) {
