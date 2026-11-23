@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_tree  # noqa: E402
 from wd import WebDriverError, element_id  # noqa: E402
 import measure  # noqa: E402
+from journey import App  # noqa: E402
 
 
 def listing(root):
@@ -162,6 +163,42 @@ class BetweenTest(unittest.TestCase):
             self.assertLess(time.monotonic() - t, 10)
         self.assertEqual(r["exit"], 0)
         self.assertIn("remounted", r["out"])
+
+
+class ReadyProbeTest(unittest.TestCase):
+    def test_each_try_is_bounded_and_recorded(self):
+        """VFS-8 AC-5: a script call that never answers costs one bounded try, and the tries
+        are kept in `ready_trace` and in the timeout error."""
+        timeouts = []
+
+        class Hung:
+            def js(self, script, *args, timeout=None):
+                timeouts.append(timeout)
+                raise TimeoutError("timed out")
+
+        app = App.__new__(App)
+        app.wd, app.ready_trace = Hung(), {}
+        with self.assertRaises(TimeoutError) as err:
+            app.ready_probe("return true", "UI ready", timeout=0.6, per_call=7)
+        self.assertTrue(timeouts and all(t == 7 for t in timeouts))
+        trace = app.ready_trace["UI ready"]
+        self.assertEqual(len(trace), len(timeouts))
+        self.assertTrue(all(len(t) == 3 and "timed out" in t[2] for t in trace))
+        self.assertIn("tries", str(err.exception))
+        self.assertIn("timed out", str(err.exception))
+
+    def test_a_ready_answer_ends_the_wait(self):
+        """VFS-8 AC-5: the first true answer ends the wait and is recorded."""
+        answers = iter([False, True])
+
+        class Page:
+            def js(self, script, *args, timeout=None):
+                return next(answers)
+
+        app = App.__new__(App)
+        app.wd, app.ready_trace = Page(), {}
+        app.ready_probe("return true", "UI ready", timeout=5)
+        self.assertEqual([t[2] for t in app.ready_trace["UI ready"]], [False, True])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ it, memory at rest, and the start-up catch-up after changes made while the app w
 
 Usage: measure.py --app <exe> --manifest <manifest.json> --label quiet|busy --out <dir>
                   [--between "<command run while the app is closed, e.g. a disk remount>"]
-Writes <out>/measure-<label>.json.
+Writes <out>/measure-<label>.json, and the `--between` command's output to <out>/between-<label>.txt.
 """
 
 import argparse
