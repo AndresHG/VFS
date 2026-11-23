@@ -1,0 +1,50 @@
+{"id": "q01", "question": "¿Cuánto nos toca pagar de derrama por el ascensor?", "answerable": true, "gold": [{"file": "acta.pdf", "page": 1}], "must_contain": ["1.200"]}
+{"id": "q02", "question": "¿Cuánto pago al año por el seguro de la casa?", "answerable": true, "gold": [{"file": "carta_seguro.docx"}], "must_contain": ["312"]}
+{"id": "q03", "question": "¿Cuánto hay que pagar por la excursión del colegio y adónde van?", "answerable": true, "gold": [{"file": "colegio.txt"}], "must_contain": ["25 euros", "Segovia"]}
+{"id": "q04", "question": "¿Cuánto me costó la luz en junio de 2020?", "answerable": true, "gold": [{"file": "doc_2020_07.txt"}], "must_contain": ["68,40"]}
+{"id": "q05", "question": "¿Cuánto pago de alquiler al mes por el piso?", "answerable": true, "gold": [{"file": "escaneo0034.docx"}], "must_contain": ["750"]}
+{"id": "q06", "question": "¿Cómo se llama el dueño del piso que tengo alquilado?", "answerable": true, "gold": [{"file": "escaneo0034.docx"}], "must_contain": ["Luis Pérez Gil"]}
+{"id": "q07", "question": "¿Cuánto pagué de fianza por el piso?", "answerable": true, "gold": [{"file": "escaneo0034.docx"}], "must_contain": ["dos mensualidades"]}
+{"id": "q08", "question": "¿Hasta cuándo tiene garantía la lavadora?", "answerable": true, "gold": [{"file": "garantia_lavadora.pdf", "page": 1}], "must_contain": ["tres años", "18 de mayo de 2021"]}
+{"id": "q09", "question": "¿Qué número de serie tiene la lavadora?", "answerable": true, "gold": [{"file": "garantia_lavadora.pdf", "page": 1}], "must_contain": ["4401-2283"]}
+{"id": "q10", "question": "¿Cuánto dinero nos prestó el banco para la hipoteca?", "answerable": true, "gold": [{"file": "hipoteca_bbva.pdf", "page": 1}], "must_contain": ["180.000", "25 años"]}
+{"id": "q11", "question": "¿Cuánto pagué de IBI el año 2023?", "answerable": true, "gold": [{"file": "ibi.pdf", "page": 1}], "must_contain": ["498,32"]}
+{"id": "q12", "question": "¿A qué edad me puedo jubilar?", "answerable": true, "gold": [{"file": "jubilacion.txt"}], "must_contain": ["66 años y cuatro meses"]}
+{"id": "q13", "question": "¿Qué día tengo cita con la endocrina?", "answerable": true, "gold": [{"file": "medico.txt"}], "must_contain": ["14 de octubre"]}
+{"id": "q14", "question": "¿Cuándo viene el técnico a arreglar la caldera?", "answerable": true, "gold": [{"file": "nota_rapida.txt"}], "must_contain": ["jueves", "Junkers"]}
+{"id": "q15", "question": "¿Cuándo le pusieron a Toby la vacuna de la rabia?", "answerable": true, "gold": [{"file": "perro.docx"}], "must_contain": ["3 de febrero"]}
+{"id": "q16", "question": "¿Qué ingredientes lleva el cocido de la abuela?", "answerable": true, "gold": [{"file": "receta_abuela.docx"}], "must_contain": ["garbanzos", "chorizo"]}
+{"id": "q17", "question": "¿Cuánto me salió a devolver la renta de 2022?", "answerable": true, "gold": [{"file": "renta2022.pdf", "page": 1}], "must_contain": ["412"]}
+{"id": "q18", "question": "¿Qué días estuvimos de vacaciones en Asturias?", "answerable": true, "gold": [{"file": "viaje_asturias.docx"}], "must_contain": ["2 al 12 de agosto", "Cangas de Onís"]}
+{"id": "q19", "question": "¿Cuántos años dura el convenio de prácticas con la Universidad de Castilla-La Mancha?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 8}], "must_contain": ["cuatro"]}
+{"id": "q20", "question": "¿Cobran algo los estudiantes que hacen las prácticas en Francia?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 5}], "must_contain": ["1.000"]}
+{"id": "q21", "question": "¿Con cuánto tiempo de aviso se pueden dejar las prácticas antes de tiempo?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 4}], "must_contain": ["quince días"]}
+{"id": "q22", "question": "¿Qué certificado tiene que presentar el estudiante para hacer prácticas con menores?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 6}], "must_contain": ["Delitos de Naturaleza Sexual"]}
+{"id": "q23", "question": "¿Quién firmó el convenio de prácticas en nombre de la Universidad de Castilla-La Mancha?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 9}], "must_contain": ["Raúl Martín Martín"]}
+{"id": "q24", "question": "¿Cuántas plazas de limpiador convoca el Ayuntamiento de Monzón?", "answerable": true, "gold": [{"file": "BOE-A-2024-100.pdf", "page": 1}], "must_contain": ["tres plazas", "una plaza"]}
+{"id": "q25", "question": "¿Qué plaza ofrece el Ayuntamiento de Sabiñánigo?", "answerable": true, "gold": [{"file": "BOE-A-2024-5000.pdf", "page": 1}], "must_contain": ["Matarife"]}
+{"id": "q26", "question": "¿Qué complemento específico tiene el puesto de Subdirector Adjunto de Relaciones Laborales?", "answerable": true, "gold": [{"file": "BOE-A-2024-1.pdf", "page": 2}], "must_contain": ["22.910,30"]}
+{"id": "q27", "question": "¿A quién nombró la Universidad de Córdoba profesora titular de Ciencias de la Computación?", "answerable": true, "gold": [{"file": "BOE-A-2022-10000.pdf", "page": 1}], "must_contain": ["Aida Gema de Haro García"]}
+{"id": "q28", "question": "¿Cuántos huevos pone la cigüeña blanca?", "answerable": true, "gold": [{"file": "wiki_ciguena.pdf", "page": 1}], "must_contain": ["cuatro huevos"]}
+{"id": "q29", "question": "¿Qué altura tiene Peñalara?", "answerable": true, "gold": [{"file": "wiki_penalara.pdf", "page": 1}], "must_contain": ["2428"]}
+{"id": "q30", "question": "¿Cuándo declararon la paella bien de interés cultural?", "answerable": true, "gold": [{"file": "wiki_paella.pdf", "page": 1}], "must_contain": ["9 de noviembre de 2021"]}
+{"id": "q31", "question": "¿Qué ley regula el IRPF?", "answerable": true, "gold": [{"file": "wiki_irpf.pdf", "page": 1}], "must_contain": ["35/2006"]}
+{"id": "q32", "question": "¿Desde cuándo hay constancia escrita de la tortilla de patatas en España?", "answerable": true, "gold": [{"file": "wiki_tortilla.docx"}], "must_contain": ["1767"]}
+{"id": "q33", "question": "¿Cómo se dice cuando alguien muere sin hacer testamento?", "answerable": true, "gold": [{"file": "wiki_testamento.docx"}], "must_contain": ["abintestato"]}
+{"id": "q34", "question": "¿Qué parte de los ingresos debería ir como máximo a pagar la hipoteca?", "answerable": true, "gold": [{"file": "wiki_hipoteca.pdf", "page": 1}], "must_contain": ["30"]}
+{"id": "q35", "question": "¿Desde cuándo se usa el fuego para calentarse?", "answerable": true, "gold": [{"file": "wiki_calefaccion.docx"}], "must_contain": ["450 000"]}
+{"id": "q36", "question": "¿Cuánto pagué del impuesto de circulación del coche?", "answerable": false}
+{"id": "q37", "question": "¿Cuánto me cuesta el seguro del coche?", "answerable": false}
+{"id": "q38", "question": "¿Qué número de póliza tiene el seguro de hogar?", "answerable": false}
+{"id": "q39", "question": "¿Cuánto pagué de gas el invierno pasado?", "answerable": false}
+{"id": "q40", "question": "¿Qué cuota pago al mes de hipoteca?", "answerable": false}
+{"id": "q41", "question": "¿Cuánto es la cuota mensual de la comunidad de vecinos?", "answerable": false}
+{"id": "q42", "question": "¿Cuál es el teléfono del fontanero?", "answerable": false}
+{"id": "q43", "question": "¿Cuánto me costó la lavadora?", "answerable": false}
+{"id": "q44", "question": "¿Qué nota sacó el niño en matemáticas?", "answerable": false}
+{"id": "q45", "question": "¿En qué hotel nos alojamos en Asturias?", "answerable": false}
+{"id": "q46", "question": "¿Cuánto me salió la declaración de la renta de 2023?", "answerable": false}
+{"id": "q47", "question": "¿Cuándo le toca a Toby la vacuna de la leishmaniasis?", "answerable": false}
+{"id": "q48", "question": "¿Cuál es la receta de la fabada?", "answerable": false}
+{"id": "q49", "question": "¿Cuánto cobra al mes un profesor titular de la Universidad de Córdoba?", "answerable": false}
+{"id": "q50", "question": "¿Qué altura tiene el Mulhacén?", "answerable": false}

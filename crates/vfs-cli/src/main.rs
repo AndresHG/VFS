@@ -1,6 +1,8 @@
 //! `vfs` command line (VFS-1): index folders and search from a terminal, generate a
 //! synthetic index (`gen-db`) and run the AC-9 benchmark on it (`bench`).
 
+#[cfg(feature = "content")]
+mod ask;
 mod bench;
 #[cfg(feature = "content")]
 mod content;
@@ -163,6 +165,31 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Ask the archive a question with a real provider (VFS-28; the key is read from the
+    /// VFS_AI_KEY environment variable). Needs content search on for this index.
+    #[cfg(feature = "content")]
+    Ask {
+        #[arg(long)]
+        db: PathBuf,
+        /// The question.
+        question: Vec<String>,
+        #[arg(long, value_enum, default_value = "anthropic")]
+        provider: ProviderArg,
+        /// Answer in English instead of Spanish.
+        #[arg(long)]
+        english: bool,
+        /// «Respuestas más baratas»: answer with the cheap model.
+        #[arg(long)]
+        cheap: bool,
+        /// Ask even when the month's cost cap is reached.
+        #[arg(long)]
+        yes: bool,
+        /// The record of what was sent; default `ai.db` next to the index.
+        #[arg(long)]
+        ai_db: Option<PathBuf>,
+        #[arg(long)]
+        folder: Option<String>,
+    },
     /// Switch content search off: delete the content store (VFS-2 prototype).
     #[cfg(feature = "content")]
     ContentOff {
@@ -191,6 +218,13 @@ enum Cmd {
         #[arg(long, value_enum, default_value_t = sources::SortArg::Relevance)]
         sort: sources::SortArg,
     },
+}
+
+#[cfg(feature = "content")]
+#[derive(Clone, Copy, ValueEnum)]
+enum ProviderArg {
+    Anthropic,
+    Openai,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -516,6 +550,36 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 scope: Default::default(),
             };
             content::search(&db, &q, layout, runs, json)?;
+        }
+        #[cfg(feature = "content")]
+        Cmd::Ask {
+            db,
+            question,
+            provider,
+            english,
+            cheap,
+            yes,
+            ai_db,
+            folder,
+        } => {
+            let ai_db = ai_db.unwrap_or_else(|| db.with_file_name("ai.db"));
+            ask::run(ask::AskArgs {
+                db: &db,
+                ai_db: &ai_db,
+                provider: match provider {
+                    ProviderArg::Anthropic => vfs_ai::Provider::Anthropic,
+                    ProviderArg::Openai => vfs_ai::Provider::OpenAi,
+                },
+                lang: if english {
+                    vfs_ai::ask::Lang::En
+                } else {
+                    vfs_ai::ask::Lang::Es
+                },
+                cheap,
+                yes,
+                filters: build_filters(Vec::new(), None, None, None, None, folder)?,
+                question: question.join(" "),
+            })?
         }
         #[cfg(feature = "content")]
         Cmd::ContentOff { db } => content::off(&db)?,

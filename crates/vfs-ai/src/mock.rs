@@ -166,3 +166,68 @@ fn serve(stream: TcpStream, response: &MockResponse) -> Option<RecordedRequest> 
         body: String::from_utf8_lossy(&body).into(),
     })
 }
+
+/// An Anthropic rewrite response whose structured output is `rewrite`, in the shape of
+/// `tests/fixtures/anthropic_rewrite.json`.
+pub fn anthropic_rewrite(rewrite: &crate::Rewrite) -> MockResponse {
+    let text = serde_json::to_string(rewrite).unwrap_or_default();
+    let body = serde_json::json!({
+        "id": "msg_mock_rewrite", "type": "message", "role": "assistant",
+        "model": crate::cost::CLAUDE_HAIKU,
+        "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 800, "output_tokens": 60,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    });
+    MockResponse::json(200, body.to_string())
+}
+
+/// An Anthropic streamed answer of `blocks`, each citation sent as a `citations_delta` with its
+/// `search_result_index`, in the shape of `tests/fixtures/anthropic_answer.sse`.
+pub fn anthropic_answer(blocks: &[crate::AnswerBlock]) -> MockResponse {
+    let event = |name: &str, data: serde_json::Value| format!("event: {name}\ndata: {data}\n\n");
+    let mut sse = event(
+        "message_start",
+        serde_json::json!({"type": "message_start", "message": {
+            "id": "msg_mock_answer", "type": "message", "role": "assistant",
+            "model": crate::cost::CLAUDE_SONNET, "content": [], "stop_reason": null,
+            "usage": {"input_tokens": 9000, "output_tokens": 1,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}),
+    );
+    for (i, b) in blocks.iter().enumerate() {
+        sse += &event(
+            "content_block_start",
+            serde_json::json!({"type": "content_block_start", "index": i,
+                               "content_block": {"type": "text", "text": "", "citations": []}}),
+        );
+        for c in &b.citations {
+            sse += &event(
+                "content_block_delta",
+                serde_json::json!({"type": "content_block_delta", "index": i, "delta": {
+                    "type": "citations_delta", "citation": {
+                        "type": "search_result_location",
+                        "source": format!("vfs://passage/{}", c.passage),
+                        "title": "", "cited_text": c.quote,
+                        "search_result_index": c.passage,
+                        "start_block_index": 0, "end_block_index": 0}}}),
+            );
+        }
+        sse += &event(
+            "content_block_delta",
+            serde_json::json!({"type": "content_block_delta", "index": i,
+                               "delta": {"type": "text_delta", "text": b.text}}),
+        );
+        sse += &event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": i}),
+        );
+    }
+    sse += &event(
+        "message_delta",
+        serde_json::json!({"type": "message_delta",
+                           "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+                           "usage": {"output_tokens": 300}}),
+    );
+    sse += &event("message_stop", serde_json::json!({"type": "message_stop"}));
+    MockResponse::sse(sse)
+}
