@@ -88,7 +88,8 @@ async function launch() {
 
 /** A served page in headless Chrome: `base` is the app on the fake backend; `evaluate` runs an
  *  expression in the page and returns its value; `until` waits for an expression to be truthy;
- *  `load` navigates to the app with extra URL options and waits for the bottom bar. */
+ *  `load` navigates to the app with extra URL options (Spanish unless `locale=` is given) and
+ *  waits for the bottom bar. */
 export async function startBrowser() {
   assert.ok(CHROME, 'Google Chrome or Chromium is needed for the browser tests (set CHROME_PATH)');
   const server = await serve();
@@ -112,8 +113,10 @@ export async function startBrowser() {
   }
 
   async function load(options = '') {
+    // The tests read Spanish copy unless they ask for a locale: CI's Chrome runs in English.
+    const locale = options.includes('locale=') ? '' : '&locale=es-ES';
     const loaded = chrome.once('Page.loadEventFired');
-    await chrome.send('Page.navigate', { url: `${base}${options}` });
+    await chrome.send('Page.navigate', { url: `${base}${options}${locale}` });
     await loaded;
     await until(`document.getElementById('open-folders').textContent.trim() !== ''`, 'the bottom bar');
   }
