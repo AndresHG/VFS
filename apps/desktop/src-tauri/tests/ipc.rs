@@ -377,3 +377,91 @@ fn feedback_report_over_ipc() {
         .unwrap()
         .contains(&format!("path: {}", root.path)));
 }
+
+/// Polls `content_status` until `f` holds, for at most 60 s.
+fn content_status_until(webview: &WebviewWindow<MockRuntime>, f: impl Fn(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let st = invoke(webview, "content_status", json!({})).expect("content_status");
+        if f(&st) {
+            return st;
+        }
+        assert!(Instant::now() < deadline, "content status: {st}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// VFS-27 AC-2, AC-5, AC-14 over IPC: the content commands with their exact payloads and
+/// camelCase shapes. Off by default, nothing has a reason and search reports off; switched
+/// on with no worker next to the test binary, the run stops with the worker reason and no
+/// document changes state; «Borrar lo leído» removes the store and switches off.
+#[test]
+fn content_commands_over_ipc() {
+    use vfs_desktop_lib::content::ContentRuns;
+    let data = tempfile::tempdir().unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tree.path()).unwrap();
+    write_file(&root.join("Cartas").join("carta.txt"));
+
+    let (app, webview) = mock_app();
+    app.manage(ContentRuns::default());
+    let db = data.path().join("app").join(INDEX_FILE);
+    init_core(app.handle(), &db).expect("init core");
+    invoke(
+        &webview,
+        "add_root",
+        json!({ "path": root.to_string_lossy() }),
+    )
+    .expect("add_root");
+
+    // Off by default (AC-2).
+    let st = content_status_until(&webview, |st| st["phase"]["kind"] == json!("off"));
+    assert_eq!(st["settings"]["enabled"], json!(false));
+    assert!(
+        st.get("done").is_some() && st.get("perHour").is_some(),
+        "{st}"
+    );
+    let unread = invoke(&webview, "content_unread", json!({ "fileIds": [1, 2] })).unwrap();
+    assert_eq!(unread, json!([[1, null], [2, null]]));
+    let off = invoke(
+        &webview,
+        "content_search",
+        json!({ "query": "carta", "filters": {}, "offset": 0 }),
+    );
+    assert!(off.is_err(), "{off:?}");
+
+    // On, with no worker beside the test binary: a run-level reason (AC-14).
+    let on = invoke(&webview, "content_set_enabled", json!({ "on": true })).unwrap();
+    assert_eq!(on["settings"]["enabled"], json!(true));
+    let stopped = content_status_until(&webview, |st| st["phase"]["kind"] == json!("stopped"));
+    assert_eq!(
+        stopped["phase"]["reason"],
+        json!("worker_cannot_start"),
+        "{stopped}"
+    );
+    let counts = invoke(&webview, "content_unread_counts", json!({})).unwrap();
+    assert_eq!(counts["byReason"], json!([]));
+    let pending = stopped["total"].as_u64().unwrap() - stopped["done"].as_u64().unwrap();
+    assert_eq!(counts["pending"], json!(pending));
+    let page = invoke(
+        &webview,
+        "content_search",
+        json!({ "query": "carta", "filters": {}, "offset": 20 }),
+    )
+    .unwrap();
+    assert_eq!(page["hits"], json!([]));
+    assert_eq!(page["partial"], json!(false));
+    let retried = invoke(&webview, "content_retry", json!({})).unwrap();
+    assert_eq!(retried["settings"]["enabled"], json!(true));
+
+    // «Borrar lo leído de los documentos» (AC-5).
+    let deleted = invoke(&webview, "content_delete_store", json!({})).unwrap();
+    assert_eq!(deleted["settings"]["enabled"], json!(false));
+    assert_eq!(deleted["phase"]["kind"], json!("off"));
+    let gone = invoke(
+        &webview,
+        "content_search",
+        json!({ "query": "carta", "filters": {}, "offset": 0 }),
+    );
+    assert!(gone.is_err(), "the store is gone: {gone:?}");
+}

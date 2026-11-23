@@ -81,6 +81,10 @@ impl<R: Runtime> ProgressSink for EventSink<R> {
         if let Err(e) = self.app.emit(EVENT_INDEX_CHANGED, ()) {
             log::warn!("emit {EVENT_INDEX_CHANGED}: {e}");
         }
+        // New or changed documents are read under the pace rules (VFS-27 R10).
+        if let Some(runs) = self.app.try_state::<content::ContentRuns>() {
+            runs.notify_names_changed();
+        }
     }
 }
 
@@ -121,6 +125,10 @@ pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), S
     let vfs = Vfs::open_with(db_path, SearchConfig::default()).map_err(|e| e.to_string())?;
     vfs.start_indexer(Arc::new(EventSink { app: app.clone() }))
         .map_err(|e| e.to_string())?;
+    // VFS-27: the background content indexer; with content search off it creates nothing.
+    if let Some(runs) = app.try_state::<content::ContentRuns>() {
+        runs.start(app, vfs.clone(), db_path);
+    }
     app.manage(AppState { vfs });
     bookmarks::init(app, db_path);
     Ok(())
@@ -369,7 +377,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(WebviewSuspended::default());
-            // VFS-27 R3: the content run an update must stop first (27b starts runs).
+            // VFS-27: the background content indexer, started with the index; an update stops it first.
             app.manage(content::ContentRuns::default());
             let handle = app.handle().clone();
             // VFS-22 R5: the OS language until the UI sends its own through `set_language`.
@@ -423,6 +431,11 @@ pub fn run() {
 
     app.run(|app, event| {
         if let RunEvent::Exit = event {
+            // A clean close ends the content run, so the next start needs no store check
+            // (VFS-27 R11) and the log gets its stop record (R16).
+            if let Some(runs) = app.try_state::<content::ContentRuns>() {
+                runs.stop_for_update();
+            }
             if let Some(state) = app.try_state::<AppState>() {
                 state.vfs.shutdown();
             }

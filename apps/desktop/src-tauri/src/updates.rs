@@ -116,7 +116,7 @@ impl<T: Clone> CheckOnce<T> {
 /// indexer is stopped inside `install` (the updater's `on_before_exit` hook, after verifying)
 /// and on success the process exits for the installer. macOS: `install` replaces the bundle
 /// while the indexer runs, then `after_install` stops it and relaunches.
-pub async fn install_flow<D, DFut, B, I, A, F, E>(
+pub async fn install_flow<D, DFut, B, BFut, I, A, F, E>(
     download: D,
     before_install: B,
     install: I,
@@ -126,13 +126,14 @@ pub async fn install_flow<D, DFut, B, I, A, F, E>(
 where
     D: FnOnce() -> DFut,
     DFut: Future<Output = Result<Vec<u8>, E>>,
-    B: FnOnce(),
+    B: FnOnce() -> BFut,
+    BFut: Future<Output = ()>,
     I: FnOnce(&[u8]) -> Result<(), E>,
     A: FnOnce(),
     F: FnOnce(),
 {
     let bytes = download().await?;
-    before_install();
+    before_install().await;
     if let Err(e) = install(&bytes) {
         recover();
         return Err(e);
@@ -193,10 +194,17 @@ fn shutdown_index<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Stops the content run before the installer starts, so it can replace `vfs-extract`: the
-/// document in flight gets 5 s, then the worker is killed (VFS-27 R3).
-fn stop_content<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(runs) = app.try_state::<ContentRuns>() {
-        runs.stop_for_update();
+/// document in flight gets 5 s, then the worker is killed (VFS-27 R3). The wait runs on a
+/// blocking thread, not on the async runtime.
+async fn stop_content<R: Runtime>(app: AppHandle<R>) {
+    let stopped = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(runs) = app.try_state::<ContentRuns>() {
+            runs.stop_for_update();
+        }
+    })
+    .await;
+    if let Err(e) = stopped {
+        log::warn!("content stop before the update: {e}");
     }
 }
 
@@ -295,14 +303,19 @@ pub async fn install_update<R: Runtime>(
     };
     let result = install_flow(
         download,
-        || stop_content(&app),
+        || stop_content(app.clone()),
         |bytes| update.install(bytes),
         || {
             // macOS: the bundle was replaced in place; relaunch on the new version.
             shutdown_index(&app);
             app.restart();
         },
-        || recover_after_failed_install(&state.index_stopped, || app.restart()),
+        || {
+            if let Some(runs) = app.try_state::<ContentRuns>() {
+                runs.restart_after_failed_update();
+            }
+            recover_after_failed_install(&state.index_stopped, || app.restart());
+        },
     )
     .await;
     result.map_err(|e| {
@@ -415,7 +428,7 @@ mod tests {
                     Err("connection reset".to_string())
                 }
             },
-            || steps.borrow_mut().push("stop content"),
+            || async { steps.borrow_mut().push("stop content") },
             |bytes: &[u8]| {
                 assert_eq!(bytes, [1, 2, 3]);
                 steps.borrow_mut().push("install");

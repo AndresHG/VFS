@@ -3,12 +3,12 @@
 //! in a separate `content.db`, and a query function with snippets.
 //!
 //! Name and path search (`vfs-core`) never depend on this crate; nothing here runs unless the
-//! caller switches content search on by calling [`indexer::run`].
+//! caller runs [`indexer::run`] or switches the [`service`] on.
 //!
 //! The `extractor` feature (on by default) adds Xberg, the extraction itself and the worker
 //! entry point used by the `vfs-extract` binary. A caller that only indexes and searches, as
-//! the app will (VFS-27 PR 27b), depends on this crate without it, so Xberg stays in the
-//! worker (VFS-2 D3, VFS-27 D1).
+//! the app does, depends on this crate without it, so Xberg stays in the worker (VFS-2 D3,
+//! VFS-27 D1). The app's background indexer is [`service`].
 
 pub mod analyze;
 pub mod chunk;
@@ -20,6 +20,7 @@ pub mod pace;
 pub mod paths;
 pub mod protocol;
 pub mod search;
+pub mod service;
 pub mod store;
 pub mod supervisor;
 #[cfg(feature = "extractor")]

@@ -40,15 +40,18 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 
 `crates/vfs-cli` uses the same `Vfs` facade, with its own index file. Firefox bookmarks
 (VFS-6) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below. Document content
-search (VFS-2) is the crate `crates/vfs-content`, reachable only from the CLI's `content`
-feature for now: an extraction worker process (`vfs-extract`) and `content.db` next to
+search (VFS-2) is the crate `crates/vfs-content`, reached from the app (VFS-27; the interface
+is VFS-27 27c) and from the CLI's `content` feature: an extraction worker process (`vfs-extract`) and `content.db` next to
 `index.db` ([design](content-search-design.md)). Release builds bundle `vfs-extract` as a Tauri
 sidecar next to the app's executable (VFS-27 R1): `scripts/sidecar.py build` builds it with the
 `extract` profile into `apps/desktop/src-tauri/binaries/`, `tauri build --config
 tauri.sidecar.conf.json` bundles it, and `scripts/sidecar.py check` verifies the bundle. The app
-does not depend on `vfs-content` yet; when the background indexer (VFS-27 PR 27b) adds it, it
-comes without the `extractor` feature, so Xberg stays out of the app's executable (a CI step
-checks the app's dependency graph).
+depends on `vfs-content` without the `extractor` feature, so Xberg stays out of the app's
+executable (a CI step checks the app's dependency graph). Its background content indexer is
+`vfs_content::service`, started next to the index (`content.json` and the run-open marker
+live in the app data folder) and fed by the app with `vfs_core::probes` and the name
+indexer's state (`src-tauri/src/content.rs`); with content search off it creates nothing and
+starts no worker.
 Before the update's installer starts, on both platforms, the app stops the content run (its
 worker gets 5 s, then is killed); the indexer is stopped as VFS-21 R8 says.
 

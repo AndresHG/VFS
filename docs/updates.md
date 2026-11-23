@@ -15,7 +15,9 @@ Spec: [VFS-21](../specs/vfs-21-updates/spec.md). Code: `apps/desktop/src-tauri/s
 3. If the manifest's version is newer (`updates::is_newer`; a stable build is never offered a
    pre-release), a notice offers "Actualizar" / "Ahora no".
 4. "Actualizar" downloads the platform's asset, checks its minisign signature against the
-   public key in `tauri.conf.json` (`plugins.updater.pubkey`), and only then installs:
+   public key in `tauri.conf.json` (`plugins.updater.pubkey`), and only then installs. On
+   both platforms the content run is stopped first: the document being read gets 5 s, then
+   the `vfs-extract` worker is killed, so the installer can replace it (VFS-27 R3). Then:
    - **Windows**: the NSIS `*-setup.exe` runs in passive mode (progress window, no
      questions, per-user so no UAC). The app stops the indexer, exits, and the installer
      reopens it.

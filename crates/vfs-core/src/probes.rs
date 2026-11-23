@@ -8,6 +8,20 @@ use std::time::Duration;
 
 pub use crate::indexer::sched::{BackOff, Step};
 use crate::platform;
+use crate::{IndexProgress, IndexerState, RootStatus};
+
+/// Whether the name indexer is walking a root or running a large pass, which content
+/// indexing waits for (VFS-27 R7 rule 1): a root in its first scan or full re-walk, or more
+/// pending folders than VFS-5's `incremental_max_dirs`.
+pub fn name_indexing_busy(progress: &IndexProgress) -> bool {
+    let limit = crate::indexer::sched::SchedConfig::default().incremental_max_dirs;
+    progress.state == IndexerState::Scanning
+        && (progress
+            .roots
+            .iter()
+            .any(|r| r.status == RootStatus::Scanning)
+            || progress.roots.iter().map(|r| r.dirs_pending).sum::<u64>() > limit)
+}
 
 /// Average disk queue length of the disk holding one path (VFS-5 R4). Exists on Windows only:
 /// macOS has no such probe (VFS-5 R6).
@@ -207,5 +221,50 @@ mod tests {
         if cfg!(target_os = "macos") {
             assert!(sampler.is_none(), "macOS has no disk probe (VFS-5 R6)");
         }
+    }
+
+    fn progress(state: IndexerState, roots: &[(RootStatus, u64)]) -> IndexProgress {
+        IndexProgress {
+            state,
+            files_indexed: 0,
+            roots: roots
+                .iter()
+                .enumerate()
+                .map(|(i, &(status, dirs_pending))| crate::RootProgress {
+                    root_id: i as i64,
+                    path: String::new(),
+                    status,
+                    dirs_done: 0,
+                    dirs_pending,
+                    files_indexed: 0,
+                    current_dir: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// VFS-27 AC-7 (R7 rule 1): content waits while a root is walked or a name pass has more
+    /// pending folders than the scheduler's incremental limit, not for a small pass or when
+    /// the indexer is idle.
+    #[test]
+    fn name_indexing_busy_follows_the_scheduler() {
+        let limit = crate::indexer::sched::SchedConfig::default().incremental_max_dirs;
+        let scanning = IndexerState::Scanning;
+        assert!(name_indexing_busy(&progress(
+            scanning,
+            &[(RootStatus::Scanning, 0)]
+        )));
+        assert!(name_indexing_busy(&progress(
+            scanning,
+            &[(RootStatus::Ready, limit), (RootStatus::Ready, 1)]
+        )));
+        assert!(!name_indexing_busy(&progress(
+            scanning,
+            &[(RootStatus::Ready, limit)]
+        )));
+        assert!(!name_indexing_busy(&progress(
+            IndexerState::Idle,
+            &[(RootStatus::Scanning, limit + 1)]
+        )));
     }
 }

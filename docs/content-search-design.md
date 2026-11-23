@@ -115,6 +115,12 @@ search: name/path pass as today, plus a content pass; results merged
   `max_backoff` without `min_work` of reading), and input within 60 s spaces documents 15 s
   apart. The probes are `vfs_core::probes`. Paused folders (VFS-32) are passed over and keep
   their state; time asleep does not count against a document's limit.
+- The app's background indexer (VFS-27 27b): `vfs_content::service` keeps the switch and the
+  pause in `content.json`, runs the engine on one thread while content search is on, waits
+  for the name indexer before starting a run, shows documents done of all, the rate over
+  working time and the time left, writes a run-open marker and checks the store with
+  `quick_check` after an unclean stop (deleting it only on the user's choice), turns
+  run-level stops into a «Reintentar» state, and writes diagnostic records without names.
 - Worker lifetime (VFS-2 R17, R18): the worker says hello with its version and whether the
   OS reports it at background priority; another version or no hello stops the run before
   any state changes. It exits as soon as its stdin closes. On Windows it runs in a Job
