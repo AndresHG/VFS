@@ -46,6 +46,51 @@ impl DiskSampler {
     }
 }
 
+/// The whole machine's processor use over the interval since the previous sample (VFS-27 R7).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CpuSample {
+    /// Busy share of all logical processors together, 0.0–1.0.
+    pub busy: f64,
+    /// Logical processors.
+    pub cores: u32,
+    /// The interval the share covers.
+    pub over: Duration,
+}
+
+/// Samples the machine's processor use from the OS's cumulative counters. Windows:
+/// `GetSystemTimes`. macOS: `host_statistics(HOST_CPU_LOAD_INFO)`. Neither needs
+/// administrator rights.
+pub struct CpuSampler {
+    last: Option<(std::time::Instant, imp::CpuTicks)>,
+    cores: u32,
+}
+
+impl Default for CpuSampler {
+    fn default() -> Self {
+        CpuSampler {
+            last: None,
+            cores: std::thread::available_parallelism().map_or(1, |n| n.get() as u32),
+        }
+    }
+}
+
+impl CpuSampler {
+    /// The share since the previous call; `None` on the first call, when the counters cannot
+    /// be read, or when they did not move.
+    pub fn sample(&mut self) -> Option<CpuSample> {
+        let now = std::time::Instant::now();
+        let ticks = imp::cpu_ticks()?;
+        let (then, before) = self.last.replace((now, ticks))?;
+        let busy = ticks.busy.checked_sub(before.busy)?;
+        let total = ticks.total.checked_sub(before.total)?;
+        (total > 0).then(|| CpuSample {
+            busy: busy as f64 / total as f64,
+            cores: self.cores,
+            over: now.saturating_duration_since(then),
+        })
+    }
+}
+
 /// Time since the last keyboard or mouse input in the user's session; `None` when it cannot be
 /// read. Windows: `GetLastInputInfo` against `GetTickCount64`. macOS:
 /// `CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateHIDSystemState,
@@ -85,6 +130,33 @@ mod imp {
         // SAFETY: no arguments.
         let now = unsafe { GetTickCount64() } as u32;
         Some(Duration::from_millis(now.wrapping_sub(info.dwTime) as u64))
+    }
+
+    /// Cumulative processor time: busy and total, in the OS's own units.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct CpuTicks {
+        pub busy: u64,
+        pub total: u64,
+    }
+
+    pub(super) fn cpu_ticks() -> Option<CpuTicks> {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::GetSystemTimes;
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut idle, mut kernel, mut user) = (zero, zero, zero);
+        if unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } == 0 {
+            return None;
+        }
+        let v = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+        // Kernel time includes idle time.
+        let total = v(kernel) + v(user);
+        Some(CpuTicks {
+            busy: total.saturating_sub(v(idle)),
+            total,
+        })
     }
 
     pub(super) fn free_space(path: &Path) -> Option<u64> {
@@ -150,6 +222,38 @@ mod imp {
         (secs.is_finite() && secs >= 0.0).then(|| Duration::from_secs_f64(secs))
     }
 
+    /// Cumulative processor ticks: busy (user, system, nice) and total.
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct CpuTicks {
+        pub busy: u64,
+        pub total: u64,
+    }
+
+    const HOST_CPU_LOAD_INFO: i32 = 3;
+    const CPU_STATE_MAX: u32 = 4; // user, system, idle, nice
+
+    extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics(host: u32, flavor: i32, info: *mut u32, count: *mut u32) -> i32;
+    }
+
+    pub(super) fn cpu_ticks() -> Option<CpuTicks> {
+        static HOST: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        // SAFETY: the host port is a send right to this host, asked for once and kept.
+        let host = *HOST.get_or_init(|| unsafe { mach_host_self() });
+        let mut t = [0u32; CPU_STATE_MAX as usize];
+        let mut count = CPU_STATE_MAX;
+        // SAFETY: `t` holds HOST_CPU_LOAD_INFO_COUNT natural_t values, as `count` says.
+        if unsafe { host_statistics(host, HOST_CPU_LOAD_INFO, t.as_mut_ptr(), &mut count) } != 0 {
+            return None;
+        }
+        let [user, system, idle, nice] = t.map(u64::from);
+        Some(CpuTicks {
+            busy: user + system + nice,
+            total: user + system + nice + idle,
+        })
+    }
+
     pub(super) fn free_space(path: &Path) -> Option<u64> {
         let bytes = path.as_os_str().as_bytes();
         // SAFETY: CoreFoundation calls on objects created here and released exactly once;
@@ -195,6 +299,16 @@ mod imp {
     pub(super) fn free_space(_path: &Path) -> Option<u64> {
         None
     }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct CpuTicks {
+        pub busy: u64,
+        pub total: u64,
+    }
+
+    pub(super) fn cpu_ticks() -> Option<CpuTicks> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -209,6 +323,28 @@ mod tests {
         let free = free_space(dir.path());
         if cfg!(any(windows, target_os = "macos")) {
             assert!(free.is_some(), "{free:?}");
+        }
+    }
+
+    /// VFS-27 AC-7 (R7 rule 3): the processor probe reads on the platforms the app ships on,
+    /// sees a busy core as busy, and gives a share between 0 and 1.
+    #[test]
+    fn cpu_sampler_reads() {
+        let mut cpu = CpuSampler::default();
+        assert_eq!(cpu.sample(), None, "the first call only sets the baseline");
+        let t = std::time::Instant::now();
+        let mut x = 0u64;
+        while t.elapsed() < Duration::from_millis(300) {
+            x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(7));
+        }
+        let s = cpu.sample();
+        if cfg!(any(windows, target_os = "macos")) {
+            let s = s.expect("a sample after 300 ms");
+            assert!(s.busy > 0.0 && s.busy <= 1.0, "{s:?}");
+            assert!(
+                s.cores >= 1 && s.over >= Duration::from_millis(300),
+                "{s:?}"
+            );
         }
     }
 

@@ -12,11 +12,14 @@ use vfs_content::service::{
     offer, ContentService, Events, Phase, Probes, ServiceConfig, Status, RUN_MARKER,
 };
 use vfs_content::{store, IndexOptions};
+use vfs_core::probes::CpuSample;
 use vfs_core::Vfs;
 
-/// A machine nobody touches: idle for 10 minutes, plenty of space, no disk probe.
+/// A machine nobody touches: idle for 10 minutes, plenty of space, no disk probe, and no
+/// processor probe unless `cpu` gives other programs' share.
 struct Quiet {
     idle: Option<Duration>,
+    cpu: Option<f64>,
 }
 
 impl Probes for Quiet {
@@ -31,6 +34,13 @@ impl Probes for Quiet {
     }
     fn disk_queue(&mut self, _path: &Path) -> Option<f64> {
         None
+    }
+    fn cpu(&mut self) -> Option<CpuSample> {
+        self.cpu.map(|busy| CpuSample {
+            busy,
+            cores: 4,
+            over: Duration::from_secs(1),
+        })
     }
 }
 
@@ -94,14 +104,23 @@ impl Setup {
     }
 
     fn start(&self, cfg: ServiceConfig, idle: Option<Duration>) -> (ContentService, Arc<Recorder>) {
+        self.start_on(cfg, Quiet { idle, cpu: None })
+    }
+
+    fn start_on(&self, cfg: ServiceConfig, machine: Quiet) -> (ContentService, Arc<Recorder>) {
         let rec = Arc::new(Recorder::default());
-        let svc = ContentService::start(cfg, Box::new(Quiet { idle }), rec.clone());
+        let svc = ContentService::start(cfg, Box::new(machine), rec.clone());
         (svc, rec)
     }
 
     fn openlog(&self) -> PathBuf {
         self.tmp.path().join("opens.log")
     }
+}
+
+/// Worker arguments that make every document take `ms` milliseconds longer.
+fn slow(ms: u64) -> Vec<String> {
+    vec![format!("--test-hook=slow:{ms}")]
 }
 
 /// Polls the service until `f` holds, for at most a minute.
@@ -142,9 +161,8 @@ fn off_by_default_creates_nothing() {
 #[test]
 fn pause_survives_a_restart_and_resumes_with_the_rest() {
     let s = setup(12);
-    let mut cfg = s.config(Vec::new());
-    // The PC in use, with a short gap, so the run can be paused part way.
-    cfg.pace.in_use_gap = Duration::from_millis(400);
+    // Slow documents, so the run can be paused part way.
+    let cfg = s.config(slow(400));
     let (svc, _rec) = s.start(cfg.clone(), Some(Duration::from_secs(5)));
     svc.set_enabled(true);
     wait_for(&svc, "three read", |st| st.done >= 3);
@@ -297,21 +315,29 @@ fn missing_worker_is_a_run_level_reason() {
 }
 
 /// VFS-27 AC-15 (R16): the diagnostic records of a run have its start, waits and stop with
-/// counts and the rate, and no file or folder name.
+/// counts and the rate, and no file or folder name. Other programs keep the processor busy,
+/// so the run waits (R7 rule 3) and still finishes.
 #[test]
 fn diagnostics_carry_no_names() {
-    let s = setup(4);
-    let mut cfg = s.config(Vec::new());
-    cfg.pace.in_use_gap = Duration::from_millis(200);
-    let (svc, rec) = s.start(cfg, Some(Duration::from_secs(5)));
+    let s = setup(12);
+    let cfg = s.config(slow(300));
+    let machine = Quiet {
+        idle: Some(Duration::from_secs(5)),
+        cpu: Some(0.95),
+    };
+    let (svc, rec) = s.start_on(cfg, machine);
     svc.set_enabled(true);
     wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
     let diag = rec.diag.lock().unwrap().clone();
     let all = diag.join("\n");
-    assert!(all.contains("content run start: 0 of 4"), "{all}");
-    assert!(all.contains("content run waits: InUse"), "{all}");
+    assert!(all.contains("content run start: 0 of 12"), "{all}");
+    assert!(all.contains("content run waits: CpuBusy"), "{all}");
     assert!(
-        all.contains("content run stop (finished): 4 indexed"),
+        !all.contains("InUse"),
+        "the in-use gap is not a wait: {all}"
+    );
+    assert!(
+        all.contains("content run stop (finished): 12 indexed"),
         "{all}"
     );
     assert!(all.contains("documents/hour"), "{all}");
@@ -327,8 +353,7 @@ fn diagnostics_carry_no_names() {
 #[test]
 fn switch_off_stops_the_run_and_delete_is_prompt() {
     let s = setup(10);
-    let mut cfg = s.config(Vec::new());
-    cfg.pace.in_use_gap = Duration::from_millis(400);
+    let cfg = s.config(slow(400));
     let (svc, _rec) = s.start(cfg, Some(Duration::from_secs(5)));
     svc.set_enabled(true);
     wait_for(&svc, "two read", |st| st.done >= 2);
@@ -384,8 +409,7 @@ fn notices_while_off_write_nothing() {
 #[test]
 fn user_pause_is_recorded() {
     let s = setup(6);
-    let mut cfg = s.config(Vec::new());
-    cfg.pace.in_use_gap = Duration::from_millis(400);
+    let cfg = s.config(slow(400));
     let (svc, rec) = s.start(cfg, Some(Duration::from_secs(5)));
     svc.set_enabled(true);
     wait_for(&svc, "one read", |st| st.done >= 1);
@@ -423,8 +447,7 @@ fn notices_with_nothing_new_start_no_run() {
 #[test]
 fn reading_resumes_after_a_failed_update() {
     let s = setup(8);
-    let mut cfg = s.config(Vec::new());
-    cfg.pace.in_use_gap = Duration::from_millis(300);
+    let cfg = s.config(slow(300));
     let (svc, _rec) = s.start(cfg, Some(Duration::from_secs(5)));
     svc.set_enabled(true);
     wait_for(&svc, "one read", |st| st.done >= 1);
@@ -599,9 +622,8 @@ fn not_now_survives_a_restart() {
 #[test]
 fn switch_off_and_on_resumes_a_paused_run() {
     let s = setup(8);
-    let mut cfg = s.config(Vec::new());
-    // The PC in use, with a short gap, so the run can be paused part way.
-    cfg.pace.in_use_gap = Duration::from_millis(400);
+    // Slow documents, so the run can be paused part way.
+    let cfg = s.config(slow(400));
     let (svc, _rec) = s.start(cfg, Some(Duration::from_secs(5)));
     svc.set_enabled(true);
     wait_for(&svc, "two read", |st| st.done >= 2);

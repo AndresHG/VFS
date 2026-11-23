@@ -576,6 +576,10 @@ pub enum Admit {
 /// How often a gate's wait looks at the stop flag.
 const GATE_POLL: Duration = Duration::from_millis(250);
 
+/// A gate's wait at least this long commits the batch first, so a long wait never holds
+/// documents already read (VFS-27 R7: the in-use gap is shorter).
+const COMMIT_BEFORE_WAIT: Duration = Duration::from_secs(2);
+
 /// The caller's hooks into a run, called between documents only, so the worker's own read
 /// never counts against the pace (VFS-27 R7). The app paces and counts progress through it;
 /// [`run`] uses one that admits every document.
@@ -714,13 +718,17 @@ pub fn run_with(
                         Admit::Read => break,
                         Admit::Stop => break 'outer,
                         Admit::Wait(d) => {
-                            if let Err((reason, detail)) =
-                                commit_batch(&mut conn, &mut batch, &analyzer, &mut sum)
-                            {
-                                sum.stop(reason, detail);
-                                break 'outer;
+                            // A long wait first commits what was read; a short gap between
+                            // documents leaves the batch to its usual commit.
+                            if d >= COMMIT_BEFORE_WAIT {
+                                if let Err((reason, detail)) =
+                                    commit_batch(&mut conn, &mut batch, &analyzer, &mut sum)
+                                {
+                                    sum.stop(reason, detail);
+                                    break 'outer;
+                                }
+                                last_commit = Instant::now();
                             }
-                            last_commit = Instant::now();
                             let until = Instant::now() + d;
                             while Instant::now() < until && !stop.load(Ordering::Relaxed) {
                                 std::thread::sleep(GATE_POLL.min(until - Instant::now()));
