@@ -47,6 +47,7 @@ function tauriBackend(t) {
     // VFS-22 R2: the OS locale (e.g. "es-ES"); WKWebView's navigator.language is not it.
     systemLocale: () => invoke('system_locale'),
     setLanguage: (lang) => invoke('set_language', { lang }),
+    waitCore: () => invoke('wait_core'),
     listRoots: () => invoke('list_roots'),
     listUnreadable: (rootId) => invoke('list_unreadable', { rootId }),
     pickFolder: () => invoke('pick_folder'),
@@ -97,7 +98,7 @@ function missingBackend() {
     missing: true,
     systemLocale: async () => navigator.language,
     setLanguage: async () => {},
-    listRoots: fail, listUnreadable: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
+    waitCore: fail, listRoots: fail, listUnreadable: fail, pickFolder: fail, addRoot: fail, removeRoot: fail, search: fail,
     suggest: fail,
     reveal: fail, revealTarget: fail, openLinkUrl: fail, getProgress: fail, rescan: fail, setRootPaused: fail, setPaused: fail,
     getIncludeAllFolders: fail, setIncludeAllFolders: fail,

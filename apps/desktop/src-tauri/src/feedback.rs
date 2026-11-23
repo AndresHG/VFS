@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, State};
 use vfs_core::api::ApiError;
-use vfs_core::{DriveKind, IndexStats, IndexerState, Root};
+use vfs_core::{DriveKind, IndexStats, IndexerState, Root, Vfs};
 
 use crate::bookmarks::BookmarkState;
 use crate::AppState;
@@ -814,8 +814,7 @@ mod win {
 }
 
 /// Gathers the [`Environment`] of the running app.
-pub fn gather<R: Runtime>(app: &AppHandle<R>, state: &AppState) -> Environment {
-    let vfs = &state.vfs;
+pub fn gather<R: Runtime>(app: &AppHandle<R>, vfs: &Vfs) -> Environment {
     let roots: Vec<(Root, DiskKind)> = vfs
         .list_roots()
         .unwrap_or_default()
@@ -872,19 +871,19 @@ fn current_report<R: Runtime>(
     description: &str,
     include_names: bool,
     log_budget: usize,
-) -> Report {
+) -> Result<Report, ApiError> {
     let logs = app
         .path()
         .app_local_data_dir()
         .map(|d| read_logs(&d.join("logs")))
         .unwrap_or_default();
-    build_report(
-        &gather(app, state),
+    Ok(build_report(
+        &gather(app, &state.vfs()?),
         description,
         include_names,
         &logs,
         log_budget,
-    )
+    ))
 }
 
 /// "Ver el informe" (VFS-20 R1, VFS-30 R4): the report as it would be saved, with only the newest
@@ -896,7 +895,7 @@ pub fn feedback_report<R: Runtime>(
     description: String,
     include_names: bool,
 ) -> Result<String, ApiError> {
-    Ok(current_report(&app, &state, &description, include_names, PREVIEW_LOG_BYTES).text)
+    Ok(current_report(&app, &state, &description, include_names, PREVIEW_LOG_BYTES)?.text)
 }
 
 /// Where the report was saved.
@@ -918,7 +917,7 @@ pub fn feedback_save<R: Runtime>(
     include_names: bool,
     github: bool,
 ) -> Result<FeedbackSaved, ApiError> {
-    let report = current_report(&app, &state, &description, include_names, usize::MAX);
+    let report = current_report(&app, &state, &description, include_names, usize::MAX)?;
     let p = app.path();
     let dir = export_dir(&[
         p.download_dir().ok(),

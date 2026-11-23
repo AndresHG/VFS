@@ -154,7 +154,7 @@ export const en = {
   dayAndTime: (day, time) => `${day}, ${time}`,
   statusReadyUnavailable: (n, k) => `${files(n)} · ${k === 1 ? '1 folder unavailable' : `${k} folders unavailable`}`,
   statusNoRoots: 'No folders yet',
-  statusConnecting: 'Connecting…',
+  statusConnecting: 'Getting search ready…',
   pause: 'Pause',
   resume: 'Resume',
   foldersButton: (n) => (n ? `Folders (${n})` : 'Folders'),

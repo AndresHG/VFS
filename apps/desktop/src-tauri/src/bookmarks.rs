@@ -85,7 +85,7 @@ pub fn search_sources<R: Runtime>(
     let marks = app.try_state::<BookmarkState>();
     let bookmarks = marks.as_ref().map(|s| s.bookmarks.as_ref());
     Ok(run_search(
-        &state.vfs,
+        &state.vfs()?,
         bookmarks,
         &query,
         &options.unwrap_or_default(),

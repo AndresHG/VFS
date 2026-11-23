@@ -11,9 +11,9 @@ pub mod reveal;
 pub mod splash;
 pub mod updates;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 
 use tauri::webview::PageLoadEvent;
 use tauri::{
@@ -60,9 +60,62 @@ pub fn move_legacy_index(old_dir: &Path, new_dir: &Path) -> std::io::Result<bool
     Ok(true)
 }
 
-/// Managed state shared by every command.
+/// Managed state shared by every command: the index, once it is open. It is managed before
+/// the index opens, which happens off the main thread (VFS-39 R1), so a command sent meanwhile
+/// gets an `ApiError` instead of a Tauri "state not managed" string.
+#[derive(Default)]
 pub struct AppState {
-    pub vfs: Vfs,
+    core: Mutex<Core>,
+    changed: Condvar,
+}
+
+/// Where the index stands for [`AppState`].
+#[derive(Default)]
+enum Core {
+    #[default]
+    Opening,
+    Open(Vfs),
+    Failed(String),
+}
+
+impl AppState {
+    /// State whose index is already open (tests, and callers that open it themselves).
+    pub fn open(vfs: Vfs) -> AppState {
+        AppState {
+            core: Mutex::new(Core::Open(vfs)),
+            changed: Condvar::new(),
+        }
+    }
+
+    /// The open index; `Unavailable` while it is still opening or when it could not open.
+    pub fn vfs(&self) -> Result<Vfs, ApiError> {
+        match &*self.lock() {
+            Core::Open(vfs) => Ok(vfs.clone()),
+            Core::Opening => {
+                Err(vfs_core::Error::Unavailable("the index is opening".into()).into())
+            }
+            Core::Failed(why) => Err(vfs_core::Error::Unavailable(why.clone()).into()),
+        }
+    }
+
+    /// Blocks until the index is open, or has failed to open.
+    pub fn wait(&self) -> Result<(), ApiError> {
+        let mut core = self.lock();
+        while matches!(*core, Core::Opening) {
+            core = self.changed.wait(core).unwrap_or_else(|e| e.into_inner());
+        }
+        drop(core);
+        self.vfs().map(drop)
+    }
+
+    fn set(&self, core: Core) {
+        *self.lock() = core;
+        self.changed.notify_all();
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Core> {
+        self.core.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// Forwards indexer progress to the webview as Tauri events.
@@ -116,22 +169,70 @@ pub fn install_logger<R: Runtime>(app: &AppHandle<R>, local_data: &Path) -> taur
     )
 }
 
-/// Opens the index at `db_path` (creating its directory), manages it as [`AppState`] and
-/// starts the background indexer. Shared by [`run`] and the integration test.
+/// Opens the index at `db_path` (creating its directory), stores it in the managed
+/// [`AppState`] (managed here if it is not yet) and starts the background indexer. Shared by
+/// [`open_core`] and the integration test. It can take minutes: after an unclean exit the
+/// open reads the whole index (`quick_check`), so it never runs on the main thread (VFS-39 R1).
 pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), String> {
-    if let Some(dir) = db_path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if app.try_state::<AppState>().is_none() {
+        app.manage(AppState::default());
     }
-    let vfs = Vfs::open_with(db_path, SearchConfig::default()).map_err(|e| e.to_string())?;
-    vfs.start_indexer(Arc::new(EventSink { app: app.clone() }))
-        .map_err(|e| e.to_string())?;
-    // VFS-27: the background content indexer; with content search off it creates nothing.
-    if let Some(runs) = app.try_state::<content::ContentRuns>() {
-        runs.start(app, vfs.clone(), db_path);
+    let state = app.state::<AppState>();
+    let opened = (|| -> Result<Vfs, String> {
+        if let Some(dir) = db_path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let vfs = Vfs::open_with(db_path, SearchConfig::default()).map_err(|e| e.to_string())?;
+        vfs.start_indexer(Arc::new(EventSink { app: app.clone() }))
+            .map_err(|e| e.to_string())?;
+        // VFS-27: the background content indexer; with content search off it creates nothing.
+        if let Some(runs) = app.try_state::<content::ContentRuns>() {
+            runs.start(app, vfs.clone(), db_path);
+        }
+        Ok(vfs)
+    })();
+    match opened {
+        Ok(vfs) => {
+            // Bookmarks first, so a UI woken by `wait_core` finds them.
+            bookmarks::init(app, db_path);
+            state.set(Core::Open(vfs));
+            Ok(())
+        }
+        Err(why) => {
+            state.set(Core::Failed(why.clone()));
+            Err(why)
+        }
     }
-    app.manage(AppState { vfs });
-    bookmarks::init(app, db_path);
-    Ok(())
+}
+
+/// Opens the index on its own thread (VFS-39 R1), so the main thread keeps running the event
+/// loop: the window loads its page and paints, and answers the OS, however long the open
+/// takes. A failure shows the startup error from the main thread.
+pub fn open_core<R: Runtime>(app: &AppHandle<R>, db_path: PathBuf) -> std::io::Result<()> {
+    if app.try_state::<AppState>().is_none() {
+        app.manage(AppState::default());
+    }
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("vfs-open".into())
+        .spawn(move || {
+            // A panic must not leave `wait_core` waiting forever.
+            let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                init_core(&app, &db_path)
+            }))
+            .unwrap_or_else(|_| {
+                let why = "the index could not be opened (internal error)".to_owned();
+                app.state::<AppState>().set(Core::Failed(why.clone()));
+                Err(why)
+            });
+            if let Err(detail) = opened {
+                let handle = app.clone();
+                if let Err(e) = app.run_on_main_thread(move || fail_startup(&handle, &detail)) {
+                    log::error!("startup failed, and its dialog too: {e}");
+                }
+            }
+        })
+        .map(drop)
 }
 
 /// What the shell asks of the WebView2 controller when the main window is minimised or
@@ -411,7 +512,7 @@ pub fn run() {
                             log::warn!("index not moved from {}: {e}", old_dir.display());
                         }
                     }
-                    init_core(&handle, &dir.join(INDEX_FILE))
+                    open_core(&handle, dir.join(INDEX_FILE)).map_err(|e| e.to_string())
                 });
             if let Err(detail) = started {
                 fail_startup(&handle, &detail);
@@ -436,8 +537,8 @@ pub fn run() {
             if let Some(runs) = app.try_state::<content::ContentRuns>() {
                 runs.stop_for_update();
             }
-            if let Some(state) = app.try_state::<AppState>() {
-                state.vfs.shutdown();
+            if let Some(vfs) = app.try_state::<AppState>().and_then(|s| s.vfs().ok()) {
+                vfs.shutdown();
             }
         }
     });

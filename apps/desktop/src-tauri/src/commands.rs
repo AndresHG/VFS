@@ -25,6 +25,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
     tauri::generate_handler![
         system_locale,
         set_language,
+        wait_core,
         list_roots,
         list_unreadable,
         pick_folder,
@@ -64,6 +65,19 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
     ]
 }
 
+/// Resolves once the index is open, or rejects with `Unavailable` when it could not open
+/// (VFS-39 R2). The UI calls it before its first index command; the wait runs on a blocking
+/// thread, so a long open never holds an async worker that other commands need.
+#[tauri::command]
+pub async fn wait_core<R: Runtime>(app: AppHandle<R>) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || match app.try_state::<AppState>() {
+        Some(state) => state.wait(),
+        None => Err(vfs_core::Error::Unavailable("the index is not opening".into()).into()),
+    })
+    .await
+    .map_err(io_error)?
+}
+
 /// The OS locale as a BCP 47 tag ("es-ES"), or "" when unknown (VFS-22 R2). The UI picks
 /// its language from it; WKWebView's `navigator.language` follows the bundle, not the OS.
 #[tauri::command(async)]
@@ -89,13 +103,13 @@ pub fn set_language<R: Runtime>(app: AppHandle<R>, lang: String) -> CmdResult<()
 
 #[tauri::command(async)]
 pub fn list_roots(state: State<'_, AppState>) -> CmdResult<Vec<Root>> {
-    Ok(state.vfs.list_roots()?)
+    Ok(state.vfs()?.list_roots()?)
 }
 
 /// The folders of a root that could not be listed (VFS-10 R4), at most 500 in path order.
 #[tauri::command(async)]
 pub fn list_unreadable(state: State<'_, AppState>, root_id: i64) -> CmdResult<Vec<UnreadableDir>> {
-    Ok(state.vfs.unreadable_dirs(root_id)?)
+    Ok(state.vfs()?.unreadable_dirs(root_id)?)
 }
 
 /// Native folder dialog; `None` when the user cancels.
@@ -117,36 +131,36 @@ pub fn pick_folder<R: Runtime>(app: AppHandle<R>) -> CmdResult<Option<String>> {
 
 #[tauri::command(async)]
 pub fn add_root(state: State<'_, AppState>, path: String) -> CmdResult<Root> {
-    Ok(state.vfs.add_root(&PathBuf::from(path))?)
+    Ok(state.vfs()?.add_root(&PathBuf::from(path))?)
 }
 
 #[tauri::command(async)]
 pub fn remove_root(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    Ok(state.vfs.remove_root(id)?)
+    Ok(state.vfs()?.remove_root(id)?)
 }
 
 /// Pauses or resumes indexing of one folder (VFS-32).
 #[tauri::command(async)]
 pub fn set_root_paused(state: State<'_, AppState>, id: i64, paused: bool) -> CmdResult<()> {
-    Ok(state.vfs.set_root_paused(id, paused)?)
+    Ok(state.vfs()?.set_root_paused(id, paused)?)
 }
 
 #[tauri::command(async)]
 pub fn search(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<SearchResponse> {
-    Ok(state.vfs.search(&query)?)
+    Ok(state.vfs()?.search(&query)?)
 }
 
 /// One search that finds something for a file search with no hits (VFS-13), or none.
 #[tauri::command(async)]
 pub fn suggest(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<Option<Suggestion>> {
-    Ok(state.vfs.suggest(&query)?)
+    Ok(state.vfs()?.suggest(&query)?)
 }
 
 /// "Mostrar en carpeta" (VFS-1 AC-13): Finder/Explorer with the file or folder selected.
 /// `isDir` selects the id space (`dirs.id` for folder hits, `files.id` otherwise).
 #[tauri::command(async)]
 pub fn reveal(state: State<'_, AppState>, id: i64, is_dir: bool) -> CmdResult<RevealOutcome> {
-    let vfs = &state.vfs;
+    let vfs = state.vfs()?;
     let path = if is_dir {
         vfs.dir_path(id)?
     } else {
@@ -169,7 +183,7 @@ pub fn reveal(state: State<'_, AppState>, id: i64, is_dir: bool) -> CmdResult<Re
 /// UNC target may wait for the network, off the UI thread (the command is async).
 #[tauri::command(async)]
 pub fn reveal_target(state: State<'_, AppState>, id: i64) -> CmdResult<RevealOutcome> {
-    let path = target_to_reveal(id, state.vfs.link_target(id)?)?;
+    let path = target_to_reveal(id, state.vfs()?.link_target(id)?)?;
     reveal::reveal(&path).map_err(io_error)
 }
 
@@ -192,7 +206,7 @@ fn target_to_reveal(id: i64, link: LinkTarget) -> Result<PathBuf, vfs_core::Erro
 /// through the same path as a bookmark (VFS-6 R10).
 #[tauri::command(async)]
 pub fn open_link_url(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    let url = url_to_open(id, state.vfs.link_target(id)?)?;
+    let url = url_to_open(id, state.vfs()?.link_target(id)?)?;
     crate::bookmarks::open_in_firefox(&url).map_err(|e| vfs_core::Error::Io(e).into())
 }
 
@@ -207,7 +221,7 @@ fn url_to_open(id: i64, link: LinkTarget) -> Result<String, vfs_core::Error> {
 
 #[tauri::command(async)]
 pub fn get_progress(state: State<'_, AppState>) -> CmdResult<IndexProgress> {
-    Ok(state.vfs.progress())
+    Ok(state.vfs()?.progress())
 }
 
 /// "Buscar cambios ahora" also reads changed Firefox profiles (VFS-6 R2).
@@ -222,26 +236,26 @@ pub fn rescan<R: Runtime>(
             b.refresh_now();
         }
     }
-    Ok(state.vfs.rescan(id)?)
+    Ok(state.vfs()?.rescan(id)?)
 }
 
 #[tauri::command(async)]
 pub fn set_paused(state: State<'_, AppState>, paused: bool) -> CmdResult<()> {
-    state.vfs.set_paused(paused);
+    state.vfs()?.set_paused(paused);
     Ok(())
 }
 
 /// «Incluir carpetas del sistema y de programas» (VFS-33 R9): off by default.
 #[tauri::command(async)]
 pub fn get_include_all_folders(state: State<'_, AppState>) -> CmdResult<bool> {
-    Ok(state.vfs.include_all_folders()?)
+    Ok(state.vfs()?.include_all_folders()?)
 }
 
 /// Sets it and returns the stored value; a change re-walks every folder (VFS-33 R8).
 #[tauri::command(async)]
 pub fn set_include_all_folders(state: State<'_, AppState>, on: bool) -> CmdResult<bool> {
-    state.vfs.set_include_all_folders(on)?;
-    Ok(state.vfs.include_all_folders()?)
+    state.vfs()?.set_include_all_folders(on)?;
+    Ok(state.vfs()?.include_all_folders()?)
 }
 
 #[cfg(test)]
