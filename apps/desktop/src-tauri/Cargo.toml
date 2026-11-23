@@ -27,6 +27,8 @@ vfs-core.workspace = true
 vfs-bookmarks.workspace = true
 # VFS-27: content search, without the extractor: Xberg stays in the vfs-extract sidecar.
 vfs-content = { path = "../../../crates/vfs-content", default-features = false }
+# VFS-28: providers, keys, cost, ai.db and the ask flow.
+vfs-ai = { path = "../../../crates/vfs-ai" }
 serde_json.workspace = true
 serde.workspace = true
 log.workspace = true
@@ -64,6 +66,7 @@ windows-core = "0.62"
 tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
+vfs-ai = { path = "../../../crates/vfs-ai", features = ["test-support"] }
 vfs-bookmarks = { workspace = true, features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 tempfile.workspace = true

@@ -1056,3 +1056,31 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 #feedback-report { font-family: ui-monospace, Consolas, monospace; font-size: var(--t-meta); white-space: pre; }
 .feedback-hint { margin: 0; color: var(--ink-2); }
 .feedback-body summary { cursor: pointer; font-weight: 700; min-block-size: 2.5rem; display: flex; align-items: center; }
+
+/* VFS-28: «Preguntar a sus documentos (IA)» and «Qué se ha enviado». */
+.ai-body { display: grid; gap: var(--s2); }
+.ai-body[hidden] { display: none; }
+.ai-providers { display: flex; gap: var(--s4); border: 0; margin: 0; padding: 0; }
+.ai-providers legend { font-weight: 700; padding: 0; margin-block-end: var(--s1); }
+.ai-key-form { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.ai-key-form[hidden] { display: none; }
+.ai-key-form label, .ai-cap label { font-weight: 700; }
+.ai-key-form input, .ai-cap input {
+  min-block-size: 2.5rem; padding: 0 var(--s3); min-inline-size: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit;
+}
+.ai-key-form input { flex: 1; }
+.ai-cap { display: grid; gap: var(--s1); }
+.ai-cap input { inline-size: 8rem; }
+.ai-key-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.ai-key-actions [hidden], #ai-msg[hidden] { display: none; }
+.ai-record-list { list-style: none; margin: 0; padding: 0 var(--s5) var(--s4); display: grid; gap: var(--s4); overflow-y: auto; }
+.ai-record-item { display: grid; gap: var(--s1); border-block-end: 1px solid var(--line); padding-block-end: var(--s3); }
+.ai-record-heading { color: var(--ink-2); font-size: var(--t-meta); margin: 0; }
+.ai-record-question { font-weight: 700; margin: 0; }
+.ai-record-file { font-weight: 700; margin: var(--s2) 0 0; }
+.ai-record-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--ink-2); }
+.ai-record-call { color: var(--ink-2); font-size: var(--t-meta); margin: 0; }
+#ai-record > .bookmarks-intro, #ai-record > .bookmarks-status, #ai-record > .btn { margin-inline: var(--s5); }
+#ai-record-empty[hidden], #ai-record-clear[hidden] { display: none; }
+#ai-open-record, #ai-record-clear { justify-self: start; }

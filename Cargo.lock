@@ -7344,6 +7344,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-wdio-webdriver",
  "tempfile",
+ "vfs-ai",
  "vfs-bookmarks",
  "vfs-content",
  "vfs-core",

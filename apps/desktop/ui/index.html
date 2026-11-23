@@ -254,6 +254,37 @@
       </div>
       <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
     </section>
+    <!-- VFS-28 R1: «Preguntar a sus documentos (IA)», off by default. The key field is
+         write-only: once saved, only its last 4 characters are shown. -->
+    <section class="setting" aria-labelledby="ai-set-title">
+      <h3 id="ai-set-title" data-s="aiSetTitle"></h3>
+      <label class="toggle"><input type="checkbox" id="ai-on"> <span data-s="aiToggle"></span></label>
+      <p class="bookmarks-intro bookmarks-status" data-s="aiIntro"></p>
+      <div id="ai-body" class="ai-body" hidden>
+        <fieldset id="ai-providers" class="ai-providers"><legend data-s="aiProviderLabel"></legend></fieldset>
+        <p id="ai-key-line" class="bookmarks-status"></p>
+        <form id="ai-key-form" class="ai-key-form">
+          <label for="ai-key" data-s="aiKeyLabel"></label>
+          <input id="ai-key" type="password" autocomplete="off" spellcheck="false">
+          <button class="btn" type="submit" data-s="aiKeySave"></button>
+        </form>
+        <div class="ai-key-actions">
+          <button id="ai-test" class="btn" type="button" data-s="aiTest"></button>
+          <button id="ai-replace" class="btn btn-quiet" type="button" data-s="aiReplace"></button>
+          <button id="ai-delete" class="btn btn-quiet" type="button" data-s="aiDelete"></button>
+        </div>
+        <p id="ai-msg" class="bookmarks-status" role="status" hidden></p>
+        <p class="bookmarks-intro" data-s="aiTestHelp"></p>
+        <div class="ai-cap">
+          <label for="ai-cap" data-s="aiCapLabel"></label>
+          <input id="ai-cap" type="number" min="0" step="0.5" inputmode="decimal">
+        </div>
+        <p id="ai-month" class="bookmarks-status"></p>
+        <label class="toggle"><input type="checkbox" id="ai-cheap"> <span data-s="aiCheap"></span></label>
+        <p class="bookmarks-intro" data-s="aiCheapHint"></p>
+        <button id="ai-open-record" class="btn btn-quiet" type="button" data-s="aiRecordOpen"></button>
+      </div>
+    </section>
     <!-- VFS-33: the default folder exclusions; almost nobody needs this, so it stays folded. -->
     <details class="setting setting-advanced">
       <summary data-s="advancedTitle"></summary>
@@ -370,6 +401,49 @@
     <form method="dialog" class="confirm-actions">
       <button class="btn" value="cancel" autofocus data-s="cancel"></button>
       <button class="btn btn-danger" value="remove" data-s="removeConfirm"></button>
+    </form>
+  </dialog>
+  <!-- VFS-28 R11: «Qué se ha enviado». -->
+  <dialog id="ai-record" class="drawer" aria-labelledby="ai-record-title" closedby="any">
+    <div class="drawer-head">
+      <h2 id="ai-record-title" data-s="aiRecordTitle"></h2>
+      <form method="dialog"><button class="icon-btn" value="close">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+        <span class="visually-hidden" data-s="close"></span>
+      </button></form>
+    </div>
+    <p class="bookmarks-intro" data-s="aiRecordIntro"></p>
+    <p id="ai-record-empty" class="bookmarks-status" data-s="aiRecordEmpty"></p>
+    <ul id="ai-record-list" class="ai-record-list" role="list"></ul>
+    <button id="ai-record-clear" class="btn btn-quiet" type="button" data-s="aiRecordClear"></button>
+  </dialog>
+
+  <dialog id="confirm-ai-clear" class="confirm" aria-labelledby="confirm-ai-clear-title" aria-describedby="confirm-ai-clear-desc">
+    <h2 id="confirm-ai-clear-title" data-s="aiRecordClearTitle"></h2>
+    <p id="confirm-ai-clear-desc" data-s="aiRecordClearBody"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-danger" value="clear" data-s="aiRecordClearConfirm"></button>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-ai-delete" class="confirm" aria-labelledby="confirm-ai-delete-title" aria-describedby="confirm-ai-delete-desc">
+    <h2 id="confirm-ai-delete-title" data-s="aiDeleteTitle"></h2>
+    <p id="confirm-ai-delete-desc" data-s="aiDeleteBody"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-danger" value="delete" data-s="aiDeleteConfirm"></button>
+    </form>
+  </dialog>
+
+  <!-- VFS-28 R2: the OS credential store refused the key. Values are KeyFallback ids. -->
+  <dialog id="ai-fallback" class="confirm" aria-labelledby="ai-fallback-title" aria-describedby="ai-fallback-desc">
+    <h2 id="ai-fallback-title" data-s="aiFallbackTitle"></h2>
+    <p id="ai-fallback-desc" data-s="aiFallbackBody"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn" value="session_only" data-s="aiFallbackSession"></button>
+      <button class="btn btn-primary" value="protected_file" data-s="aiFallbackFile"></button>
     </form>
   </dialog>
 </body>

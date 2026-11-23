@@ -28,6 +28,7 @@
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
   ReadState, RevealOutcome, RootStatus, Scope, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
+  AiErrorCode, KeyFallback, KeyPlace, KeyState, Provider,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -276,6 +277,64 @@ function fakeContent(mode, files) {
 }
 const R_DELAY = 250;
 const clone = (o) => JSON.parse(JSON.stringify(o));
+
+/** VFS-28: the AI settings, key, cap and record in memory. Keeps only a key's last 4. */
+function fakeAi() {
+  const st = {
+    settings: { enabled: false, provider: Provider.ANTHROPIC, cheap: false, noticeSeen: false },
+    keys: {}, // provider -> {last4, place}
+    capNano: 5e9,
+    records: [{
+      id: 1, askedAt: new Date(Date.now() - 3 * 3600e3).toISOString(), provider: Provider.ANTHROPIC,
+      question: '¿Cuánto pagué de fianza por el piso?',
+      rewrite: '{"keywords":["fianza","piso"],"phrases":[],"synonyms":["depósito"],"kind":null,"date_from":null,"date_to":null,"folder_hint":null}',
+      passages: [{ fileName: 'Contrato alquiler.pdf', page: 2, text: 'La parte arrendataria entrega en este acto la cantidad de 1.200 euros en concepto de fianza.' }],
+      calls: [
+        { followUp: false, rewrite: true, model: 'claude-haiku-5-5', inputTokens: 812, outputTokens: 61, costNano: 111_700 },
+        { followUp: false, rewrite: false, model: 'claude-sonnet-5-5', inputTokens: 9_300, outputTokens: 587, costNano: 24_470_000 },
+      ],
+      costNano: 24_581_700,
+    }],
+  };
+  const status = () => {
+    const k = st.keys[st.settings.provider];
+    return clone({
+      settings: st.settings,
+      key: k ? { state: KeyState.SAVED, ...k } : { state: KeyState.NONE },
+      capNano: st.capNano,
+      monthNano: st.records.reduce((n, r) => n + r.costNano, 0),
+      store: true,
+    });
+  };
+  const save = (provider, key, place) => {
+    if (!key.trim() || /\s/.test(key.trim())) throw { code: AiErrorCode.KEY_INVALID, message: 'the key text is not valid' };
+    st.keys[provider] = { last4: key.trim().slice(-4), place };
+    return status();
+  };
+  return {
+    async aiStatus() { await sleep(20); return status(); },
+    async aiSetSettings(enabled, provider, cheap) { Object.assign(st.settings, { enabled, provider, cheap }); return status(); },
+    async aiNoticeSeen() { st.settings.noticeSeen = true; return status(); },
+    async aiSaveKey(provider, key) {
+      await sleep(80);
+      if (key.includes('nostore')) throw { code: AiErrorCode.STORE_UNAVAILABLE, message: 'locked' };
+      return save(provider, key, KeyPlace.CREDENTIAL_STORE);
+    },
+    async aiSaveKeyFallback(provider, key, fallback) {
+      return save(provider, key, fallback === KeyFallback.PROTECTED_FILE ? KeyPlace.PROTECTED_FILE : KeyPlace.SESSION_ONLY);
+    },
+    async aiDeleteKey(provider) { delete st.keys[provider]; return status(); },
+    async aiTestKey(provider) {
+      await sleep(400);
+      const k = st.keys[provider];
+      if (!k) throw { code: AiErrorCode.NO_KEY, message: 'no key saved' };
+      if (k.last4 === 'bad0') throw { code: AiErrorCode.INVALID_KEY, message: 'invalid' };
+    },
+    async aiSetCap(capNano) { st.capNano = capNano; return status(); },
+    async aiRecords() { await sleep(30); return clone(st.records); },
+    async aiClearRecords() { st.records = []; },
+  };
+}
 
 export function createFakeBackend(params) {
   const scenario = params.get('scenario') || Scenario.DEFAULT;
@@ -657,6 +716,7 @@ export function createFakeBackend(params) {
     async onUpdateProgress(cb) { updateCbs.add(cb); return () => updateCbs.delete(cb); },
 
     ...content.api,
+    ...fakeAi(),
 
     async getProgress() { await sleep(20); return progress(); },
     async rescan(id) {

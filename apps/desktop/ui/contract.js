@@ -138,3 +138,47 @@ export const UnreadReason = Object.freeze({
   UNSUPPORTED: 'unsupported',
   FAILED: 'failed',
 });
+
+/** The model provider of «Preguntar a sus documentos» (VFS-28 D1). */
+export const Provider = Object.freeze({
+  ANTHROPIC: 'anthropic',
+  OPENAI: 'openai',
+});
+
+/** `ApiError.code` of the AI commands (VFS-28 R2–R4, R13). */
+export const AiErrorCode = Object.freeze({
+  INVALID_KEY: 'invalid_key',
+  NO_CREDIT: 'no_credit',
+  SPEND_LIMIT: 'spend_limit',
+  SATURATED: 'saturated',
+  MODEL_GONE: 'model_gone',
+  OFFLINE: 'offline',
+  CANCELLED: 'cancelled',
+  PROVIDER: 'provider', // the message is the one the provider sent
+  BAD_RESPONSE: 'bad_response',
+  KEY_INVALID: 'key_invalid',
+  NO_KEY: 'no_key',
+  KEY_UNREADABLE: 'key_unreadable',
+  STORE_UNAVAILABLE: 'store_unavailable',
+  STORAGE: 'storage',
+});
+
+/** `AiStatus.key.state` (VFS-28 R1, R3). */
+export const KeyState = Object.freeze({
+  NONE: 'none',
+  SAVED: 'saved',
+  UNREADABLE: 'unreadable',
+});
+
+/** `AiStatus.key.place`: where a saved key is kept (VFS-28 R2). */
+export const KeyPlace = Object.freeze({
+  CREDENTIAL_STORE: 'credential_store',
+  PROTECTED_FILE: 'protected_file',
+  SESSION_ONLY: 'session_only',
+});
+
+/** Where to keep the key when the OS store refuses it (VFS-28 R2). */
+export const KeyFallback = Object.freeze({
+  PROTECTED_FILE: 'protected_file',
+  SESSION_ONLY: 'session_only',
+});
