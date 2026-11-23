@@ -303,6 +303,7 @@ export const en = {
   contentWaiting: {
     [ContentWait.NAME_INDEXING]: 'waiting for the folder check to finish',
     [ContentWait.DISK_BUSY]: 'waiting: the disk is busy',
+    [ContentWait.CPU_BUSY]: 'waiting: the computer is busy with other programs',
     [ContentWait.LOW_SPACE]: 'paused: low disk space',
     [ContentWait.IN_USE]: '',
   },

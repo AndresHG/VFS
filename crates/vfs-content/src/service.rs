@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::indexer::{self, Admit, Gate, IndexOptions, OutcomeKind, RunSummary, StopReason};
 use crate::pace::{Decision, Pace, PaceConfig, Readings, WaitReason};
 use crate::store;
+use vfs_core::probes::CpuSample;
 
 /// Settings file in the app data folder.
 pub const SETTINGS_FILE: &str = "content.json";
@@ -47,6 +48,8 @@ pub trait Probes: Send {
     /// One disk-load sample (queue length) for the disk holding `path`; `None` where there is
     /// no probe.
     fn disk_queue(&mut self, path: &Path) -> Option<f64>;
+    /// The machine's processor use since the previous call; `None` when unknown.
+    fn cpu(&mut self) -> Option<CpuSample>;
 }
 
 /// Where status changes and diagnostic records go: Tauri events and the log in the app.
@@ -103,6 +106,7 @@ pub enum Phase {
 pub enum WaitKind {
     NameIndexing,
     DiskBusy,
+    CpuBusy,
     InUse,
     LowSpace,
 }
@@ -112,6 +116,7 @@ impl From<WaitReason> for WaitKind {
         match r {
             WaitReason::NameIndexing => WaitKind::NameIndexing,
             WaitReason::DiskBusy => WaitKind::DiskBusy,
+            WaitReason::CpuBusy => WaitKind::CpuBusy,
             WaitReason::InUse => WaitKind::InUse,
             WaitReason::LowSpace => WaitKind::LowSpace,
         }
@@ -817,6 +822,7 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             recent: VecDeque::new(),
             failures: Default::default(),
             waiting: None,
+            admitted: None,
         };
         let result = indexer::run_with(&cfg.index_db, &cfg.index, &shared.stop_run, &mut gate);
         let (rate, failures) = (gate.per_hour(), gate.failures.clone());
@@ -914,6 +920,8 @@ struct AppGate<'a> {
     recent: VecDeque<u64>,
     failures: std::collections::BTreeMap<String, u64>,
     waiting: Option<WaitKind>,
+    /// When the document in flight was admitted: its wall time sets the in-use gap (R7).
+    admitted: Option<Instant>,
 }
 
 impl AppGate<'_> {
@@ -939,12 +947,13 @@ impl Gate for AppGate<'_> {
                 return Admit::Stop;
             }
         }
-        // Read the probes first; the disk sample borrows them for the pace call.
+        // Read the probes first; the disk and processor samples share them for the pace call.
         let name_busy = self.probes.name_busy();
         let idle = self.probes.idle();
         let free_bytes = self.probes.free_bytes();
-        let probes = &mut *self.probes;
-        let mut disk = || probes.disk_queue(path);
+        let probes = std::cell::RefCell::new(&mut *self.probes);
+        let mut disk = || probes.borrow_mut().disk_queue(path);
+        let mut cpu = || probes.borrow_mut().cpu();
         let decision = self.pace.decide(
             Instant::now(),
             Readings {
@@ -952,16 +961,19 @@ impl Gate for AppGate<'_> {
                 idle,
                 free_bytes,
                 disk: &mut disk,
+                cpu: &mut cpu,
             },
         );
         match decision {
             Decision::Read => {
-                self.pace.read_at(Instant::now());
+                self.admitted = Some(Instant::now());
                 if self.waiting.take().is_some() {
                     set_phase(self.shared, Phase::Reading);
                 }
                 Admit::Read
             }
+            // The gap while the PC is in use is part of reading, not a wait (R7 rule 4, D6).
+            Decision::Wait(d, WaitReason::InUse) => Admit::Wait(d),
             Decision::Wait(d, reason) => {
                 let kind = WaitKind::from(reason);
                 if self.waiting != Some(kind) {
@@ -979,6 +991,12 @@ impl Gate for AppGate<'_> {
     fn after_document(&mut self, outcome: OutcomeKind, worker_ms: u64) {
         // A document's time is capped at the engine's limit: time asleep is not work.
         let ms = worker_ms.min(self.shared.cfg.index.worker.timeout.as_millis() as u64);
+        let now = Instant::now();
+        let took = self
+            .admitted
+            .take()
+            .map_or(Duration::from_millis(ms), |t| now - t);
+        self.pace.finished(now, took);
         self.work_ms += ms;
         self.run_docs += 1;
         self.recent.push_back(ms);

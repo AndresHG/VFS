@@ -132,6 +132,15 @@ impl BackOff {
         BackOff::new(SchedConfig::default())
     }
 
+    /// The same window and guarantee with another busy threshold: the content indexer's
+    /// processor rule, fed the share other programs use (VFS-27 R7).
+    pub fn with_busy_at(busy_at: f64) -> BackOff {
+        BackOff::new(SchedConfig {
+            busy_queue: busy_at,
+            ..SchedConfig::default()
+        })
+    }
+
     /// Longest continuous back-off before a forced work slice.
     pub fn max_backoff(&self) -> Duration {
         self.cfg.max_backoff

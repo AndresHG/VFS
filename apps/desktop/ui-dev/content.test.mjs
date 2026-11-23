@@ -79,11 +79,21 @@ test('the status area shows progress with pause', () => {
   assert.match(mainJs, /contentSetPaused\(action === ContentAction\.PAUSE\)/);
 });
 
-/** VFS-27 R6, R7: waits say why; the low-space pause ends with «Reanudar la lectura». */
+/** VFS-27 R6, R7, AC-7: waits say why; the low-space pause ends with «Reanudar la lectura». */
 test('waits say why', () => {
   const name = contentStatusLine(L, status(ContentPhase.WAITING, { phase: { reason: ContentWait.NAME_INDEXING } }));
   assert.match(name.text, /revisión de carpetas/);
   assert.equal(name.action, ContentAction.PAUSE);
+  // R7: a busy disk or processor is named, never left to guess; every wait but the in-use gap
+  // has its words in both catalogs.
+  const disk = contentStatusLine(L, status(ContentPhase.WAITING, { phase: { reason: ContentWait.DISK_BUSY } }));
+  assert.match(disk.text, /esperando: el disco está ocupado/);
+  const cpu = contentStatusLine(L, status(ContentPhase.WAITING, { phase: { reason: ContentWait.CPU_BUSY } }));
+  assert.match(cpu.text, /esperando: el ordenador está ocupado con otros programas/);
+  assert.equal(cpu.action, ContentAction.PAUSE);
+  for (const C of Object.values(CATALOGS)) {
+    for (const w of Object.values(ContentWait)) if (w !== ContentWait.IN_USE) assert.ok(C.contentWaiting[w], w);
+  }
   const low = contentStatusLine(L, status(ContentPhase.WAITING, { phase: { reason: ContentWait.LOW_SPACE } }));
   assert.match(low.text, /poco espacio/);
   assert.equal(low.action, ContentAction.RESUME);

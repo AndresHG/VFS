@@ -304,8 +304,10 @@ export const es = {
   contentReading: (done, total) => `Leyendo documentos: ${done} de ${total}`,
   contentRate: (n) => `${n} por hora`,
   contentWaiting: {
-    [ContentWait.NAME_INDEXING]: 'espera a que termine la revisión de carpetas',
-    [ContentWait.DISK_BUSY]: 'espera: el disco está ocupado',
+    // VFS-27 R7: each wait says what the reading waits for, in plain words.
+    [ContentWait.NAME_INDEXING]: 'esperando a que termine la revisión de carpetas',
+    [ContentWait.DISK_BUSY]: 'esperando: el disco está ocupado',
+    [ContentWait.CPU_BUSY]: 'esperando: el ordenador está ocupado con otros programas',
     [ContentWait.LOW_SPACE]: 'en pausa: poco espacio en disco',
     [ContentWait.IN_USE]: '',
   },

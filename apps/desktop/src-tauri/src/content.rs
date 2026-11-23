@@ -15,7 +15,7 @@ use vfs_content::pace::PaceConfig;
 use vfs_content::service::{ContentService, Events, Offer, Probes, ServiceConfig, Status};
 use vfs_content::{ContentResponse, IndexOptions, Query, Searcher, UnreadReason};
 use vfs_core::api::ApiError;
-use vfs_core::probes::DiskSampler;
+use vfs_core::probes::{CpuSample, CpuSampler, DiskSampler};
 use vfs_core::{SearchFilters, Vfs};
 
 /// File name of the extraction worker, as the bundler places the sidecar next to the app's
@@ -56,6 +56,7 @@ struct AppProbes {
     data_dir: PathBuf,
     /// One disk sampler per drive (the first component of a document's path).
     samplers: HashMap<PathBuf, Option<DiskSampler>>,
+    cpu: CpuSampler,
 }
 
 impl Probes for AppProbes {
@@ -81,6 +82,10 @@ impl Probes for AppProbes {
             .or_insert_with(|| DiskSampler::for_path(path))
             .as_mut()?
             .queue_length()
+    }
+
+    fn cpu(&mut self) -> Option<CpuSample> {
+        self.cpu.sample()
     }
 }
 
@@ -126,6 +131,7 @@ impl ContentRuns {
             vfs,
             data_dir,
             samplers: HashMap::new(),
+            cpu: CpuSampler::default(),
         };
         let events = Arc::new(AppEvents { app: app.clone() });
         let svc = Arc::new(ContentService::start(cfg, Box::new(probes), events));

@@ -296,12 +296,17 @@ fn all_content_waits() -> Vec<WaitKind> {
     let all = vec![
         WaitKind::NameIndexing,
         WaitKind::DiskBusy,
+        WaitKind::CpuBusy,
         WaitKind::InUse,
         WaitKind::LowSpace,
     ];
     for w in &all {
         match w {
-            WaitKind::NameIndexing | WaitKind::DiskBusy | WaitKind::InUse | WaitKind::LowSpace => {}
+            WaitKind::NameIndexing
+            | WaitKind::DiskBusy
+            | WaitKind::CpuBusy
+            | WaitKind::InUse
+            | WaitKind::LowSpace => {}
         }
     }
     all
