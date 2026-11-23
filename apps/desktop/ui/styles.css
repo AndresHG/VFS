@@ -505,6 +505,11 @@ input[type="date"] {
 }
 /* With hits inside documents below, the name list keeps room for a few rows (VFS-27 R12). */
 .results:has(> .content-hits:not([hidden])) { grid-template-rows: auto auto minmax(7rem, 1fr) auto auto; }
+/* VFS-38 R4: under «Solo documentos» there is no name list; while no message shows in its
+   place, the content section takes its room. */
+.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) { grid-template-rows: auto auto 0 minmax(0, 1fr) auto; }
+.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) > .list-wrap { display: none; }
+.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) > .content-hits { max-block-size: none; }
 /* VFS-38 R9: the count with «Orden» beside it. */
 .results-head {
   grid-row: 1;

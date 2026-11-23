@@ -143,6 +143,9 @@ export const es = {
   emptyNoHitsBody: 'Compruebe lo escrito o pruebe con menos palabras.',
   emptyNoHitsFilters: 'Hay filtros puestos que pueden estar ocultando resultados.',
   emptyNamesOnly: 'Buscando solo en los nombres.',
+  // VFS-38 R4: «Solo documentos» with a query under 3 letters, and its no-match action.
+  emptyDocumentsShort: 'Escribe al menos 3 letras para buscar dentro de los documentos.',
+  searchEverything: 'Buscar en todo',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `Ningún resultado con estos filtros. ¿Buscar sin filtros? (${n})`,
   suggestSpelling: (word, n) => `¿Quería decir «${word}»? (${n})`,

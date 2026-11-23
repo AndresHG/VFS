@@ -23,7 +23,7 @@
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 // Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
 // scan); `content=on` starts it reading, `content=damaged` and `content=stopped` show those states. A content query with
-// "alguna" is partial.
+// "alguna" is partial; one with "zzzz" finds nothing.
 
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
@@ -252,7 +252,7 @@ function fakeContent(mode, files) {
         await sleep(R_DELAY);
         const words = fold(query).split(/\s+/).filter(Boolean);
         const kinds = filters.kinds || [];
-        const pool = docs.filter((d) => (!kinds.length || kinds.includes(FileKind.DOCUMENT))
+        const pool = words.includes('zzzz') ? [] : docs.filter((d) => (!kinds.length || kinds.includes(FileKind.DOCUMENT))
           && (!filters.folder || d.dir.startsWith(filters.folder))).slice(0, Math.round((st.done / total) * 57));
         const hits = pool.slice(offset, offset + 20).map((d, i) => {
           const snippet = `… según consta en el acta, ${query} aparece en la cláusula tercera del contrato firmado …`;
