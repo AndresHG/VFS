@@ -17,6 +17,16 @@ Spanish and English (VFS-22). Product spec: `specs/vfs-1-core-search/spec.md`.
 - **Targets**: Windows 10+ and macOS; no administrator rights. CI runs a Windows + macOS matrix.
 - **Harness**: Python 3 + bash hooks and scripts, run only on the macOS dev machine.
 
+## Lightweight first
+
+- Footprint and responsiveness outrank features: VFS must never load the user's system. Every
+  change states its cost in CPU, memory, disk I/O and index size, and a feature that cannot be
+  made light waits (`docs/vision.md`, owner).
+- Background work paces itself by measured headroom (disk busy, CPU), never by input
+  idleness alone, and is checked on both a fast SSD machine and the slow HDD target (VFS-27 T2).
+- When an open-source library is too heavy or slow for the target, measure it and say so;
+  replacing it with our own code is a legitimate line of research (`docs/vision.md`).
+
 ## Build and test
 
 Rust is not on agents' `PATH`: prefix cargo commands with `source "$HOME/.cargo/env" &&`.
