@@ -252,6 +252,7 @@ fn damaged_store_waits_for_the_user() {
             limit: 10,
             offset: 0,
             sort: Default::default(),
+            scope: Default::default(),
         })
         .unwrap();
     let files = names.hits.iter().filter(|h| !h.is_dir).count();
