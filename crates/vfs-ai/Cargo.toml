@@ -1,12 +1,15 @@
 [package]
 name = "vfs-ai"
-description = "Ask your archive (VFS-28): model providers, API keys, error mapping, cost metering, ai.db"
+description = "Ask your archive (VFS-28): model providers, API keys, cost metering, ai.db and the ask flow"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+vfs-core.workspace = true
+# VFS-28 R6: the ask flow retrieves through content search; the extractor stays out (VFS-2 D3).
+vfs-content = { path = "../vfs-content", default-features = false }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

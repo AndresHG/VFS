@@ -7244,6 +7244,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "vfs-ai",
+ "vfs-content",
+ "vfs-core",
  "windows-native-keyring-store",
  "windows-sys 0.61.2",
 ]
@@ -7266,6 +7268,7 @@ dependencies = [
 name = "vfs-cli"
 version = "0.2.2"
 dependencies = [
+ "chrono",
  "clap",
  "dunce",
  "libc",
@@ -7274,6 +7277,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "vfs-ai",
  "vfs-bookmarks",
  "vfs-content",
  "vfs-core",

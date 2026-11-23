@@ -1,6 +1,8 @@
 //! Shared helpers for the vfs-ai tests: fixtures, sample requests, fast retries.
 #![allow(dead_code)]
 
+pub mod fake_corpus;
+
 use std::time::Duration;
 
 use serde_json::Value;

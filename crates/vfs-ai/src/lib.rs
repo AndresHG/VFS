@@ -1,16 +1,20 @@
-//! Ask your archive (VFS-28), PR 28b: the model providers and everything around a priced call.
+//! Ask your archive (VFS-28): the model providers, everything around a priced call, and the ask
+//! flow.
 //!
 //! - [`ChatModel`]: `validate_key`, `rewrite` and a streamed `answer`, for Anthropic and OpenAI,
-//!   over blocking `reqwest` (D10). Prompts and the ask flow belong to the caller (28c).
+//!   over blocking `reqwest` (D10).
+//! - [`ask`]: the ask flow (28c): prompts, retrieval rounds, passages, citation checks,
+//!   follow-ups and the R14 diagnostics.
 //! - [`ApiKey`]: the redacting secret type; [`Keys`]: the OS credential store with the
 //!   protected-file and session-only fallbacks (R2).
 //! - [`AiError`]: provider errors mapped to the kinds of R13, with retries.
 //! - [`cost`]: the dated model and price table (R10, D7).
 //! - [`AiDb`]: `ai.db`, the record of what was sent and the monthly totals (R10, R11).
 //!
-//! Nothing here depends on content search (VFS-2): passages arrive as plain data.
+//! Only [`ask`] touches content search (VFS-2), through its [`ask::Corpus`] trait.
 
 mod anthropic;
+pub mod ask;
 pub mod cost;
 mod db;
 mod error;
