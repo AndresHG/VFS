@@ -11,12 +11,14 @@
 //   scenario=first-scan  every folder still being scanned for the first time
 //   (default)            one ready folder, one scanning, one unavailable; 50.000 files
 //   slow                 add 0.4–1.2 s of latency to every search
+//   bookmarks            Firefox bookmarks already on and read at start
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
 // opened_parent, standing in for the rare case the Shell cannot select a long path
 // (VFS-24). Shortcuts (VFS-18): "boda" finds "Fotos de la boda.lnk" by its target on a disk
 // that is not connected (Mostrar el destino fails), "banco" an Internet Shortcut and
-// "musica" a linked folder. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
+// "musica" a linked folder. Names only (VFS-38): "peñalara" finds a document by name, a photo by its
+// folder and that folder; "ordesa" is only in a folder path. Firefox bookmarks (VFS-6) start off; turning them on in the folder panel
 // gives a few fake ones after 1 s. Each "Añadir carpeta…" walks a fixed list of picks: a new folder, a folder
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 // Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
@@ -25,7 +27,7 @@
 
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
-  ReadState, RevealOutcome, RootStatus, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
+  ReadState, RevealOutcome, RootStatus, Scope, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
 } from '../ui/contract.js';
 
 /** `?scenario=` values (see the header). */
@@ -299,6 +301,22 @@ export function createFakeBackend(params) {
       fName: fold(name), fDir: fold(`${dir} ${link.target}`),
     });
   }
+  // VFS-38: names against folder paths. The "Ordesa 2019" folder is left out of the folders on
+  // purpose, so "ordesa" is in folder paths only.
+  const docsRoot = 'C:\\Users\\Carmen\\Documents';
+  for (const [name, dir, kind, isDir] of [
+    ['Excursión Peñalara.docx', `${docsRoot}\\Fotos\\Sierra`, FileKind.DOCUMENT, false],
+    ['IMG_0412.jpg', `${docsRoot}\\Fotos\\Peñalara julio`, FileKind.PHOTO, false],
+    ['Peñalara julio', `${docsRoot}\\Fotos`, FileKind.FOLDER, true],
+    ['IMG_0501.jpg', `${docsRoot}\\Fotos\\Ordesa 2019`, FileKind.PHOTO, false],
+    ['IMG_0502.jpg', `${docsRoot}\\Fotos\\Ordesa 2019`, FileKind.PHOTO, false],
+  ]) {
+    const list = isDir ? corpus.dirs : corpus.files;
+    list.push({
+      id: 900_000 + list.length, rootId: 1, seq: 0, isDir, matched: null, dir, name, kind,
+      size: isDir ? 0 : 1_500_000, modified: NOW - 60 * DAY, fName: fold(name), fDir: fold(dir),
+    });
+  }
   const all = [...corpus.files, ...corpus.dirs];
   const totalOf = (id) => corpus.counts.get(id) || 0;
 
@@ -330,6 +348,11 @@ export function createFakeBackend(params) {
   const content = fakeContent(params.get('content'), corpus.files);
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
+  const readBookmarks = () => Object.assign(bookmarks, {
+    state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000),
+    roots: [{ id: 1001, root: BookmarkRoot.MENU, profile: null }, { id: 1003, root: BookmarkRoot.UNFILED, profile: null }],
+  });
+  if (params.has('bookmarks')) { bookmarks.enabled = true; readBookmarks(); }
   let lastChanged = 0;
   let picks = 0;
   let generation = 0;
@@ -395,7 +418,8 @@ export function createFakeBackend(params) {
     }
   }, 500);
 
-  function rank(text, f) {
+  /** `namesOnly` (VFS-38 R3): every word in the name; folder paths are not used. */
+  function rank(text, f, namesOnly) {
     const ts = fold(text).split(/\s+/).filter(Boolean);
     const kinds = f.kinds || [];
     const pass = (e) => visible(e)
@@ -412,7 +436,7 @@ export function createFakeBackend(params) {
       let inName = 0; let ok = true;
       for (const t of ts) {
         if (e.fName.includes(t)) inName++;
-        else if (!e.fDir.includes(t)) { ok = false; break; }
+        else if (namesOnly || !e.fDir.includes(t)) { ok = false; break; }
       }
       if (ok) out.push({ e, m: inName === ts.length ? MatchKind.NAME : MatchKind.PATH, score: inName === ts.length ? 0 : 1 });
     }
@@ -490,8 +514,9 @@ export function createFakeBackend(params) {
         await sleep(900);
         return { hits: [], total: 0, truncated: true, truncatedBy: TruncatedBy.DEADLINE, elapsedMs: 1000 };
       }
-      const key = JSON.stringify([text, f, generation, q.sort]);
-      if (!cache || cache.key !== key) cache = { key, list: groupCopies(sortFake(rank(text, f), q.sort)) };
+      const namesOnly = q.scope === Scope.NAMES;
+      const key = JSON.stringify([text, f, generation, q.sort, namesOnly]);
+      if (!cache || cache.key !== key) cache = { key, list: groupCopies(sortFake(rank(text, f, namesOnly), q.sort)) };
       const list = cache.list;
       const capped = list.length > 2000;
       const total = Math.min(list.length, 2000);
@@ -527,14 +552,15 @@ export function createFakeBackend(params) {
       if (!e?.link?.openable) throw { code: ErrorCode.UNAVAILABLE, message: `link ${id}` };
     },
 
-    /** VFS-13, enough for looking at the screen: without filters, or without the last word. */
+    /** VFS-13, enough for looking at the screen: without filters and in «Todo» (VFS-38 R13),
+     *  or without the last word in the same scope. */
     async suggest(q) {
       const f = q.filters || {};
       const filtered = (f.kinds || []).length || f.modifiedFrom != null || f.modifiedTo != null
-        || f.sizeMin != null || f.sizeMax != null || f.folder;
-      const count = async (text, filters) => (await this.search({ text, filters, limit: 1, offset: 0 }));
+        || f.sizeMin != null || f.sizeMax != null || f.folder || q.scope === Scope.NAMES;
+      const count = async (text, filters, scope = q.scope) => (await this.search({ text, filters, scope, limit: 1, offset: 0 }));
       if (q.text && filtered) {
-        const r = await count(q.text, {});
+        const r = await count(q.text, {}, Scope.ALL);
         if (r.total) {
           return { kind: SuggestionKind.DROP_FILTERS, text: q.text, clearFilters: true, term: null,
             replacement: null, count: r.total, capped: r.truncated };
@@ -562,7 +588,7 @@ export function createFakeBackend(params) {
       const ts = fold(q.text || '').split(/\s+/).filter(Boolean);
       const pool = BOOKMARKS.filter((b) => inside == null || b.parent === inside);
       const found = marks && !blocked && (ts.length || inside != null)
-        ? pool.filter((b) => ts.every((t) => fold(`${b.title} ${b.url} ${b.folder.join(' ')}`).includes(t)))
+        ? pool.filter((b) => ts.every((t) => fold(q.scope === Scope.NAMES ? b.title : `${b.title} ${b.url} ${b.folder.join(' ')}`).includes(t)))
           .map(({ parent, ...b }) => ({ ...b, source: Source.BOOKMARKS, matched: MatchKind.NAME }))
         : [];
       const offset = q.offset || 0;
@@ -584,10 +610,7 @@ export function createFakeBackend(params) {
       bookmarks.count = 0;
       if (on) {
         setTimeout(() => {
-          Object.assign(bookmarks, {
-            state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000),
-            roots: [{ id: 1001, root: BookmarkRoot.MENU, profile: null }, { id: 1003, root: BookmarkRoot.UNFILED, profile: null }],
-          });
+          readBookmarks();
           for (const cb of bookmarkCbs) cb({ ...bookmarks });
         }, 1000);
       }

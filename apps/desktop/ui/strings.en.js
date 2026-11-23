@@ -1,7 +1,7 @@
 // The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
 // words, no "index" jargon. Functions take already-formatted values.
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import { DateChoice, LanguageChoice, ScopeChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason,
@@ -29,6 +29,17 @@ export const en = {
     : names.length <= 2 ? names.join(', ') : `${names[0]} and ${names.length - 1} more`),
   clearFilters: 'Clear filters',
   clearFiltersN: (n) => `Clear filters (${n})`,
+  fScope: 'Search in',
+  scopeOptions: {
+    [ScopeChoice.ALL]: 'All', [ScopeChoice.NAMES]: 'Names only', [ScopeChoice.DOCUMENTS]: 'Documents only',
+  },
+  moreFilters: 'More filters',
+  moreFiltersN: (n) => `More filters (${n})`,
+  activeFiltersTitle: 'Filters in use',
+  chipSize: (choice) => `Size: ${choice}`,
+  chipFolder: (name) => `Folder: ${name}`,
+  sourceChips: { [SourceChoice.FILES]: 'Files only', [SourceChoice.BOOKMARKS]: 'Bookmarks only' },
+  removeFilter: (label) => `Remove “${label}”`,
   rangeInverted: 'The “From” date is after the “To” date.',
 
   kindsPlural: {
@@ -50,7 +61,7 @@ export const en = {
     [SizeChoice.MEDIUM]: '1 MB to 100 MB', [SizeChoice.LARGE]: '100 MB to 1 GB',
     [SizeChoice.HUGE]: 'Over 1 GB',
   },
-  fSource: 'Search in',
+  fSource: 'Source',
   sourceOptions: {
     [SourceChoice.BOTH]: 'Files and bookmarks', [SourceChoice.FILES]: 'Files',
     [SourceChoice.BOOKMARKS]: 'Bookmarks',
@@ -128,6 +139,7 @@ export const en = {
   emptyNoHitsTitle: (q) => (q ? `Nothing found for “${q}”` : 'No files match these filters'),
   emptyNoHitsBody: 'Check what you typed or try fewer words.',
   emptyNoHitsFilters: 'Some filters are on and may be hiding results.',
+  emptyNamesOnly: 'Searching names only.',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `No results with these filters. Search without filters? (${n})`,
   suggestSpelling: (word, n) => `Did you mean “${word}”? (${n})`,

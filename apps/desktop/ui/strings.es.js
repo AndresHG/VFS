@@ -2,7 +2,7 @@
 // "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values. Every
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
-import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import { DateChoice, LanguageChoice, ScopeChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason,
@@ -29,6 +29,18 @@ export const es = {
     : names.length <= 2 ? names.join(', ') : `${names[0]} y ${names.length - 1} más`),
   clearFilters: 'Quitar filtros',
   clearFiltersN: (n) => `Quitar filtros (${n})`,
+  // VFS-38: the scope group, «Más filtros» and the line of filters in use below the filters.
+  fScope: 'Buscar en',
+  scopeOptions: {
+    [ScopeChoice.ALL]: 'Todo', [ScopeChoice.NAMES]: 'Solo nombres', [ScopeChoice.DOCUMENTS]: 'Solo documentos',
+  },
+  moreFilters: 'Más filtros',
+  moreFiltersN: (n) => `Más filtros (${n})`,
+  activeFiltersTitle: 'Filtros puestos',
+  chipSize: (choice) => `Tamaño: ${choice}`,
+  chipFolder: (name) => `Carpeta: ${name}`,
+  sourceChips: { [SourceChoice.FILES]: 'Solo archivos', [SourceChoice.BOOKMARKS]: 'Solo marcadores' },
+  removeFilter: (label) => `Quitar «${label}»`,
   rangeInverted: 'La fecha «Desde» es posterior a «Hasta».',
 
   kindsPlural: {
@@ -51,7 +63,7 @@ export const es = {
     [SizeChoice.MEDIUM]: 'De 1 MB a 100 MB', [SizeChoice.LARGE]: 'De 100 MB a 1 GB',
     [SizeChoice.HUGE]: 'Más de 1 GB',
   },
-  fSource: 'Buscar en',
+  fSource: 'Origen',
   sourceOptions: {
     [SourceChoice.BOTH]: 'Archivos y marcadores', [SourceChoice.FILES]: 'Archivos',
     [SourceChoice.BOOKMARKS]: 'Marcadores',
@@ -130,6 +142,7 @@ export const es = {
   emptyNoHitsTitle: (q) => (q ? `No se encontró nada para «${q}»` : 'No hay archivos con estos filtros'),
   emptyNoHitsBody: 'Compruebe lo escrito o pruebe con menos palabras.',
   emptyNoHitsFilters: 'Hay filtros puestos que pueden estar ocultando resultados.',
+  emptyNamesOnly: 'Buscando solo en los nombres.',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `Ningún resultado con estos filtros. ¿Buscar sin filtros? (${n})`,
   suggestSpelling: (word, n) => `¿Quería decir «${word}»? (${n})`,

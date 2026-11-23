@@ -8,7 +8,9 @@ and the problems listed in [audit.md](audit.md).
 
 1. **The results are the interface.** Chrome takes the least space that keeps it usable.
 2. **One volume.** Ink for content, muted ink for context, accent for the one thing to do now.
-3. **Visible, not loud.** Filters and status are always on screen (spec R9) but quiet until used.
+3. **Visible, not loud.** Status, the scope, type and date are always on screen; the rest of
+   the filters are one click away in «Más filtros», and any filter in use shows as a chip
+   below the line (VFS-38 R7, R8). Quiet until used.
 4. **Big by default, bigger on request.** Sizes in `rem`; the layout survives 200 % text.
 5. **Nothing moves unless the person moved it.**
 
@@ -77,7 +79,9 @@ Implementation: raw values as custom properties, switched under
 | Search box | surface, 1.5px `--line-strong`, radius 0.875rem | — | 3px `--focus` ring, 2px offset | — | — |
 | Primary button | accent fill, on-accent text | 8 % darker | ring | 2 % darker | 55 % opacity, no pointer |
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
-| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; "Quitar filtros (n)" clears all | — |
+| Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; «Más filtros (n)» counts the filters behind it | — |
+| Scope group | one `--sunk` pill of radios, «Buscar en» label in ink-2 (kept for screen readers only when the line would not fit) | radio `--sunk-2` | ring; one tab stop, arrows move the choice | chosen radio bold on surface with a `--line-strong` border; accent-soft and accent border when it narrows (not «Todo») | — |
+| Filter chip | accent-soft bg, accent border, bold, `×`; one per filter in use behind «Más filtros», on a line below the filters with «Quitar filtros (n)» at its end, which clears every filter and the scope but keeps the order | `--sunk-2` | ring | — | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
@@ -112,12 +116,14 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 
 Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
 Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keeps its shape:
-- **Where to search** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") is the
-  first pill in the filter line and shows only while bookmarks are included. **"Orden"** is
-  the last pill and always shows, with five orders (most alike, newest, oldest, name A–Z,
-  largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12).
-  Both are native-select pills like date and size rather than the type checklist: each is
-  one choice, and a select also works where the Popover API is missing.
+- **«Origen»** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") sits in
+  «Más filtros» beside size and folder and shows only while bookmarks are included; a choice
+  other than the default shows as a chip («Solo archivos», «Solo marcadores»). «Buscar en»
+  names only the scope group (VFS-38 R7). **"Orden"** sits in the results header beside the
+  count whenever there are results, with five orders (most alike, newest, oldest, name A–Z,
+  largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12,
+  VFS-38 R9). Both are native selects: each is one choice, and a select also works where
+  the Popover API is missing.
 - **Bookmark rows** reuse the result row: a bookmark icon, the title as the name, and the
   bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
   same middle truncation, because the folder path matters as much as for files. The date slot
@@ -161,5 +167,6 @@ results get the screen, one action instead of a column of buttons, no boxes in b
 colour, a quiet idle page that says what to do. It keeps every filter visible on one line (R9)
 and every keyboard and screen-reader behaviour of today. Two things to borrow when building it:
 from B, the type checklist uses large one-click rows with ticks; from C, the result count moves
-into the status line so short windows keep one more row. Pick B instead if the person using it
+into the status line so short windows keep one more row (VFS-38 R9 later moved it to a results
+header beside «Orden»; on short windows that header is compact and the status keeps one line). Pick B instead if the person using it
 struggles with anything that opens; pick C if the goal is the smallest change before phase 2.
