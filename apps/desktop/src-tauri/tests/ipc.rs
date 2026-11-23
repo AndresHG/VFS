@@ -435,9 +435,17 @@ fn content_commands_over_ipc() {
         st.get("done").is_some() && st.get("perHour").is_some(),
         "{st}"
     );
-    // The offer's numbers (AC-4), read from the name index alone.
-    let offer = invoke(&webview, "content_offer", json!({})).unwrap();
-    assert_eq!(offer["documents"], json!(1), "{offer}");
+    // The offer's numbers (AC-4), read from the name index alone, once the folder's name
+    // scan has found its one document.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let offer = loop {
+        let offer = invoke(&webview, "content_offer", json!({})).unwrap();
+        if offer["documents"] == json!(1) {
+            break offer;
+        }
+        assert!(Instant::now() < deadline, "offer: {offer}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
     assert!(
         offer["seconds"].is_array() && offer["bytes"].is_array(),
         "{offer}"
