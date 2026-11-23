@@ -102,8 +102,8 @@ Background pace (owner decision T2, which replaces T1)
   words: «esperando a que termine la revisión de carpetas», «esperando: el disco está
   ocupado», «esperando: el ordenador está ocupado con otros programas».
   Expected rates: on a fast machine in light use (SSD, 100 ms documents) at least 250
-  documents a minute; on the target PC with its disk kept busy, a fraction of its calm rate,
-  never zero.
+  documents a minute; on the target PC with its disk kept busy, under half its calm rate and
+  at least one document per back-off cycle (`max_backoff` + `min_work`, 10 s).
 - R8. THE app SHALL show content progress in the status area:
   - documents read out of the total;
   - documents per hour, computed over working time only, not pauses or waits;
