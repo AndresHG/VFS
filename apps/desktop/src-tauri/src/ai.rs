@@ -3,16 +3,23 @@
 //! when typed, and never back (R2): no command returns it, and only its last 4 characters are
 //! shown.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri_plugin_dialog::DialogExt;
+use vfs_ai::ask::{self, AskError, AskOptions, Lang, LocalCorpus, Reply, Thread};
 use vfs_ai::{
-    chat_model, AiDb, AiError, ApiKey, CallKind, Endpoint, Fallback, KeyError, KeyLocation, Keys,
-    Provider,
+    chat_model, AiDb, AiError, AnswerEvent, ApiKey, CallKind, CancelToken, Endpoint, Fallback,
+    KeyError, KeyLocation, Keys, Provider,
 };
 use vfs_core::api::ApiError;
+use vfs_core::SearchFilters;
+
+use crate::bibliography::{self, BibEntry};
+use crate::AppState;
 
 /// The AI settings, apart from the index; never the key (R2).
 pub const SETTINGS_FILE: &str = "ai.json";
@@ -89,6 +96,12 @@ pub enum AiErrorCode {
     StoreUnavailable,
     /// The record or the settings could not be read or written.
     Storage,
+    /// The month's spend reached the cap; ask again with `confirmed` (R10).
+    CapReached,
+    /// Content search has no store to ask over (R5).
+    NoStore,
+    /// The thread is gone (the window was reloaded, D3).
+    NoThread,
 }
 
 impl AiErrorCode {
@@ -109,6 +122,9 @@ impl AiErrorCode {
             KeyUnreadable,
             StoreUnavailable,
             Storage,
+            CapReached,
+            NoStore,
+            NoThread,
         ]
     }
 
@@ -283,6 +299,17 @@ pub struct AiState {
     endpoint: Option<String>,
     settings: Mutex<AiSettings>,
     db: Mutex<Option<AiDb>>,
+    /// Open threads by id, in memory only (D3).
+    threads: Mutex<HashMap<u64, Asking>>,
+    next_thread: Mutex<u64>,
+    /// The cancel token of each running question, by the UI's ask id (R13 «Cancelar»).
+    running: Mutex<HashMap<u64, CancelToken>>,
+}
+
+/// A thread and the pages each of its answers cited, per document (R12).
+struct Asking {
+    thread: Thread,
+    cited: BTreeMap<i64, BTreeSet<u32>>,
 }
 
 impl AiState {
@@ -302,6 +329,9 @@ impl AiState {
             keys,
             endpoint,
             db: Mutex::new(None),
+            threads: Mutex::new(HashMap::new()),
+            next_thread: Mutex::new(1),
+            running: Mutex::new(HashMap::new()),
         }
     }
 
@@ -536,6 +566,431 @@ pub fn ai_records(ai: State<'_, AiState>) -> Result<Vec<RecordView>, ApiError> {
 #[tauri::command(async)]
 pub fn ai_clear_records(ai: State<'_, AiState>) -> Result<(), ApiError> {
     ai.db()?.get_mut().clear_records().map_err(storage_error)
+}
+
+/// Streamed answer text (`{askId, text}`), as it arrives (R7).
+pub const EVENT_ANSWER_TEXT: &str = "ai-answer-text";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextEvent {
+    ask_id: u64,
+    text: String,
+}
+
+/// A passage sent, for the markers (R8): what hovering shows and where the file is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceView {
+    pub file_id: i64,
+    pub name: String,
+    pub pages: Vec<u32>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationView {
+    /// Index into the thread's sources.
+    pub passage: usize,
+    pub marker: u32,
+}
+
+/// A run of answer text with its markers (R8). Text only: the UI draws it as plain text (R7a).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockView {
+    pub text: String,
+    pub citations: Vec<CitationView>,
+}
+
+/// A checked answer, with its cost and the month's spend (R8, R10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyView {
+    pub blocks: Vec<BlockView>,
+    /// No valid citation: «No he encontrado la respuesta en sus documentos» (R8).
+    pub not_found: bool,
+    pub cost_nano: i64,
+    pub month_nano: i64,
+    pub cap_nano: i64,
+}
+
+/// A document found, for the not-found list (R8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentView {
+    pub file_id: i64,
+    pub name: String,
+}
+
+/// A first question's result: its thread id for follow-ups, the reply, the passages it was
+/// built from and the documents found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskView {
+    pub thread_id: u64,
+    pub reply: ReplyView,
+    pub sources: Vec<SourceView>,
+    pub documents: Vec<DocumentView>,
+}
+
+fn lang_of(code: &str) -> Lang {
+    if code == "en" {
+        Lang::En
+    } else {
+        Lang::Es
+    }
+}
+
+fn ask_error(e: AskError) -> ApiError {
+    match e {
+        AskError::CapReached(s) => api_error(
+            AiErrorCode::CapReached,
+            format!("spent {} of {}", s.spent_nano, s.cap_nano),
+        ),
+        AskError::Ai(e) => ai_error(e),
+        AskError::Content(vfs_content::Error::Off) => {
+            api_error(AiErrorCode::NoStore, "content search is off")
+        }
+        AskError::Content(e) => storage_error(e),
+        AskError::Db(e) => storage_error(e),
+    }
+}
+
+impl AiState {
+    fn start(&self, ask_id: u64) -> CancelToken {
+        let token = CancelToken::new();
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(ask_id, token.clone());
+        token
+    }
+
+    fn finish(&self, ask_id: u64) {
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&ask_id);
+    }
+
+    fn reply_view(&self, reply: &Reply) -> Result<ReplyView, ApiError> {
+        let cap = self
+            .db()?
+            .get()
+            .cap_status(&chrono::Local::now())
+            .map_err(storage_error)?;
+        Ok(ReplyView {
+            blocks: reply
+                .blocks
+                .iter()
+                .map(|b| BlockView {
+                    text: b.text.clone(),
+                    citations: b
+                        .citations
+                        .iter()
+                        .map(|c| CitationView {
+                            passage: c.passage,
+                            marker: c.marker,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            not_found: reply.not_found,
+            cost_nano: reply.cost_nano,
+            month_nano: cap.spent_nano,
+            cap_nano: cap.cap_nano,
+        })
+    }
+
+    /// Adds the pages `reply` cited to the thread's bibliography.
+    fn cite(asking: &mut Asking, reply: &Reply) {
+        for c in reply.blocks.iter().flat_map(|b| &b.citations) {
+            if let Some(s) = asking.thread.sources.get(c.passage) {
+                asking
+                    .cited
+                    .entry(s.file_id)
+                    .or_default()
+                    .extend(s.pages.iter().copied());
+            }
+        }
+    }
+
+    fn options(&self, confirmed: bool, lang: &str) -> AskOptions {
+        let s = self.settings();
+        AskOptions {
+            provider: s.provider,
+            lang: lang_of(lang),
+            cheap: s.cheap,
+            over_cap_confirmed: confirmed,
+            now: chrono::Local::now(),
+        }
+    }
+}
+
+impl AiState {
+    fn store_thread(&self, asking: Asking) -> u64 {
+        let id = {
+            let mut next = self.next_thread.lock().unwrap_or_else(|e| e.into_inner());
+            let id = *next;
+            *next += 1;
+            id
+        };
+        self.threads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, asking);
+        id
+    }
+
+    /// Asks `question` over `corpus` (R6–R10): the work of `ai_ask`, blocking. `on_text` hears
+    /// the answer as it streams.
+    #[allow(clippy::too_many_arguments)]
+    pub fn ask_over(
+        &self,
+        corpus: &dyn ask::Corpus,
+        ask_id: u64,
+        question: &str,
+        filters: &SearchFilters,
+        confirmed: bool,
+        lang: &str,
+        on_text: &mut dyn FnMut(String),
+    ) -> Result<AskView, ApiError> {
+        let opts = self.options(confirmed, lang);
+        let key = self.key(opts.provider)?;
+        let model =
+            chat_model(opts.provider, key, self.endpoint(opts.provider)).map_err(ai_error)?;
+        let cancel = self.start(ask_id);
+        let result = {
+            let mut db = self.db()?;
+            ask::ask(
+                model.as_ref(),
+                corpus,
+                db.get_mut(),
+                question,
+                filters,
+                &opts,
+                &cancel,
+                &mut |AnswerEvent::Text(t)| on_text(t),
+            )
+        };
+        self.finish(ask_id);
+        let asked = result.map_err(ask_error)?;
+        let reply = self.reply_view(&asked.reply)?;
+        let sources = asked
+            .thread
+            .sources
+            .iter()
+            .map(|s| SourceView {
+                file_id: s.file_id,
+                name: s.name.clone(),
+                pages: s.pages.clone(),
+                text: s.text.clone(),
+            })
+            .collect();
+        let documents = asked
+            .thread
+            .documents
+            .iter()
+            .map(|d| DocumentView {
+                file_id: d.file_id,
+                name: d.name.clone(),
+            })
+            .collect();
+        let mut asking = Asking {
+            thread: asked.thread,
+            cited: BTreeMap::new(),
+        };
+        AiState::cite(&mut asking, &asked.reply);
+        Ok(AskView {
+            thread_id: self.store_thread(asking),
+            reply,
+            sources,
+            documents,
+        })
+    }
+
+    /// A follow-up in thread `thread_id` (R9): the work of `ai_follow_up`, blocking.
+    pub fn follow_up_in(
+        &self,
+        thread_id: u64,
+        ask_id: u64,
+        question: &str,
+        confirmed: bool,
+        lang: &str,
+        on_text: &mut dyn FnMut(String),
+    ) -> Result<ReplyView, ApiError> {
+        let opts = self.options(confirmed, lang);
+        let mut asking = self
+            .threads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&thread_id)
+            .ok_or_else(|| api_error(AiErrorCode::NoThread, "thread not found"))?;
+        let provider = asking.thread.provider;
+        let cancel = self.start(ask_id);
+        let result = self.key(provider).and_then(|key| {
+            let model = chat_model(provider, key, self.endpoint(provider)).map_err(ai_error)?;
+            let mut db = self.db()?;
+            ask::follow_up(
+                model.as_ref(),
+                db.get_mut(),
+                &mut asking.thread,
+                question,
+                &opts,
+                &cancel,
+                &mut |AnswerEvent::Text(t)| on_text(t),
+            )
+            .map_err(ask_error)
+        });
+        self.finish(ask_id);
+        if let Ok(reply) = &result {
+            AiState::cite(&mut asking, reply);
+        }
+        self.threads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(thread_id, asking);
+        self.reply_view(&result?)
+    }
+}
+
+/// «Preguntar» (R6–R10): asks `question` under the filters on screen. The answer text streams
+/// as [`EVENT_ANSWER_TEXT`] events tagged with `ask_id`; `ai_cancel(ask_id)` stops it. Rejects
+/// with `cap_reached` when the month's cap is reached and `confirmed` is false, and with
+/// `no_store` when content search has no store.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command(async)]
+pub fn ai_ask<R: Runtime>(
+    app: AppHandle<R>,
+    ai: State<'_, AiState>,
+    core: State<'_, AppState>,
+    ask_id: u64,
+    question: String,
+    filters: SearchFilters,
+    confirmed: bool,
+    lang: String,
+) -> Result<AskView, ApiError> {
+    let vfs = core.vfs()?;
+    let ai: &AiState = &ai;
+    off_runtime(|| {
+        let searcher = vfs_content::Searcher::open(&ai.index_db)
+            .map_err(|e| ask_error(AskError::Content(e)))?;
+        let corpus = LocalCorpus {
+            searcher: &searcher,
+            vfs: &vfs,
+        };
+        ai.ask_over(
+            &corpus,
+            ask_id,
+            &question,
+            &filters,
+            confirmed,
+            &lang,
+            &mut |text| {
+                let _ = app.emit(EVENT_ANSWER_TEXT, TextEvent { ask_id, text });
+            },
+        )
+    })
+}
+
+/// «Repreguntar» (R9): a follow-up over the thread's passages, retrieving nothing. Priced,
+/// recorded and stopped by the cap like a question.
+#[tauri::command(async)]
+pub fn ai_follow_up<R: Runtime>(
+    app: AppHandle<R>,
+    ai: State<'_, AiState>,
+    thread_id: u64,
+    ask_id: u64,
+    question: String,
+    confirmed: bool,
+    lang: String,
+) -> Result<ReplyView, ApiError> {
+    let ai: &AiState = &ai;
+    off_runtime(|| {
+        ai.follow_up_in(
+            thread_id,
+            ask_id,
+            &question,
+            confirmed,
+            &lang,
+            &mut |text| {
+                let _ = app.emit(EVENT_ANSWER_TEXT, TextEvent { ask_id, text });
+            },
+        )
+    })
+}
+
+impl AiState {
+    /// Stops the question or follow-up `ask_id`; false when none with that id is running.
+    pub fn cancel(&self, ask_id: u64) -> bool {
+        let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        running.get(&ask_id).map(CancelToken::cancel).is_some()
+    }
+}
+
+/// «Cancelar» (R13): stops the question or follow-up `ask_id` at once.
+#[tauri::command(async)]
+pub fn ai_cancel(ai: State<'_, AiState>, ask_id: u64) {
+    ai.cancel(ask_id);
+}
+
+impl AiState {
+    /// The bibliography of a thread (R12): the cited documents, or with `all` every document
+    /// found, in the order retrieval ranked them.
+    pub fn bibliography(&self, thread_id: u64, all: bool) -> Result<Vec<BibEntry>, ApiError> {
+        let threads = self.threads.lock().unwrap_or_else(|e| e.into_inner());
+        let asking = threads
+            .get(&thread_id)
+            .ok_or_else(|| api_error(AiErrorCode::NoThread, "thread not found"))?;
+        Ok(asking
+            .thread
+            .documents
+            .iter()
+            .filter(|d| all || asking.cited.contains_key(&d.file_id))
+            .map(|d| {
+                let pages = asking
+                    .cited
+                    .get(&d.file_id)
+                    .map(|p| p.iter().copied().collect())
+                    .unwrap_or_default();
+                bibliography::entry(d, pages)
+            })
+            .collect())
+    }
+}
+
+/// «Bibliografía» (R12).
+#[tauri::command(async)]
+pub fn ai_bibliography(
+    ai: State<'_, AiState>,
+    thread_id: u64,
+    all: bool,
+) -> Result<Vec<BibEntry>, ApiError> {
+    ai.bibliography(thread_id, all)
+}
+
+/// «Exportar RIS» (R12): asks where to save and writes the `.ris` file. Resolves with the path
+/// written, or null when the user cancelled the dialog.
+#[tauri::command(async)]
+pub fn ai_export_ris<R: Runtime>(
+    app: AppHandle<R>,
+    ai: State<'_, AiState>,
+    thread_id: u64,
+    all: bool,
+) -> Result<Option<String>, ApiError> {
+    let text = bibliography::ris(&ai.bibliography(thread_id, all)?);
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(crate::i18n::current(&app).strings().bibliography_file)
+        .add_filter("RIS", &["ris"])
+        .blocking_save_file();
+    let Some(fp) = picked else { return Ok(None) };
+    let path = fp.into_path().map_err(storage_error)?;
+    std::fs::write(&path, text).map_err(storage_error)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 #[cfg(test)]

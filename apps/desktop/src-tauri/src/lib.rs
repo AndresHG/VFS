@@ -3,6 +3,7 @@
 //! the static frontend in `apps/desktop/ui`.
 
 pub mod ai;
+pub mod bibliography;
 pub mod bookmarks;
 pub mod commands;
 pub mod content;

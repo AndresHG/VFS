@@ -11,6 +11,7 @@ import { createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
+import { setupAsk } from './ask.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
@@ -1307,7 +1308,11 @@ function main(L) {
 
   /* ---------------------------------------------------------------- AI (VFS-28) */
 
-  const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast });
+  const ask = setupAsk({
+    api, S, lang: L.lang, $, el, filters, revealFile, toast,
+    aiStatus: () => ai.status(), updateAi: (st) => ai.update(st), refreshAi: () => ai.refresh(),
+  });
+  const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast, onStatus: (st) => ask.setStatus(st) });
 
   /* ---------------------------------------------------------------- folder panel */
 
