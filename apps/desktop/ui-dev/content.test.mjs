@@ -249,4 +249,7 @@ test('Ajustes has the switch, the size and the delete with confirmation', () => 
   assert.match(html, /<dialog id="confirm-content-delete"[\s\S]*?value="delete" data-s="contentDeleteConfirm"/);
   assert.match(mainJs, /contentDeleteDialog\.returnValue !== 'delete'\) return;\s*try \{\s*setContent\(await api\.contentDeleteStore\(\)\)/);
   assert.equal(CATALOGS[Lang.EN].contentToggle, 'Also search inside documents');
+  // VFS-34 R6: its content size field follows the switch; it is not repeated here.
+  assert.match(mainJs, /showContentLimit\(\$\('content-max-row'\), contentOn\(st\)\)/);
+  assert.equal([...html.matchAll(/type="number"[^>]*max="100000"/g)].length, 1, 'one content size field');
 });

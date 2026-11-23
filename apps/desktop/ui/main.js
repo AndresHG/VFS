@@ -1417,8 +1417,8 @@ function main(L) {
   });
   api.getFileExclusions().then(renderFilter, () => {});
 
-  // VFS-34 R6: the content size limit, shown only while content search is on (VFS-27
-  // calls showContentLimit from its switch).
+  // VFS-34 R6: the content size limit, shown only while content search is on (setContent
+  // follows the switch).
   const contentMax = $('content-max-mb');
   showContentLimit($('content-max-row'), false);
   api.getContentMaxMb().then((mb) => { contentMax.value = String(mb); }, () => {});
@@ -1525,6 +1525,7 @@ function main(L) {
     renderContentStatus();
     $('banner-content-damaged').hidden = st?.phase.kind !== ContentPhase.DAMAGED;
     $('content-on').checked = contentOn(st);
+    showContentLimit($('content-max-row'), contentOn(st)); // VFS-34 R6
     if (settingsDialog.open && before?.phase.kind !== st?.phase.kind) refreshContentStore();
     maybeOffer();
   }
