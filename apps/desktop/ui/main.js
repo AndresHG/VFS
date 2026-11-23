@@ -1621,10 +1621,11 @@ function main(L) {
   const contentSearch = createContentSearch({ api, render: renderContentHits });
   let shownContentHits = null;
 
-  /** The content section applies to file searches with content search on (R12). */
+  /** The content section applies to file searches with content search on (R12), never under
+   *  «Solo nombres» (VFS-38 R3). */
   function contentApplies() {
     return contentOn(state.content) && sourcesFor(state.source, bookmarksOn()).includes(Source.FILES)
-      && bookmarkFolderOf(state.folder) == null;
+      && bookmarkFolderOf(state.folder) == null && state.scope !== ScopeChoice.NAMES;
   }
 
   function runContentQuery() {

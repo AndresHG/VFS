@@ -245,6 +245,19 @@ test('the words stay highlighted and no row has a match label', async () => {
   }
 });
 
+/** VFS-38 AC-2 (R3, UI part): with content search on, «Solo nombres» runs no content search,
+ *  so the section «En el contenido de los documentos» goes away; «Todo» brings it back. */
+test('«Solo nombres» hides the content section', async () => {
+  await start('&content=on');
+  await page.type('peñalara');
+  const shown = `!document.getElementById('content-hits').hidden`;
+  await until(shown, 'the content section under «Todo»');
+  await page.scope(ScopeChoice.NAMES);
+  await until(`!(${shown})`, 'no content section under «Solo nombres»');
+  await page.scope(ScopeChoice.ALL);
+  await until(shown, 'the content section back under «Todo»');
+});
+
 /** VFS-38 AC-11 (R13, UI part): a names-only search that finds nothing says so and offers the
  *  «Todo» count; pressing it lists the folder's files with the scope back on «Todo». A
  *  «sin la última palabra» suggestion keeps «Solo nombres». */
