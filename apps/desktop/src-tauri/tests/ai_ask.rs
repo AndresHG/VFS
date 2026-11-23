@@ -267,3 +267,36 @@ fn unknown_thread_is_reported() {
     assert_eq!(err.code, "no_thread");
     assert_eq!(ai.bibliography(42, true).unwrap_err().code, "no_thread");
 }
+
+/// VFS-28 R13 «Cancelar»: cancelling a streaming answer stops it with `cancelled`, the question
+/// is still recorded and priced (R10, R11), and the id no longer names a running question.
+#[test]
+fn cancel_stops_a_streaming_answer() {
+    let mock = MockServer::start(vec![
+        anthropic_rewrite(&rewrite()),
+        anthropic_answer(&[block("uno ", &[]), block("dos", &[])]),
+    ]);
+    let (_d, ai) = state(&mock);
+    assert!(!ai.cancel(7), "nothing is running yet");
+    let mut cancelled = false;
+    let err = ai
+        .ask_over(
+            &TwoDocs,
+            7,
+            "q",
+            &SearchFilters::default(),
+            false,
+            "es",
+            &mut |_| {
+                cancelled |= ai.cancel(7);
+            },
+        )
+        .unwrap_err();
+    assert!(cancelled);
+    assert_eq!(err.code, "cancelled");
+    assert!(!ai.cancel(7), "the finished question is forgotten");
+    assert!(
+        ai.status().unwrap().month_nano > 0,
+        "the cancelled answer is priced"
+    );
+}

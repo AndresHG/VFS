@@ -1309,7 +1309,8 @@ function main(L) {
   /* ---------------------------------------------------------------- AI (VFS-28) */
 
   const ask = setupAsk({
-    api, S, lang: L.lang, $, el, filters, aiStatus: () => ai.status(), revealFile, toast,
+    api, S, lang: L.lang, $, el, filters, revealFile, toast,
+    aiStatus: () => ai.status(), updateAi: (st) => ai.update(st), refreshAi: () => ai.refresh(),
   });
   const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast, onStatus: (st) => ask.setStatus(st) });
 

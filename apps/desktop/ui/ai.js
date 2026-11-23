@@ -267,5 +267,5 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
     }
   }
   refresh();
-  return { refresh, status: () => status };
+  return { refresh, update: render, status: () => status };
 }

@@ -70,6 +70,84 @@ test('the answer view draws text only', () => {
   assert.doesNotMatch(askJs, /innerHTML|insertAdjacentHTML|outerHTML|DOMParser/);
 });
 
+/** Asks `question` in the drawer and waits for its turn to finish; accepts the first-use
+ *  notice when it shows. */
+async function ask(b, question) {
+  await b.evaluate(`(() => {
+    if (!document.getElementById('ai-ask').open) document.getElementById('ask-open').click();
+    document.getElementById('ai-question').value = ${JSON.stringify(question)};
+    document.getElementById('ai-ask-form').requestSubmit();
+  })()`);
+}
+
+/** VFS-28 AC-5 (first-use notice, R6): the notice shows before the first question only;
+ *  after «Entendido» a second question asks straight away. */
+test('the first-use notice shows once', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await b.until(`!document.getElementById('ask-open').hidden`, '«Preguntar»');
+    await ask(b, 'primera');
+    await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
+    await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
+    await b.until(`document.querySelectorAll('.ai-answer-text').length === 1`, 'the first answer');
+    await ask(b, 'segunda');
+    await b.until(`document.querySelector('.ai-turn-question')?.textContent === 'segunda'
+      && document.querySelector('.ai-answer-text')`, 'the second answer');
+    assert.equal(await b.evaluate(`document.getElementById('ai-notice').open`), false);
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-28 AC-6 (not-found view, R8): an answer with no valid citation shows «No he encontrado
+ *  la respuesta en sus documentos» and the closest documents, each with «Mostrar en carpeta». */
+test('a not-found answer lists the closest documents', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=notfound');
+    await b.until(`!document.getElementById('ask-open').hidden`, '«Preguntar»');
+    await ask(b, '¿Cuánto cuesta el seguro del coche?');
+    await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
+    await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
+    await b.until(`document.querySelector('.ai-not-found')`, 'the not-found answer');
+    const r = await b.evaluate(`({
+      text: document.querySelector('.ai-not-found').textContent,
+      docs: [...document.querySelectorAll('.ai-closest-list li span')].map((s) => s.textContent),
+      reveal: [...document.querySelectorAll('.ai-closest-list li button')].map((x) => x.textContent),
+      markers: document.querySelectorAll('.ai-marker').length,
+    })`);
+    assert.equal(r.text, 'No he encontrado la respuesta en sus documentos.');
+    assert.deepEqual(r.docs, ['Contrato alquiler.pdf', 'Recibo fianza.docx', 'Seguro hogar.pdf']);
+    assert.ok(r.reveal.every((t) => t === S.aiReveal));
+    assert.equal(r.markers, 0);
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-28 AC-8 (UI part, R10): with the cap reached, the question asks for confirmation with
+ *  the month's spend and the cap; confirmed, the answer shows its cost and the month's. */
+test('the cap prompt, then the cost line', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=cap');
+    await b.until(`!document.getElementById('ask-open').hidden`, '«Preguntar»');
+    await ask(b, '¿fianza?');
+    await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
+    await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
+    await b.until(`document.getElementById('confirm-ai-cap').open`, 'the cap prompt');
+    const prompt = await b.evaluate(`document.getElementById('confirm-ai-cap-desc').textContent`);
+    assert.match(prompt, /^Este mes lleva .+ de su límite de 5,00\s?US\$\. ¿Preguntar igualmente\?$/);
+    await b.evaluate(`document.querySelector('#confirm-ai-cap button[value=ask]').click()`);
+    await b.until(`document.querySelector('.ai-cost')`, 'the answer and its cost');
+    const cost = await b.evaluate(`document.querySelector('.ai-cost').textContent`);
+    assert.match(cost, /^Esta respuesta: 0,0348\s?US\$\. Este mes: .+ de 5,00\s?US\$\.$/);
+  } finally {
+    b.close();
+  }
+});
+
 /** VFS-28 AC-13 (rendering part, R7a): an answer echoing an instruction, an <img> tag and a
  *  Markdown image appears as literal text: no element is made from it and nothing is fetched. */
 test('a hostile answer stays text and loads nothing', async () => {

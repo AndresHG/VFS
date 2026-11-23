@@ -922,17 +922,18 @@ pub fn ai_follow_up<R: Runtime>(
     })
 }
 
+impl AiState {
+    /// Stops the question or follow-up `ask_id`; false when none with that id is running.
+    pub fn cancel(&self, ask_id: u64) -> bool {
+        let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        running.get(&ask_id).map(CancelToken::cancel).is_some()
+    }
+}
+
 /// «Cancelar» (R13): stops the question or follow-up `ask_id` at once.
 #[tauri::command(async)]
 pub fn ai_cancel(ai: State<'_, AiState>, ask_id: u64) {
-    if let Some(t) = ai
-        .running
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&ask_id)
-    {
-        t.cancel();
-    }
+    ai.cancel(ask_id);
 }
 
 impl AiState {

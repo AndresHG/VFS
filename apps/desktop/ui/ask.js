@@ -55,10 +55,11 @@ export function bibLine(S, e) {
 }
 
 /**
- * Wires «Preguntar». `filters()` gives the filters on screen; `aiStatus()` the latest AiStatus.
+ * Wires «Preguntar». `filters()` gives the filters on screen; `aiStatus()` the latest AiStatus,
+ * `updateAi(status)` hands a newer one to the settings panel and `refreshAi()` reads it again.
  * Returns `setStatus(status)` for the settings panel to call.
  */
-export function setupAsk({ api, S, lang, $, el, filters, aiStatus, revealFile, toast }) {
+export function setupAsk({ api, S, lang, $, el, filters, aiStatus, updateAi, refreshAi, revealFile, toast }) {
   const dialog = $('ai-ask');
   const form = $('ai-ask-form');
   const input = $('ai-question');
@@ -95,7 +96,7 @@ export function setupAsk({ api, S, lang, $, el, filters, aiStatus, revealFile, t
     return new Promise((resolve) => {
       d.addEventListener('close', async () => {
         if (d.returnValue !== 'ok') { resolve(false); return; }
-        try { await api.aiNoticeSeen(); } catch { /* asked again next time */ }
+        try { updateAi(await api.aiNoticeSeen()); } catch { /* asked again next time */ }
         resolve(true);
       }, { once: true });
     });
@@ -179,6 +180,7 @@ export function setupAsk({ api, S, lang, $, el, filters, aiStatus, revealFile, t
           const reply = await call(id, confirmed);
           drawReply(body, reply);
           last = reply;
+          refreshAi(); // the month's spend, for the next cap prompt (R10)
           $('ai-after').hidden = false;
           return;
         } catch (err) {
