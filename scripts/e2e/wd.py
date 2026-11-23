@@ -97,8 +97,9 @@ class WebDriver:
         return self.s("GET", f"/element/{el}/text")
 
     # Scripts --------------------------------------------------------------------------------
-    def js(self, script, *args):
-        return self.s("POST", "/execute/sync", {"script": script, "args": list(args)})
+    def js(self, script, *args, timeout=None):
+        return self.s("POST", "/execute/sync", {"script": script, "args": list(args)},
+                      timeout=timeout)
 
     def js_async(self, script, *args, timeout=None):
         return self.s("POST", "/execute/async", {"script": script, "args": list(args)},

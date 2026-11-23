@@ -3,13 +3,17 @@
 import json
 import os
 import sys
+import subprocess
 import tempfile
+import time
 import unicodedata
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_tree  # noqa: E402
 from wd import WebDriverError, element_id  # noqa: E402
+import measure  # noqa: E402
+from journey import App  # noqa: E402
 
 
 def listing(root):
@@ -143,6 +147,90 @@ class WebDriverTest(unittest.TestCase):
         self.assertEqual(element_id({"element-6066-11e4-a52e-4f735466cecf": "b"}), "b")
         with self.assertRaises(WebDriverError):
             element_id({"other": "c"})
+
+
+class BetweenTest(unittest.TestCase):
+    def test_a_child_left_running_does_not_hold_the_measurement(self):
+        """VFS-8 AC-6: the busy run's `between` command leaves DiskSpd running with its output
+        handle; the measurement goes on once the command itself exits."""
+        child = ("import subprocess, sys; print('remounted'); sys.stdout.flush();"
+                 " subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(15)'],"
+                 " stdout=sys.stdout, stderr=sys.stderr)")
+        cmd = subprocess.list2cmdline([sys.executable, "-c", child])
+        with tempfile.TemporaryDirectory() as d:
+            t = time.monotonic()
+            r = measure.run_between(cmd, os.path.join(d, "between.txt"))
+            self.assertLess(time.monotonic() - t, 10)
+        self.assertEqual(r["exit"], 0)
+        self.assertIn("remounted", r["out"])
+
+
+class ReadyProbeTest(unittest.TestCase):
+    def test_each_try_is_bounded_and_recorded(self):
+        """VFS-8 AC-5: a script call that never answers costs one bounded try, and the tries
+        are kept in `ready_trace` and in the timeout error."""
+        timeouts = []
+
+        class Hung:
+            def js(self, script, *args, timeout=None):
+                timeouts.append(timeout)
+                raise TimeoutError("timed out")
+
+        app = App.__new__(App)
+        app.wd, app.ready_trace = Hung(), {}
+        with self.assertRaises(TimeoutError) as err:
+            app.ready_probe("return true", "UI ready", timeout=0.6, per_call=7)
+        self.assertTrue(timeouts and all(t == 7 for t in timeouts))
+        trace = app.ready_trace["UI ready"]
+        self.assertEqual(len(trace), len(timeouts))
+        self.assertTrue(all(len(t) == 3 and "timed out" in t[2] for t in trace))
+        self.assertIn("tries", str(err.exception))
+        self.assertIn("timed out", str(err.exception))
+
+    def test_a_ready_answer_ends_the_wait(self):
+        """VFS-8 AC-5: the first true answer ends the wait and is recorded."""
+        answers = iter([False, True])
+
+        class Page:
+            def js(self, script, *args, timeout=None):
+                return next(answers)
+
+        app = App.__new__(App)
+        app.wd, app.ready_trace = Page(), {}
+        app.ready_probe("return true", "UI ready", timeout=5)
+        self.assertEqual([t[2] for t in app.ready_trace["UI ready"]], [False, True])
+
+
+class PinSpanishTest(unittest.TestCase):
+    class Page:
+        def __init__(self, lang):
+            self.lang, self.calls = lang, []
+
+        def js(self, script, *args, timeout=None):
+            self.calls.append(("js", script, timeout))
+            return self.lang
+
+        def s(self, method, path, body=None, timeout=None):
+            self.calls.append((method, path, timeout))
+
+    def pin(self, lang):
+        app = App.__new__(App)
+        app.wd = self.Page(lang)
+        app.pin_spanish()
+        return app.wd.calls
+
+    def test_an_english_page_is_refreshed_by_webdriver_not_by_the_script(self):
+        """VFS-8 AC-5, AC-6: the language script answers before any reload; the reload is
+        WebDriver's refresh."""
+        calls = self.pin("en")
+        self.assertEqual([c[0] for c in calls], ["js", "POST"])
+        self.assertNotIn("reload", calls[0][1])
+        self.assertEqual(calls[0][2], 10)
+        self.assertEqual(calls[1][1], "/refresh")
+
+    def test_a_spanish_page_is_not_reloaded(self):
+        """VFS-8 AC-5: a page already in Spanish is left as it is."""
+        self.assertEqual([c[0] for c in self.pin("es")], ["js"])
 
 
 if __name__ == "__main__":
