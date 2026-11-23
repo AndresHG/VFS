@@ -346,3 +346,90 @@ test('«Solo documentos» shows only the content results', async () => {
   await until(`${scopeButtons}.length === 3`, 'the content status');
   assert.equal(await evaluate(checkedScope), ScopeChoice.DOCUMENTS, 'kept while content search is on');
 });
+
+/** Sets the window size of the next loads (CSS px) and the root text size. */
+async function viewport(width, height, scale = 1) {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
+}
+
+/** VFS-38 R7, VFS-35 R5: the «Más filtros» popover opens under its button and stays inside
+ *  the window: moved left at the right edge (its width was read before it showed, so it hung
+ *  off the minimum window), and as tall as its fields, scrolling when the room below the
+ *  button is short (WebKit stretched it to the window's height). Esc closes it and gives the
+ *  focus back to the button. */
+test('the «Más filtros» popover stays inside the window', async () => {
+  try {
+    for (const [w, h, root] of [[720, 480, '100%'], [720, 480, '125%'], [1024, 496, '100%'], [1093, 534, '100%']]) {
+      const where = `${w}x${h}, text ${root}`;
+      await viewport(w, h, w > 1000 ? 1.25 : 1);
+      await start(BOOKMARKS);
+      await evaluate(`document.documentElement.style.fontSize = '${root}'`);
+      await page.type('foto');
+      await until(`${rowCount} > 0`, 'results');
+      // As from the keyboard: the button has the focus when it opens the popover.
+      await evaluate(`(() => { const b = document.getElementById('f-more'); b.focus(); b.click(); })()`);
+      await until(`document.getElementById('f-more-pop').matches(':popover-open')`, 'the popover');
+      const box = await evaluate(`(() => {
+        const pop = document.getElementById('f-more-pop');
+        const r = pop.getBoundingClientRect();
+        const button = document.getElementById('f-more').getBoundingClientRect();
+        const last = document.getElementById('f-source').getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: innerWidth, h: innerHeight, below: r.top >= button.bottom,
+          fits: pop.scrollHeight <= pop.clientHeight + 1, scrolls: getComputedStyle(pop).overflowY === 'auto', lastBottom: last.bottom,
+          fieldsHeight: [...pop.children].filter((c) => !c.hidden).reduce((s, c) => s + c.offsetHeight, 0) };
+      })()`);
+      assert.ok(box.left >= 0 && box.right <= box.w, `inside the window sideways ${JSON.stringify(box)} (${where})`);
+      assert.ok(box.bottom <= box.h + 0.5 && box.below, `under its button and above the window's bottom ${JSON.stringify(box)} (${where})`);
+      assert.ok(box.fits ? box.lastBottom <= box.bottom : box.scrolls, `every field in sight or reachable by scrolling ${JSON.stringify(box)} (${where})`);
+      assert.ok(box.bottom - box.top <= box.fieldsHeight + 80, `as tall as its fields ${JSON.stringify(box)} (${where})`);
+      await key('Escape', 'Escape', 27);
+      await until(`!document.getElementById('f-more-pop').matches(':popover-open')`, 'Esc closes it');
+      assert.equal(await evaluate(`document.activeElement?.id`), 'f-more', `the focus goes back to the button (${where})`);
+    }
+  } finally {
+    await evaluate(`document.documentElement.style.fontSize = ''`);
+    await viewport(1280, 800);
+  }
+});
+
+/** VFS-6 R7: the size field is off while only bookmarks are searched, and looks it. */
+test('the size field looks off while only bookmarks are searched', async () => {
+  await start(BOOKMARKS);
+  await evaluate(`document.getElementById('f-more').click()`);
+  const opacity = `getComputedStyle(document.getElementById('f-size')).opacity`;
+  assert.equal(await evaluate(opacity), '1');
+  await page.choose('f-source', SourceChoice.BOOKMARKS);
+  assert.equal(await evaluate(`document.getElementById('f-size').disabled`), true);
+  assert.ok(Number(await evaluate(opacity)) < 1, 'dimmed');
+});
+
+/** VFS-38 R2, VFS-27 R12: under «Todo» with content search on, the content section shows
+ *  below the name hits with its count, bookmarks on and «Archivos y marcadores» included (the
+ *  default source sends no source list, which read as "no files" and hid the section), and
+ *  its heading is in sight at 1280×720 at 125 % even with thousands of name hits. Only
+ *  «Solo marcadores» leaves it out. */
+test('content hits show under «Todo» with bookmarks on', async () => {
+  try {
+    for (const options of [`&content=on`, `${BOOKMARKS}&content=on`]) {
+      await viewport(1024, 496, 1.25);
+      await start(options);
+      await until(`document.querySelectorAll('#f-scope [role="radio"]').length === 3`, 'the content status');
+      assert.equal(await evaluate(checkedScope), ScopeChoice.ALL);
+      await page.type('foto');
+      await until(`${rowCount} > 0 && document.querySelectorAll('#content-list .chit').length > 0`, `name and content hits (${options})`);
+      const head = await evaluate(`(() => {
+        const sec = document.getElementById('content-hits');
+        const r = document.querySelector('.content-head').getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + 20, r.top + r.height / 2);
+        return { hidden: sec.hidden, inside: r.top >= 0 && r.bottom <= innerHeight, onTop: !!top && document.querySelector('.content-head').contains(top),
+          count: document.getElementById('content-count').textContent, n: document.querySelectorAll('#content-list .chit').length };
+      })()`);
+      assert.ok(!head.hidden && head.inside && head.onTop, `the heading is in sight ${JSON.stringify(head)} (${options})`);
+      assert.equal(head.count, S.contentCount(head.n, String(head.n), false), `the count (${options})`);
+    }
+    await page.choose('f-source', SourceChoice.BOOKMARKS);
+    await until(`document.getElementById('content-hits').hidden`, 'no content section for bookmarks alone');
+  } finally {
+    await viewport(1280, 800);
+  }
+});

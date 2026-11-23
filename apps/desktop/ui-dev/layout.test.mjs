@@ -111,6 +111,24 @@ for (const viewport of VIEWPORTS) {
       await assertNoSideScroll(`folders panel, ${where}`);
     });
 
+    /** VFS-35 R4, VFS-6: with bookmarks on, the folders panel keeps every folder reachable:
+     *  the list scrolls on its own between the intro and the folded «Marcadores de Firefox»
+     *  line, so its first and last folders, the bookmarks line and «Añadir carpeta…» are all
+     *  in sight without scrolling the panel (the bookmarks section took the height before). */
+    test(`folder list reachable with bookmarks on at ${where}`, async () => {
+      await open(viewport, text, '&bookmarks');
+      await evaluate(`document.getElementById('open-folders').click()`);
+      await until(`document.getElementById('folders').open && document.querySelectorAll('#roots .root').length >= 3`, 'the folders panel');
+      for (const s of ['#roots .root:first-child .root-path', '#bookmarks-setting summary', '#add-folder']) await assertVisible(s, `folders panel, ${where}`);
+      const panel = await evaluate(`(() => { const d = document.getElementById('folders'); return [d.scrollHeight, d.clientHeight]; })()`);
+      assert.ok(panel[0] <= panel[1] + 1, `the panel itself does not scroll ${JSON.stringify(panel)} (${where})`);
+      await evaluate(`document.querySelector('#roots .root:last-child').scrollIntoView({ block: 'nearest' })`);
+      await assertVisible('#roots .root:last-child .root-path', `last folder, ${where}`);
+      await evaluate(`document.querySelector('#roots .root:last-child .root-actions .btn').scrollIntoView({ block: 'nearest' })`);
+      await assertVisible('#roots .root:last-child .root-actions .btn', `last folder's actions, ${where}`);
+      await assertNoSideScroll(`folders panel, ${where}`);
+    });
+
     /** VFS-34 AC-6, VFS-35 AC-5: in Ajustes › Avanzado, the file filter shows the five
      *  defaults (none a shortcut), its add field, add button and reset button fit and are
      *  not covered once scrolled to, and the size field is hidden while content search is

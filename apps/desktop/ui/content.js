@@ -159,7 +159,7 @@ export function unreadLabel(S, hit, reason) {
  * CONTENT_DEBOUNCE_MS after the last call, only when `on` and the text is long enough; each
  * query has a sequence number and an answer to an older one is dropped (`retrieve` itself is
  * not interrupted, D5). `more()` loads the next page. `render(view)` gets null (no section) or
- * {hits, partial, more, loading, failed}. `schedule` and `cancel` are setTimeout and
+ * {hits, partial, more, loading, failed, total, totalCapped} (`total` is null until an answer). `schedule` and `cancel` are setTimeout and
  * clearTimeout, injected for tests.
  */
 export function createContentSearch({ api, render, schedule = setTimeout, cancel = clearTimeout }) {
@@ -169,6 +169,7 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
 
   const view = () => current && {
     hits: current.hits, partial: current.partial, more: current.more, loading: current.loading, failed: current.failed,
+    total: current.total, totalCapped: current.totalCapped,
   };
 
   async function fetch(mine, offset) {
@@ -182,6 +183,8 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
       if (mine !== seq) return; // a newer query is on its way
       q.hits = offset ? q.hits.concat(res.hits) : res.hits;
       q.partial = res.partial;
+      q.total = res.total;
+      q.totalCapped = !!res.totalCapped;
       q.more = q.hits.length < res.total && res.hits.length > 0;
     } catch {
       if (mine !== seq) return;
@@ -200,7 +203,7 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
       return;
     }
     // The older hits go at once, so they are never read as this query's (R12).
-    current = { text: String(text).trim(), filters, hits: [], partial: false, more: false, loading: true, failed: false };
+    current = { text: String(text).trim(), filters, hits: [], partial: false, more: false, loading: true, failed: false, total: null, totalCapped: false };
     render(view());
     timer = schedule(() => fetch(mine, 0), CONTENT_DEBOUNCE_MS);
   }

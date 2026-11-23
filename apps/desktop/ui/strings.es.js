@@ -216,6 +216,7 @@ export const es = {
   remoteWarning: 'Esta carpeta está en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
   bookmarksTitle: 'Marcadores de Firefox',
   bookmarksToggle: 'Incluir marcadores de Firefox',
+  bookmarksSummary: (on) => (on ? '· incluidos' : '· no incluidos'),
   bookmarksIntro: 'Busca también entre los marcadores guardados en Firefox. Solo se leen los marcadores, nunca el historial ni las contraseñas, y nada sale de este equipo.',
 
   // VFS-21: updates. The check is the app's only connection to the internet; say so.
@@ -328,6 +329,7 @@ export const es = {
   contentRebuild: 'Volver a leer los documentos',
   contentDisable: 'Desactivar',
   contentTitle: 'En el contenido de los documentos',
+  contentCount: (n, text, capped) => (capped ? `· más de ${text} documentos` : `· ${text} ${n === 1 ? 'documento' : 'documentos'}`),
   contentSearching: 'Buscando dentro de los documentos…',
   contentStillReading: (done, total) => `Todavía leyendo documentos: ${done} de ${total}`,
   contentReadPart: (done, total) => `Se han leído ${done} de ${total} documentos; el resto está en carpetas sin conexión o en pausa.`,

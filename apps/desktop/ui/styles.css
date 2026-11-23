@@ -436,16 +436,29 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 /* «Más filtros» (VFS-38 R7): labelled selects in the popover, or in a row unfolded below the
    line where the Popover API is missing. */
 .more-pop { gap: var(--s3); padding: var(--s3) var(--s4) var(--s4); }
-.more-pop:popover-open { display: grid; min-inline-size: 18rem; }
+/* As tall as its fields: WebKit stretches a fixed grid with `fit-content` height to the whole
+   window, which pushed the last field off screen. main.js caps the height to the room left. */
+.more-pop:popover-open { display: grid; align-content: start; block-size: auto; min-inline-size: 18rem; }
+.type-pop:popover-open, .more-pop:popover-open { overflow-y: auto; max-inline-size: calc(100vw - 16px); }
+/* VFS-6 R7: the size does not apply to bookmarks alone; the field says so by looking off. */
+.more-pop select:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Drawn by us, not the platform: WebKit's native menu button ignores the target height. The
+   chevron is two gradient triangles so it follows the theme's ink. */
 .more-pop select {
+  appearance: none;
   min-block-size: var(--target);
   max-inline-size: 22rem;
-  padding: 0 var(--s3);
+  padding: 0 2.25rem 0 var(--s3);
   border: 1.5px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--surface);
+  background:
+    linear-gradient(45deg, transparent 50%, var(--ink-2) 50%) right 1.1rem center / 0.4rem 0.4rem no-repeat,
+    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%) right 0.7rem center / 0.4rem 0.4rem no-repeat,
+    var(--surface);
+  color: var(--ink);
   font-size: var(--t-meta);
   text-overflow: ellipsis;
+  cursor: pointer;
 }
 .filters[data-more="inline"] .more-pop {
   position: static;
@@ -712,6 +725,9 @@ input[type="date"] {
 
 .content-hits {
   max-block-size: 32vh;
+  /* VFS-27 R12: however many name hits there are, the section keeps room for its heading and
+     a whole hit; the name list above keeps its own (7rem). */
+  min-block-size: min(9.5rem, 32vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-block-start: 1px solid var(--line-strong);
@@ -719,7 +735,20 @@ input[type="date"] {
 }
 .content-hits[hidden] { display: none; }
 .app[data-view="start"] .content-hits { display: none; }
+/* The heading and its count stay in sight while the hits scroll under it. */
+.content-head {
+  position: sticky;
+  inset-block-start: calc(-1 * var(--s2));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+  padding-block: var(--s1);
+  background: var(--paper);
+  z-index: 1;
+}
 .content-hits h3 { margin: 0; font-size: var(--t-meta); font-weight: 700; color: var(--ink); }
+.content-count { font-size: var(--t-meta); color: var(--ink-2); }
 .content-notes p { margin: var(--s1) 0 0; color: var(--ink-2); font-size: var(--t-meta); }
 .content-list { list-style: none; margin: 0; padding: 0; }
 .chit {
@@ -859,7 +888,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 }
 .drawer-intro { margin: 0; padding: 0 var(--s5) var(--s4); color: var(--ink-2); }
 #folders-msg { margin: 0 var(--s5) var(--s4); }
-.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1 0 auto; border-block-start: 1px solid var(--line); }
+.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1 1 auto; min-block-size: min(9rem, 25dvh); overflow-y: auto; overscroll-behavior: contain; border-block-start: 1px solid var(--line); }
 .roots .none { color: var(--ink-2); padding: var(--s4) 0; }
 .root {
   display: grid;
@@ -1015,8 +1044,11 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   min-block-size: 2.5rem; padding: 0 var(--s3); border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--surface);
 }
-.bookmarks-setting { padding: var(--s4) var(--s5) 0; border-block-start: 1px solid var(--line); }
-.bookmarks-setting h3 { margin: 0 0 var(--s1); font-size: 1rem; }
+/* VFS-6 in the folders panel: one folded line under the folder list, which scrolls on its own
+   so every folder stays reachable on a short window (VFS-35 R4). */
+.bookmarks-setting { flex: none; padding: 0 var(--s5); border-block-start: 1px solid var(--line); }
+.bookmarks-setting summary { padding-block: var(--s3); font-weight: 700; cursor: pointer; }
+.bookmarks-summary { font-weight: 400; color: var(--ink-2); }
 .bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }
 .setting-advanced summary { cursor: pointer; font-weight: 700; }
 .toggle { display: inline-flex; align-items: center; gap: var(--s2); min-block-size: 2.5rem; font-weight: 700; }
