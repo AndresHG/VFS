@@ -859,7 +859,7 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                         },
                     );
                     // `index.db` refusing writes is the name indexer's or the disk's, never
-                    // the run's: the guard above starts the run again later on its own (R15).
+                    // the run's: the guard above starts the run again later on its own (R15, VFS-43 R3).
                     if reason == StopReason::IndexWrite {
                         index_retry_at = Some(Instant::now() + cfg.pace.index_write_retry);
                     }

@@ -553,7 +553,7 @@ fn is_busy(e: &crate::Error) -> bool {
 
 /// Runs `write` on `index.db` until it is done, `stop` is set, or it fails for a reason
 /// other than a busy index: each try waits out the busy timeout, so a long write by another
-/// connection is a wait, never a stop (VFS-2 R20). After a stop the states are left to the
+/// connection is a wait, never a stop (VFS-2 R20, VFS-43 R2). After a stop the states are left to the
 /// next run's [`mirror`].
 fn write_index(stop: &AtomicBool, mut write: impl FnMut() -> Result<()>) -> Result<()> {
     loop {

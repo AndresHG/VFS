@@ -944,7 +944,7 @@ fn ac20_offline_root_is_passed_over() {
     assert_eq!(s.state("ausente.txt").0, INDEXED);
 }
 
-/// VFS-2 R20, VFS-40 R2: another writer holding `index.db` past the run's busy timeout, as
+/// VFS-43 AC-2, VFS-2 R20: another writer holding `index.db` past the run's busy timeout, as
 /// the name indexer's compaction did on a busy Windows runner, makes the run wait, never
 /// stop: once the lock is released every document is read and its state mirrored.
 #[test]

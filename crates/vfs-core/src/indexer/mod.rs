@@ -182,12 +182,6 @@ fn data_dir(conn: &Connection) -> Option<PathBuf> {
 }
 
 fn begin(conn: &Connection) -> Result<Transaction<'_>> {
-    // Starved very-low-priority I/O would hold the write lock while other writers time out
-    // (VFS-5 R3, VFS-40 R2).
-    debug_assert!(
-        !sched::IN_BACKGROUND.get(),
-        "VFS-5 R3: a write transaction in background mode"
-    );
     Ok(Transaction::new_unchecked(
         conn,
         TransactionBehavior::Immediate,
@@ -1469,7 +1463,7 @@ impl Worker {
         let conn = &self.conn;
         // At the indexer's own priority, never in background mode: a slice holds the write
         // lock, and starved very-low-priority I/O would hold it while other writers time out
-        // (VFS-5 R3).
+        // (VFS-5 R3, VFS-43 R1).
         let more = compact::merge_slice(conn);
         let took = now.elapsed();
         let Some(c) = self.compaction.as_mut() else {

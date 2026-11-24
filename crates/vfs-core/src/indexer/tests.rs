@@ -3215,7 +3215,7 @@ fn the_count_before_adding_matches_the_exact_matcher() {
     }
 }
 
-/// VFS-40 AC-1, R2, R3, VFS-5 R3: once a removal leaves enough deletions, the idle indexer
+/// VFS-40 AC-1, VFS-43 AC-1, VFS-5 R3: once a removal leaves enough deletions, the idle indexer
 /// compacts the index and writes one `compact` record, without ever entering background mode:
 /// its slices hold the write lock, and very-low I/O priority would starve them while other
 /// writers wait. The only root is removed, so no listing enters it either.

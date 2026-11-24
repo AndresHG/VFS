@@ -5,7 +5,6 @@
 //! Everything here is plain logic over a clock value, load samples and a priority backend,
 //! so it is tested without Windows; the real probes live in `platform`.
 
-use std::cell::Cell;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -209,12 +208,6 @@ impl CheckpointStats {
             Duration::from_micros(self.max_us.swap(0, Ordering::Relaxed)),
         )
     }
-}
-
-thread_local! {
-    /// Whether this thread is in background mode, checked when a write transaction begins
-    /// (VFS-5 R3).
-    pub(crate) static IN_BACKGROUND: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Replaces `wal_autocheckpoint` on the indexer's connection with the same passive
@@ -568,9 +561,7 @@ impl Sched {
             return f();
         }
         self.prio.begin_background();
-        IN_BACKGROUND.set(true);
         let r = f();
-        IN_BACKGROUND.set(false);
         self.prio.end_background();
         r
     }

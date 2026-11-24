@@ -391,7 +391,7 @@ fn retry_after_a_run_level_stop() {
     assert_eq!(fin.done, 2);
 }
 
-/// VFS-27 R15: a run stopped because `index.db` could not be written starts again on its
+/// VFS-43 AC-3, VFS-27 R15: a run stopped because `index.db` could not be written starts again on its
 /// own after `index_write_retry`, with no «Reintentar», and finishes once the index takes
 /// writes again.
 #[test]

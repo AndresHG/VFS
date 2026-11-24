@@ -1,6 +1,7 @@
 # VFS-40 — The index gives back space after large deletions
 
-- **Status**: implemented (PR pending)
+- **Status**: implemented (PR #202); R2's merge size and priority, D3 and the pre-mortem's
+  priority superseded by VFS-43
 - **Size**: M (indexer idle work and one `meta` key; no schema change)
 - **Links**: VFS-4 (schema v3: `files_fts` and `file_paths_fts` without `contentless_delete`,
   `docs/research/index-footprint.md`); VFS-1 AC-6 (integrity check after an unclean exit);
@@ -37,10 +38,9 @@ keeps 1.9 GB of disk.
   whose entries were deleted to the `meta` counter `fts_deleted`, in the same transaction.
 - R2. WHILE the indexer is idle (no walk, purge, link pass or change flush pending) and `fts_deleted` is
   at least max(50,000, a tenth of the indexed files), THE indexer SHALL merge the FTS
-  segments of `file_paths_fts`, `files_fts` and `dirs_fts` with FTS5's `('merge', -16)`, one
-  slice per write transaction, at the indexer's own priority (never background mode, which
-  VFS-5 R3 forbids while holding the write lock), resting three times each slice's duration
-  before the next (at most a quarter of the time busy). Any pending work, a pause
+  segments of `file_paths_fts`, `files_fts` and `dirs_fts` with FTS5's `('merge', -64)`, one
+  slice per write transaction, at background priority, resting three times each slice's
+  duration before the next (at most a quarter of the time busy). Any pending work, a pause
   or a stop ends the slice loop; it goes on at the next idle.
 - R3. WHEN no table has merge work left, THE indexer SHALL subtract from `fts_deleted` the
   value it had when the merging began, then run `VACUUM` (temporary data in a file, a 2 MB
@@ -89,16 +89,11 @@ Tests cite these ids (`VFS-40 AC-<m>`) in their doc comments.
   place that counts.
 - D2. Threshold max(50,000, files / 10), like FTS5's own `deletemerge` default of 10 %: a full
   merge rewrites the whole FTS data, so it must not run for everyday churn.
-- D3. `('merge', -16)`: a negative argument merges regardless of `automerge`. At `-64`, on the
-  copy above (Apple Silicon SSD), 76 slices, p50 0.45 s, max 0.92 s, WAL at most 32 MB per
-  slice, peak RSS 58 MB; with the R2 rest the owner's index compacts in about 2.5 minutes. On
-  the target PC (CPU about 3–4× slower, HDD shared with Synology) slices were expected around
-  2–5 s and the whole job around 15–25 minutes, once. `-16` keeps the total and makes each
-  write-lock hold about a quarter as long: merging away 100 k deleted files took 7 slices of
-  at most 136 ms at `-64` and 15 of at most 40 ms at `-16`, 449 ms in total both ways (M1
-  SSD). The first version ran slices in background mode; on a busy Windows CI runner a slice
-  then held the lock for about 12 s, and a content run's write timed out (e2e run
-  45487168816). `optimize` does the same in one statement but
+- D3. `('merge', -64)`: a negative argument merges regardless of `automerge`. On the copy
+  above (Apple Silicon SSD), 76 slices, p50 0.45 s, max 0.92 s, WAL at most 32 MB per slice,
+  peak RSS 58 MB; with the R2 rest the owner's index compacts in about 2.5 minutes. On the
+  target PC (CPU about 3–4× slower, HDD shared with Synology) slices are expected around 2–5 s
+  and the whole job around 15–25 minutes, once. `optimize` does the same in one statement but
   peaked at 380 MB RSS and holds the write lock for 51 s here; rejected.
 - D4. `VACUUM` with `temp_store=FILE` and a 2 MB page cache for that statement. The temporary
   database takes the connection's cache size, so with the writer's 32 MB cache and the
@@ -108,10 +103,8 @@ Tests cite these ids (`VFS-40 AC-<m>`) in their doc comments.
 
 ## Pre-mortem
 
-- Slow PC + HDD: one-off, short slices at the indexer's own priority (the walk profile's
-  lowest CPU priority), 25 % duty cycle, resumable (each slice commits; a partial merge is
-  kept by FTS5). Other writers wait at most one slice; the content run waits out a longer
-  hold (VFS-2 R20).
+- Slow PC + HDD: one-off, sliced, background priority, 25 % duty cycle, resumable (each slice
+  commits; a partial merge is kept by FTS5).
 - Killed mid-slice or mid-`VACUUM`: the transaction rolls back (WAL); the counter is only
   reduced after the last slice, so the work restarts at the next idle.
 - Antivirus / long paths / NFC-NFD / cloud placeholders / user files: n/a, the work is inside
