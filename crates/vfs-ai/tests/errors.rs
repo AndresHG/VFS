@@ -4,10 +4,10 @@
 mod common;
 
 use std::net::TcpListener;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::*;
-use vfs_ai::mock::{MockResponse, MockServer};
+use vfs_ai::mock::{MockResponse, MockServer, RecordedWaits};
 use vfs_ai::{
     chat_model, AiError, ApiKey, CancelToken, ChatModel, Endpoint, Provider, RewriteRequest,
 };
@@ -178,66 +178,94 @@ fn rate_limits_and_overloads_retry_twice() {
     }
 }
 
-/// VFS-28 R13: a retry that then succeeds returns the success.
+/// VFS-28 R13: a retry that then succeeds returns the success, after the first fallback
+/// wait; both requests reached the provider.
 #[test]
 fn retry_then_success() {
     let mock = MockServer::start(vec![
         MockResponse::json(529, error_body("anthropic_529")),
         ok_json(r#"{"data":[]}"#),
     ]);
-    model_at(Provider::Anthropic, &mock).validate_key().unwrap();
+    let fallback = [Duration::from_secs(2), Duration::from_secs(8)];
+    let (model, waits) = model_with_waits(
+        Provider::Anthropic,
+        &mock,
+        fallback,
+        RecordedWaits::default(),
+    );
+    model.validate_key().unwrap();
     assert_eq!(mock.requests().len(), 2);
+    assert_eq!(waits.waits(), [fallback[0]]);
+}
+
+/// VFS-28 R13: two overloads wait the 2 s then the 8 s fallback, and a third is not retried.
+#[test]
+fn fallback_waits_two_then_eight() {
+    let mock = MockServer::start(vec![
+        MockResponse::json(529, error_body("anthropic_529"));
+        3
+    ]);
+    let fallback = [Duration::from_secs(2), Duration::from_secs(8)];
+    let (model, waits) = model_with_waits(
+        Provider::Anthropic,
+        &mock,
+        fallback,
+        RecordedWaits::default(),
+    );
+    assert_eq!(model.validate_key().unwrap_err().kind(), "saturated");
+    assert_eq!(waits.waits(), fallback);
+    assert_eq!(mock.requests().len(), 3);
 }
 
 /// VFS-28 R13: the provider's wait is honoured instead of the 2 s / 8 s fallback, for
 /// `retry-after` and for OpenAI's `x-ratelimit-reset-*`.
 #[test]
 fn provider_wait_overrides_fallback() {
-    let slow = [Duration::from_secs(30); 2];
-    let responses = [
-        MockResponse::json(429, error_body("anthropic_429")).header("retry-after", "0"),
-        MockResponse::json(429, error_body("openai_429_rate"))
-            .header("x-ratelimit-reset-requests", "10ms"),
+    let fallback = [Duration::from_secs(30); 2];
+    let cases = [
+        (
+            Provider::Anthropic,
+            MockResponse::json(429, error_body("anthropic_429")).header("retry-after", "3"),
+            Duration::from_secs(3),
+        ),
+        (
+            Provider::OpenAi,
+            MockResponse::json(429, error_body("openai_429_rate"))
+                .header("x-ratelimit-reset-requests", "10ms"),
+            Duration::from_millis(10),
+        ),
     ];
-    for (provider, response) in [Provider::Anthropic, Provider::OpenAi]
-        .into_iter()
-        .zip(responses)
-    {
+    for (provider, response, expected) in cases {
         let mock = MockServer::start(vec![response, ok_json(r#"{"data":[]}"#)]);
-        let start = Instant::now();
-        model_with_retry(provider, &mock, slow)
-            .validate_key()
-            .unwrap();
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "{provider} waited the fallback"
-        );
+        let (model, waits) = model_with_waits(provider, &mock, fallback, RecordedWaits::default());
+        model.validate_key().unwrap();
+        assert_eq!(waits.waits(), [expected], "{provider}");
     }
 }
 
-/// VFS-28 R13: «Cancelar» stops a call during a retry wait.
+/// VFS-28 R13: «Cancelar» pressed during a retry wait ends the call with `Cancelled`, and no
+/// further request is sent.
 #[test]
 fn cancel_stops_a_retry_wait() {
     let mock = MockServer::start(vec![
         MockResponse::json(529, error_body("anthropic_529"));
         3
     ]);
-    let model = model_with_retry(Provider::Anthropic, &mock, [Duration::from_secs(30); 2]);
-    let cancel = CancelToken::new();
-    let stopper = cancel.clone();
-    let t = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
-        stopper.cancel();
-    });
-    let start = Instant::now();
+    let waits = RecordedWaits::cancelling();
+    let (model, waits) = model_with_waits(
+        Provider::Anthropic,
+        &mock,
+        [Duration::from_secs(30); 2],
+        waits,
+    );
     let request = RewriteRequest {
         system_prompt: "s".into(),
         question: "q".into(),
     };
-    let err = model.rewrite(&request, &cancel).unwrap_err();
-    t.join().unwrap();
+    let err = model.rewrite(&request, &CancelToken::new()).unwrap_err();
     assert!(matches!(err, AiError::Cancelled { .. }), "{err:?}");
-    assert!(start.elapsed() < Duration::from_secs(5));
+    assert_eq!(waits.waits().len(), 1);
+    assert_eq!(mock.requests().len(), 1);
 }
 
 /// VFS-28 AC-4: a refused connection is «Sin conexión», not retried.

@@ -1,6 +1,7 @@
 //! HTTP for both providers: the client, authentication, retries (R13) and the SSE reader.
 
 use std::io::{BufRead, BufReader, Read};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,12 +21,30 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const SHORT_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const STREAM_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// How a retry waits (R13). [`SleepWait`] sleeps; tests record the waits instead.
+pub trait RetryWait: Send + Sync + std::fmt::Debug {
+    /// Waits `wait`, or less if `cancel` is set, which ends the call with
+    /// [`AiError::Cancelled`].
+    fn wait(&self, wait: Duration, cancel: &CancelToken) -> Result<(), AiError>;
+}
+
+/// The real wait: sleeps until the time is up or the call is cancelled.
+#[derive(Debug)]
+pub struct SleepWait;
+
+impl RetryWait for SleepWait {
+    fn wait(&self, wait: Duration, cancel: &CancelToken) -> Result<(), AiError> {
+        sleep_unless_cancelled(wait, cancel)
+    }
+}
+
 /// Retries of a rate-limited, overloaded or 5xx call (R13): at most two, honouring the
 /// provider's wait, else `fallback[attempt]`. A provider wait above `max_wait` is cut to it.
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub fallback: [Duration; 2],
     pub max_wait: Duration,
+    pub waiter: Arc<dyn RetryWait>,
 }
 
 impl Default for RetryPolicy {
@@ -33,6 +52,7 @@ impl Default for RetryPolicy {
         RetryPolicy {
             fallback: [Duration::from_secs(2), Duration::from_secs(8)],
             max_wait: Duration::from_secs(60),
+            waiter: Arc::new(SleepWait),
         }
     }
 }
@@ -125,7 +145,7 @@ impl Http {
                 self.provider,
                 wait.as_millis()
             );
-            sleep_unless_cancelled(wait, cancel)?;
+            self.retry.waiter.wait(wait, cancel)?;
         }
     }
 
@@ -147,7 +167,7 @@ pub(crate) fn transport_error(e: reqwest::Error) -> AiError {
     }
 }
 
-fn sleep_unless_cancelled(wait: Duration, cancel: &CancelToken) -> Result<(), AiError> {
+pub(crate) fn sleep_unless_cancelled(wait: Duration, cancel: &CancelToken) -> Result<(), AiError> {
     let end = Instant::now() + wait;
     loop {
         if cancel.is_cancelled() {
@@ -217,6 +237,20 @@ impl<R: Read> SseReader<R> {
 
 #[cfg(test)]
 mod tests {
+    /// VFS-28 R13 «Cancelar»: a cancelled call stops waiting at once, however long the wait;
+    /// an uncancelled zero wait returns. No real time passes in either case.
+    #[test]
+    fn a_cancelled_wait_ends_at_once() {
+        let cancel = crate::provider::CancelToken::new();
+        assert!(super::sleep_unless_cancelled(std::time::Duration::ZERO, &cancel).is_ok());
+        cancel.cancel();
+        let r = super::sleep_unless_cancelled(std::time::Duration::from_secs(3600), &cancel);
+        assert!(matches!(
+            r,
+            Err(crate::error::AiError::Cancelled { usage: None })
+        ));
+    }
+
     use super::*;
 
     #[test]
