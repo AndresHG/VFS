@@ -159,8 +159,8 @@ export function unreadLabel(S, hit, reason) {
  * CONTENT_DEBOUNCE_MS after the last call, only when `on` and the text is long enough; each
  * query has a sequence number and an answer to an older one is dropped (`retrieve` itself is
  * not interrupted, D5). `more()` loads the next page. `render(view)` gets null (no section) or
- * {hits, partial, more, loading, failed, total, totalCapped} (`total` is null until an answer). `schedule` and `cancel` are setTimeout and
- * clearTimeout, injected for tests.
+ * {hits, partial, more, loading, failed, total, totalCapped} (`total` is null until an
+ * answer). `schedule` and `cancel` are setTimeout and clearTimeout, injected for tests.
  */
 export function createContentSearch({ api, render, schedule = setTimeout, cancel = clearTimeout }) {
   let seq = 0;

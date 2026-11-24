@@ -396,11 +396,12 @@ test('the «Más filtros» popover stays inside the window', async () => {
 test('the size field looks off while only bookmarks are searched', async () => {
   await start(BOOKMARKS);
   await evaluate(`document.getElementById('f-more').click()`);
-  const opacity = `getComputedStyle(document.getElementById('f-size')).opacity`;
-  assert.equal(await evaluate(opacity), '1');
+  // The page's own style, not the engine's default for a disabled select (WebKit draws none).
+  const look = `(() => { const s = getComputedStyle(document.getElementById('f-size')); return [s.opacity, s.cursor]; })()`;
+  assert.deepEqual(await evaluate(look), ['1', 'pointer']);
   await page.choose('f-source', SourceChoice.BOOKMARKS);
   assert.equal(await evaluate(`document.getElementById('f-size').disabled`), true);
-  assert.ok(Number(await evaluate(opacity)) < 1, 'dimmed');
+  assert.deepEqual(await evaluate(look), ['0.5', 'not-allowed'], 'dimmed by the page');
 });
 
 /** VFS-38 R2, VFS-27 R12: under «Todo» with content search on, the content section shows
