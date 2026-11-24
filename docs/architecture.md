@@ -113,7 +113,10 @@ Design points:
   base row. `dirs_fts` keeps positions and `contentless_delete=1`; `files_fts` and
   `file_paths_fts` keep neither positions nor per-row sizes (`columnsize=0`, schema version
   3), so their rows are deleted with FTS5's `'delete'` command and the indexed value
-  (`ingest::delete_files_fts`), before the base rows change.
+  (`ingest::delete_files_fts`), before the base rows change. Those deletions are counted
+  in `meta` (`fts_deleted`); once they reach a tenth of the indexed files (at least 50,000),
+  the idle indexer merges the FTS segments in small background slices and vacuums when the
+  index is mostly free pages and uses at most 256 MiB (VFS-40, `indexer/compact.rs`).
 - **File hits are read without their folder row when nothing needs it** (VFS-4): the name
   tiers read `files` alone when every root is searched and none is being removed and there
   is no folder filter; the folder row is read to check a word missing from the name, and to

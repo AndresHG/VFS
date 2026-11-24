@@ -1519,6 +1519,7 @@ fn overflow_indexer_with(fx: &mut Fx, sched: Sched) -> (IndexerHandle, Arc<FakeH
         cursor_every: Duration::from_millis(50),
         replay_quiet: Duration::from_millis(300),
         replay_max: Duration::from_millis(1500),
+        ..Timing::default()
     };
     overflow_indexer_timed(fx, sched, timing)
 }
@@ -1616,6 +1617,7 @@ fn overflow_burst_gives_one_replay() {
         cursor_every: Duration::from_millis(50),
         replay_quiet: Duration::from_secs(2),
         replay_max: Duration::from_secs(4),
+        ..Timing::default()
     };
     let (h, history) = overflow_indexer_timed(&mut fx, Sched::inert(), timing);
     let checked = fx.last_scan();
@@ -1739,6 +1741,7 @@ fn overflow_without_usable_history_holds_and_owes_a_walk() {
         cursor_every: Duration::from_millis(50),
         replay_quiet: Duration::from_secs(2),
         replay_max: Duration::from_secs(4),
+        ..Timing::default()
     };
     let (h, history) = overflow_indexer_timed(&mut fx, Sched::inert(), timing);
     let before = history.replays.load(Ordering::SeqCst);
@@ -1820,6 +1823,7 @@ fn overflow_replays_the_real_history() {
             cursor_every: Duration::from_secs(3600),
             replay_quiet: Duration::from_millis(200),
             replay_max: Duration::from_secs(2),
+            ..Timing::default()
         },
     )
     .unwrap();
@@ -3209,4 +3213,51 @@ fn the_count_before_adding_matches_the_exact_matcher() {
             "{pattern}"
         );
     }
+}
+
+/// VFS-40 AC-1, R2, R3: once a removal leaves enough deletions, the idle indexer compacts
+/// the index at background priority and writes one `compact` record.
+#[test]
+fn idle_indexer_compacts_after_a_removal() {
+    let mut fx = fixture(&["A", "B/C", "D"]);
+    fx.scan();
+    crate::roots::remove_root(&mut fx.conn, fx.root_id).unwrap();
+    let prio: Log = Arc::default();
+    let (records, sink) = capture();
+    let sched = Sched::new(
+        SchedConfig::default(),
+        Box::new(sched::tests::Recorder(Arc::clone(&prio))),
+        None,
+        sink,
+    );
+    let h = IndexerHandle::spawn_with_history(
+        fx.db_path.clone(),
+        Arc::new(NullSink),
+        sched,
+        None,
+        Box::new(OsHistory),
+        Timing {
+            compact_floor: 1,
+            ..Timing::default()
+        },
+    )
+    .unwrap();
+    wait_until("the compact record", Duration::from_secs(20), || {
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("compact deleted=3 "))
+    });
+    drop(h);
+    assert!(prio.lock().unwrap().iter().any(|p| p == "bg_begin"));
+    let left: String = db::open_ro(&fx.db_path)
+        .unwrap()
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [compact::DELETED_KEY],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(left, "0");
 }

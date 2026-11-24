@@ -36,7 +36,9 @@ Log lines are `[date][time UTC][target][LEVEL] message`. Targets worth knowing:
   never redacted because they hold only numbers. `start` at each launch (uptime, deferred catch-up, disk-load probe, index folder in a
   sync root); `pass` every minute of a walk and `pass_end` per walk (mode, dirs and files per
   minute, `backoff_s` spent waiting for a busy disk, commit and checkpoint ms, retries,
-  errors); `memory` every 10 min (working set, WAL and index MB); `watch_overflow` when a
+  errors); `memory` every 10 min (working set, WAL and index MB); `compact` once per index
+  compaction after large deletions (deletions merged, slices, busy ms, vacuum done/skipped,
+  index MB before->after; VFS-40); `watch_overflow` when a
   watcher lost events and a re-walk was queued; `root_add` (root id, roots, folders and files
   taken in, ms), `root_remove` (root id, ms) and `root_removed` when the indexer has deleted
   a removed root's rows (root id, folders, files, ms).

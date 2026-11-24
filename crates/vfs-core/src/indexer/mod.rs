@@ -19,6 +19,7 @@
 //! very-low I/O priority.
 
 mod apply;
+pub(crate) mod compact;
 mod cursor;
 mod exclude;
 pub(crate) mod patterns;
@@ -98,12 +99,14 @@ const REPLAY_QUIET: Duration = Duration::from_secs(10);
 /// …and never later than this after the first overflow of the burst.
 const REPLAY_MAX: Duration = Duration::from_secs(60);
 
-/// The worker's clocks for change cursors and overflow replays (tests use short ones).
+/// The worker's clocks for change cursors and overflow replays, and the compaction floor
+/// (tests use small ones).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Timing {
     pub cursor_every: Duration,
     pub replay_quiet: Duration,
     pub replay_max: Duration,
+    pub compact_floor: u64,
 }
 
 impl Default for Timing {
@@ -112,9 +115,22 @@ impl Default for Timing {
             cursor_every: CURSOR_EVERY,
             replay_quiet: REPLAY_QUIET,
             replay_max: REPLAY_MAX,
+            compact_floor: compact::FLOOR,
         }
     }
 }
+
+/// A compaction under way (VFS-40 R2): the counter when it began, its slices so far, their
+/// time, and when the next slice may start.
+struct Compaction {
+    started_at: u64,
+    slices: u32,
+    busy: Duration,
+    rest_until: Instant,
+}
+
+/// A slice of compaction is followed by this many times its duration of rest (VFS-40 R2).
+const COMPACT_REST_FACTOR: u32 = 3;
 
 /// A replay owed to a root after watcher overflows: the burst's first overflow and when it
 /// is due (VFS-26 R2).
@@ -1073,6 +1089,7 @@ impl IndexerHandle {
             candidates: HashMap::new(),
             lost: HashMap::new(),
             replay_due: HashMap::new(),
+            compaction: None,
         };
         let interrupt = worker.conn.get_interrupt_handle();
         let join = std::thread::Builder::new()
@@ -1194,6 +1211,8 @@ struct Worker {
     /// Roots whose history is to be replayed after a watcher overflow (VFS-26 R2); their
     /// cursor is frozen meanwhile.
     replay_due: HashMap<i64, ReplayDue>,
+    /// Compaction under way, if any (VFS-40).
+    compaction: Option<Compaction>,
 }
 
 /// Prepares the folder holding the index (VFS-5 R9): not content-indexed on Windows, a
@@ -1376,6 +1395,10 @@ impl Worker {
                         }
                         Err(e) => log::warn!("link pass: {e}"),
                     }
+                    // A stop, pause or wake cut the link pass short: not idle yet (VFS-40 R2).
+                    if !yield_now() {
+                        self.compact_step();
+                    }
                     self.publish(IndexerState::Idle);
                     let mut timeout = match self.dirty_since {
                         Some(t) => DIRTY_COALESCE.saturating_sub(t.elapsed()),
@@ -1396,6 +1419,10 @@ impl Worker {
                     if let Some(due) = self.replay_due.values().map(|d| d.at).min() {
                         timeout = timeout.min(due.saturating_duration_since(Instant::now()));
                     }
+                    if let Some(c) = &self.compaction {
+                        let rest = c.rest_until.saturating_duration_since(Instant::now());
+                        timeout = timeout.min(rest);
+                    }
                     self.wait(timeout.max(Duration::from_millis(10)));
                 }
                 Err(e) => {
@@ -1405,6 +1432,68 @@ impl Worker {
                     self.wait(Duration::from_secs(5));
                 }
             }
+        }
+    }
+
+    /// One step of compaction while idle (VFS-40 R2, R3): starts one when due, runs one merge
+    /// slice once the rest after the previous one is over, and finishes it when no merge
+    /// work is left. The idle wait ends with the rest, and any command or change cuts it.
+    fn compact_step(&mut self) {
+        let now = Instant::now();
+        // Changes waiting to be flushed are work: compaction waits for them (R2).
+        if self.dirty_since.is_some()
+            || self.compaction.as_ref().is_some_and(|c| now < c.rest_until)
+        {
+            return;
+        }
+        if self.compaction.is_none() {
+            match compact::due(&self.conn, self.timing.compact_floor) {
+                Ok(Some(n)) => {
+                    self.compaction = Some(Compaction {
+                        started_at: n,
+                        slices: 0,
+                        busy: Duration::ZERO,
+                        rest_until: now,
+                    })
+                }
+                Ok(None) => return,
+                Err(e) => return log::warn!("compaction: {e}"),
+            }
+        }
+        let conn = &self.conn;
+        let more = self.sched.background(|| compact::merge_slice(conn));
+        let took = now.elapsed();
+        let Some(c) = self.compaction.as_mut() else {
+            return;
+        };
+        c.busy += took;
+        c.rest_until = Instant::now() + took * COMPACT_REST_FACTOR;
+        match more {
+            Ok(true) => c.slices += 1,
+            Ok(false) => {
+                let (started_at, slices, busy) = (c.started_at, c.slices, c.busy);
+                let conn = &self.conn;
+                match self
+                    .sched
+                    .background(|| compact::finish(conn, started_at, compact::VACUUM_MIN_FREE))
+                {
+                    Ok((vacuumed, before, after)) => {
+                        let line = format!(
+                            "compact deleted={started_at} slices={slices} busy_ms={} \
+                             vacuum={} index_mb={}->{}",
+                            busy.as_millis(),
+                            if vacuumed { "done" } else { "skipped" },
+                            before >> 20,
+                            after >> 20
+                        );
+                        self.sched.diag.emit(&line);
+                        self.compaction = None;
+                    }
+                    // Tried again after the rest; the counter is untouched until it works.
+                    Err(e) => log::warn!("compaction: {e}"),
+                }
+            }
+            Err(e) => log::warn!("compaction: {e}"),
         }
     }
 

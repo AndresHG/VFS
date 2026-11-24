@@ -944,19 +944,21 @@ pub mod ingest {
 
     /// Deletes the `file_paths_fts` rows of the files `f` that `files_where` selects, by
     /// their indexed value (see `delete_files_fts`); a folder rename calls it before the
-    /// folder's path changes.
+    /// folder's path changes. Every file FTS deletion passes here, so it counts them for
+    /// compaction (VFS-40 R1).
     pub(crate) fn delete_file_paths_fts<P: rusqlite::Params>(
         tx: &Connection,
         files_where: &str,
         params: P,
     ) -> Result<()> {
-        tx.prepare_cached(&format!(
-            "INSERT INTO file_paths_fts(file_paths_fts, rowid, path) \
-             SELECT 'delete', f.id, {FILE_PATH_SQL} FROM files f JOIN dirs d ON d.id = f.dir_id \
-             WHERE {files_where}"
-        ))?
-        .execute(params)?;
-        Ok(())
+        let n = tx
+            .prepare_cached(&format!(
+                "INSERT INTO file_paths_fts(file_paths_fts, rowid, path) \
+                 SELECT 'delete', f.id, {FILE_PATH_SQL} FROM files f \
+                 JOIN dirs d ON d.id = f.dir_id WHERE {files_where}"
+            ))?
+            .execute(params)?;
+        crate::indexer::compact::record_deleted(tx, n)
     }
 
     /// Deletes a file and its FTS rows.
