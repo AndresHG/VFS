@@ -144,12 +144,6 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
   grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(14rem + var(--results-head, 0rem)), 1fr) auto;
 }
 .app:has(> .results > .results-head:not([hidden])) { --results-head: 3.25rem; }
-/* With hits inside documents, the results keep room for a short name list and the content
-   section's heading, note and first whole hit, so notices give way first (VFS-27 R12,
-   VFS-35 R3). */
-.app:has(> .results > .content-hits:not([hidden])) {
-  grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(16.5rem + var(--results-head, 0rem)), 1fr) auto;
-}
 /* Explicit rows: the line of filters in use (VFS-38 R8) is often hidden, and a hidden child
    must not move the others into its row. */
 .app > .top { grid-row: 1; }
@@ -157,6 +151,9 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .app > .active-filters { grid-row: 3; }
 .app > .notices { grid-row: 4; }
 .app > .results { grid-row: 5; }
+/* A notice line squeezed to nothing keeps its padding, which reaches into the results; the
+   results header (the tabs and the count, VFS-42 R7) paints over it, WebKit included. */
+.app > .results { position: relative; z-index: 1; background: var(--paper); }
 .app > .bottom { grid-row: 6; }
 .app > * {
   justify-self: center;
@@ -334,31 +331,6 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 .filter-select.is-on::after { background: var(--accent); }
 .filter-select option { font-weight: 400; color: var(--ink); background: var(--surface); }
 
-/* VFS-38 R1: the scope group, one pill of radios. The chosen one is bold on a bordered surface,
-   and in the accent tint when it narrows the search (anything but «Todo»), like a filter. */
-.scope {
-  display: inline-flex;
-  align-items: center;
-  min-block-size: var(--target);
-  border-radius: 999px;
-  background: var(--sunk);
-  font-size: var(--t-meta);
-}
-.scope-label { padding-inline: var(--s4) var(--s1); color: var(--ink-2); white-space: nowrap; }
-.scope-btn {
-  min-block-size: var(--target);
-  padding: 0 var(--s4);
-  border: 1.5px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background-color var(--ease);
-}
-.scope-btn:hover { background: var(--sunk-2); }
-.scope-btn[aria-checked="true"] { background: var(--surface); border-color: var(--line-strong); font-weight: 700; }
-.scope.is-on .scope-btn[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); }
-
 /* VFS-38 R8: the filters in use, below the line; the filters behind «Más filtros» as removable
    chips, then «Quitar filtros (N)». */
 .active-filters {
@@ -519,33 +491,81 @@ input[type="date"] {
 .results {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
 }
-/* With hits inside documents below, the name list keeps room for a few rows (VFS-27 R12). */
-.results:has(> .content-hits:not([hidden])) { grid-template-rows: auto auto minmax(7rem, 1fr) auto auto; }
-/* VFS-38 R4: under «Solo documentos» there is no name list; while no message shows in its
-   place, the content section takes its room. */
-.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) { grid-template-rows: auto auto 0 minmax(0, 1fr) auto; }
-.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) > .list-wrap { display: none; }
-.results[data-scope="documents"]:has(> .list-wrap > .empty[hidden]) > .content-hits { max-block-size: none; }
-/* VFS-38 R9: the count with «Orden» beside it. */
+/* VFS-42 R1, R7: the results header, the tabs first, then the count and «Orden» (VFS-12), which
+   wrap together onto a second line when the row is short; the tabs never shrink or wrap. */
 .results-head {
   grid-row: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: var(--s1) var(--s4);
+  padding-block-end: var(--s1);
+}
+.tabs { flex: none; display: flex; gap: var(--s1); }
+/* A tab is a word with an accent bar under it when chosen. The bold width is reserved (the
+   hidden copy below), so choosing a tab moves nothing beside it. */
+.tab {
+  flex: none;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--target);
+  padding: 0 var(--s4);
+  border: 0;
+  border-block-end: 3px solid transparent;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--t-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ease), color var(--ease);
+}
+.tab::after {
+  content: attr(data-text);
+  block-size: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 700;
+}
+.tab:hover { background: var(--sunk); color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); font-weight: 700; border-block-end-color: var(--accent); }
+.results-meta {
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s1) var(--s3);
-  padding-block-end: var(--s2);
 }
-.summary-line { flex: 1 1 14rem; margin: 0; font-size: var(--t-meta); }
-.summary { color: var(--ink); }
-/* Explicit rows: a hidden note or header must not move the list into an auto-sized row. */
-.fuzzy-note { grid-row: 2; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
-.results > .list-wrap { grid-row: 3; }
-.results > .content-hits { grid-row: 4; }
-.results > .details { grid-row: 5; }
+.summary-line { flex: 1 1 10rem; margin: 0; font-size: var(--t-meta); }
+.summary { display: block; color: var(--ink); }
+/* The tab's panel: the fuzzy note, the hits inside documents (on «Documentos»), the name list
+   or a message in its place, and the selected file's location. Explicit rows: a hidden note
+   must not move the list into an auto-sized row. */
+.results-panel {
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+.fuzzy-note { grid-row: 1; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
+.results-panel > .content-hits { grid-row: 2; }
+.results-panel > .list-wrap { grid-row: 3; }
+.results-panel > .details { grid-row: 4; }
+/* VFS-42 R3: «Documentos» has no name list; while no message shows in its place, the content
+   hits take its room. A message (no match, while documents are still being read) sits below
+   the reading note. */
+.results-panel[data-tab="documents"]:has(> .list-wrap > .empty[hidden]) { grid-template-rows: auto minmax(0, 1fr) 0 auto; }
+.results-panel[data-tab="documents"]:has(> .list-wrap > .empty[hidden]) > .list-wrap { display: none; }
+.results-panel[data-tab="documents"] > .details { display: none; }
+.content-hits:not([hidden]) + .list-wrap { border-block-start: 0; }
 
 .list-wrap {
   position: relative;
@@ -726,35 +746,18 @@ input[type="date"] {
 }
 .details strong { color: var(--ink); }
 
-/* ---------- Hits inside documents (VFS-27 R12): below the name hits, scrolling on their own
-   so the name list keeps its room. */
+/* ---------- Hits inside documents (VFS-27 R12), on «Documentos» (VFS-42 R3): in the name
+   list's place, scrolling on their own; their count is in the results header. */
 
 .content-hits {
-  max-block-size: 32vh;
-  /* VFS-27 R12: however many name hits there are, the section keeps room for its heading and
-     a whole hit; the name list above keeps its own (7rem). */
-  min-block-size: min(11rem, 36vh);
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-block-start: 1px solid var(--line-strong);
-  padding-block: var(--s2);
+  border-block-start: 1px solid var(--line);
+  padding-block: var(--s1) var(--s2);
 }
 .content-hits[hidden] { display: none; }
 .app[data-view="start"] .content-hits { display: none; }
-/* The heading and its count stay in sight while the hits scroll under it. */
-.content-head {
-  position: sticky;
-  inset-block-start: calc(-1 * var(--s2));
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--s2);
-  padding-block: var(--s1);
-  background: var(--paper);
-  z-index: 1;
-}
-.content-hits h3 { margin: 0; font-size: var(--t-meta); font-weight: 700; color: var(--ink); }
-.content-count { font-size: var(--t-meta); color: var(--ink-2); }
 .content-notes p { margin: var(--s1) 0 0; color: var(--ink-2); font-size: var(--t-meta); }
 .content-list { list-style: none; margin: 0; padding: 0; }
 .chit {
@@ -986,11 +989,15 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .filters[data-more="inline"]:has(> .more-pop:not([hidden])) { flex-wrap: wrap; overflow-x: visible; }
   .filters > .range, .filters[data-more="inline"] > .more-pop { flex: 1 0 100%; }
   .active-filters { padding-block-end: var(--s1); }
-  /* The results header is compact, like the bottom bar's buttons: one line, the count cut
-     short if it must be (its whole text is its tooltip and is announced). */
-  .results-head { flex-wrap: nowrap; padding-block-end: 0; }
-  .summary-line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .results-head .filter, .results-head .filter-select select { min-block-size: 2.25rem; }
+  /* The results header is compact, like the bottom bar's buttons: the count on one line, cut
+     short if it must be (its whole text is its tooltip and is announced), beside the tabs
+     while there is room (VFS-42 R7). */
+  .results-head { padding-block-end: 0; }
+  .results-meta { flex: 1 1 12rem; }
+  .summary-line, .summary { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Some of the count stays readable: without 7rem for it beside «Orden», «Orden» wraps below. */
+  .summary-line { flex: 1 1 7rem; }
+  .results-head .tab, .results-head .filter, .results-head .filter-select select { min-block-size: 2.25rem; }
   /* That header takes a row from the list; the status gives one line back (its whole text
      is its tooltip). */
   .app:has(.results-head:not([hidden])) .status-text p { -webkit-line-clamp: 1; }
@@ -1000,8 +1007,6 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   /* One line, cut by the character rather than the word (a clamped line cut after its first
      word). The status line does the same while the results header shows. */
   .content-line, .app:has(.results-head:not([hidden])) .status-text p { display: block; white-space: nowrap; text-overflow: ellipsis; }
-  /* The selected row's folder line gives its height to the content section. */
-  .results:has(> .content-hits:not([hidden])) > .details { display: none; }
   .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto auto minmax(0, 1.4fr) auto; }
   .app[data-view="start"] .empty { padding-block-start: var(--s1); }
   .app[data-view="start"] .empty .empty-art { display: none; }
@@ -1010,6 +1015,17 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 /* Short and narrow: the texts take their own line, the buttons theirs, at the end. */
 @container app (height < 40rem) and (width < 50rem) {
   .bottom { justify-content: flex-end; }
+}
+
+/* Short and very narrow (the minimum window with large text): a second header line would
+   take the list's second row (VFS-35 R2), so the count and «Orden» stay beside the tabs, both
+   cut short (VFS-42 R7); the count's whole text is its tooltip and is announced, and «Orden»
+   lists its choices whole. */
+@container app (height < 40rem) and (width < 40rem) {
+  .results-meta { flex-wrap: nowrap; }
+  .summary-line { flex: 1 1 3rem; }
+  .results-meta > .filter-select { min-width: 0; }
+  .results-meta > .filter-select select { max-inline-size: 11rem; text-overflow: ellipsis; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1046,7 +1062,8 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .row[aria-selected="true"] { outline: 3px solid Highlight; outline-offset: -3px; }
   .filter, .filter-select select { border: 1px solid ButtonText; }
   .filter.is-on, .filter-select.is-on { outline: 2px solid Highlight; }
-  .scope-btn[aria-checked="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .tab[aria-selected="true"] { border-block-end-color: Highlight; }
+  .tab[aria-selected="false"] { border-block-end-color: Canvas; }
   .filter-select::after { background: ButtonText; }
   .row mark { forced-color-adjust: none; background: Mark; color: MarkText; }
   /* VFS-24 AC-3: forced colours drop backgrounds, which would erase the folder state dots and

@@ -1,7 +1,7 @@
 // The English catalog (VFS-22 R1): the same keys as `strings.es.js`, same tone: short, plain
 // words, no "index" jargon. Functions take already-formatted values.
 
-import { DateChoice, LanguageChoice, ScopeChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason, Provider, AiErrorCode,
@@ -29,10 +29,9 @@ export const en = {
     : names.length <= 2 ? names.join(', ') : `${names[0]} and ${names.length - 1} more`),
   clearFilters: 'Clear filters',
   clearFiltersN: (n) => `Clear filters (${n})`,
-  fScope: 'Search in',
-  scopeOptions: {
-    [ScopeChoice.ALL]: 'All', [ScopeChoice.NAMES]: 'Names only', [ScopeChoice.DOCUMENTS]: 'Documents only',
-  },
+  tabsLabel: 'Search in',
+  tabNames: 'Names',
+  tabDocuments: 'Documents',
   moreFilters: 'More filters',
   moreFiltersN: (n) => `More filters (${n})`,
   activeFiltersTitle: 'Filters in use',
@@ -139,10 +138,12 @@ export const en = {
   emptyNoHitsTitle: (q) => (q ? `Nothing found for “${q}”` : 'No files match these filters'),
   emptyNoHitsBody: 'Check what you typed or try fewer words.',
   emptyNoHitsFilters: 'Some filters are on and may be hiding results.',
-  emptyNamesOnly: 'Searching names only.',
-  // VFS-38 R4: «Solo documentos» with a query under 3 letters, and its no-match action.
   emptyDocumentsShort: 'Type at least 3 letters to search inside documents.',
-  searchEverything: 'Search everything',
+  searchNames: 'Search names',
+  documentsBookmarkFolder: 'Bookmark folders have no documents',
+  removeFolder: 'Remove the folder',
+  documentsOffTitle: 'Searching inside documents is off',
+  documentsOffBody: 'VFS can read the text of your documents so you can find them by a word they contain. Reading takes a while and uses some space on the disk.',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `No results with these filters. Search without filters? (${n})`,
   suggestSpelling: (word, n) => `Did you mean “${word}”? (${n})`,

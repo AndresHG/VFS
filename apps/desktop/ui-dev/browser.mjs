@@ -1,4 +1,4 @@
-// The real page in a headless Chrome, for the tests that need a browser (VFS-35, VFS-38): a
+// The real page in a headless Chrome, for the tests that need a browser (VFS-35, VFS-38, VFS-42): a
 // server for apps/desktop on 127.0.0.1, so ui/api.js loads the development fake backend
 // (VFS-1 U5), and a minimal DevTools protocol client with Node built-ins only (no npm packages).
 // Needs Google Chrome or Chromium (or CHROME_PATH).
@@ -139,13 +139,13 @@ export async function startBrowser() {
     } })()`);
   }
 
-  /** Clicks the scope radio for `choice` (VFS-38). */
-  async function scope(choice) {
-    await evaluate(`document.querySelector('#f-scope [data-scope=${JSON.stringify(choice)}]').click()`);
+  /** Clicks the results tab `tab`, a ResultsTab (VFS-42). */
+  async function tab(name) {
+    await evaluate(`document.querySelector('#tabs [data-tab=${JSON.stringify(name)}]').click()`);
   }
 
   return {
-    base, send: chrome.send, evaluate, until, load, type, choose, kinds, scope,
+    base, send: chrome.send, evaluate, until, load, type, choose, kinds, tab,
     close() { chrome.close(); server.close(); },
   };
 }

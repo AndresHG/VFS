@@ -1,7 +1,8 @@
 // VFS-35: the window fits small and low-resolution screens. The real page runs in a headless
 // Chrome against the development fake backend, at the content size of a maximised window on
 // common laptop screens, at normal and large text. Chrome is driven over the DevTools
-// protocol (browser.mjs). VFS-38 AC-8: the filter line stays one row.
+// protocol (browser.mjs). VFS-38 AC-8: the filter line stays one row. VFS-42 AC-7: the results
+// tabs stay one row, with the count and «Orden» beside them or wrapped below.
 // Run: node --test apps/desktop/ui-dev/layout.test.mjs   (needs Google Chrome or Chromium)
 
 import test from 'node:test';
@@ -10,7 +11,7 @@ import assert from 'node:assert/strict';
 import { startBrowser } from './browser.mjs';
 import { CATALOGS, Lang } from '../ui/strings.js';
 import { FileKind } from '../ui/contract.js';
-import { DateChoice, ScopeChoice, SizeChoice, SourceChoice } from '../ui/choices.js';
+import { DateChoice, ResultsTab, SizeChoice, SourceChoice } from '../ui/choices.js';
 
 /** Content area of a maximised window on Windows 11 (taskbar 48 px and title bar 32 px, in
  *  CSS px) for each screen and scaling, plus the minimum window of tauri.conf.json. */
@@ -73,7 +74,7 @@ async function assertNoSideScroll(where) {
 
 const FOOTER = ['#open-folders', '#open-settings'];
 /** The first filter pill: covered or squashed filters fail here (VFS-35 AC-6). */
-const FILTER = '#f-scope';
+const FILTER = '#f-type';
 
 for (const viewport of VIEWPORTS) {
   for (const text of TEXT) {
@@ -101,7 +102,7 @@ for (const viewport of VIEWPORTS) {
 
       const short = await evaluate(`document.getElementById('app').clientHeight < 40 * parseFloat(getComputedStyle(document.documentElement).fontSize)`);
       if (short) {
-        const tops = await evaluate(`[...document.querySelectorAll('#filters > .filter, #filters > .scope')].filter((el) => el.offsetParent !== null).map((el) => Math.round(el.getBoundingClientRect().top))`);
+        const tops = await evaluate(`[...document.querySelectorAll('#filters > .filter')].filter((el) => el.offsetParent !== null).map((el) => Math.round(el.getBoundingClientRect().top))`);
         assert.equal(new Set(tops).size, 1, `filter pills on one row ${JSON.stringify(tops)} (${where})`);
       }
 
@@ -115,13 +116,15 @@ for (const viewport of VIEWPORTS) {
      *  shown), the bottom bar keeps every button on one row: on a short window from 56 rem
      *  wide at normal text the whole bar is one row, the reading progress cut to one line
      *  with its whole text as tooltip (it wrapped to three lines and pushed «Ajustes» onto a
-     *  row of its own). Then at 1280×720 at 125 % (1024×496 CSS px) the content section shows its first whole
-     *  hit below the name hits. */
+     *  row of its own). Then at 1280×720 at 125 % (1024×496 CSS px) «Documentos» shows its
+     *  first whole hit (VFS-42 R3). */
     test(`bottom bar one row while reading documents at ${where}`, async () => {
       for (const locale of ['', '&locale=en-US']) {
         await open(viewport, text, `&bookmarks&content=on${locale}`);
         await evaluate(`(() => { const q = document.getElementById('q'); q.value = 'foto'; q.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await until(`document.querySelectorAll('#results .row').length > 0 && document.querySelectorAll('#content-list .chit').length > 0 && !document.getElementById('content-line').hidden`, 'name and content hits');
+        await until(`document.querySelectorAll('#results .row').length > 0`, 'name hits');
+        await page.tab(ResultsTab.DOCUMENTS); // VFS-42 R3: content hits only on «Documentos»
+        await until(`document.querySelectorAll('#content-list .chit').length > 0 && !document.getElementById('content-line').hidden`, 'content hits');
         const bar = await evaluate(`(() => {
           const shown = (el) => el.offsetParent !== null;
           const mid = (el) => { const r = el.getBoundingClientRect(); return Math.round(r.top + r.height / 2); };
@@ -213,33 +216,31 @@ function widest(labels, keys) {
 }
 
 /** The filter states of AC-8 for one language: the type set whose button reads longest, the
- *  longest date and size choices, a folder, files only (so size applies) and «Solo nombres». */
+ *  longest date and size choices, a folder and files only (so size applies). */
 function filterStates(S) {
   const typeSets = [[FileKind.DOCUMENT, FileKind.FOLDER], [FileKind.DOCUMENT, FileKind.PHOTO, FileKind.VIDEO], [FileKind.VIDEO, FileKind.FOLDER]];
   const types = typeSets.reduce((a, b) => (S.typeButton(...b.map((k) => S.kindsPlural[k])).length > S.typeButton(...a.map((k) => S.kindsPlural[k])).length ? b : a));
   const date = widest(S.dateOptions, [DateChoice.WEEK, DateChoice.MONTH, DateChoice.YEAR]);
   const size = widest(S.sizeOptions, [SizeChoice.SMALL, SizeChoice.MEDIUM, SizeChoice.LARGE, SizeChoice.HUGE]);
-  const some = { types, date, scope: ScopeChoice.NAMES };
+  const some = { types, date };
   return [
-    { name: 'no filters', types: [], date: DateChoice.ANY, scope: ScopeChoice.ALL, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
-    { name: 'type, date and names only', ...some, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
+    { name: 'no filters', types: [], date: DateChoice.ANY, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
+    { name: 'type and date', ...some, size: SizeChoice.ANY, folder: '', source: SourceChoice.BOTH },
     { name: 'every filter', ...some, size, folder: 'D:\\Archivo familiar', source: SourceChoice.FILES },
   ];
 }
 
-/** Opens the results view with bookmarks on and content search on, so the scope group has its
- *  three buttons (VFS-38 R1). */
+/** Opens the results view with bookmarks on and content search on. */
 async function openFilterLine(viewport, text, lang) {
   await open(viewport, text, `${lang === Lang.EN ? '&bookmarks&locale=en-US' : '&bookmarks'}&content=on`);
   await until(`[...document.getElementById('f-folder').options].some((o) => o.value === 'D:\\\\Archivo familiar')
     && !document.getElementById('f-source-field').hidden
-    && document.querySelectorAll('#f-scope [role="radio"]').length === 3`, 'roots, bookmarks and the three scope buttons');
+    && document.getElementById('content-on').checked`, 'roots, bookmarks and the content status');
   await page.type('a');
   await until(`document.getElementById('app').dataset.view === 'list'`, 'results view');
 }
 
 async function applyState(state) {
-  await page.scope(state.scope);
   await page.kinds(state.types);
   await page.choose('f-date', state.date);
   await page.choose('f-source', state.source);
@@ -252,7 +253,7 @@ async function applyState(state) {
 /** The filter line's controls and how they sit: their tops, the line's width, the room. */
 const LINE = `(() => {
   const form = document.getElementById('filters');
-  const controls = ['f-scope', 'f-type', 'f-date', 'f-more'].map((id) => document.getElementById(id))
+  const controls = ['f-type', 'f-date', 'f-more'].map((id) => document.getElementById(id))
     .map((el) => (el.tagName === 'SELECT' ? el.parentElement : el)).filter((el) => el.offsetParent !== null);
   const rects = controls.map((el) => el.getBoundingClientRect());
   const style = getComputedStyle(form);
@@ -263,7 +264,6 @@ const LINE = `(() => {
     room: Math.round(room),
     fits: rects.at(-1).right <= form.getBoundingClientRect().right - parseFloat(style.paddingRight) + 0.5,
     scrolls: form.scrollWidth > form.clientWidth,
-    label: getComputedStyle(document.getElementById('f-scope-label')).position !== 'absolute',
     measure: parseFloat(getComputedStyle(document.documentElement).fontSize) * 60,
   };
 })()`;
@@ -274,7 +274,7 @@ for (const viewport of LINE_VIEWPORTS) {
   for (const lang of [Lang.ES, Lang.EN]) {
     const where = `${viewport.name}, ${viewport.width}x${viewport.height}, normal text, ${lang}`;
 
-    /** VFS-38 AC-8 (R9, R10): with bookmarks on and three scope buttons, the filter line is one
+    /** VFS-38 AC-8 (R9, R10): with bookmarks on and content search on, the filter line is one
      *  row inside the 60rem column with no sideways scroll in every filter state, and «Orden»
      *  sits in the results header. */
     test(`filter line is one row and «Orden» is in the results header at ${where}`, async (t) => {
@@ -282,7 +282,7 @@ for (const viewport of LINE_VIEWPORTS) {
       for (const state of filterStates(CATALOGS[lang])) {
         await applyState(state);
         const line = await evaluate(LINE);
-        t.diagnostic(`${state.name}: line ${line.width}px of ${line.room}px (measure ${line.measure}px), «${CATALOGS[lang].fScope}» shown: ${line.label}`);
+        t.diagnostic(`${state.name}: line ${line.width}px of ${line.room}px (measure ${line.measure}px)`);
         assert.equal(new Set(line.tops).size, 1, `one row ${JSON.stringify(line.tops)} (${state.name}, ${where})`);
         assert.ok(line.fits && !line.scrolls, `inside the line, no sideways scroll: ${line.width}px of ${line.room}px (${state.name}, ${where})`);
         assert.ok(line.room <= line.measure + 0.5, `the line keeps to the 60rem column (${where})`);
@@ -309,7 +309,7 @@ test('a bottom bar wider than its row wraps instead of widening the page', async
 });
 
 /** VFS-38 AC-8 (R10, VFS-35 R5): at the minimum window and with large text, every filter set,
- *  bookmarks on and three scope buttons, nothing is wider than the window. */
+ *  bookmarks and content search on, nothing is wider than the window. */
 for (const [viewport, text] of [[VIEWPORTS[6], TEXT[0]], [VIEWPORTS[6], TEXT[1]], [VIEWPORTS[1], TEXT[1]], [VIEWPORTS[4], TEXT[1]]]) {
   const where = `${viewport.name}, ${viewport.width}x${viewport.height}, ${text.name}`;
   test(`every filter set does not widen the page at ${where}`, async () => {
@@ -319,4 +319,56 @@ for (const [viewport, text] of [[VIEWPORTS[6], TEXT[0]], [VIEWPORTS[6], TEXT[1]]
     await assertVisible('#f-clear', where);
     await assertNoSideScroll(where);
   });
+}
+
+/* ---------------------------------------------------------------- VFS-42 AC-7 */
+
+/** How the results header sits: the tabs' boxes, whether each tab shows its whole word, and
+ *  where the count and «Orden» are. */
+const TAB_ROW = `(() => {
+  const tabs = [...document.querySelectorAll('#tabs [role="tab"]')].map((t) => {
+    const r = t.getBoundingClientRect();
+    return { top: Math.round(r.top), left: r.left, right: r.right, whole: t.scrollWidth <= t.clientWidth + 0.5 && t.scrollHeight <= t.clientHeight + 0.5 };
+  });
+  const meta = document.querySelector('.results-meta').getBoundingClientRect();
+  return { tabs, metaTop: Math.round(meta.top), metaLeft: meta.left, tabsBottom: Math.round(document.getElementById('tabs').getBoundingClientRect().bottom), w: innerWidth,
+    list: getComputedStyle(document.getElementById('tabs')).overflowX };
+})()`;
+
+/** VFS-42 AC-7: the tabs are one row inside the window, each showing its whole word; the count
+ *  (and «Orden» when `sort`) are visible beside them or on the line below; nothing scrolls
+ *  sideways. */
+async function assertTabRow(where, sort) {
+  const row = await evaluate(TAB_ROW);
+  assert.equal(new Set(row.tabs.map((t) => t.top)).size, 1, `the tabs on one row ${JSON.stringify(row)} (${where})`);
+  assert.ok(row.tabs.every((t) => t.left >= 0 && t.right <= row.w + 0.5 && t.whole), `the tabs whole and inside the window ${JSON.stringify(row)} (${where})`);
+  assert.equal(row.list, 'visible', `the tabs do not scroll (${where})`);
+  const beside = row.metaTop < row.tabsBottom - 1;
+  assert.ok(beside ? row.metaLeft >= row.tabs.at(-1).right : row.metaTop >= row.tabsBottom - 1, `the count beside the tabs or below them ${JSON.stringify(row)} (${where})`);
+  await assertVisible('#summary', where);
+  if (sort) await assertVisible('#f-sort-pill', where);
+  else assert.equal(await evaluate(`document.getElementById('f-sort-pill').offsetParent`), null, `no «Orden» (${where})`);
+  await assertNoSideScroll(where);
+}
+
+const TAB_VIEWPORTS = [maximised(1366, 768, 1.25), maximised(1280, 720, 1.25), maximised(1920, 1080, 1), VIEWPORTS[6]];
+
+for (const viewport of TAB_VIEWPORTS) {
+  for (const text of TEXT) {
+    for (const lang of [Lang.ES, Lang.EN]) {
+      const where = `${viewport.name}, ${viewport.width}x${viewport.height}, ${text.name}, ${lang}`;
+
+      /** VFS-42 AC-7 (R7, R8): with bookmarks on, on «Nombres» and «Documentos», the tab row
+       *  holds as assertTabRow says. */
+      test(`the tab row fits at ${where}`, async () => {
+        await openFilterLine(viewport, text, lang);
+        await page.type('foto');
+        await until(`document.querySelectorAll('#results .row').length > 0 && document.getElementById('summary').textContent !== ''`, 'name hits');
+        await assertTabRow(`«Nombres», ${where}`, true);
+        await page.tab(ResultsTab.DOCUMENTS);
+        await until(`document.querySelectorAll('#content-list .chit').length > 0 && document.getElementById('summary').textContent !== ''`, 'content hits');
+        await assertTabRow(`«Documentos», ${where}`, false);
+      });
+    }
+  }
 }

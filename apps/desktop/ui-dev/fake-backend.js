@@ -23,7 +23,8 @@
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 // Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
 // scan); `content=on` starts it reading, `content=damaged` and `content=stopped` show those states. A content query with
-// "alguna" is partial; one with "zzzz" finds nothing.
+// "alguna" is partial; one with "zzzz" finds nothing; one with "fallo" fails. `api.fakeCalls`
+// counts the name searches, content searches and content offers sent (VFS-42 AC-2, AC-4).
 
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
@@ -205,8 +206,9 @@ function byteRanges(text, word) {
   return out;
 }
 
-/** VFS-27: a content run that reads 1.200 documents, content hits and unread reasons. */
-function fakeContent(mode, files) {
+/** VFS-27: a content run that reads 1.200 documents, content hits and unread reasons. `calls`
+ *  counts the content searches and offers. */
+function fakeContent(mode, files, calls) {
   const docs = files.filter((f) => f.kind === FileKind.DOCUMENT && !f.isDir);
   const total = 1200;
   const st = {
@@ -244,14 +246,17 @@ function fakeContent(mode, files) {
       async contentRebuild() { return set(() => { st.done = 0; }); },
       async contentMarkOffered() { st.settings.offered = true; emit(); return structuredClone(st); },
       async contentOffer() {
+        calls.contentOffer++;
         await sleep(60);
         return { documents: total, seconds: [204, 660], bytes: [total * 13_000, total * 16_000], freeBytes: 50e9, lowSpace: false };
       },
       async contentDeleteStore() { await sleep(300); return set(() => { st.settings.enabled = false; st.done = 0; }); },
       async contentSearch(query, filters, offset) {
+        calls.contentSearch++;
         if (!st.settings.enabled) throw { code: ErrorCode.UNAVAILABLE, message: 'content search is off' };
         await sleep(R_DELAY);
         const words = fold(query).split(/\s+/).filter(Boolean);
+        if (words.includes('fallo')) throw { code: ErrorCode.DB, message: 'database is locked' };
         const kinds = filters.kinds || [];
         const pool = words.includes('zzzz') ? [] : docs.filter((d) => (!kinds.length || kinds.includes(FileKind.DOCUMENT))
           && (!filters.folder || d.dir.startsWith(filters.folder))).slice(0, Math.round((st.done / total) * 57));
@@ -489,7 +494,8 @@ export function createFakeBackend(params) {
     if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail(PatternReason.DUPLICATE);
   };
   const updateCbs = new Set();
-  const content = fakeContent(params.get('content'), corpus.files);
+  const fakeCalls = { searchSources: 0, contentSearch: 0, contentOffer: 0 };
+  const content = fakeContent(params.get('content'), corpus.files, fakeCalls);
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   const readBookmarks = () => Object.assign(bookmarks, {
@@ -723,6 +729,7 @@ export function createFakeBackend(params) {
     },
 
     async searchSources(q, options = {}) {
+      fakeCalls.searchSources++;
       const sources = options.sources || [];
       const inside = options.bookmarkFolder ?? null;
       const files = inside == null && (sources.length === 0 || sources.includes(Source.FILES));
@@ -801,6 +808,7 @@ export function createFakeBackend(params) {
     async onUpdateProgress(cb) { updateCbs.add(cb); return () => updateCbs.delete(cb); },
 
     ...content.api,
+    fakeCalls,
     ...fakeAi(params.get('ai') || ''),
 
     async getProgress() { await sleep(20); return progress(); },

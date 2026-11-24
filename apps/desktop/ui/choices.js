@@ -2,8 +2,6 @@
 // selects, where a search is, and how the screen is laid out. Their meaning is in main.js and
 // status.js, their labels in the catalogs (strings.es.js, strings.en.js).
 
-import { Scope } from './contract.js';
-
 /** The UI languages (VFS-22). */
 export const Lang = Object.freeze({ ES: 'es', EN: 'en' });
 
@@ -52,18 +50,7 @@ export const SourceChoice = Object.freeze({
  *  and `S.timeLeft`. */
 export const TimeUnit = Object.freeze({ MINUTES: 'minutes', HOURS: 'hours', DAYS: 'days' });
 
-/** The «Buscar en» scope group (VFS-38 R1, R14): the screen's choices. `all` and `names` are
- *  the core's `Scope`; `documents` («Solo documentos») runs content search only and is built
- *  with the content switch (VFS-27 27c). */
-export const ScopeChoice = Object.freeze({ ...Scope, DOCUMENTS: 'documents' });
-
-/** The scope buttons on the filter line, in order (VFS-38 R1): «Solo documentos» only while
- *  content search is on (VFS-38 R5). */
-export function scopesFor(contentOn) {
-  return contentOn ? [ScopeChoice.ALL, ScopeChoice.NAMES, ScopeChoice.DOCUMENTS] : [ScopeChoice.ALL, ScopeChoice.NAMES];
-}
-
-/** The `SearchQuery.scope` of a scope choice. */
-export function scopeFor(choice) {
-  return choice === ScopeChoice.NAMES ? Scope.NAMES : Scope.ALL;
-}
+/** The tabs at the start of the results header (VFS-42 R1): what a search looks in. «Nombres»
+ *  searches names and folder paths (core `Scope.ALL`); «Documentos» runs content search only
+ *  (VFS-27). Not a filter and not remembered (R5). */
+export const ResultsTab = Object.freeze({ NAMES: 'names', DOCUMENTS: 'documents' });
