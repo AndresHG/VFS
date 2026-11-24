@@ -191,41 +191,74 @@ fn ac2_every_format_is_searchable() {
     }
 }
 
+/// A gate that admits every document and times each one, from its admission to its outcome.
+#[derive(Default)]
+struct Timed {
+    admitted: Option<std::time::Instant>,
+    took: Vec<(OutcomeKind, Duration)>,
+}
+
+impl vfs_content::Gate for Timed {
+    fn before_document(&mut self, _path: &Path) -> vfs_content::Admit {
+        self.admitted = Some(std::time::Instant::now());
+        vfs_content::Admit::Read
+    }
+    fn after_document(&mut self, outcome: OutcomeKind, _worker_ms: u64) {
+        let took = self.admitted.take().expect("admitted").elapsed();
+        self.took.push((outcome, took));
+    }
+}
+
 /// VFS-2 AC-3: a worker that hangs is killed within the limit plus one second, the file is
 /// marked failed (timeout) and the next file is still indexed; the timeout is retried once
-/// on a later run and then never again (AC-6).
+/// on a later run and then never again (AC-6). The kill is timed on the hung file alone, from
+/// its admission to its outcome, with the worker already running from the file before it, so
+/// a loaded machine's worker start or other files do not count against the bound.
 #[test]
 fn ac3_hanging_worker_is_killed() {
     let s = setup();
-    s.write("a/colgado.txt", "este archivo cuelga al extractor");
-    s.write("b/siguiente.txt", "la cigüeña sigue aquí");
+    // One folder, so the run reads them in name order (`dir_id`, then `name`).
+    s.write("a/1_primero.txt", "el primer archivo arranca el extractor");
+    s.write("a/2_colgado.txt", "este archivo cuelga al extractor");
+    s.write("a/3_siguiente.txt", "la cigüeña sigue aquí");
     s.scan();
     let mut o = s.opts();
-    o.worker.timeout = Duration::from_secs(4);
-    o.worker.args = vec!["--test-hook=hang:colgado.txt".into()];
-    let t = std::time::Instant::now();
-    let sum = s.run(&o);
-    // The limit plus one second for the hung file, plus the normal file (a debug build of
-    // the worker extracting a few words, under parallel tests).
-    assert!(
-        t.elapsed() < Duration::from_secs(4 + 1 + 3),
+    // Long enough that the files that must be read never reach it, even with a cold worker
+    // on a loaded machine; the hung file still must end within it plus one second.
+    o.worker.timeout = Duration::from_secs(8);
+    o.worker.args = vec!["--test-hook=hang:2_colgado.txt".into()];
+    let mut gate = Timed::default();
+    let sum = vfs_content::index_with(&s.db, &o, &AtomicBool::new(false), &mut gate).unwrap();
+    let outcomes: Vec<OutcomeKind> = gate.took.iter().map(|(k, _)| *k).collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            OutcomeKind::Indexed,
+            OutcomeKind::Failed(FailReason::Timeout),
+            OutcomeKind::Indexed
+        ],
         "{:?}",
-        t.elapsed()
+        gate.took
+    );
+    let hung = gate.took[1].1;
+    assert!(
+        hung < o.worker.timeout + Duration::from_secs(1),
+        "the hung file took {hung:?}"
     );
     assert_eq!(
-        s.state("colgado.txt"),
+        s.state("2_colgado.txt"),
         (FAILED, Some(FAILED), reason(FailReason::Timeout))
     );
-    assert_eq!(s.state("siguiente.txt").0, INDEXED);
+    assert_eq!(s.state("3_siguiente.txt").0, INDEXED);
     assert_eq!(sum.worker_starts, 2, "{sum:?}");
-    assert_eq!(s.names("cigüeña"), vec!["siguiente.txt"]);
+    assert_eq!(s.names("cigüeña"), vec!["3_siguiente.txt"]);
 
     // A timeout is retried once on a later run, then the failure is final.
     let retry = s.run(&o);
     assert_eq!((retry.queued, retry.files_opened, retry.failed), (1, 1, 1));
     let last = s.run(&o);
     assert_eq!((last.queued, last.files_opened), (0, 0));
-    assert_eq!(s.state("colgado.txt").0, FAILED);
+    assert_eq!(s.state("2_colgado.txt").0, FAILED);
 }
 
 /// VFS-2 AC-4: truncated, corrupted, password-protected, empty and zip-bomb documents end
