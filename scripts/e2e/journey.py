@@ -734,7 +734,8 @@ class Journey:
     def s_content_search(self):
         """VFS-27 AC-16: a folder of the golden documents is added, content search is
         accepted from the offer, the run finishes, and each document is found by a word in
-        its text. The big tree is removed first, so the run reads only these documents."""
+        its text, on screen under the «Documentos» tab (VFS-42). The big tree is removed
+        first, so the run reads only these documents."""
         for r in self.wd.invoke("list_roots"):
             self.wd.invoke("remove_root", {"id": r["id"]})
         dest = os.path.join(os.path.dirname(os.path.abspath(self.args.manifest)), "Contenido")
@@ -760,7 +761,12 @@ class Journey:
             names = [h["name"] for h in r["hits"][:CONTENT_TOP]]
             if name not in names:
                 missing.append(f"{query!r} -> want {name}, got {names}")
+        # VFS-42 R3: «Nombres» runs no content search; the hits are on the «Documentos» tab.
         self.type_query(CONTENT_CASES[0][0])
+        self.wd.click(self.wd.find("#tab-documents"))
+        wait_for(lambda: self.wd.js(
+            "return document.getElementById('tab-documents').getAttribute('aria-selected')") == "true",
+            5, 0.1, "«Documentos» chosen")
         wait_for(lambda: self.visible("#content-hits") and self.wd.js(
             "return document.querySelectorAll('#content-list .chit').length") > 0,
             20, 0.25, "content section on screen")
