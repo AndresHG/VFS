@@ -8,9 +8,10 @@ and the problems listed in [audit.md](audit.md).
 
 1. **The results are the interface.** Chrome takes the least space that keeps it usable.
 2. **One volume.** Ink for content, muted ink for context, accent for the one thing to do now.
-3. **Visible, not loud.** Status, the scope, type and date are always on screen; the rest of
-   the filters are one click away in «Más filtros», and any filter in use shows as a chip
-   below the line (VFS-38 R7, R8). Quiet until used.
+3. **Visible, not loud.** Status, type and date are always on screen, and with results the
+   tabs «Nombres» and «Documentos» head them (VFS-42); the rest of the filters are one click
+   away in «Más filtros», and any filter in use shows as a chip below the line (VFS-38 R7,
+   R8). Quiet until used.
 4. **Big by default, bigger on request.** Sizes in `rem`; the layout survives 200 % text.
 5. **Nothing moves unless the person moved it.**
 
@@ -80,8 +81,8 @@ Implementation: raw values as custom properties, switched under
 | Primary button | accent fill, on-accent text | 8 % darker | ring | 2 % darker | 55 % opacity, no pointer |
 | Quiet button | no border, ink-2 text | `--sunk` bg, ink text | ring | `--sunk` bg | 55 % opacity |
 | Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; «Más filtros (n)» counts the filters behind it | — |
-| Scope group | one `--sunk` pill of radios, «Buscar en» label in ink-2 (kept for screen readers only when the line would not fit) | radio `--sunk-2` | ring; one tab stop, arrows move the choice | chosen radio bold on surface with a `--line-strong` border; accent-soft and accent border when it narrows (not «Todo») | — |
-| Filter chip | accent-soft bg, accent border, bold, `×`; one per filter in use behind «Más filtros», on a line below the filters with «Quitar filtros (n)» at its end, which clears every filter and the scope but keeps the order | `--sunk-2` | ring | — | — |
+| Results tabs | «Nombres» and «Documentos» at the start of the results header, `--t-body` words in ink-2 with no counts, then the count and «Orden»; named «Buscar en» for screen readers; the tabs never shrink or wrap, the count and «Orden» wrap below them | `--sunk` bg, ink text | ring; one tab stop, the arrows, Home and End choose | chosen tab bold ink with a 3px accent bar under it (its bold width reserved, so nothing beside it moves) | — |
+| Filter chip | accent-soft bg, accent border, bold, `×`; one per filter in use behind «Más filtros», on a line below the filters with «Quitar filtros (n)» at its end, which clears every filter but keeps the order and the tab | `--sunk-2` | ring | — | — |
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
@@ -123,9 +124,10 @@ one folded line under the folder list, «Marcadores de Firefox · incluidos», a
 scrolls on its own, so every folder stays reachable on a short window. The layout keeps its shape:
 - **«Origen»** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") sits in
   «Más filtros» beside size and folder and shows only while bookmarks are included; a choice
-  other than the default shows as a chip («Solo archivos», «Solo marcadores»). «Buscar en»
-  names only the scope group (VFS-38 R7). **"Orden"** sits in the results header beside the
-  count whenever there are results, with five orders (most alike, newest, oldest, name A–Z,
+  other than the default shows as a chip («Solo archivos», «Solo marcadores»). On
+  «Documentos» it is hidden and not counted, and «Carpeta» offers no bookmark folders
+  (VFS-42 R3). «Buscar en» names only the results tabs. **"Orden"** sits in the results header
+  beside the count whenever «Nombres» has results, with five orders (most alike, newest, oldest, name A–Z,
   largest) plus «Archivos primero, luego marcadores» while bookmarks are included (VFS-12,
   VFS-38 R9). Both are native selects: each is one choice, and a select also works where
   the Popover API is missing.

@@ -53,14 +53,10 @@
       <span id="dev-badge" class="dev-badge" hidden data-s="devBadge"></span>
     </header>
 
-    <!-- The filter line (VFS-38 R7): the scope group, «Tipo», «Fecha» and «Más filtros», one
-         quiet row. Labels are kept for screen readers; the chosen value is the text. -->
+    <!-- The filter line (VFS-38 R7, VFS-42 R1): «Tipo», «Fecha» and «Más filtros», one quiet
+         row. Labels are kept for screen readers; the chosen value is the text. -->
     <form class="filters" id="filters" aria-labelledby="filters-title">
       <h2 id="filters-title" class="visually-hidden" data-s="filtersTitle"></h2>
-      <!-- VFS-38 R1: one choice, one tab stop; main.js adds a radio per offered scope. -->
-      <div id="f-scope" class="scope" role="radiogroup" aria-labelledby="f-scope-label">
-        <span id="f-scope-label" class="scope-label" data-s="fScope"></span>
-      </div>
       <button id="f-type" class="filter" type="button" popovertarget="f-type-pop" aria-describedby="f-type-label">
         <span id="f-type-text"></span>
         <svg aria-hidden="true"><use href="#i-chevron"/></svg>
@@ -110,7 +106,7 @@
     </form>
 
     <!-- VFS-38 R8: while any filter is on, the ones behind «Más filtros» as removable chips,
-         then «Quitar filtros (N)», which clears every filter and the scope. -->
+         then «Quitar filtros (N)», which clears every filter (VFS-42 R5: not the tab). -->
     <div class="active-filters" id="active-filters" role="group" data-s-label="activeFiltersTitle" hidden>
       <div class="filter-tags" id="filter-tags"></div>
       <button id="f-clear" class="btn btn-quiet" type="button" aria-controls="filters" data-s="clearFilters"></button>
@@ -156,32 +152,39 @@
 
     <main class="results" id="main">
       <h2 class="visually-hidden" data-s="resultsTitle"></h2>
-      <!-- VFS-38 R9: the result count with «Orden» beside it (VFS-12), while there are results. -->
+      <!-- VFS-42 R1, R7: the results header, shown with the results view: the tabs «Nombres» and
+           «Documentos» (one tab stop; the arrow keys, Home and End choose), then the count and,
+           on «Nombres», «Orden» (VFS-12), which wrap below when the row is short. -->
       <div class="results-head" id="results-head" hidden>
-        <p class="summary-line"><strong id="summary" class="summary"></strong></p>
-        <label class="filter filter-select" id="f-sort-pill">
-          <span class="visually-hidden" data-s="fSort"></span>
-          <select id="f-sort"></select>
-        </label>
-      </div>
-      <p id="fuzzy-note" class="fuzzy-note" hidden data-s="fuzzyNote"></p>
-      <div class="list-wrap">
-        <div id="results" class="list" role="listbox" tabindex="-1" data-s-label="resultsTitle">
-          <div class="sizer" id="sizer" role="presentation"></div>
+        <div id="tabs" class="tabs" role="tablist" data-s-label="tabsLabel">
+          <button id="tab-names" class="tab" type="button" role="tab" data-tab="names" aria-controls="results-panel" aria-selected="true" data-s="tabNames"></button>
+          <button id="tab-documents" class="tab" type="button" role="tab" data-tab="documents" aria-controls="results-panel" aria-selected="false" tabindex="-1" data-s="tabDocuments"></button>
         </div>
-        <div id="empty" class="empty" hidden></div>
-      </div>
-      <!-- VFS-27 R12, R13: hits inside documents, below the name hits. -->
-      <section id="content-hits" class="content-hits" aria-labelledby="content-title" hidden>
-        <div class="content-head">
-          <h3 id="content-title" data-s="contentTitle"></h3>
-          <span id="content-count" class="content-count"></span>
+        <div class="results-meta">
+          <p class="summary-line"><strong id="summary" class="summary"></strong></p>
+          <label class="filter filter-select" id="f-sort-pill">
+            <span class="visually-hidden" data-s="fSort"></span>
+            <select id="f-sort"></select>
+          </label>
         </div>
-        <div id="content-notes" class="content-notes" aria-live="polite"></div>
-        <ul id="content-list" class="content-list" role="list"></ul>
-        <button id="content-more" class="link-btn" type="button" hidden data-s="contentMore"></button>
-      </section>
-      <p class="details" id="details" aria-live="off"></p>
+      </div>
+      <div id="results-panel" class="results-panel" role="tabpanel" aria-labelledby="tab-names" data-tab="names">
+        <p id="fuzzy-note" class="fuzzy-note" hidden data-s="fuzzyNote"></p>
+        <!-- VFS-27 R12, R13: hits inside documents, on «Documentos» only (VFS-42 R3). -->
+        <section id="content-hits" class="content-hits" aria-labelledby="content-title" hidden>
+          <h3 id="content-title" class="visually-hidden" data-s="contentTitle"></h3>
+          <div id="content-notes" class="content-notes" aria-live="polite"></div>
+          <ul id="content-list" class="content-list" role="list"></ul>
+          <button id="content-more" class="link-btn" type="button" hidden data-s="contentMore"></button>
+        </section>
+        <div class="list-wrap">
+          <div id="results" class="list" role="listbox" tabindex="-1" data-s-label="resultsTitle">
+            <div class="sizer" id="sizer" role="presentation"></div>
+          </div>
+          <div id="empty" class="empty" hidden></div>
+        </div>
+        <p class="details" id="details" aria-live="off"></p>
+      </div>
     </main>
 
     <footer class="bottom">

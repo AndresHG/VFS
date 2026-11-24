@@ -1,12 +1,11 @@
-// Remembered choices and the scope choices (VFS-38 R6, R14), without a browser.
+// Remembered choices (VFS-38 R6) and the results tabs (VFS-42 R1, R5), without a browser.
 // Run: node --test apps/desktop/ui-dev/prefs.test.mjs
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { PrefKey, readPref, writePref } from '../ui/prefs.js';
-import { ScopeChoice, SourceChoice, scopeFor, scopesFor } from '../ui/choices.js';
-import { Scope } from '../ui/contract.js';
+import { ResultsTab, SourceChoice } from '../ui/choices.js';
 import { CATALOGS, Lang } from '../ui/strings.js';
 
 /** A Storage stand-in over a Map. */
@@ -24,40 +23,44 @@ const throwing = {
  *  offered, unreadable or absent storage give the default; writing never throws. */
 test('a remembered choice is read only when it is offered', () => {
   const sources = Object.values(SourceChoice);
-  const store = memory({ [PrefKey.SOURCE]: SourceChoice.FILES, [PrefKey.SCOPE]: 'everything' });
+  const store = memory({ [PrefKey.SOURCE]: SourceChoice.FILES, [PrefKey.SORT]: 'sideways' });
   assert.equal(readPref(store, PrefKey.SOURCE, sources, SourceChoice.BOTH), SourceChoice.FILES);
-  assert.equal(readPref(store, PrefKey.SCOPE, scopesFor(true), ScopeChoice.ALL), ScopeChoice.ALL, 'unknown value');
-  assert.equal(readPref(store, PrefKey.SORT, ['relevance'], 'relevance'), 'relevance', 'missing value');
-  assert.equal(readPref(memory({ [PrefKey.SCOPE]: ScopeChoice.DOCUMENTS }), PrefKey.SCOPE, scopesFor(false), ScopeChoice.ALL),
-    ScopeChoice.ALL, 'a choice not offered at start');
+  assert.equal(readPref(store, PrefKey.SORT, ['relevance'], 'relevance'), 'relevance', 'unknown value');
+  assert.equal(readPref(memory(), PrefKey.SORT, ['relevance'], 'relevance'), 'relevance', 'missing value');
+  assert.equal(readPref(memory({ [PrefKey.SOURCE]: SourceChoice.BOOKMARKS }), PrefKey.SOURCE, [SourceChoice.BOTH], SourceChoice.BOTH),
+    SourceChoice.BOTH, 'a choice not offered at start');
   assert.equal(readPref(throwing, PrefKey.SOURCE, sources, SourceChoice.BOTH), SourceChoice.BOTH, 'storage that throws');
   assert.equal(readPref(null, PrefKey.SOURCE, sources, SourceChoice.BOTH), SourceChoice.BOTH, 'no storage at all');
-  assert.doesNotThrow(() => writePref(throwing, PrefKey.SCOPE, ScopeChoice.NAMES));
-  assert.doesNotThrow(() => writePref(null, PrefKey.SCOPE, ScopeChoice.NAMES));
+  assert.doesNotThrow(() => writePref(throwing, PrefKey.SOURCE, SourceChoice.FILES));
+  assert.doesNotThrow(() => writePref(null, PrefKey.SOURCE, SourceChoice.FILES));
   const kept = memory();
-  writePref(kept, PrefKey.SCOPE, ScopeChoice.NAMES);
-  assert.equal(readPref(kept, PrefKey.SCOPE, scopesFor(false), ScopeChoice.ALL), ScopeChoice.NAMES);
+  writePref(kept, PrefKey.SOURCE, SourceChoice.FILES);
+  assert.equal(readPref(kept, PrefKey.SOURCE, sources, SourceChoice.BOTH), SourceChoice.FILES);
 });
 
-/** VFS-38 R1, R14, AC-4: the screen's scope choices map to the core's `Scope`; the group offers
- *  «Todo» first, and «Solo documentos» last and only while content search is on; every choice
- *  has its label. */
-test('scope choices map to the core scope and have labels', () => {
-  assert.equal(scopeFor(ScopeChoice.ALL), Scope.ALL);
-  assert.equal(scopeFor(ScopeChoice.NAMES), Scope.NAMES);
-  for (const s of Object.values(Scope)) assert.ok(Object.values(ScopeChoice).includes(s), s);
-  assert.deepEqual(scopesFor(false), [ScopeChoice.ALL, ScopeChoice.NAMES]);
-  assert.deepEqual(scopesFor(true), [ScopeChoice.ALL, ScopeChoice.NAMES, ScopeChoice.DOCUMENTS]);
-  assert.equal(scopeFor(ScopeChoice.DOCUMENTS), Scope.ALL, '«Solo documentos» runs no name search at all');
+/** VFS-42 AC-5 (R5): the tab is not remembered: no key is kept for it, `vfs.scope` included. */
+test('no remembered choice for the tab', () => {
+  assert.ok(!Object.values(PrefKey).includes('vfs.scope'), 'vfs.scope is no longer read');
+  assert.ok(!Object.keys(PrefKey).some((k) => /scope|tab/i.test(k)), 'no key for the scope or the tab');
+});
+
+/** VFS-42 R1, R3: two tabs with their labels in both languages, the tablist named «Buscar en»;
+ *  the copy of «Documentos» exists in both catalogs. */
+test('the tabs and the «Documentos» messages have their copy', () => {
+  assert.deepEqual(Object.values(ResultsTab), ['names', 'documents']);
   for (const lang of Object.values(Lang)) {
     const S = CATALOGS[lang];
-    assert.deepEqual(Object.keys(S.scopeOptions).sort(), Object.values(ScopeChoice).sort(), lang);
+    for (const k of ['tabsLabel', 'tabNames', 'tabDocuments', 'emptyDocumentsShort', 'searchNames', 'documentsBookmarkFolder',
+      'removeFolder', 'documentsOffTitle', 'documentsOffBody']) assert.ok(S[k], `${lang}: ${k}`);
     assert.deepEqual(Object.keys(S.sourceChips).sort(), [SourceChoice.BOOKMARKS, SourceChoice.FILES], lang);
   }
-  assert.equal(CATALOGS[Lang.ES].fScope, 'Buscar en');
-  assert.equal(CATALOGS[Lang.ES].scopeOptions[ScopeChoice.DOCUMENTS], 'Solo documentos');
-  assert.equal(CATALOGS[Lang.ES].searchEverything, 'Buscar en todo');
-  assert.equal(CATALOGS[Lang.ES].emptyDocumentsShort, 'Escribe al menos 3 letras para buscar dentro de los documentos.');
-  assert.equal(CATALOGS[Lang.ES].fSource, 'Origen');
+  const ES = CATALOGS[Lang.ES];
+  assert.deepEqual([ES.tabsLabel, ES.tabNames, ES.tabDocuments], ['Buscar en', 'Nombres', 'Documentos']);
+  assert.deepEqual([CATALOGS[Lang.EN].tabNames, CATALOGS[Lang.EN].tabDocuments], ['Names', 'Documents']);
+  assert.equal(ES.searchNames, 'Buscar en los nombres');
+  assert.equal(ES.documentsBookmarkFolder, 'Las carpetas de marcadores no tienen documentos');
+  assert.equal(ES.removeFolder, 'Quitar la carpeta');
+  assert.equal(ES.emptyDocumentsShort, 'Escribe al menos 3 letras para buscar dentro de los documentos.');
+  assert.equal(ES.fSource, 'Origen');
   assert.equal(CATALOGS[Lang.EN].fSource, 'Source');
 });

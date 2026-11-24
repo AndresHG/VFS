@@ -22,11 +22,10 @@ import {
 } from './content.js';
 import {
   ContentPhase, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus,
-  SortOrder, Source, TruncatedBy, UiErrorCode,
+  Scope, SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
-  DateChoice, LanguageChoice, ScopeChoice, SearchState, SizeChoice, SourceChoice, TypeChecklist, View,
-  scopeFor, scopesFor, typeChecklistMode,
+  DateChoice, LanguageChoice, ResultsTab, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
 } from './choices.js';
 import { PrefKey, readPref, webStorage, writePref } from './prefs.js';
 import {
@@ -122,9 +121,9 @@ function main(L) {
     terms: [],
     searchState: SearchState.IDLE,
     unavailableDismissed: '',
+    // VFS-42 R5: every launch opens on «Nombres»; the tab is not remembered.
+    tab: ResultsTab.NAMES,
     // VFS-38 R6: remembered; source and sort are read once the bookmark setting is known.
-    // «Solo documentos» is checked against content search once its status is known (R5).
-    scope: readPref(store, PrefKey.SCOPE, scopesFor(true), ScopeChoice.ALL),
     source: SourceChoice.BOTH,
     sort: SortOrder.RELEVANCE,
     bookmarks: null, // BookmarkStatus, null until known
@@ -227,82 +226,52 @@ function main(L) {
     if (e.newState === 'open') firstMoreField()?.focus();
   });
 
-  /* VFS-38 R1: the scope group, a radio group with one tab stop; the arrow keys move the choice
-     and every change runs the search again (the newer query drops the older, VFS-1 S6). */
-  const scopeGroup = $('f-scope');
-  const scopeRadios = () => [...scopeGroup.querySelectorAll('[role="radio"]')];
+  /* VFS-42 R1: the tabs «Nombres» and «Documentos» at the start of the results header, one tab
+     stop; the arrow keys, Home and End move and choose. Choosing one runs the search again (the
+     newer query drops the older, VFS-1 S6). */
+  const tabList = $('tabs');
+  const tabs = () => [...tabList.querySelectorAll('[role="tab"]')];
+  for (const t of tabs()) t.dataset.text = t.textContent; // the bold width, reserved by styles.css
 
-  /** The offered scopes: «Solo documentos» while content search is on, and while its status
-   *  is not known yet when it is the remembered choice (R5 decides once it is). */
-  function offeredScopes() {
-    return scopesFor(state.content ? contentOn(state.content) : state.scope === ScopeChoice.DOCUMENTS);
+  function renderTabs() {
+    for (const t of tabs()) {
+      const chosen = t.dataset.tab === state.tab;
+      t.setAttribute('aria-selected', String(chosen));
+      t.tabIndex = chosen ? 0 : -1;
+      if (chosen) $('results-panel').setAttribute('aria-labelledby', t.id);
+    }
+    $('results-panel').dataset.tab = state.tab;
   }
 
-  function renderScope() {
-    const offered = offeredScopes();
-    if (scopeRadios().map((b) => b.dataset.scope).join() !== offered.join()) {
-      const focused = scopeGroup.contains(document.activeElement);
-      for (const b of scopeRadios()) b.remove();
-      for (const choice of offered) {
-        const b = el('button', 'scope-btn', S.scopeOptions[choice]);
-        b.type = 'button';
-        b.setAttribute('role', 'radio');
-        b.dataset.scope = choice;
-        scopeGroup.append(b);
-      }
-      if (focused) scopeGroup.querySelector(`[data-scope="${state.scope}"]`)?.focus();
-    }
-    for (const b of scopeRadios()) {
-      const chosen = b.dataset.scope === state.scope;
-      b.setAttribute('aria-checked', String(chosen));
-      b.tabIndex = chosen ? 0 : -1;
-    }
-    scopeGroup.classList.toggle(ON, state.scope !== ScopeChoice.ALL);
-    $('main').dataset.scope = state.scope; // VFS-38 R4: the layout without a name list
-  }
-
-  function setScope(choice) {
-    if (choice === state.scope) return;
-    state.scope = choice;
-    writePref(store, PrefKey.SCOPE, choice);
-    renderScope();
+  function setTab(tab) {
+    if (tab === state.tab) return;
+    state.tab = tab;
+    renderTabs();
     renderSources();
+    renderFolderSelect();
     filtersChanged();
   }
 
-  scopeGroup.addEventListener('click', (e) => {
-    const b = e.target.closest('[role="radio"]');
-    if (b) setScope(b.dataset.scope);
+  tabList.addEventListener('click', (e) => {
+    const t = e.target.closest('[role="tab"]');
+    if (t) setTab(t.dataset.tab);
   });
-  /** Arrow keys step through the radios (wrapping), Home and End jump to the ends. */
-  const SCOPE_STEPS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
-  scopeGroup.addEventListener('keydown', (e) => {
-    const radios = scopeRadios();
-    const at = radios.indexOf(e.target);
+  /** Arrow keys step through the tabs (wrapping), Home and End jump to the ends. */
+  const TAB_STEPS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+  tabList.addEventListener('keydown', (e) => {
+    const all = tabs();
+    const at = all.indexOf(e.target);
     if (at < 0) return;
     let next;
-    if (e.key in SCOPE_STEPS) next = (at + SCOPE_STEPS[e.key] + radios.length) % radios.length;
+    if (e.key in TAB_STEPS) next = (at + TAB_STEPS[e.key] + all.length) % all.length;
     else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = radios.length - 1;
+    else if (e.key === 'End') next = all.length - 1;
     else return;
     e.preventDefault();
-    radios[next].focus();
-    setScope(radios[next].dataset.scope);
+    all[next].focus();
+    setTab(all[next].dataset.tab);
   });
-  renderScope();
-
-  /** VFS-38 R10: «Buscar en» shows while the filter line fits on one row with it; otherwise
-   *  it is kept for screen readers only, and no other control shrinks. */
-  function fitScopeLabel() {
-    const label = $('f-scope-label');
-    const form = $('filters');
-    label.classList.remove('visually-hidden');
-    const first = scopeGroup.getBoundingClientRect();
-    const last = $('f-more').getBoundingClientRect();
-    if (Math.round(last.top) !== Math.round(first.top) || form.scrollWidth > form.clientWidth) label.classList.add('visually-hidden');
-  }
-  new ResizeObserver(fitScopeLabel).observe($('filters'));
-  document.fonts?.ready.then(fitScopeLabel);
+  renderTabs();
 
   function fillSelect(select, options) {
     select.replaceChildren(...Object.entries(options).map(([v, t]) => new Option(t, v)));
@@ -325,10 +294,14 @@ function main(L) {
     return !!state.bookmarks?.enabled;
   }
 
-  /** Whether the source choice applies: bookmarks on, and not under «Solo documentos», which
-   *  searches no bookmarks (VFS-38 R4). */
+  function documentsTab() {
+    return state.tab === ResultsTab.DOCUMENTS;
+  }
+
+  /** Whether the source choice applies: bookmarks on, and not on «Documentos», which searches
+   *  no bookmarks (VFS-42 R3). */
   function sourceApplies() {
-    return bookmarksOn() && state.scope !== ScopeChoice.DOCUMENTS;
+    return bookmarksOn() && !documentsTab();
   }
 
   /** The source choice (VFS-6), remembered (VFS-38 R6). */
@@ -377,7 +350,8 @@ function main(L) {
       opts.push(o);
     }
     opts.push(new Option(S.folderPick, PICK_FOLDER));
-    // VFS-6 R12: bookmark roots, and a folder chosen with "Ver su contenido".
+    // VFS-6 R12: bookmark roots, and a folder chosen with "Ver su contenido". «Documentos»
+    // offers none, but keeps one chosen earlier on screen as the chosen value (VFS-42 R3).
     if (bookmarksOn()) {
       const group = document.createElement('optgroup');
       group.label = S.folderGroupBookmarks;
@@ -389,6 +363,7 @@ function main(L) {
       if (b && !(state.bookmarks.roots || []).some((r) => r.id === b.id)) {
         group.append(new Option(S.folderInside(b.title), bookmarkFolderValue(b.id)));
       }
+      if (documentsTab()) for (const o of [...group.children]) if (o.value !== state.folder) o.remove();
       if (group.children.length) opts.push(group);
     }
     sel.replaceChildren(...opts);
@@ -432,9 +407,9 @@ function main(L) {
     return out;
   }
 
-  /** VFS-38 R8: every active filter, the source and the scope included. */
+  /** VFS-38 R8: every active filter, the source included; the tab is not a filter (VFS-42 R5). */
   function activeFilterCount() {
-    return state.kinds.size + (state.date !== DateChoice.ANY) + moreFilters().length + (state.scope !== ScopeChoice.ALL);
+    return state.kinds.size + (state.date !== DateChoice.ANY) + moreFilters().length;
   }
 
   function renderClearButton() {
@@ -453,7 +428,6 @@ function main(L) {
     // A filter that narrows the list looks chosen.
     $('f-date').parentElement.classList.toggle(ON, state.date !== DateChoice.ANY);
     $('f-more').classList.toggle(ON, more.length > 0);
-    fitScopeLabel();
   }
 
   /** Local midnight of a yyyy-mm-dd value, in unix seconds. */
@@ -494,7 +468,7 @@ function main(L) {
 
   /** One page of the current query over the chosen sources (VFS-6). */
   function fetchPage(offset) {
-    const query = { text: state.text.trim(), filters: filters(), limit: PAGE, offset, scope: scopeFor(state.scope) };
+    const query = { text: state.text.trim(), filters: filters(), limit: PAGE, offset, scope: Scope.ALL };
     return api.searchSources(query, {
       sources: sourcesFor(state.source, bookmarksOn()),
       bookmarkFolder: bookmarkFolderOf(state.folder),
@@ -525,8 +499,8 @@ function main(L) {
       if (p) { state.pickedFolder = p; state.folder = p; renderFolderSelect(); filtersChanged(); }
     } catch (err) { showError(errorText(err)); }
   });
-  /** «Quitar filtros» (VFS-38 R8): clears type, date, size, folder, source and scope and keeps
-   *  the sort; a suggestion (VFS-13) keeps a bookmark folder. */
+  /** «Quitar filtros» (VFS-38 R8, VFS-42 R5, R6): clears type, date, size, folder and source and
+   *  keeps the sort and the tab; a suggestion (VFS-13) keeps a bookmark folder. */
   function clearFilters({ keepBookmarkFolder = false } = {}) {
     state.kinds.clear();
     for (const c of chips.querySelectorAll('input')) c.checked = false;
@@ -537,12 +511,6 @@ function main(L) {
     state.folder = folderAfterClear(state.folder, keepBookmarkFolder);
     $('f-folder').value = state.folder;
     if (state.source !== SourceChoice.BOTH) setSource(SourceChoice.BOTH);
-    if (state.scope !== ScopeChoice.ALL) {
-      state.scope = ScopeChoice.ALL;
-      writePref(store, PrefKey.SCOPE, state.scope);
-      renderScope();
-      renderSources();
-    }
     filtersChanged();
     $('q').focus();
   }
@@ -576,7 +544,7 @@ function main(L) {
     runSearch();
   }
 
-  /** Words, or a filter that narrows the files; the scope and source alone list nothing. */
+  /** Words, or a filter that narrows the files; the tab and the source alone list nothing. */
   function hasQuery() {
     return state.text.trim() !== '' || narrowingCount() > 0;
   }
@@ -595,8 +563,8 @@ function main(L) {
       setResults(0, null, new Map());
       return;
     }
-    if (state.scope === ScopeChoice.DOCUMENTS) {
-      // VFS-38 R4: only the content section; no name or path search, no suggestion.
+    if (documentsTab()) {
+      // VFS-42 R3: only the content search; no name or path search, no suggestion.
       state.searchState = SearchState.DONE;
       setResults(0, null, new Map());
       return;
@@ -640,7 +608,7 @@ function main(L) {
   /** VFS-13 R1, R5: asks the core for one suggestion; shown only while no newer search
    *  started. A failure leaves the empty state as it is. */
   async function askSuggestion(seq) {
-    const query = { text: state.text.trim(), filters: filters(), limit: 1, offset: 0, scope: scopeFor(state.scope) };
+    const query = { text: state.text.trim(), filters: filters(), limit: 1, offset: 0, scope: Scope.ALL };
     try {
       const s = await api.suggest(query);
       if (seq !== state.seq) return;
@@ -1034,7 +1002,8 @@ function main(L) {
 
   /* ---------------------------------------------------------------- summary, empty, details */
 
-  /** The results header (VFS-38 R9): the count, and «Orden» while there are results. */
+  /** The results header after the tabs (VFS-42 R7): the count, and on «Nombres» «Orden» while
+   *  there are results. */
   function renderSummary() {
     const s = $('summary');
     const fuzzy = $('fuzzy-note');
@@ -1042,12 +1011,17 @@ function main(L) {
     renderSummaryText(s);
     s.title = s.textContent;
     // «Orden» stays while a newer search is loading, so the header does not jump.
-    $('f-sort-pill').hidden = !state.total;
-    $('results-head').hidden = !s.textContent && !state.total;
+    $('f-sort-pill').hidden = !state.total || documentsTab();
     if (state.searchState === SearchState.DONE && state.total) fuzzy.hidden = hitAt(0)?.matched !== MatchKind.FUZZY;
   }
 
   function renderSummaryText(s) {
+    if (documentsTab()) {
+      // VFS-27 R12: how many documents matched, once the answer is in.
+      const view = contentSearch.view();
+      s.textContent = view?.total == null || view.loading ? '' : S.contentCount(view.total, N.count(view.total), view.totalCapped);
+      return;
+    }
     if (state.searchState === SearchState.LOADING) { s.textContent = S.searching; return; }
     if (state.searchState !== SearchState.DONE || !state.total) { s.textContent = ''; return; }
     const n = N.count(state.total);
@@ -1092,41 +1066,48 @@ function main(L) {
         mode = SearchState.IDLE;
         parts.push(icon('search'), el('h3', null, S.emptyIdleTitle(N.count(filesIndexed))), el('p', null, S.emptyIdleBody));
       }
-    } else if (state.searchState === SearchState.DONE && state.scope === ScopeChoice.DOCUMENTS) {
-      // VFS-38 R4: content results only. A short query asks for 3 letters; no match offers «Todo».
+    } else if (state.searchState === SearchState.DONE && documentsTab()) {
+      // VFS-42 R3, R4: content results only, in this order: the invitation while content
+      // search is off, a bookmark folder (no documents), a short query, no match.
       const view = contentSearch.view();
-      if (!contentQueryDue(state.text)) {
+      if (!contentOn(state.content)) {
+        askOfferNumbers();
+        const offer = offerNumbers ? offerText(L, offerNumbers) : null;
+        mode = `documents-off:${!!offer}`;
+        parts.push(icon('search'), el('h3', null, S.documentsOffTitle), el('p', null, offer ? offer.text : S.documentsOffBody));
+        if (offer?.warn) parts.push(el('p', null, offer.warn));
+        actions = [button(S.contentOfferYes, 'btn btn-primary', () => contentCall(() => api.contentSetEnabled(true)))];
+      } else if (bookmarkFolderOf(state.folder) != null) {
+        mode = 'documents-bookmarks';
+        parts.push(icon('bookmark-folder'), el('h3', null, S.documentsBookmarkFolder));
+        actions = [button(S.removeFolder, 'btn btn-primary', () => { state.folder = ''; $('f-folder').value = ''; filtersChanged(); q.focus(); })];
+      } else if (!contentQueryDue(state.text)) {
         mode = 'documents-short';
         parts.push(icon('search'), el('h3', null, S.emptyDocumentsShort));
-      } else if (!view || (!view.loading && !view.failed && !view.hits.length)) {
-        mode = `documents-none:${state.text.trim()}`;
+      } else if (view && !view.loading && !view.failed && !view.hits.length) {
+        const filtered = activeFilterCount() > 0;
+        mode = `documents-none:${state.text.trim()}:${filtered}`;
         parts.push(icon('search'), el('h3', null, S.emptyNoHitsTitle(state.text.trim())), el('p', null, S.contentNone));
-        actions = [button(S.searchEverything, 'btn btn-primary', () => { setScope(ScopeChoice.ALL); q.focus(); })];
+        actions = [button(S.searchNames, 'btn btn-primary', () => { setTab(ResultsTab.NAMES); q.focus(); })];
+        if (filtered) actions.push(button(S.clearFilters, 'btn', () => $('f-clear').click()));
       } else {
         box.hidden = true;
         setView();
         return;
       }
-    } else if (state.searchState === SearchState.DONE && !state.total && contentSearch.view()?.hits.length) {
-      // No name hits, but hits inside documents below: no "nothing found" over them (R12).
-      box.hidden = true;
-      setView();
-      return;
     } else if (state.searchState === SearchState.DONE && !state.total) {
       if (state.truncatedBy === TruncatedBy.DEADLINE) {
         mode = TruncatedBy.DEADLINE;
         parts.push(icon('info'), el('h3', null, S.emptyDeadlineTitle), el('p', null, S.emptyDeadlineBody));
         actions = [button(S.retry, 'btn btn-primary', () => runSearch())];
       } else {
+        // VFS-38 R8, R13 minus the scope (VFS-42 R6).
         const sg = state.suggestion;
-        const namesOnly = state.scope === ScopeChoice.NAMES;
-        const filtered = activeFilterCount() - namesOnly;
-        mode = `no-hits:${filtered > 0}:${namesOnly}:${sg ? sg.kind + sg.text : ''}`;
+        const filtered = activeFilterCount();
+        mode = `no-hits:${filtered > 0}:${sg ? sg.kind + sg.text : ''}`;
         parts.push(icon('search'), el('h3', null, S.emptyNoHitsTitle(state.text.trim())));
-        // VFS-38 R13: a names-only search says so; «Quitar filtros» also brings back «Todo».
-        if (namesOnly) parts.push(el('p', null, S.emptyNamesOnly));
-        if (activeFilterCount()) {
-          if (filtered) parts.push(el('p', null, S.emptyNoHitsFilters));
+        if (filtered) {
+          parts.push(el('p', null, S.emptyNoHitsFilters));
           // A "drop filters" suggestion is this same action with its count.
           if (!sg?.clearFilters) actions = [button(S.clearFilters, sg ? 'btn' : 'btn btn-primary', () => $('f-clear').click())];
         } else {
@@ -1162,14 +1143,17 @@ function main(L) {
     box.hidden = false;
   }
 
-  /** Before any search the box sits in the middle of an empty page; results move it up. */
+  /** Before any search the box sits in the middle of an empty page; results move it up, with
+   *  the results header and its tabs above them (VFS-42 R1). */
   function setView() {
-    $('app').dataset.view = viewFor({
+    const view = viewFor({
       backendMissing: !!api.missing,
       rootsLoaded: !!state.rootsLoaded,
       rootCount: state.roots.length,
       searchState: state.searchState,
     });
+    $('app').dataset.view = view;
+    $('results-head').hidden = view !== View.LIST;
   }
 
   function button(text, cls, onClick) {
@@ -1210,7 +1194,8 @@ function main(L) {
     announceTimer = setTimeout(() => {
       const a = $('announcer');
       if (state.searchState === SearchState.DONE) {
-        a.textContent = state.total ? $('summary').textContent : ($('empty').querySelector('h3')?.textContent || '');
+        // The count (of names, or of documents on «Documentos»), else the empty view's title.
+        a.textContent = $('summary').textContent || $('empty').querySelector('h3')?.textContent || '';
       } else if (state.searchState === SearchState.ERROR) {
         a.textContent = S.emptyErrorTitle;
       }
@@ -1689,14 +1674,10 @@ function main(L) {
   const contentSearch = createContentSearch({ api, render: renderContentHits });
   let shownContentHits = null;
 
-  /** The content section applies to file searches with content search on (R12), never under
-   *  «Solo nombres» (VFS-38 R3); under «Solo documentos» the source choice does not apply (R4).
-   *  Files are searched unless the source is bookmarks alone: «Archivos y marcadores» sends no
-   *  source list at all (`sourcesFor` gives []), so it must not be read as "no files". */
+  /** The content search runs only on «Documentos» with content search on (VFS-42 R2, R3), and
+   *  not inside a bookmark folder; the source choice does not apply there. */
   function contentApplies() {
-    const bookmarksOnly = sourceApplies() && state.source === SourceChoice.BOOKMARKS;
-    return contentOn(state.content) && !bookmarksOnly
-      && bookmarkFolderOf(state.folder) == null && state.scope !== ScopeChoice.NAMES;
+    return documentsTab() && contentOn(state.content) && bookmarkFolderOf(state.folder) == null;
   }
 
   function runContentQuery() {
@@ -1706,16 +1687,14 @@ function main(L) {
   function renderContentHits(view) {
     const sec = $('content-hits');
     sec.hidden = !view;
-    if (!view) { shownContentHits = null; renderEmpty(); return; }
+    if (!view) { shownContentHits = null; renderSummary(); renderEmpty(); return; }
     const notes = [];
     if (view.loading && !view.hits.length) notes.push(S.contentSearching);
     if (view.failed) notes.push(S.contentFailed);
+    // No match is said by the empty view below these notes, with «Buscar en los nombres» (VFS-42 R3).
     notes.push(...sectionNotes(L, state.content, view.partial));
-    // Under «Solo documentos» the empty view says it, with «Buscar en todo» (VFS-38 R4).
-    if (!view.loading && !view.failed && !view.hits.length && state.scope !== ScopeChoice.DOCUMENTS) notes.push(S.contentNone);
     $('content-notes').replaceChildren(...notes.map((t) => el('p', null, t)));
-    // VFS-27 R12: the heading says how many documents matched, once the answer is in.
-    $('content-count').textContent = view.total == null || view.loading ? '' : S.contentCount(view.total, N.count(view.total), view.totalCapped);
+    renderSummary(); // the count «· N documentos» in the results header
     $('content-more').hidden = !view.more;
     if (view.hits === shownContentHits) return;
     shownContentHits = view.hits;
@@ -1766,16 +1745,7 @@ function main(L) {
   function setContent(st) {
     const before = state.content;
     state.content = st;
-    // VFS-38 R5: at start, or when content search goes off, «Solo documentos» becomes «Todo».
-    if (state.scope === ScopeChoice.DOCUMENTS && !contentOn(st)) {
-      state.scope = ScopeChoice.ALL;
-      writePref(store, PrefKey.SCOPE, state.scope);
-      renderScope();
-      renderSources();
-      filtersChanged();
-    } else {
-      renderScope();
-    }
+    // VFS-42 R4: turning content search off keeps «Documentos», which then shows the invitation.
     if (contentOn(before) !== contentOn(st)) {
       runContentQuery();
       if (contentOn(st)) loadUnread([...state.pages.values()].flat());
@@ -1822,6 +1792,20 @@ function main(L) {
   /* The offer (R4): asked once the folders have finished their first scan, and again only when
      the folders change before it was answered. */
   let offerKey = '';
+  /* VFS-42 R4: the numbers of the invitation on «Documentos» while content search is off, asked
+     at most once per session (counting documents reads the whole file list) and kept; none
+     while first scans run, and null when unknown (no documents yet, an error). */
+  let offerNumbers = null;
+  let offerAsked = false;
+  async function askOfferNumbers() {
+    if (offerAsked || offerNumbers || firstScanRunning()) return;
+    offerAsked = true;
+    try {
+      const offer = await api.contentOffer();
+      offerNumbers = offer.documents ? offer : null;
+    } catch { return; } // the invitation stays without numbers
+    if (offerNumbers) renderEmpty();
+  }
   async function maybeOffer() {
     if (!offerDue(state.content, state.roots)) { $('banner-content-offer').hidden = true; return; }
     const key = state.roots.map((r) => `${r.id}:${r.lastFullScan}`).join(',');
@@ -1831,6 +1815,7 @@ function main(L) {
     try { offer = await api.contentOffer(); } catch { offerKey = ''; return; } // asked again next time
     // Nothing to read yet: no offer, and not marked as offered.
     if (!offer.documents || !offerDue(state.content, state.roots)) return;
+    offerNumbers = offer; // the «Documentos» invitation uses them too
     const { text, warn } = offerText(L, offer);
     $('content-offer-text').textContent = text;
     $('content-offer-warn').textContent = warn;

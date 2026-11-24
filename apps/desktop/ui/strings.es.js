@@ -2,7 +2,7 @@
 // "índice" or "reindexar" (VFS-1 decision 16). Functions take already-formatted values. Every
 // key exists in `strings.en.js` too (ui-dev/strings.test.mjs).
 
-import { DateChoice, LanguageChoice, ScopeChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
+import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
   BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason, Provider, AiErrorCode,
@@ -29,11 +29,11 @@ export const es = {
     : names.length <= 2 ? names.join(', ') : `${names[0]} y ${names.length - 1} más`),
   clearFilters: 'Quitar filtros',
   clearFiltersN: (n) => `Quitar filtros (${n})`,
-  // VFS-38: the scope group, «Más filtros» and the line of filters in use below the filters.
-  fScope: 'Buscar en',
-  scopeOptions: {
-    [ScopeChoice.ALL]: 'Todo', [ScopeChoice.NAMES]: 'Solo nombres', [ScopeChoice.DOCUMENTS]: 'Solo documentos',
-  },
+  // VFS-42: the tabs of the results header, named «Buscar en» for screen readers.
+  tabsLabel: 'Buscar en',
+  tabNames: 'Nombres',
+  tabDocuments: 'Documentos',
+  // VFS-38: «Más filtros» and the line of filters in use below the filters.
   moreFilters: 'Más filtros',
   moreFiltersN: (n) => `Más filtros (${n})`,
   activeFiltersTitle: 'Filtros puestos',
@@ -142,10 +142,14 @@ export const es = {
   emptyNoHitsTitle: (q) => (q ? `No se encontró nada para «${q}»` : 'No hay archivos con estos filtros'),
   emptyNoHitsBody: 'Compruebe lo escrito o pruebe con menos palabras.',
   emptyNoHitsFilters: 'Hay filtros puestos que pueden estar ocultando resultados.',
-  emptyNamesOnly: 'Buscando solo en los nombres.',
-  // VFS-38 R4: «Solo documentos» with a query under 3 letters, and its no-match action.
+  // VFS-42 R3, R4: «Documentos» with a query under 3 letters, its no-match action, a bookmark
+  // folder chosen, and the invitation while content search is off.
   emptyDocumentsShort: 'Escribe al menos 3 letras para buscar dentro de los documentos.',
-  searchEverything: 'Buscar en todo',
+  searchNames: 'Buscar en los nombres',
+  documentsBookmarkFolder: 'Las carpetas de marcadores no tienen documentos',
+  removeFolder: 'Quitar la carpeta',
+  documentsOffTitle: 'La búsqueda dentro de los documentos está desactivada',
+  documentsOffBody: 'VFS puede leer el texto de sus documentos para encontrarlos por una palabra que contengan. La lectura tarda un tiempo y ocupa algo de espacio en el disco.',
   // One search that finds something (VFS-13); `n` is a formatted count or suggestCapped.
   suggestDropFilters: (n) => `Ningún resultado con estos filtros. ¿Buscar sin filtros? (${n})`,
   suggestSpelling: (word, n) => `¿Quería decir «${word}»? (${n})`,

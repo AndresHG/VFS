@@ -1,5 +1,6 @@
-// VFS-38: the scope group, «Más filtros», the line of filters in use and the remembered choices,
-// on the real page in a headless Chrome against the development fake backend (browser.mjs).
+// VFS-38: «Más filtros», the line of filters in use and the remembered choices, on the real page
+// in a headless Chrome against the development fake backend (browser.mjs). The scope group
+// became the results tabs (VFS-42, tabs.test.mjs).
 // Run: node --test apps/desktop/ui-dev/filters.test.mjs   (needs Google Chrome or Chromium)
 
 import test from 'node:test';
@@ -8,7 +9,7 @@ import assert from 'node:assert/strict';
 import { startBrowser } from './browser.mjs';
 import { CATALOGS, Lang } from '../ui/strings.js';
 import { FileKind, SortOrder, Source } from '../ui/contract.js';
-import { ScopeChoice, SourceChoice } from '../ui/choices.js';
+import { ResultsTab, SourceChoice } from '../ui/choices.js';
 import { PrefKey } from '../ui/prefs.js';
 
 const S = CATALOGS[Lang.ES];
@@ -51,7 +52,6 @@ async function recordSearches() {
   })()`);
 }
 
-const checkedScope = `document.querySelector('#f-scope [aria-checked="true"]')?.dataset.scope`;
 const tags = `[...document.querySelectorAll('#filter-tags .filter-tag')].map((b) => b.textContent)`;
 const rowCount = `document.querySelectorAll('#results .row:not(.loading)').length`;
 
@@ -61,65 +61,28 @@ async function key(name, code = name, keyCode = 0) {
   }
 }
 
-/** VFS-38 AC-5 (R1): the scope group is one tab stop; the arrow keys move the choice and each
- *  move runs the search again; the accessibility tree has one radio group named «Buscar en»
- *  with the chosen radio checked. */
-test('the scope group is a radio group moved with the arrow keys', async () => {
-  await start();
-  await recordSearches();
-  await page.type('foto');
-  await until(`${rowCount} > 0`, 'results');
-  assert.equal(await evaluate(`[...document.querySelectorAll('#f-scope [role="radio"]')].filter((b) => b.tabIndex === 0).length`), 1);
-
-  await evaluate(`document.getElementById('q').focus()`);
-  for (let i = 0; i < 4 && !(await evaluate(`!!document.activeElement.closest('#f-scope')`)); i++) await key('Tab', 'Tab', 9);
-  assert.equal(await evaluate(`document.activeElement.dataset.scope`), ScopeChoice.ALL, 'Tab reaches the chosen radio');
-
-  await evaluate(`window.searches.length = 0`);
-  await key('ArrowRight', 'ArrowRight', 39);
-  assert.equal(await evaluate(`document.activeElement.dataset.scope`), ScopeChoice.NAMES);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES);
-  await until(`window.searches.some((s) => s.query.scope === ${JSON.stringify(ScopeChoice.NAMES)})`, 'a names-only search');
-  await key('ArrowRight', 'ArrowRight', 39);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, 'the arrows wrap');
-  await key('ArrowLeft', 'ArrowLeft', 37);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES);
-  await until(`window.searches.at(-1).query.scope === ${JSON.stringify(ScopeChoice.NAMES)}`, 'the search run again');
-
-  const { nodes } = await page.send('Accessibility.getFullAXTree');
-  const groups = nodes.filter((n) => n.role?.value === 'radiogroup');
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].name?.value, S.fScope);
-  const checked = nodes.filter((n) => n.role?.value === 'radio'
-    && n.properties?.some((p) => p.name === 'checked' && String(p.value?.value) === 'true'));
-  assert.deepEqual(checked.map((n) => n.name?.value), [S.scopeOptions[ScopeChoice.NAMES]]);
-});
-
-/** VFS-38 AC-6 (R6): scope, source and sort are kept across a restart; type and folder start
- *  empty. Unknown values or storage that throws give the defaults and the app starts; a stored
- *  «Marcadores» while bookmarks are off searches files. */
-test('scope, source and sort are remembered; filters are not', async () => {
+/** VFS-38 AC-6 (R6, minus the scope: VFS-42 R5): source and sort are kept across a restart;
+ *  type and folder start empty. Unknown values or storage that throws give the defaults and
+ *  the app starts; a stored «Marcadores» while bookmarks are off searches files. */
+test('source and sort are remembered; filters are not', async () => {
   await start(BOOKMARKS);
-  await page.scope(ScopeChoice.NAMES);
   await page.choose('f-source', SourceChoice.FILES);
   await page.choose('f-sort', SortOrder.NEWEST);
   await page.kinds([FileKind.PHOTO]);
   await page.choose('f-folder', FOLDER);
   await reload(BOOKMARKS);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES);
   assert.equal(await evaluate(`document.getElementById('f-source').value`), SourceChoice.FILES);
   assert.equal(await evaluate(`document.getElementById('f-sort').value`), SortOrder.NEWEST);
   assert.equal(await evaluate(`document.querySelectorAll('#kind-chips input:checked').length`), 0);
   assert.equal(await evaluate(`document.getElementById('f-folder').value`), '');
-  // The remembered «Solo nombres» keeps the line of filters in use on screen (R8).
+  // The remembered «Solo archivos» keeps the line of filters in use on screen (R8).
   assert.equal(await evaluate(`document.getElementById('active-filters').hidden`), false);
 
   const defaults = async (what) => {
-    assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, what);
     assert.equal(await evaluate(`document.getElementById('f-source').value`), SourceChoice.BOTH, what);
     assert.equal(await evaluate(`document.getElementById('f-sort').value`), SortOrder.RELEVANCE, what);
   };
-  await start(BOOKMARKS, { [PrefKey.SCOPE]: 'everything', [PrefKey.SOURCE]: 'mail', [PrefKey.SORT]: 'sideways' });
+  await start(BOOKMARKS, { [PrefKey.SOURCE]: 'mail', [PrefKey.SORT]: 'sideways' });
   await defaults('unknown values');
 
   const { identifier } = await page.send('Page.addScriptToEvaluateOnNewDocument', {
@@ -128,8 +91,8 @@ test('scope, source and sort are remembered; filters are not', async () => {
   try {
     await reload(BOOKMARKS);
     await defaults('storage that throws');
-    await page.scope(ScopeChoice.NAMES);
-    assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES, 'choices still work, unremembered');
+    await page.choose('f-sort', SortOrder.NEWEST);
+    assert.equal(await evaluate(`document.getElementById('f-sort').value`), SortOrder.NEWEST, 'choices still work, unremembered');
     await page.type('foto');
     await until(`${rowCount} > 0`, 'results without storage');
   } finally {
@@ -143,7 +106,8 @@ test('scope, source and sort are remembered; filters are not', async () => {
   assert.deepEqual(await evaluate(`window.searches.at(-1).options.sources`), [Source.FILES]);
 });
 
-/** VFS-38 AC-7 (R7, R8): «Más filtros (N)», the chips and «Quitar filtros (N)». */
+/** VFS-38 AC-7 (R7, R8, minus the scope: VFS-42 R5): «Más filtros (N)», the chips and
+ *  «Quitar filtros (N)», which keeps the sort. */
 test('«Más filtros», its chips and «Quitar filtros»', async () => {
   await start(BOOKMARKS);
   assert.equal(await evaluate(`document.getElementById('active-filters').hidden`), true, 'no line without filters');
@@ -164,20 +128,13 @@ test('«Más filtros», its chips and «Quitar filtros»', async () => {
   assert.deepEqual(await evaluate(tags), [S.sourceChips[SourceChoice.BOOKMARKS]]);
 
   await page.choose('f-folder', FOLDER);
-  await page.scope(ScopeChoice.NAMES);
   await page.choose('f-sort', SortOrder.NAME);
-  assert.equal(await evaluate(`document.getElementById('f-clear').textContent`), S.clearFiltersN(3));
+  assert.equal(await evaluate(`document.getElementById('f-clear').textContent`), S.clearFiltersN(2));
   await evaluate(`document.getElementById('f-clear').click()`);
   assert.equal(await evaluate(`document.getElementById('f-folder').value`), '');
   assert.equal(await evaluate(`document.getElementById('f-source').value`), SourceChoice.BOTH);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL);
   assert.equal(await evaluate(`document.getElementById('f-sort').value`), SortOrder.NAME, 'the sort stays');
   assert.equal(await evaluate(`document.getElementById('active-filters').hidden`), true);
-
-  await page.scope(ScopeChoice.NAMES);
-  assert.deepEqual(await evaluate(tags), []);
-  assert.equal(await evaluate(`document.getElementById('f-clear').textContent`), S.clearFiltersN(1));
-  assert.equal(await evaluate(`document.getElementById('active-filters').hidden`), false);
 });
 
 /** VFS-38 AC-7 (R7): without the Popover API, «Más filtros» unfolds a row below the filter
@@ -220,12 +177,12 @@ const ROWS = `[...document.querySelectorAll('#results .row:not(.loading)')].map(
   };
 }).sort((a, b) => a.name.localeCompare(b.name))`;
 
-/** VFS-38 AC-9 (R11): «peñalara» is highlighted in names and folder lines under «Todo» and
- *  «Solo nombres», and no row carries a match label. */
+/** VFS-38 AC-9 (R11): «peñalara» is highlighted in names and folder lines on «Nombres»
+ *  (VFS-42 R2: names and paths), and no row carries a match label. */
 test('the words stay highlighted and no row has a match label', async () => {
   await start();
   await page.type('peñalara');
-  await until(`${rowCount} === 3`, 'the three «Todo» hits');
+  await until(`${rowCount} === 3`, 'the three hits');
   const all = await evaluate(ROWS);
   assert.deepEqual(all.map((r) => r.name), ['Excursión Peñalara.docx', 'IMG_0412.jpg', 'Peñalara julio']);
   assert.deepEqual(all.find((r) => r.name === 'IMG_0412.jpg').pathMarks, ['penalara'], 'a folder-line hit');
@@ -233,118 +190,6 @@ test('the words stay highlighted and no row has a match label', async () => {
     assert.ok([...r.nameMarks, ...r.pathMarks].length > 0 && [...r.nameMarks, ...r.pathMarks].every((m) => m === 'penalara'), r.name);
     assert.equal(r.badges, 0, `${r.name}: no label`);
   }
-
-  await page.scope(ScopeChoice.NAMES);
-  await until(`${rowCount} === 2`, 'the two names-only hits');
-  const names = await evaluate(ROWS);
-  assert.deepEqual(names.map((r) => r.name), ['Excursión Peñalara.docx', 'Peñalara julio']);
-  for (const r of names) {
-    assert.deepEqual(r.nameMarks, ['penalara'], r.name);
-    assert.equal(r.badges, 0, `${r.name}: no label`);
-    assert.deepEqual(r, all.find((x) => x.name === r.name), `${r.name}: drawn as under «Todo»`);
-  }
-});
-
-/** VFS-38 AC-2 (R3, UI part): with content search on, «Solo nombres» runs no content search,
- *  so the section «En el contenido de los documentos» goes away; «Todo» brings it back. */
-test('«Solo nombres» hides the content section; details sit below it', async () => {
-  await start('&content=on');
-  await page.type('peñalara');
-  const shown = `!document.getElementById('content-hits').hidden`;
-  await until(shown, 'the content section under «Todo»');
-  // VFS-38 R9: the results header adds a grid row; the selected file's details stay below the
-  // content section instead of on top of it.
-  await until(`${rowCount} > 0`, 'the name hits');
-  await evaluate(`document.querySelector('#results .row:not(.loading)').click()`);
-  await until(`document.getElementById('details').textContent.trim() !== ''`, 'the details line');
-  const gap = await evaluate(`document.getElementById('details').getBoundingClientRect().top
-    - document.getElementById('content-hits').getBoundingClientRect().bottom`);
-  assert.ok(gap >= 0, `details ${gap}px below the content section`);
-  await page.scope(ScopeChoice.NAMES);
-  await until(`!(${shown})`, 'no content section under «Solo nombres»');
-  await page.scope(ScopeChoice.ALL);
-  await until(shown, 'the content section back under «Todo»');
-});
-
-/** VFS-38 AC-11 (R13, UI part): a names-only search that finds nothing says so and offers the
- *  «Todo» count; pressing it lists the folder's files with the scope back on «Todo». A
- *  «sin la última palabra» suggestion keeps «Solo nombres». */
-test('the empty view names the scope and its suggestion brings back «Todo»', async () => {
-  await start();
-  await page.scope(ScopeChoice.NAMES);
-  await page.type('ordesa');
-  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('2'))}`, 'the «Todo» count');
-  assert.ok((await evaluate(`[...document.querySelectorAll('#empty p')].map((p) => p.textContent)`)).includes(S.emptyNamesOnly));
-  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
-  await until(`${rowCount} === 2`, 'the folder\'s files');
-  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL);
-  assert.ok((await evaluate(ROWS)).every((r) => r.text.includes('Ordesa 2019')));
-
-  await page.scope(ScopeChoice.NAMES);
-  await page.type('peñalara zzzz');
-  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropTerm('zzzz', '2'))}`, 'a drop-term suggestion');
-  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
-  await until(`${rowCount} === 2`, 'the names-only hits');
-  assert.equal(await evaluate(checkedScope), ScopeChoice.NAMES, 'the scope stays');
-});
-
-const scopeButtons = `[...document.querySelectorAll('#f-scope [role="radio"]')].map((b) => b.dataset.scope)`;
-const emptyBox = `(() => { const e = document.getElementById('empty'); return e.hidden ? null
-  : { title: e.querySelector('h3')?.textContent, body: [...e.querySelectorAll('p')].map((p) => p.textContent),
-    action: e.querySelector('.actions .btn-primary')?.textContent ?? null }; })()`;
-
-/** VFS-38 AC-4 (R1, R4, R5): «Solo documentos» is offered only while content search is on. It
- *  shows the content section alone: no name list, no «Origen», no «Orden», and no name search
- *  sent. A short query asks for 3 letters; no match offers «Buscar en todo», which brings back
- *  «Todo». Turning content search off, or a restart with it off, brings back «Todo». */
-test('«Solo documentos» shows only the content results', async () => {
-  await start(BOOKMARKS);
-  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES], 'content search off');
-
-  await start(`${BOOKMARKS}&content=on`);
-  await until(`${scopeButtons}.length === 3`, 'the third button once content search is on');
-  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES, ScopeChoice.DOCUMENTS]);
-  await until(`!document.getElementById('f-source-field').hidden`, '«Origen» under «Todo» with bookmarks on');
-  await recordSearches();
-  await page.scope(ScopeChoice.DOCUMENTS);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.DOCUMENTS);
-  await page.type('peñalara');
-  await until(`document.querySelectorAll('#content-list .chit').length > 0`, 'the content hits');
-  assert.equal(await evaluate(rowCount), 0, 'no name list');
-  assert.deepEqual(await evaluate('window.searches'), [], 'no name or path search');
-  assert.equal(await evaluate(`document.getElementById('f-source-field').hidden`), true, 'no «Origen»');
-  assert.equal(await evaluate(`document.getElementById('f-sort-pill').hidden`), true, 'no «Orden»');
-  assert.equal(await evaluate(emptyBox), null, 'no empty view over the hits');
-  assert.equal(await evaluate(`document.querySelector('.list-wrap').offsetParent`), null, 'the section takes the name list\'s room');
-  assert.equal(await evaluate(`document.getElementById('content-title').textContent`), S.contentTitle);
-
-  await page.type('pe');
-  await until(`${emptyBox}?.title === ${JSON.stringify(S.emptyDocumentsShort)}`, 'the 3-letter message');
-  assert.equal(await evaluate(`document.getElementById('content-hits').hidden`), true);
-
-  await page.type('zzzz');
-  await until(`${emptyBox}?.action === ${JSON.stringify(S.searchEverything)}`, 'the no-match view');
-  assert.deepEqual(await evaluate(emptyBox), {
-    title: S.emptyNoHitsTitle('zzzz'), body: [S.contentNone], action: S.searchEverything,
-  });
-  assert.ok(!(await evaluate(`document.getElementById('content-notes').textContent`)).includes(S.contentNone), 'said once');
-  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
-  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, '«Buscar en todo» sets «Todo»');
-  await until('window.searches.length > 0', 'the name search under «Todo»');
-
-  await page.scope(ScopeChoice.DOCUMENTS);
-  await evaluate(`(() => { const t = document.getElementById('content-on'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-  await until(`${scopeButtons}.length === 2`, 'two buttons once content search is off');
-  assert.equal(await evaluate(checkedScope), ScopeChoice.ALL, 'off brings back «Todo»');
-  assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(PrefKey.SCOPE)})`), ScopeChoice.ALL);
-
-  await start(BOOKMARKS, { [PrefKey.SCOPE]: ScopeChoice.DOCUMENTS });
-  await until(`${checkedScope} === ${JSON.stringify(ScopeChoice.ALL)}`, '«Todo» after a restart with content search off');
-  assert.deepEqual(await evaluate(scopeButtons), [ScopeChoice.ALL, ScopeChoice.NAMES]);
-
-  await start(`${BOOKMARKS}&content=on`, { [PrefKey.SCOPE]: ScopeChoice.DOCUMENTS });
-  await until(`${scopeButtons}.length === 3`, 'the content status');
-  assert.equal(await evaluate(checkedScope), ScopeChoice.DOCUMENTS, 'kept while content search is on');
 });
 
 /** Sets the window size of the next loads (CSS px) and the root text size. */
@@ -404,32 +249,34 @@ test('the size field looks off while only bookmarks are searched', async () => {
   assert.deepEqual(await evaluate(look), ['0.5', 'not-allowed'], 'dimmed by the page');
 });
 
-/** VFS-38 R2, VFS-27 R12: under «Todo» with content search on, the content section shows
- *  below the name hits with its count, bookmarks on and «Archivos y marcadores» included (the
- *  default source sends no source list, which read as "no files" and hid the section), and
- *  its heading is in sight at 1280×720 at 125 % (1024×496 CSS px) even with thousands of name hits. Only
- *  «Solo marcadores» leaves it out. */
-test('content hits show under «Todo» with bookmarks on', async () => {
+/** VFS-42 R3, VFS-27 R12: on «Documentos» with content search on, the hits take the name
+ *  list's room with their count in the results header, bookmarks on and every source included
+ *  (the source does not apply there, so «Solo marcadores» leaves them in), and the first hit is
+ *  whole in sight at 1280×720 at 125 % (1024×496 CSS px). */
+test('content hits show on «Documentos» with bookmarks on', async () => {
   try {
     for (const options of [`&content=on`, `${BOOKMARKS}&content=on`]) {
       await viewport(1024, 496, 1.25);
       await start(options);
-      await until(`document.querySelectorAll('#f-scope [role="radio"]').length === 3`, 'the content status');
-      assert.equal(await evaluate(checkedScope), ScopeChoice.ALL);
+      await until(`document.getElementById('content-on').checked`, 'the content status');
       await page.type('foto');
-      await until(`${rowCount} > 0 && document.querySelectorAll('#content-list .chit').length > 0`, `name and content hits (${options})`);
-      const head = await evaluate(`(() => {
-        const sec = document.getElementById('content-hits');
-        const r = document.querySelector('.content-head').getBoundingClientRect();
-        const top = document.elementFromPoint(r.left + 20, r.top + r.height / 2);
-        return { hidden: sec.hidden, inside: r.top >= 0 && r.bottom <= innerHeight, onTop: !!top && document.querySelector('.content-head').contains(top),
-          count: document.getElementById('content-count').textContent, n: document.querySelectorAll('#content-list .chit').length };
+      await until(`${rowCount} > 0`, `name hits (${options})`);
+      await page.tab(ResultsTab.DOCUMENTS);
+      await until(`document.querySelectorAll('#content-list .chit').length > 0`, `content hits (${options})`);
+      const first = await evaluate(`(() => {
+        const r = document.querySelector('#content-list .chit').getBoundingClientRect();
+        const bottom = Math.min(innerHeight, document.querySelector('.bottom').getBoundingClientRect().top);
+        return { inside: r.top >= 0 && r.bottom <= bottom + 0.5, list: document.querySelector('.list-wrap').offsetParent,
+          count: document.getElementById('summary').textContent, n: document.querySelectorAll('#content-list .chit').length };
       })()`);
-      assert.ok(!head.hidden && head.inside && head.onTop, `the heading is in sight ${JSON.stringify(head)} (${options})`);
-      assert.equal(head.count, S.contentCount(head.n, String(head.n), false), `the count (${options})`);
+      assert.ok(first.inside, `the first hit is whole in sight ${JSON.stringify(first)} (${options})`);
+      assert.equal(first.list, null, `the hits take the name list's room (${options})`);
+      assert.equal(first.count, S.contentCount(first.n, String(first.n), false), `the count (${options})`);
     }
+    await page.tab(ResultsTab.NAMES);
     await page.choose('f-source', SourceChoice.BOOKMARKS);
-    await until(`document.getElementById('content-hits').hidden`, 'no content section for bookmarks alone');
+    await page.tab(ResultsTab.DOCUMENTS);
+    await until(`document.querySelectorAll('#content-list .chit').length > 0`, 'content hits with «Solo marcadores» chosen on «Nombres»');
   } finally {
     await viewport(1280, 800);
   }
