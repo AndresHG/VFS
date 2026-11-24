@@ -365,8 +365,10 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
     } else {
         open_rw(db_path)
     };
+    let mut checked = false;
     let opened = opened.and_then(|c| {
         if unclean {
+            checked = true;
             quick_check(&c)?;
         }
         Ok(c)
@@ -386,7 +388,7 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
     }
     log::info!(target: crate::indexer::DIAG_TARGET, "{}", open_record(
         started.elapsed(),
-        unclean,
+        checked,
         recovered,
         std::fs::metadata(db_path).ok().map(|m| m.len()),
     ));

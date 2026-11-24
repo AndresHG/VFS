@@ -944,7 +944,7 @@ mod tests {
             return;
         }
         let before = proc_stats();
-        assert!(before.peak_bytes.unwrap() >= working_set_bytes().unwrap() / 2);
+        assert!(before.peak_bytes.unwrap() >= working_set_bytes().unwrap());
         let dir = tempfile::tempdir().unwrap();
         let mut f = std::fs::File::create(dir.path().join("x")).unwrap();
         std::io::Write::write_all(&mut f, &vec![7u8; 4 << 20]).unwrap();
@@ -956,6 +956,7 @@ mod tests {
         std::hint::black_box(x);
         let after = proc_stats();
         assert!(after.cpu.unwrap() > before.cpu.unwrap());
+        // Half of the 4 MB written: the OS may count a write it merges with another later.
         assert!(after.written_bytes.unwrap() >= before.written_bytes.unwrap() + (2 << 20));
         assert!(after.read_bytes.unwrap() >= before.read_bytes.unwrap());
     }
