@@ -4,7 +4,7 @@
 - **Size**: M (indexer idle work and one `meta` key; no schema change)
 - **Links**: VFS-4 (schema v3: `files_fts` and `file_paths_fts` without `contentless_delete`,
   `docs/research/index-footprint.md`); VFS-1 AC-6 (integrity check after an unclean exit);
-  VFS-27 T2 and rubric R10/R11 (background work paced by measured cost)
+  VFS-27 T2 and rubric R10 (background work paced by measured cost)
 
 ## Problem
 
@@ -35,7 +35,7 @@ keeps 1.9 GB of disk.
 - R1. WHEN rows of `files_fts` / `file_paths_fts` are deleted (walks, exclusions, file
   filter purges, folder renames, root removal), THE index SHALL add the number of files
   whose entries were deleted to the `meta` counter `fts_deleted`, in the same transaction.
-- R2. WHILE the indexer is idle (no walk, purge or link pass pending) and `fts_deleted` is
+- R2. WHILE the indexer is idle (no walk, purge, link pass or change flush pending) and `fts_deleted` is
   at least max(50,000, a tenth of the indexed files), THE indexer SHALL merge the FTS
   segments of `file_paths_fts`, `files_fts` and `dirs_fts` with FTS5's `('merge', -64)`, one
   slice per write transaction, at background priority, resting three times each slice's

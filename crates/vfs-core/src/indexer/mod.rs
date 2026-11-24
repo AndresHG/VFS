@@ -1437,7 +1437,10 @@ impl Worker {
     /// work is left. The idle wait ends with the rest, and any command or change cuts it.
     fn compact_step(&mut self) {
         let now = Instant::now();
-        if self.compaction.as_ref().is_some_and(|c| now < c.rest_until) {
+        // Changes waiting to be flushed are work: compaction waits for them (R2).
+        if self.dirty_since.is_some()
+            || self.compaction.as_ref().is_some_and(|c| now < c.rest_until)
+        {
             return;
         }
         if self.compaction.is_none() {

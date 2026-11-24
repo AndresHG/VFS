@@ -135,7 +135,9 @@ fn vacuum_worth(size: u64, count: u64, free: u64, min_free: u64) -> bool {
 
 /// Ends a compaction once no merge work is left: takes the deletions counted when it began
 /// off the counter, vacuums when worth it (`min_free`: `VACUUM_MIN_FREE`, smaller in tests),
-/// and returns `(vacuumed, bytes before, after)`.
+/// and returns `(vacuumed, bytes before, after)`. Only a failure to settle the counter is an
+/// error: once it is settled, the compaction is over whatever the `VACUUM` does, so a retry
+/// never takes the same deletions off twice.
 pub(crate) fn finish(
     conn: &Connection,
     started_at: u64,
@@ -148,6 +150,20 @@ pub(crate) fn finish(
         rusqlite::params![DELETED_KEY, left as i64],
     )?;
     tx.commit()?;
+    match shrink(conn, min_free) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            // The merge already removed the dead entries; the free pages are reused as the
+            // index grows.
+            log::warn!("compaction: vacuum: {e}");
+            let size = pages(conn).map_or(0, |(size, count, _)| size * count);
+            Ok((false, size, size))
+        }
+    }
+}
+
+/// `VACUUM` when worth it (R3); returns `(vacuumed, bytes before, after)`.
+fn shrink(conn: &Connection, min_free: u64) -> Result<(bool, u64, u64)> {
     let (size, count, free) = pages(conn)?;
     let before = size * count;
     if !vacuum_worth(size, count, free, min_free) {
@@ -157,19 +173,16 @@ pub(crate) fn finish(
     // the writer's 32 MB cache and memory temp storage, the `VACUUM` of a 62 MB index peaked
     // at 141 MB RSS; this way at 29 MB, no slower (D4).
     let cache: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
+    let temp: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0))?;
+    let vacuum = conn
+        .execute_batch(&format!(
+            "PRAGMA temp_store=FILE; PRAGMA cache_size=-{VACUUM_CACHE_KIB};"
+        ))
+        .and_then(|()| conn.execute_batch("VACUUM;"));
     conn.execute_batch(&format!(
-        "PRAGMA temp_store=FILE; PRAGMA cache_size=-{VACUUM_CACHE_KIB};"
+        "PRAGMA temp_store={temp}; PRAGMA cache_size={cache};"
     ))?;
-    let vacuum = conn.execute_batch("VACUUM;");
-    conn.execute_batch(&format!(
-        "PRAGMA temp_store=MEMORY; PRAGMA cache_size={cache};"
-    ))?;
-    if let Err(e) = vacuum {
-        // The merge already removed the dead entries; the free pages are reused as the
-        // index grows. The counter is settled, so this is not tried again.
-        log::warn!("compaction: vacuum: {e}");
-        return Ok((false, before, before));
-    }
+    vacuum?;
     conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
     let (size, count, _) = pages(conn)?;
     Ok((true, before, size * count))
