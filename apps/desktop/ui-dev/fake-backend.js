@@ -280,6 +280,17 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 
 /** VFS-28: the AI settings, key, cap and record in memory. Keeps only a key's last 4. */
 function fakeAi(mode) {
+  // `?ai=off`: a build without the `ai` feature (VFS-28). The wrappers exist, as in ui/api.js,
+  // but every AI command is unknown to the shell and rejects the way Tauri does.
+  if (mode === 'off') {
+    const api = fakeAi('');
+    for (const k of Object.keys(api)) {
+      api[k] = k.startsWith('on')
+        ? async () => () => {}
+        : async () => { throw `command ${k} not found`; };
+    }
+    return api;
+  }
   const st = {
     settings: { enabled: Boolean(mode), provider: Provider.ANTHROPIC, cheap: false, noticeSeen: false },
     // provider -> {last4, place}; with `?ai=` the screen starts ready to ask.

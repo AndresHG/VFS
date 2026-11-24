@@ -86,4 +86,6 @@ test('the Ajustes section and the record are in the page', () => {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.match(html, /<div id="ai-body" class="ai-body" hidden>/, 'off by default');
+  assert.match(html, /<section id="ai-section" class="setting" aria-labelledby="ai-set-title" hidden>/,
+    'hidden until the shell answers ai_status (VFS-28: a build without AI never shows it)');
 });

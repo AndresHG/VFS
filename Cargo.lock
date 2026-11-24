@@ -7348,6 +7348,7 @@ dependencies = [
  "vfs-bookmarks",
  "vfs-content",
  "vfs-core",
+ "vfs-desktop",
  "webview2-com",
  "windows-core",
  "windows-sys 0.61.2",

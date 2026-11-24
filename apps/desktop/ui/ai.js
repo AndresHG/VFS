@@ -101,6 +101,7 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
 
   function render(next) {
     status = next;
+    $('ai-section').hidden = false;
     const s = next.settings;
     on.checked = s.enabled;
     $('ai-body').hidden = !s.enabled;
@@ -258,12 +259,13 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
     showRecord();
   });
 
-  /** Reads the status again (when Ajustes opens). */
+  /** Reads the status again (when Ajustes opens). Until it first answers, the section and
+   *  «Preguntar» stay hidden: a build without AI has no `ai_status` (VFS-28). */
   async function refresh() {
     try {
       render(await api.aiStatus());
     } catch (err) {
-      say(aiErrorText(S, err, status?.settings.provider));
+      if (status) say(aiErrorText(S, err, status.settings.provider));
     }
   }
   refresh();

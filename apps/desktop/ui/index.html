@@ -257,8 +257,9 @@
       <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
     </section>
     <!-- VFS-28 R1: «Preguntar a sus documentos (IA)», off by default. The key field is
-         write-only: once saved, only its last 4 characters are shown. -->
-    <section class="setting" aria-labelledby="ai-set-title">
+         write-only: once saved, only its last 4 characters are shown. Hidden until the shell
+         answers ai_status: a build without the `ai` feature never shows it. -->
+    <section id="ai-section" class="setting" aria-labelledby="ai-set-title" hidden>
       <h3 id="ai-set-title" data-s="aiSetTitle"></h3>
       <label class="toggle"><input type="checkbox" id="ai-on"> <span data-s="aiToggle"></span></label>
       <p class="bookmarks-intro bookmarks-status" data-s="aiIntro"></p>
