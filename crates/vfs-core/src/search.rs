@@ -122,11 +122,45 @@ pub(crate) fn search(
         }
         Err(e) => return Err(e.into()),
     }
-    let response = search_snapshot(conn, state, config, query);
-    if conn.execute_batch("COMMIT").is_err() {
-        conn.execute_batch("ROLLBACK")?;
-    }
+    let start = Instant::now();
+    let response = match search_snapshot(conn, state, config, query) {
+        Err(e) if cut_while_opening(conn, &e) => Ok(interrupted_response(query, start)),
+        r => r,
+    };
+    end_read(conn)?;
     response
+}
+
+/// Tries [`end_read`] makes before leaving the transaction to the next search.
+const END_READ_TRIES: usize = 8;
+
+/// Ends the search's read transaction (VFS-1 AC-10). A newer search's interrupt can cut the
+/// `ROLLBACK` too, but only one landing as it starts: the statement is prepared once, so
+/// there is no parse to cut. A transaction still open after the tries is rolled back by the
+/// next search's `BEGIN`.
+fn end_read(conn: &Connection) -> Result<()> {
+    for _ in 0..END_READ_TRIES {
+        if conn.is_autocommit() {
+            return Ok(());
+        }
+        match conn
+            .prepare_cached("ROLLBACK")
+            .and_then(|mut s| s.execute([]))
+        {
+            Ok(_) => return Ok(()),
+            Err(e) if is_interrupt(&e) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
+/// An FTS5 table open cut by an interrupt (VFS-3 AC-7). The interrupt fails the open as
+/// "vtable constructor failed" (`sqlite3_declare_vtab` reports its cut parse as
+/// `SQLITE_ERROR`), as a real failure does; only an interrupt leaves its flag pending.
+fn cut_while_opening(conn: &Connection, e: &Error) -> bool {
+    // SAFETY: reads a flag of this open connection's handle.
+    is_table_open_cut(e) && unsafe { rusqlite::ffi::sqlite3_is_interrupted(conn.handle()) != 0 }
 }
 
 /// Whether a newer search started since this was made (the search counter moved past the
@@ -2066,6 +2100,156 @@ mod tests {
         let r = search(&mut conn, &mut state, &config, &q).unwrap();
         assert_eq!(r.truncated_by, Some(TruncatedBy::Cap));
         assert_eq!(r.total as usize, MAX_HITS);
+    }
+
+    /// An index with one file, `archivo 1.pdf`, at `path`.
+    fn one_file_index(path: &std::path::Path) -> Connection {
+        let mut w = db::open_rw(path).unwrap();
+        let tx = w.transaction().unwrap();
+        let root = ingest::insert_root(&tx, "/", "/datos").unwrap();
+        let top: i64 = tx
+            .query_row("SELECT id FROM dirs WHERE root_id = ?1", [root], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let file = ingest::NewFile {
+            name: "archivo 1.pdf",
+            size: 10,
+            mtime: 1,
+            lossy: false,
+        };
+        ingest::insert_file(&tx, top, &file).unwrap();
+        tx.commit().unwrap();
+        w
+    }
+
+    fn text_query(text: &str) -> SearchQuery {
+        SearchQuery {
+            text: text.into(),
+            filters: SearchFilters::default(),
+            limit: 10,
+            offset: 0,
+            sort: Default::default(),
+            scope: Default::default(),
+        }
+    }
+
+    /// VFS-1 AC-10 (S6): interrupts on a new connection's first search, which also opens the
+    /// FTS5 table, never fail it, and the read transaction it leaves open under a constant
+    /// stream of them is rolled back by the next search.
+    #[test]
+    fn interrupts_never_fail_a_first_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        drop(one_file_index(&path));
+        let config = SearchConfig {
+            deadline: Duration::from_secs(60),
+            ..SearchConfig::default()
+        };
+        for _ in 0..300 {
+            let mut conn = db::open_ro(&path).unwrap();
+            let handle = conn.get_interrupt_handle();
+            let done = Arc::new(AtomicBool::new(false));
+            let spammer = {
+                let done = done.clone();
+                std::thread::spawn(move || {
+                    while !done.load(Ordering::Relaxed) {
+                        handle.interrupt();
+                        std::hint::spin_loop();
+                    }
+                })
+            };
+            let r = search(
+                &mut conn,
+                &mut SearchState::default(),
+                &config,
+                &text_query("archivo"),
+            );
+            done.store(true, Ordering::Relaxed);
+            spammer.join().unwrap();
+            r.unwrap();
+            let r = search(
+                &mut conn,
+                &mut SearchState::default(),
+                &config,
+                &text_query("archivo"),
+            )
+            .unwrap();
+            assert_eq!(r.hits.len(), 1);
+            assert!(conn.is_autocommit());
+        }
+    }
+
+    /// VFS-3 AC-7: an FTS5 table that failed to open is an interruption only while an
+    /// interrupt is pending; otherwise `search` returns the error.
+    #[test]
+    fn table_open_failure_is_an_interruption_only_with_one_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let w = one_file_index(&path);
+        // Without its config table FTS5 cannot open: "vtable constructor failed".
+        w.execute_batch("DROP TABLE files_fts_config").unwrap();
+        drop(w);
+        let mut conn = db::open_ro(&path).unwrap();
+        let r = search(
+            &mut conn,
+            &mut SearchState::default(),
+            &SearchConfig::default(),
+            &text_query("archivo"),
+        );
+        let e = r.expect_err("a broken FTS5 table is an error");
+        assert!(is_table_open_cut(&e), "{e:?}");
+        assert!(conn.is_autocommit());
+        assert!(!cut_while_opening(&conn, &e));
+        // An interrupt sent while a statement runs stays pending once it ends.
+        {
+            let mut st = conn.prepare("SELECT 1 UNION ALL SELECT 2").unwrap();
+            let mut rows = st.query([]).unwrap();
+            rows.next().unwrap();
+            conn.get_interrupt_handle().interrupt();
+        }
+        assert!(cut_while_opening(&conn, &e));
+        let other = Error::Db(rusqlite::Error::QueryReturnedNoRows);
+        assert!(!cut_while_opening(&conn, &other));
+    }
+
+    /// VFS-41 R3, VFS-1 AC-10: under the process's soft heap limit the search connection
+    /// opens the FTS5 table once, not on every query (each open reads its config table).
+    #[test]
+    fn fts_table_opens_once_per_connection() {
+        db::limit_sqlite_heap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        drop(one_file_index(&path));
+        let mut conn = db::open_ro(&path).unwrap();
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = opens.clone();
+        conn.authorizer(Some(move |ctx: rusqlite::hooks::AuthContext<'_>| {
+            if let rusqlite::hooks::AuthAction::Read { table_name, .. } = ctx.action {
+                if table_name == "files_fts_config" {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            rusqlite::hooks::Authorization::Allow
+        }))
+        .unwrap();
+        let config = SearchConfig::default();
+        let mut search_for = |text: &str| {
+            search(
+                &mut conn,
+                &mut SearchState::default(),
+                &config,
+                &text_query(text),
+            )
+            .unwrap();
+        };
+        search_for("archivo");
+        let first = opens.load(Ordering::Relaxed);
+        assert!(first > 0, "the first query opens the FTS5 table");
+        for i in 0..50 {
+            search_for(&format!("archivo {}", i % 7));
+        }
+        assert_eq!(opens.load(Ordering::Relaxed), first);
     }
 
     /// VFS-1 AC-9, AC-10 (S8): the no-hit probe says "impossible" only when no file or
