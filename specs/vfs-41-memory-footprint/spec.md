@@ -51,8 +51,8 @@ after an unclean exit, the integrity check reads every used page (VFS-39).
 
 Tests cite these ids (`VFS-41 AC-<m>`) in their doc comments.
 
-- AC-1 (R1) On Windows and macOS, the process counters are known. The peak is at least the
-  working set. A synced 4 MB write raises the written bytes, and CPU time grows.
+- AC-1 (R1) On Windows and macOS, the process counters are known. The peak catches a 64 MB
+  allocation freed before the next reading. A synced 4 MB write raises the written bytes, and CPU time grows.
 - AC-2 (R1, R2, R5) A `memory` record carries every R1 field and none is unknown. A
   `pass_end` record carries `read_mb` and `written_mb`.
 - AC-3 (R3) Once the index is open, the process's SQLite soft heap limit is 96 MiB.
@@ -77,8 +77,9 @@ Tests cite these ids (`VFS-41 AC-<m>`) in their doc comments.
 - D1. One soft limit for the process, not smaller caches. A busy connection keeps its full
   cache while the others are idle; only the total is bounded.
 - D2. 96 MiB: see the AC-9 bench on a 2 M-file index, before and after, in the PR.
-- D3. On macOS, `getrusage` gives peak RSS and CPU, and `proc_pid_rusage` V2 gives the disk
-  bytes read and written. On Windows, `PeakWorkingSetSize` and `GetProcessTimes` give peak
+- D3. On macOS, `getrusage` gives CPU, and `proc_pid_rusage` V4 gives the peak physical
+  footprint (the figure `vmmap` shows; `ru_maxrss` lagged behind the resident size in tests)
+  and the disk bytes read and written. On Windows, `PeakWorkingSetSize` and `GetProcessTimes` give peak
   memory and CPU, and `GetProcessIoCounters` gives bytes read and written. It counts all the
   I/O the process issues (files and devices), not disk alone. No new dependency or
   `windows-sys` feature.

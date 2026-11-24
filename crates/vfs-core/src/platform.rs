@@ -356,16 +356,17 @@ mod imp {
         unsafe {
             let mut ru: libc::rusage = std::mem::zeroed();
             if libc::getrusage(libc::RUSAGE_SELF, &mut ru) == 0 {
-                // macOS reports `ru_maxrss` in bytes.
-                stats.peak_bytes = Some(ru.ru_maxrss as u64);
                 stats.cpu = Some(tv(ru.ru_utime) + tv(ru.ru_stime));
             }
         }
-        // SAFETY: `info` is a plain C struct of the V2 layout that `proc_pid_rusage` fills.
+        // SAFETY: `info` is a plain C struct of the V4 layout that `proc_pid_rusage` fills.
         unsafe {
-            let mut info: libc::rusage_info_v2 = std::mem::zeroed();
-            let ptr = (&mut info as *mut libc::rusage_info_v2).cast();
-            if libc::proc_pid_rusage(libc::getpid(), libc::RUSAGE_INFO_V2, ptr) == 0 {
+            let mut info: libc::rusage_info_v4 = std::mem::zeroed();
+            let ptr = (&mut info as *mut libc::rusage_info_v4).cast();
+            if libc::proc_pid_rusage(libc::getpid(), libc::RUSAGE_INFO_V4, ptr) == 0 {
+                // The "peak physical footprint" `vmmap` shows; `ru_maxrss` can lag behind
+                // the resident size.
+                stats.peak_bytes = Some(info.ri_lifetime_max_phys_footprint);
                 stats.read_bytes = Some(info.ri_diskio_bytesread);
                 stats.written_bytes = Some(info.ri_diskio_byteswritten);
             }
@@ -935,16 +936,23 @@ mod tests {
         }
     }
 
-    /// VFS-41 AC-1: the footprint counters are known on both platforms, the peak is at least
-    /// the current working set, and CPU time and bytes written only grow (a synced 4 MB write
-    /// shows up in the written bytes).
+    /// VFS-41 AC-1: the footprint counters are known on both platforms; the peak catches a
+    /// 64 MB allocation that is freed before the next reading; CPU time and bytes written
+    /// grow (a synced 4 MB write shows up in the written bytes).
     #[test]
     fn process_counters_grow() {
         if !cfg!(any(windows, target_os = "macos")) {
             return;
         }
         let before = proc_stats();
-        assert!(before.peak_bytes.unwrap() >= working_set_bytes().unwrap());
+        let touched = vec![1u8; 64 << 20];
+        std::hint::black_box(&touched);
+        drop(touched);
+        let peak = proc_stats().peak_bytes.unwrap();
+        assert!(
+            peak >= before.peak_bytes.unwrap().max(32 << 20),
+            "peak {peak}"
+        );
         let dir = tempfile::tempdir().unwrap();
         let mut f = std::fs::File::create(dir.path().join("x")).unwrap();
         std::io::Write::write_all(&mut f, &vec![7u8; 4 << 20]).unwrap();

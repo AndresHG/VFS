@@ -276,7 +276,7 @@ fn io_now() -> Io {
 }
 
 /// Whole megabytes, or `?` when unknown.
-fn mb(b: Option<u64>) -> String {
+pub(crate) fn mb(b: Option<u64>) -> String {
     b.map_or_else(|| "?".to_owned(), |b| (b >> 20).to_string())
 }
 

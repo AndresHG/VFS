@@ -403,7 +403,7 @@ fn open_record(took: Duration, checked: bool, recovered: bool, bytes: Option<u64
         took.as_millis(),
         u8::from(checked),
         u8::from(recovered),
-        bytes.map_or_else(|| "?".to_owned(), |b| (b >> 20).to_string())
+        crate::indexer::sched::mb(bytes)
     )
 }
 
