@@ -380,11 +380,15 @@ test('«Nombres» with nothing found offers to drop the filters', async () => {
   await page.choose('f-source', SourceChoice.FILES); // a suggestion is asked only when files are searched
   await page.kinds([FileKind.AUDIO]);
   await page.type('recetas zz');
-  // Wait for the last search's own view: an earlier search's suggestion, or a re-render that
-  // made «Quitar filtros» the main button, must not take the click.
-  await until(`document.querySelector('#empty h3')?.textContent === ${JSON.stringify(S.emptyNoHitsTitle('recetas zz'))}
-    && document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('1'))}`, 'the suggestion for the last search');
-  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
+  // Check and click in the same task, on the last search's own view: a redraw between a
+  // check and a separate click (a background refresh) could put «Quitar filtros» there.
+  await until(`(() => {
+    const b = document.querySelector('#empty .actions .btn-primary');
+    if (document.querySelector('#empty h3')?.textContent !== ${JSON.stringify(S.emptyNoHitsTitle('recetas zz'))}
+      || b?.textContent !== ${JSON.stringify(S.suggestDropFilters('1'))}) return false;
+    b.click();
+    return true;
+  })()`, 'the suggestion for the last search, clicked');
   assert.equal(await evaluate(`document.querySelectorAll('#kind-chips input:checked').length`), 0, 'the type cleared');
   await until(`document.getElementById('f-folder').value === ${JSON.stringify(root)}`, 'the bookmark folder kept');
 });
