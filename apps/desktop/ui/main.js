@@ -531,7 +531,7 @@ function main(L) {
   q.addEventListener('input', () => {
     state.text = q.value;
     $('q-clear').hidden = !q.value;
-    // VFS-13 R2: a suggestion belongs to its text; it leaves the screen with the keystroke,
+    // VFS-13 R5, R6: a suggestion belongs to its text; it leaves the screen with the keystroke,
     // not with the debounced search, so a click meanwhile never runs the old text. Answers
     // still on their way for the old text are dropped too (their sequence no longer matches).
     state.seq++;

@@ -312,7 +312,7 @@ test('the tab is not remembered and is not a filter', async () => {
   assert.equal(await evaluate(`localStorage.getItem('vfs.scope')`), null, 'nothing kept for the tab');
 });
 
-/** VFS-13 R2: a suggestion belongs to the text it was found for. Once the text changes, the
+/** VFS-13 R5, R6: a suggestion belongs to the text it was found for. Once the text changes, the
  *  old one leaves the screen at once, so a click in the debounce window never runs the old
  *  text (on a slow PC a background redraw could show it under the new title). */
 test('a new text drops the old suggestion at once', async () => {
@@ -330,7 +330,7 @@ test('a new text drops the old suggestion at once', async () => {
   assert.notEqual(primary, S.suggestDropFilters('2'), 'no suggestion for the old text');
 });
 
-/** VFS-13 R2: a suggestion still on its way for the old text when a key is pressed is dropped
+/** VFS-13 R5, R6: a suggestion still on its way for the old text when a key is pressed is dropped
  *  when it lands, before the new search runs. */
 test('a suggestion that lands after a new keystroke is dropped', async () => {
   await start();
