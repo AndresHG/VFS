@@ -86,7 +86,7 @@ Implementation: raw values as custom properties, switched under
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
 | Popover («Tipo», «Más filtros») | surface, 1px `--line-strong`, under its button; as tall as its fields, moved left and scrolling inside so it never leaves the window; native selects drawn by the page at the target height | — | ring; Esc closes it and the focus goes back to the button | — | a field that does not apply (size with bookmarks only) at 50 % opacity |
-| Bottom bar | paper, hairline above; status, reading progress, then the quiet buttons. The buttons stay together on one row; from 50 rem wide the whole bar is one row, the texts cut (one line on a short window) with their whole text as tooltip | — | ring | — | — |
+| Bottom bar | paper, hairline above; status, reading progress, then the quiet buttons. The buttons stay together on one row; from 56 rem wide the whole bar is one row, the texts cut (one line on a short window) with their whole text as tooltip | — | ring | — | — |
 | Side panel (Carpetas, Ajustes, …) | paper, slides in from the right; closes on Esc, its × or a click outside it, in WebKit too; a number being edited is applied and typed text stays in its field | — | — | — | — |
 
 The reveal action appears on the selected row and on hover; Return and double-click perform it

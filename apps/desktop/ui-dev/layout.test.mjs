@@ -112,7 +112,7 @@ for (const viewport of VIEWPORTS) {
     });
 
     /** VFS-35 R1, VFS-27 R8, R12: while documents are being read (bookmarks on, results
-     *  shown), the bottom bar keeps every button on one row: on a short window from 50 rem
+     *  shown), the bottom bar keeps every button on one row: on a short window from 56 rem
      *  wide at normal text the whole bar is one row, the reading progress cut to one line
      *  with its whole text as tooltip (it wrapped to three lines and pushed «Ajustes» onto a
      *  row of its own). Then at 1280×720 at 125 % (1024×496 CSS px) the content section shows its first whole
@@ -136,7 +136,7 @@ for (const viewport of VIEWPORTS) {
           assert.ok(Math.max(...bar.buttons) - Math.min(...bar.buttons) <= 4, `every button on one row ${JSON.stringify(bar)} (${at})`);
         }
         const short = await evaluate(`document.getElementById('app').clientHeight < 40 * parseFloat(getComputedStyle(document.documentElement).fontSize)`);
-        const wide = viewport.width >= 50 * 16 * (text.root === '100%' ? 1 : 1.25);
+        const wide = viewport.width >= 56 * 16 * (text.root === '100%' ? 1 : 1.25);
         if (short && wide && text.root === '100%') {
           assert.ok(Math.max(...bar.all) - Math.min(...bar.all) <= 4, `the whole bar on one row ${JSON.stringify(bar)} (${at})`);
           assert.equal(bar.title, bar.textContent, `the whole progress text is its tooltip (${at})`);
@@ -296,6 +296,17 @@ for (const viewport of LINE_VIEWPORTS) {
     });
   }
 }
+
+/** VFS-35 R5: the bottom bar wraps rather than widening the page when its buttons need more
+ *  room than the row has, as with large text and wider system fonts (CI's macOS Chrome drew
+ *  this bar 55 px wider than the window). A button made wider stands in for those fonts. */
+test('a bottom bar wider than its row wraps instead of widening the page', async () => {
+  const viewport = VIEWPORTS[1];
+  await openFilterLine(viewport, TEXT[1], Lang.ES);
+  await evaluate(`document.getElementById('open-settings').style.paddingInline = '14rem'`);
+  await assertNoSideScroll(`${viewport.name}, large text, a wide button`);
+  await evaluate(`document.getElementById('open-settings').style.paddingInline = ''`);
+});
 
 /** VFS-38 AC-8 (R10, VFS-35 R5): at the minimum window and with large text, every filter set,
  *  bookmarks on and three scope buttons, nothing is wider than the window. */
