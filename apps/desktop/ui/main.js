@@ -1802,6 +1802,7 @@ function main(L) {
     const line = api.missing ? null : contentStatusLine(L, state.content);
     $('content-line').hidden = !line;
     $('content-line').textContent = line?.text || '';
+    $('content-line').title = line?.text || ''; // cut to one or two lines; whole as tooltip
     const action = $('content-action');
     action.hidden = !line?.action;
     action.dataset.action = line?.action || '';

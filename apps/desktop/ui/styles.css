@@ -144,6 +144,12 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
   grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(14rem + var(--results-head, 0rem)), 1fr) auto;
 }
 .app:has(> .results > .results-head:not([hidden])) { --results-head: 3.25rem; }
+/* With hits inside documents, the results keep room for a short name list and the content
+   section's heading, note and first whole hit, so notices give way first (VFS-27 R12,
+   VFS-35 R3). */
+.app:has(> .results > .content-hits:not([hidden])) {
+  grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(16.5rem + var(--results-head, 0rem)), 1fr) auto;
+}
 /* Explicit rows: the line of filters in use (VFS-38 R8) is often hidden, and a hidden child
    must not move the others into its row. */
 .app > .top { grid-row: 1; }
@@ -727,7 +733,7 @@ input[type="date"] {
   max-block-size: 32vh;
   /* VFS-27 R12: however many name hits there are, the section keeps room for its heading and
      a whole hit; the name list above keeps its own (7rem). */
-  min-block-size: min(9.5rem, 32vh);
+  min-block-size: min(11rem, 36vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-block-start: 1px solid var(--line-strong);
@@ -816,6 +822,21 @@ input[type="date"] {
 .status-text { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); }
 .status-text p { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
 .bottom .btn { font-size: var(--t-meta); }
+/* VFS-35 R1, VFS-27 R8: the status and the reading progress give way to the buttons, cut to
+   two lines (one on a short window) with their whole text as tooltip; the buttons stay on one
+   row and never wrap away from each other. */
+.status-text p, .content-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.bottom .btn { flex: none; white-space: nowrap; }
+@container app (width >= 50rem) {
+  .bottom { flex-wrap: nowrap; }
+  .status-text, .content-line { flex: 1 1 0; min-width: 5rem; }
+}
+/* Narrow, while documents are read: the two texts first, then the buttons together on a row
+   of their own. */
+@container app (width < 50rem) {
+  .bottom:has(> .content-line:not([hidden])) > :is(.status-text, .content-line) { order: -1; flex: 1 1 14rem; }
+  .bottom:has(> .content-line:not([hidden]))::before { content: ""; flex-basis: 100%; }
+}
 #scan-progress { width: 3rem; flex: none; }
 
 progress {
@@ -974,16 +995,19 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .app:has(.results-head:not([hidden])) .status-text p { -webkit-line-clamp: 1; }
   .bottom { padding-block: var(--s1); }
   .bottom .btn { min-block-size: 2.25rem; padding-inline: var(--s3); }
-  .status-text p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .status-text { flex: 1 1 0; min-width: 7rem; }
+  /* One line, cut by the character rather than the word (a clamped line cut after its first
+     word). The status line does the same while the results header shows. */
+  .content-line, .app:has(.results-head:not([hidden])) .status-text p { display: block; white-space: nowrap; text-overflow: ellipsis; }
+  /* The selected row's folder line gives its height to the content section. */
+  .results:has(> .content-hits:not([hidden])) > .details { display: none; }
   .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto auto minmax(0, 1.4fr) auto; }
   .app[data-view="start"] .empty { padding-block-start: var(--s1); }
   .app[data-view="start"] .empty .empty-art { display: none; }
 }
 
-/* Short and narrow: a status that does not fit beside the buttons takes its own line. */
+/* Short and narrow: the texts take their own line, the buttons theirs, at the end. */
 @container app (height < 40rem) and (width < 50rem) {
-  .status-text { flex-basis: auto; }
   .bottom { justify-content: flex-end; }
 }
 
