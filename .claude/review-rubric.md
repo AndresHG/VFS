@@ -48,6 +48,11 @@ from; they are stack-agnostic.
   a resident cache, a larger installer) states its cost in the PR: binary or installer bytes,
   memory, disk and index bytes, CPU or I/O. It measures them where it can, or gives an estimate
   with its method; a cost with no figure is a blocker (CLAUDE.md «Lightweight first»).
+- **R12. A UI change to anything `scripts/e2e/` drives** (an element id or class it finds,
+  the step a user takes to reach a view, what a view shows) updates `scripts/e2e/journey.py`
+  in the same PR, and the PR body says the journey ran locally or the e2e workflow was
+  dispatched on the branch (`gh workflow run e2e.yml --ref <branch>`): e2e does not run on
+  pull requests (VFS-42: the journey still waited for content under «Todo»).
 
 ## Worth flagging — not blocking
 
