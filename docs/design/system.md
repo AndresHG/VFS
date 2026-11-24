@@ -85,6 +85,9 @@ Implementation: raw values as custom properties, switched under
 | Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
+| Popover («Tipo», «Más filtros») | surface, 1px `--line-strong`, under its button; as tall as its fields, moved left and scrolling inside so it never leaves the window; native selects drawn by the page at the target height | — | ring; Esc closes it and the focus goes back to the button | — | a field that does not apply (size with bookmarks only) at 50 % opacity |
+| Bottom bar | paper, hairline above; status, reading progress, then the quiet buttons. The buttons stay together on one row; from 56 rem wide the whole bar is one row, the texts cut (one line on a short window) with their whole text as tooltip | — | ring | — | — |
+| Side panel (Carpetas, Ajustes, …) | paper, slides in from the right; closes on Esc, its × or a click outside it, in WebKit too; a number being edited is applied and typed text stays in its field | — | — | — | — |
 
 The reveal action appears on the selected row and on hover; Return and double-click perform it
 on any row. Hidden-until-hover is never the only path: keyboard selection shows it too.
@@ -115,7 +118,9 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 ## Sources (VFS-6)
 
 Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
-Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). The layout keeps its shape:
+Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). In that panel the setting is
+one folded line under the folder list, «Marcadores de Firefox · incluidos», and the folder list
+scrolls on its own, so every folder stays reachable on a short window. The layout keeps its shape:
 - **«Origen»** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") sits in
   «Más filtros» beside size and folder and shows only while bookmarks are included; a choice
   other than the default shows as a chip («Solo archivos», «Solo marcadores»). «Buscar en»

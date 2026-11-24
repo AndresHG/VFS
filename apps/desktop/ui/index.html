@@ -173,7 +173,10 @@
       </div>
       <!-- VFS-27 R12, R13: hits inside documents, below the name hits. -->
       <section id="content-hits" class="content-hits" aria-labelledby="content-title" hidden>
-        <h3 id="content-title" data-s="contentTitle"></h3>
+        <div class="content-head">
+          <h3 id="content-title" data-s="contentTitle"></h3>
+          <span id="content-count" class="content-count"></span>
+        </div>
         <div id="content-notes" class="content-notes" aria-live="polite"></div>
         <ul id="content-list" class="content-list" role="list"></ul>
         <button id="content-more" class="link-btn" type="button" hidden data-s="contentMore"></button>
@@ -200,7 +203,7 @@
   <p id="announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
   <div id="toast" class="toast" role="status" hidden></div>
 
-  <dialog id="folders" class="drawer" aria-labelledby="folders-title" closedby="any">
+  <dialog id="folders" class="drawer" aria-labelledby="folders-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="folders-title" data-s="foldersTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -214,12 +217,14 @@
       <p id="folders-msg-text"></p>
     </div>
     <ul class="roots" id="roots" role="list"></ul>
-    <section class="bookmarks-setting" aria-labelledby="bookmarks-title">
-      <h3 id="bookmarks-title" data-s="bookmarksTitle"></h3>
+    <!-- VFS-6: folded so the folder list above keeps the panel's height; the line says whether
+         bookmarks are included. -->
+    <details class="bookmarks-setting" id="bookmarks-setting">
+      <summary><span id="bookmarks-title" data-s="bookmarksTitle"></span> <span id="bookmarks-summary" class="bookmarks-summary"></span></summary>
       <label class="toggle"><input type="checkbox" id="bookmarks-on"> <span data-s="bookmarksToggle"></span></label>
       <p class="bookmarks-intro" data-s="bookmarksIntro"></p>
       <p class="bookmarks-status" id="bookmarks-status" aria-live="polite"></p>
-    </section>
+    </details>
     <div class="drawer-foot">
       <button id="add-folder" class="btn btn-primary" type="button" data-s="addFolder"></button>
       <button id="rescan-all" class="btn btn-quiet" type="button" data-s="rescanAll"></button>
@@ -227,7 +232,7 @@
   </dialog>
 
   <!-- VFS-22: settings (language); VFS-21: the update check; VFS-33: advanced. -->
-  <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="any">
+  <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="settings-title" data-s="settingsTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -318,7 +323,7 @@
     </details>
   </dialog>
 
-  <dialog id="copies" class="drawer" aria-labelledby="copies-title" closedby="any">
+  <dialog id="copies" class="drawer" aria-labelledby="copies-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="copies-title"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -331,7 +336,7 @@
   </dialog>
 
   <!-- VFS-10: the folders of one chosen folder that could not be read. -->
-  <dialog id="unreadable" class="drawer" aria-labelledby="unreadable-title" closedby="any">
+  <dialog id="unreadable" class="drawer" aria-labelledby="unreadable-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="unreadable-title" data-s="unreadableTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -346,7 +351,7 @@
   </dialog>
 
   <!-- VFS-20: "Enviar comentarios". The report is built in the shell; nothing is sent from here. -->
-  <dialog id="feedback" class="drawer" aria-labelledby="feedback-title" closedby="any">
+  <dialog id="feedback" class="drawer" aria-labelledby="feedback-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="feedback-title" data-s="feedbackTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -407,7 +412,7 @@
     </form>
   </dialog>
   <!-- VFS-28 R11: «Qué se ha enviado». -->
-  <dialog id="ai-record" class="drawer" aria-labelledby="ai-record-title" closedby="any">
+  <dialog id="ai-record" class="drawer" aria-labelledby="ai-record-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="ai-record-title" data-s="aiRecordTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -450,7 +455,7 @@
     </form>
   </dialog>
   <!-- VFS-28 R6–R9: a question, its answer as plain text with markers, and follow-ups. -->
-  <dialog id="ai-ask" class="drawer ai-ask" aria-labelledby="ai-ask-title" closedby="any">
+  <dialog id="ai-ask" class="drawer ai-ask" aria-labelledby="ai-ask-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="ai-ask-title" data-s="aiAskTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">
@@ -485,7 +490,7 @@
   </dialog>
 
   <!-- VFS-28 R12: «Bibliografía». -->
-  <dialog id="ai-bib" class="drawer" aria-labelledby="ai-bib-title" closedby="any">
+  <dialog id="ai-bib" class="drawer" aria-labelledby="ai-bib-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">
       <h2 id="ai-bib-title" data-s="aiBibTitle"></h2>
       <form method="dialog"><button class="icon-btn" value="close">

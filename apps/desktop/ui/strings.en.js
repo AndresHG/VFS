@@ -213,6 +213,7 @@ export const en = {
   remoteWarning: 'This folder is on a network or removable drive. If it is disconnected, its files will be marked “Unavailable”.',
   bookmarksTitle: 'Firefox bookmarks',
   bookmarksToggle: 'Include Firefox bookmarks',
+  bookmarksSummary: (on) => (on ? '· included' : '· not included'),
   bookmarksIntro: 'Also searches the bookmarks saved in Firefox. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
 
   // VFS-21: updates. The check is the app's only connection to the internet; say so.
@@ -324,6 +325,7 @@ export const en = {
   contentRebuild: 'Read the documents again',
   contentDisable: 'Turn off',
   contentTitle: 'In the content of documents',
+  contentCount: (n, text, capped) => (capped ? `· more than ${text} documents` : `· ${text} ${n === 1 ? 'document' : 'documents'}`),
   contentSearching: 'Searching inside documents…',
   contentStillReading: (done, total) => `Still reading documents: ${done} of ${total}`,
   contentReadPart: (done, total) => `${done} of ${total} documents have been read; the rest are in folders that are offline or paused.`,

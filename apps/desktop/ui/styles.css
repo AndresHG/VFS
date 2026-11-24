@@ -144,6 +144,12 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
   grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(14rem + var(--results-head, 0rem)), 1fr) auto;
 }
 .app:has(> .results > .results-head:not([hidden])) { --results-head: 3.25rem; }
+/* With hits inside documents, the results keep room for a short name list and the content
+   section's heading, note and first whole hit, so notices give way first (VFS-27 R12,
+   VFS-35 R3). */
+.app:has(> .results > .content-hits:not([hidden])) {
+  grid-template-rows: auto auto auto minmax(0, auto) minmax(calc(16.5rem + var(--results-head, 0rem)), 1fr) auto;
+}
 /* Explicit rows: the line of filters in use (VFS-38 R8) is often hidden, and a hidden child
    must not move the others into its row. */
 .app > .top { grid-row: 1; }
@@ -436,16 +442,29 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
 /* «Más filtros» (VFS-38 R7): labelled selects in the popover, or in a row unfolded below the
    line where the Popover API is missing. */
 .more-pop { gap: var(--s3); padding: var(--s3) var(--s4) var(--s4); }
-.more-pop:popover-open { display: grid; min-inline-size: 18rem; }
+/* As tall as its fields: WebKit stretches a fixed grid with `fit-content` height to the whole
+   window, which pushed the last field off screen. main.js caps the height to the room left. */
+.more-pop:popover-open { display: grid; align-content: start; block-size: auto; min-inline-size: 18rem; }
+.type-pop:popover-open, .more-pop:popover-open { overflow-y: auto; max-inline-size: calc(100vw - 16px); }
+/* VFS-6 R7: the size does not apply to bookmarks alone; the field says so by looking off. */
+.more-pop select:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Drawn by us, not the platform: WebKit's native menu button ignores the target height. The
+   chevron is two gradient triangles so it follows the theme's ink. */
 .more-pop select {
+  appearance: none;
   min-block-size: var(--target);
   max-inline-size: 22rem;
-  padding: 0 var(--s3);
+  padding: 0 2.25rem 0 var(--s3);
   border: 1.5px solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--surface);
+  background:
+    linear-gradient(45deg, transparent 50%, var(--ink-2) 50%) right 1.1rem center / 0.4rem 0.4rem no-repeat,
+    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%) right 0.7rem center / 0.4rem 0.4rem no-repeat,
+    var(--surface);
+  color: var(--ink);
   font-size: var(--t-meta);
   text-overflow: ellipsis;
+  cursor: pointer;
 }
 .filters[data-more="inline"] .more-pop {
   position: static;
@@ -712,6 +731,9 @@ input[type="date"] {
 
 .content-hits {
   max-block-size: 32vh;
+  /* VFS-27 R12: however many name hits there are, the section keeps room for its heading and
+     a whole hit; the name list above keeps its own (7rem). */
+  min-block-size: min(11rem, 36vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   border-block-start: 1px solid var(--line-strong);
@@ -719,7 +741,20 @@ input[type="date"] {
 }
 .content-hits[hidden] { display: none; }
 .app[data-view="start"] .content-hits { display: none; }
+/* The heading and its count stay in sight while the hits scroll under it. */
+.content-head {
+  position: sticky;
+  inset-block-start: calc(-1 * var(--s2));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+  padding-block: var(--s1);
+  background: var(--paper);
+  z-index: 1;
+}
 .content-hits h3 { margin: 0; font-size: var(--t-meta); font-weight: 700; color: var(--ink); }
+.content-count { font-size: var(--t-meta); color: var(--ink-2); }
 .content-notes p { margin: var(--s1) 0 0; color: var(--ink-2); font-size: var(--t-meta); }
 .content-list { list-style: none; margin: 0; padding: 0; }
 .chit {
@@ -787,6 +822,22 @@ input[type="date"] {
 .status-text { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: var(--s3); }
 .status-text p { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
 .bottom .btn { font-size: var(--t-meta); }
+/* VFS-35 R1, VFS-27 R8: the status and the reading progress give way to the buttons, cut to
+   two lines (one on a short window) with their whole text as tooltip; the buttons stay on one
+   row and never wrap away from each other. */
+.status-text p, .content-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.bottom .btn { flex: none; white-space: nowrap; }
+/* The texts start from no width, so the row breaks only when the buttons and the texts' least
+   width cannot share it (large text, wider system fonts); it never widens the page. */
+@container app (width >= 56rem) {
+  .status-text, .content-line { flex: 1 1 0; min-width: 5rem; }
+}
+/* Narrow, while documents are read: the two texts first, then the buttons together on a row
+   of their own. */
+@container app (width < 56rem) {
+  .bottom:has(> .content-line:not([hidden])) > :is(.status-text, .content-line) { order: -1; flex: 1 1 14rem; }
+  .bottom:has(> .content-line:not([hidden]))::before { content: ""; flex-basis: 100%; }
+}
 #scan-progress { width: 3rem; flex: none; }
 
 progress {
@@ -859,7 +910,7 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 }
 .drawer-intro { margin: 0; padding: 0 var(--s5) var(--s4); color: var(--ink-2); }
 #folders-msg { margin: 0 var(--s5) var(--s4); }
-.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1 0 auto; border-block-start: 1px solid var(--line); }
+.roots { list-style: none; margin: 0; padding: 0 var(--s5); flex: 1 1 auto; min-block-size: min(9rem, 25dvh); overflow-y: auto; overscroll-behavior: contain; border-block-start: 1px solid var(--line); }
 .roots .none { color: var(--ink-2); padding: var(--s4) 0; }
 .root {
   display: grid;
@@ -945,16 +996,19 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   .app:has(.results-head:not([hidden])) .status-text p { -webkit-line-clamp: 1; }
   .bottom { padding-block: var(--s1); }
   .bottom .btn { min-block-size: 2.25rem; padding-inline: var(--s3); }
-  .status-text p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .status-text { flex: 1 1 0; min-width: 7rem; }
+  /* One line, cut by the character rather than the word (a clamped line cut after its first
+     word). The status line does the same while the results header shows. */
+  .content-line, .app:has(.results-head:not([hidden])) .status-text p { display: block; white-space: nowrap; text-overflow: ellipsis; }
+  /* The selected row's folder line gives its height to the content section. */
+  .results:has(> .content-hits:not([hidden])) > .details { display: none; }
   .app[data-view="start"] { grid-template-rows: minmax(0, 1fr) auto auto auto auto auto minmax(0, 1.4fr) auto; }
   .app[data-view="start"] .empty { padding-block-start: var(--s1); }
   .app[data-view="start"] .empty .empty-art { display: none; }
 }
 
-/* Short and narrow: a status that does not fit beside the buttons takes its own line. */
+/* Short and narrow: the texts take their own line, the buttons theirs, at the end. */
 @container app (height < 40rem) and (width < 50rem) {
-  .status-text { flex-basis: auto; }
   .bottom { justify-content: flex-end; }
 }
 
@@ -1015,8 +1069,11 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   min-block-size: 2.5rem; padding: 0 var(--s3); border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--surface);
 }
-.bookmarks-setting { padding: var(--s4) var(--s5) 0; border-block-start: 1px solid var(--line); }
-.bookmarks-setting h3 { margin: 0 0 var(--s1); font-size: 1rem; }
+/* VFS-6 in the folders panel: one folded line under the folder list, which scrolls on its own
+   so every folder stays reachable on a short window (VFS-35 R4). */
+.bookmarks-setting { flex: none; padding: 0 var(--s5); border-block-start: 1px solid var(--line); }
+.bookmarks-setting summary { padding-block: var(--s3); font-weight: 700; cursor: pointer; }
+.bookmarks-summary { font-weight: 400; color: var(--ink-2); }
 .bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }
 .setting-advanced summary { cursor: pointer; font-weight: 700; }
 .toggle { display: inline-flex; align-items: center; gap: var(--s2); min-block-size: 2.5rem; font-weight: 700; }

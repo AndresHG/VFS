@@ -111,6 +111,67 @@ for (const viewport of VIEWPORTS) {
       await assertNoSideScroll(`folders panel, ${where}`);
     });
 
+    /** VFS-35 R1, VFS-27 R8, R12: while documents are being read (bookmarks on, results
+     *  shown), the bottom bar keeps every button on one row: on a short window from 56 rem
+     *  wide at normal text the whole bar is one row, the reading progress cut to one line
+     *  with its whole text as tooltip (it wrapped to three lines and pushed «Ajustes» onto a
+     *  row of its own). Then at 1280×720 at 125 % (1024×496 CSS px) the content section shows its first whole
+     *  hit below the name hits. */
+    test(`bottom bar one row while reading documents at ${where}`, async () => {
+      for (const locale of ['', '&locale=en-US']) {
+        await open(viewport, text, `&bookmarks&content=on${locale}`);
+        await evaluate(`(() => { const q = document.getElementById('q'); q.value = 'foto'; q.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await until(`document.querySelectorAll('#results .row').length > 0 && document.querySelectorAll('#content-list .chit').length > 0 && !document.getElementById('content-line').hidden`, 'name and content hits');
+        const bar = await evaluate(`(() => {
+          const shown = (el) => el.offsetParent !== null;
+          const mid = (el) => { const r = el.getBoundingClientRect(); return Math.round(r.top + r.height / 2); };
+          const buttons = [...document.querySelectorAll('.bottom .btn')].filter(shown);
+          const all = [...document.querySelector('.bottom').children].filter(shown);
+          const line = document.getElementById('content-line');
+          return { buttons: buttons.map(mid), all: all.map(mid), title: line.title, textContent: line.textContent };
+        })()`);
+        const at = `${where}${locale}`;
+        // The minimum window at large text has no room for five buttons in a row (VFS-35).
+        if (viewport.width > 720 || text.root === '100%') {
+          assert.ok(Math.max(...bar.buttons) - Math.min(...bar.buttons) <= 4, `every button on one row ${JSON.stringify(bar)} (${at})`);
+        }
+        const short = await evaluate(`document.getElementById('app').clientHeight < 40 * parseFloat(getComputedStyle(document.documentElement).fontSize)`);
+        const wide = viewport.width >= 56 * 16 * (text.root === '100%' ? 1 : 1.25);
+        if (short && wide && text.root === '100%') {
+          assert.ok(Math.max(...bar.all) - Math.min(...bar.all) <= 4, `the whole bar on one row ${JSON.stringify(bar)} (${at})`);
+          assert.equal(bar.title, bar.textContent, `the whole progress text is its tooltip (${at})`);
+        }
+        if (viewport.width === 1024 && viewport.height === 496 && text.root === '100%') {
+          const hit = await evaluate(`(() => {
+            const sec = document.getElementById('content-hits').getBoundingClientRect();
+            const first = document.querySelector('#content-list .chit').getBoundingClientRect();
+            const bottom = Math.min(sec.bottom, document.querySelector('.bottom').getBoundingClientRect().top);
+            return { top: first.top, bottom: first.bottom, visibleTo: bottom, secTop: sec.top };
+          })()`);
+          assert.ok(hit.top >= hit.secTop && hit.bottom <= hit.visibleTo + 0.5, `the first content hit is whole in sight ${JSON.stringify(hit)} (${at})`);
+        }
+      }
+    });
+
+    /** VFS-35 R4, VFS-6: with bookmarks on, the folders panel keeps every folder reachable:
+     *  the list scrolls on its own between the intro and the folded «Marcadores de Firefox»
+     *  line, so its first and last folders, the bookmarks line and «Añadir carpeta…» are all
+     *  in sight without scrolling the panel (the bookmarks section took the height before). */
+    test(`folder list reachable with bookmarks on at ${where}`, async () => {
+      await open(viewport, text, '&bookmarks');
+      await evaluate(`document.getElementById('open-folders').click()`);
+      await until(`document.getElementById('folders').open && document.querySelectorAll('#roots .root').length >= 3`, 'the folders panel');
+      await until(`document.getElementById('folders').getAnimations().every((a) => a.playState !== 'running')`, 'the panel slid in');
+      for (const s of ['#roots .root:first-child .root-path', '#bookmarks-setting summary', '#add-folder']) await assertVisible(s, `folders panel, ${where}`);
+      const panel = await evaluate(`(() => { const d = document.getElementById('folders'); return [d.scrollHeight, d.clientHeight]; })()`);
+      assert.ok(panel[0] <= panel[1] + 1, `the panel itself does not scroll ${JSON.stringify(panel)} (${where})`);
+      await evaluate(`document.querySelector('#roots .root:last-child').scrollIntoView({ block: 'nearest' })`);
+      await assertVisible('#roots .root:last-child .root-path', `last folder, ${where}`);
+      await evaluate(`document.querySelector('#roots .root:last-child .root-actions .btn').scrollIntoView({ block: 'nearest' })`);
+      await assertVisible('#roots .root:last-child .root-actions .btn', `last folder's actions, ${where}`);
+      await assertNoSideScroll(`folders panel, ${where}`);
+    });
+
     /** VFS-34 AC-6, VFS-35 AC-5: in Ajustes › Avanzado, the file filter shows the five
      *  defaults (none a shortcut), its add field, add button and reset button fit and are
      *  not covered once scrolled to, and the size field is hidden while content search is
@@ -235,6 +296,17 @@ for (const viewport of LINE_VIEWPORTS) {
     });
   }
 }
+
+/** VFS-35 R5: the bottom bar wraps rather than widening the page when its buttons need more
+ *  room than the row has, as with large text and wider system fonts (CI's macOS Chrome drew
+ *  this bar 55 px wider than the window). A button made wider stands in for those fonts. */
+test('a bottom bar wider than its row wraps instead of widening the page', async () => {
+  const viewport = VIEWPORTS[1];
+  await openFilterLine(viewport, TEXT[1], Lang.ES);
+  await evaluate(`document.getElementById('open-settings').style.paddingInline = '14rem'`);
+  await assertNoSideScroll(`${viewport.name}, large text, a wide button`);
+  await evaluate(`document.getElementById('open-settings').style.paddingInline = ''`);
+});
 
 /** VFS-38 AC-8 (R10, VFS-35 R5): at the minimum window and with large text, every filter set,
  *  bookmarks on and three scope buttons, nothing is wider than the window. */

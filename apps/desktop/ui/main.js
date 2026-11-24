@@ -12,6 +12,7 @@ import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
 import { setupAsk } from './ask.js';
+import { lightDismiss } from './dismiss.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
@@ -176,14 +177,23 @@ function main(L) {
   }
 
   // A popover opens under its button. Placed from the button's box so it also works where
-  // CSS anchor positioning is missing (older WKWebView).
+  // CSS anchor positioning is missing (older WKWebView). It is kept inside the window: moved
+  // left when it would pass the right edge, and scrolling inside when taller than the room
+  // below the button (VFS-35 R5). Its width is only known once it shows, so it is placed
+  // again then, and whenever the window or a scrolling filter line moves the button.
   function placeUnder(pop, button) {
-    pop.addEventListener('beforetoggle', (e) => {
-      if (e.newState !== 'open') return;
+    const place = () => {
       const r = button.getBoundingClientRect();
-      pop.style.top = `${r.bottom + 6}px`;
+      const top = r.bottom + 6;
+      pop.style.top = `${top}px`;
+      pop.style.maxHeight = `${Math.max(0, innerHeight - top - 8)}px`;
       pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
-    });
+    };
+    pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') place(); });
+    pop.addEventListener('toggle', (e) => { if (e.newState === 'open') place(); });
+    const follow = () => { if (pop.matches(':popover-open')) place(); };
+    addEventListener('resize', follow);
+    $('filters').addEventListener('scroll', follow);
   }
 
   // Without the Popover API at all, the type chips are shown inline instead.
@@ -1288,6 +1298,9 @@ function main(L) {
   // VFS-22 R3, R5: the shell (window title, macOS menu, folder picker) follows the UI.
   api.setLanguage(L.lang).catch(() => {});
 
+  // Every side panel closes on a click outside it, WebKit included (dismiss.js).
+  for (const d of document.querySelectorAll('dialog[data-light-dismiss]')) lightDismiss(d);
+
   const settingsDialog = $('settings');
   fillSelect($('language'), S.languageOptions);
   $('open-settings').addEventListener('click', () => {
@@ -1524,6 +1537,7 @@ function main(L) {
   function renderBookmarks() {
     const st = state.bookmarks;
     bookmarksToggle.checked = !!st?.enabled;
+    $('bookmarks-summary').textContent = S.bookmarksSummary(!!st?.enabled);
     const parts = [];
     if (st?.enabled) {
       parts.push(S.bookmarksState[st.state] || '');
@@ -1676,9 +1690,12 @@ function main(L) {
   let shownContentHits = null;
 
   /** The content section applies to file searches with content search on (R12), never under
-   *  «Solo nombres» (VFS-38 R3); under «Solo documentos» the source choice does not apply (R4). */
+   *  «Solo nombres» (VFS-38 R3); under «Solo documentos» the source choice does not apply (R4).
+   *  Files are searched unless the source is bookmarks alone: «Archivos y marcadores» sends no
+   *  source list at all (`sourcesFor` gives []), so it must not be read as "no files". */
   function contentApplies() {
-    return contentOn(state.content) && sourcesFor(sourceApplies() ? state.source : SourceChoice.FILES, bookmarksOn()).includes(Source.FILES)
+    const bookmarksOnly = sourceApplies() && state.source === SourceChoice.BOOKMARKS;
+    return contentOn(state.content) && !bookmarksOnly
       && bookmarkFolderOf(state.folder) == null && state.scope !== ScopeChoice.NAMES;
   }
 
@@ -1697,6 +1714,8 @@ function main(L) {
     // Under «Solo documentos» the empty view says it, with «Buscar en todo» (VFS-38 R4).
     if (!view.loading && !view.failed && !view.hits.length && state.scope !== ScopeChoice.DOCUMENTS) notes.push(S.contentNone);
     $('content-notes').replaceChildren(...notes.map((t) => el('p', null, t)));
+    // VFS-27 R12: the heading says how many documents matched, once the answer is in.
+    $('content-count').textContent = view.total == null || view.loading ? '' : S.contentCount(view.total, N.count(view.total), view.totalCapped);
     $('content-more').hidden = !view.more;
     if (view.hits === shownContentHits) return;
     shownContentHits = view.hits;
@@ -1783,6 +1802,7 @@ function main(L) {
     const line = api.missing ? null : contentStatusLine(L, state.content);
     $('content-line').hidden = !line;
     $('content-line').textContent = line?.text || '';
+    $('content-line').title = line?.text || ''; // cut to one or two lines; whole as tooltip
     const action = $('content-action');
     action.hidden = !line?.action;
     action.dataset.action = line?.action || '';
