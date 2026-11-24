@@ -3,10 +3,11 @@
 
 pub mod fake_corpus;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use vfs_ai::mock::{MockResponse, MockServer};
+use vfs_ai::mock::{MockResponse, MockServer, RecordedWaits};
 use vfs_ai::{
     chat_model, AnswerRequest, ApiKey, ChatModel, Endpoint, Passage, Provider, RetryPolicy,
 };
@@ -26,22 +27,33 @@ pub fn error_body(name: &str) -> String {
 
 pub const TEST_KEY: &str = "sk-test-NOT-A-REAL-KEY-0123456789abcdef";
 
-/// A model for `provider` pointed at `mock`, with retries that wait 1 ms.
+/// A model for `provider` pointed at `mock`, whose retries wait no real time.
 pub fn model_at(provider: Provider, mock: &MockServer) -> Box<dyn ChatModel> {
-    model_with_retry(provider, mock, [Duration::from_millis(1); 2])
+    model_with_waits(
+        provider,
+        mock,
+        [Duration::from_secs(2), Duration::from_secs(8)],
+        RecordedWaits::default(),
+    )
+    .0
 }
 
-pub fn model_with_retry(
+/// A model with `fallback` retry waits, recorded by `waits` instead of slept.
+pub fn model_with_waits(
     provider: Provider,
     mock: &MockServer,
     fallback: [Duration; 2],
-) -> Box<dyn ChatModel> {
+    waits: RecordedWaits,
+) -> (Box<dyn ChatModel>, Arc<RecordedWaits>) {
+    let waits = Arc::new(waits);
     let mut endpoint = Endpoint::local(mock.url());
     endpoint.retry = RetryPolicy {
         fallback,
         max_wait: Duration::from_secs(60),
+        waiter: waits.clone(),
     };
-    chat_model(provider, ApiKey::new(TEST_KEY).unwrap(), endpoint).unwrap()
+    let model = chat_model(provider, ApiKey::new(TEST_KEY).unwrap(), endpoint).unwrap();
+    (model, waits)
 }
 
 pub fn passage(i: usize, text: &str) -> Passage {

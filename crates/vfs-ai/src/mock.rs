@@ -87,8 +87,11 @@ impl MockServer {
                 let response = queue
                     .next()
                     .unwrap_or_else(|| MockResponse::json(599, "{\"mock\":\"exhausted\"}"));
-                if let Some(request) = serve(stream, &response) {
+                // The request is recorded before the response is written: a client that has its
+                // answer always finds its request in `requests()`.
+                if let Some(request) = read_request(&stream) {
                     log.lock().unwrap().push(request);
+                    write_response(stream, &response);
                 }
             }
         });
@@ -120,7 +123,7 @@ impl Drop for MockServer {
     }
 }
 
-fn serve(stream: TcpStream, response: &MockResponse) -> Option<RecordedRequest> {
+fn read_request(stream: &TcpStream) -> Option<RecordedRequest> {
     let mut reader = BufReader::new(stream.try_clone().ok()?);
     let mut line = String::new();
     reader.read_line(&mut line).ok()?;
@@ -147,6 +150,15 @@ fn serve(stream: TcpStream, response: &MockResponse) -> Option<RecordedRequest> 
     }
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body).ok()?;
+    Some(RecordedRequest {
+        method,
+        path,
+        headers,
+        body: String::from_utf8_lossy(&body).into(),
+    })
+}
+
+fn write_response(stream: TcpStream, response: &MockResponse) {
     let mut out = stream;
     let mut head = format!("HTTP/1.1 {} Mock\r\n", response.status);
     for (name, value) in &response.headers {
@@ -159,12 +171,6 @@ fn serve(stream: TcpStream, response: &MockResponse) -> Option<RecordedRequest> 
     let _ = out.write_all(head.as_bytes());
     let _ = out.write_all(response.body.as_bytes());
     let _ = out.flush();
-    Some(RecordedRequest {
-        method,
-        path,
-        headers,
-        body: String::from_utf8_lossy(&body).into(),
-    })
 }
 
 /// An Anthropic rewrite response whose structured output is `rewrite`, in the shape of
@@ -230,4 +236,43 @@ pub fn anthropic_answer(blocks: &[crate::AnswerBlock]) -> MockResponse {
     );
     sse += &event("message_stop", serde_json::json!({"type": "message_stop"}));
     MockResponse::sse(sse)
+}
+
+/// A retry wait that records each wait instead of sleeping, so retry tests take no real time
+/// and assert the exact waits chosen (R13). With `cancel_on_wait`, the first wait also sets
+/// the call's cancel token, as «Cancelar» pressed during the wait would.
+#[derive(Debug, Default)]
+pub struct RecordedWaits {
+    waits: Mutex<Vec<std::time::Duration>>,
+    cancel_on_wait: bool,
+}
+
+impl RecordedWaits {
+    /// Waits that also press «Cancelar» at the first wait.
+    pub fn cancelling() -> RecordedWaits {
+        RecordedWaits {
+            cancel_on_wait: true,
+            ..RecordedWaits::default()
+        }
+    }
+
+    /// The waits asked for, in order.
+    pub fn waits(&self) -> Vec<std::time::Duration> {
+        self.waits.lock().unwrap().clone()
+    }
+}
+
+impl crate::RetryWait for RecordedWaits {
+    fn wait(
+        &self,
+        wait: std::time::Duration,
+        cancel: &crate::CancelToken,
+    ) -> Result<(), crate::AiError> {
+        self.waits.lock().unwrap().push(wait);
+        if self.cancel_on_wait {
+            cancel.cancel();
+        }
+        // The real wait's cancel check, with no time to sleep.
+        crate::http::sleep_unless_cancelled(std::time::Duration::ZERO, cancel)
+    }
 }
