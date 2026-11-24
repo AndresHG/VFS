@@ -527,6 +527,8 @@ function main(L) {
 
   const q = $('q');
   let debounce = 0;
+  /** A typed search is waiting for its debounce: background refreshes wait for it. */
+  let typedPending = false;
 
   q.addEventListener('input', () => {
     state.text = q.value;
@@ -540,7 +542,8 @@ function main(L) {
       if (!$('empty').hidden) renderEmpty();
     }
     clearTimeout(debounce);
-    debounce = setTimeout(runSearch, DEBOUNCE_MS);
+    typedPending = true;
+    debounce = setTimeout(() => { typedPending = false; runSearch(); }, DEBOUNCE_MS);
   });
   $('q-clear').addEventListener('click', () => { clearQuery(); q.focus(); });
 
@@ -549,6 +552,7 @@ function main(L) {
     state.text = '';
     $('q-clear').hidden = true;
     clearTimeout(debounce);
+    typedPending = false;
     runSearch();
   }
 
@@ -561,6 +565,9 @@ function main(L) {
 
   /** Runs page 0 of the current query. `quiet` keeps the list and selection (live refresh). */
   async function runSearch({ quiet = false } = {}) {
+    // VFS-13 R5, R6: a background refresh inside a keystroke's debounce would show a
+    // suggestion the typed search then takes away; the typed search is about to run anyway.
+    if (quiet && typedPending) return;
     const seq = ++state.seq;
     // A live refresh keeps the suggestion on screen until its own answer replaces it.
     if (!quiet) state.suggestion = null;
@@ -630,6 +637,8 @@ function main(L) {
     q.value = s.text;
     state.text = s.text;
     $('q-clear').hidden = !s.text;
+    clearTimeout(debounce); // the suggested search replaces any typed one still waiting
+    typedPending = false;
     if (s.clearFilters) clearFilters({ keepBookmarkFolder: true }); else runSearch();
     q.focus();
   }

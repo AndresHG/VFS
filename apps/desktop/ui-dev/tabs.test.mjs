@@ -355,6 +355,27 @@ test('a suggestion that lands after a new keystroke is dropped', async () => {
   assert.notEqual(primary, S.suggestDropFilters('7'), 'the old answer is not shown');
 });
 
+/** VFS-13 R5, R6: an index change while a typed search waits for its debounce starts no
+ *  background refresh; only the typed search runs, so the screen does not show a passing
+ *  suggestion that the typed search then takes away. */
+test('no background refresh while a typed search waits', async () => {
+  await start();
+  await page.kinds([FileKind.AUDIO]);
+  await page.type('ordesa');
+  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('2'))}`, 'the suggestion for «ordesa»');
+  await resetCalls();
+  const names = await evaluate(`(async () => {
+    const { api } = await import('/ui/api.js');
+    const q = document.getElementById('q');
+    q.value = 'ordesa zz';
+    q.dispatchEvent(new Event('input', { bubbles: true }));
+    api.fakeIndexChanged(); // inside the debounce
+    return api.fakeCalls.searchSources;
+  })()`);
+  assert.equal(names, 0, 'no name search before the typed one');
+  await until(`(async () => (await import('/ui/api.js')).api.fakeCalls.searchSources === 1)()`, 'the typed search');
+});
+
 /** VFS-42 AC-6 (R6): a «Nombres» search with a type that finds nothing offers `dropFilters`
  *  with no scope wording; pressing it clears the type and keeps a chosen bookmark folder. */
 test('«Nombres» with nothing found offers to drop the filters', async () => {
