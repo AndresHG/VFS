@@ -144,8 +144,18 @@ test('«Documentos» runs only the content search', async () => {
   await resetCalls();
   await page.tab(ResultsTab.DOCUMENTS);
   await until(`${hitCount} > 0`, 'the content hits');
-  const c = await evaluate(calls);
-  assert.deepEqual([c.contentSearch, c.searchSources], [1, 0], 'one content search, no name search');
+  let c = await evaluate(calls);
+  assert.equal(c.contentSearch, 1, 'one content search');
+  // A name request sent before the switch may still land; a new text on «Documentos» must
+  // start no name search.
+  await resetCalls();
+  await page.type('fotos');
+  await until(`(async () => (await import('/ui/api.js')).api.fakeCalls.contentSearch >= 1)()`, 'the new content search');
+  await until(`${hitCount} > 0`, 'the content hits');
+  c = await evaluate(calls);
+  assert.equal(c.searchSources, 0, 'no name search on «Documentos»');
+  await page.type('foto');
+  await until(`(() => { const m = [...document.querySelectorAll('#content-list mark')]; return m.length > 0 && m.every((x) => x.textContent === 'foto'); })()`, 'the content hits for «foto» again');
   assert.equal(await evaluate(rowCount), 0, 'no name list');
   assert.ok(await evaluate(`[...document.querySelectorAll('#content-list mark')].every((m) => m.textContent === 'foto') && document.querySelectorAll('#content-list mark').length > 0`), 'highlights');
   const n = await evaluate(hitCount);
@@ -328,5 +338,5 @@ test('«Nombres» with nothing found offers to drop the filters', async () => {
   await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('1'))}`, 'the suggestion');
   await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#kind-chips input:checked').length`), 0, 'the type cleared');
-  assert.equal(await evaluate(`document.getElementById('f-folder').value`), root, 'the bookmark folder kept');
+  await until(`document.getElementById('f-folder').value === ${JSON.stringify(root)}`, 'the bookmark folder kept');
 });

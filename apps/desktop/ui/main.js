@@ -649,7 +649,8 @@ function main(L) {
   }
 
   async function ensurePage(p) {
-    if (state.pages.has(p) || state.pagesPending.has(p)) return;
+    // VFS-42 R3: «Documentos» runs no name search, not even for a page the list asks for.
+    if (documentsTab() || state.pages.has(p) || state.pagesPending.has(p)) return;
     const seq = state.seq;
     state.pagesPending.add(p);
     try {
