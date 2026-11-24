@@ -312,6 +312,49 @@ test('the tab is not remembered and is not a filter', async () => {
   assert.equal(await evaluate(`localStorage.getItem('vfs.scope')`), null, 'nothing kept for the tab');
 });
 
+/** VFS-13 R2: a suggestion belongs to the text it was found for. Once the text changes, the
+ *  old one leaves the screen at once, so a click in the debounce window never runs the old
+ *  text (on a slow PC a background redraw could show it under the new title). */
+test('a new text drops the old suggestion at once', async () => {
+  await start();
+  await page.kinds([FileKind.AUDIO]);
+  await page.type('ordesa');
+  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('2'))}`, 'the suggestion for «ordesa»');
+  // Same task as the keystroke: before the debounced search runs.
+  const primary = await evaluate(`(() => {
+    const q = document.getElementById('q');
+    q.value = 'ordesa zz';
+    q.dispatchEvent(new Event('input', { bubbles: true }));
+    return document.querySelector('#empty .actions .btn-primary')?.textContent ?? null;
+  })()`);
+  assert.notEqual(primary, S.suggestDropFilters('2'), 'no suggestion for the old text');
+});
+
+/** VFS-13 R2: a suggestion still on its way for the old text when a key is pressed is dropped
+ *  when it lands, before the new search runs. */
+test('a suggestion that lands after a new keystroke is dropped', async () => {
+  await start();
+  await evaluate(`(async () => {
+    const { api } = await import('/ui/api.js');
+    window.__waiting = [];
+    api.suggest = (q) => new Promise((resolve) => window.__waiting.push(() => resolve({
+      kind: ${JSON.stringify(SuggestionKind.DROP_FILTERS)}, text: q.text, clearFilters: true, term: null, replacement: null, count: 7, capped: false,
+    })));
+  })()`);
+  await page.kinds([FileKind.AUDIO]);
+  await page.type('ordesa');
+  await until(`window.__waiting.length > 0`, 'a suggestion asked for «ordesa»');
+  const primary = await evaluate(`(async () => {
+    const q = document.getElementById('q');
+    q.value = 'ordesa zz';
+    q.dispatchEvent(new Event('input', { bubbles: true }));
+    for (const release of window.__waiting.splice(0)) release();
+    await new Promise((r) => setTimeout(r, 0)); // the answer lands; the debounced search has not run
+    return document.querySelector('#empty .actions .btn-primary')?.textContent ?? null;
+  })()`);
+  assert.notEqual(primary, S.suggestDropFilters('7'), 'the old answer is not shown');
+});
+
 /** VFS-42 AC-6 (R6): a «Nombres» search with a type that finds nothing offers `dropFilters`
  *  with no scope wording; pressing it clears the type and keeps a chosen bookmark folder. */
 test('«Nombres» with nothing found offers to drop the filters', async () => {
