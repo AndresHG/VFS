@@ -141,19 +141,21 @@ test('«Documentos» runs only the content search', async () => {
   await page.type('foto');
   await until(`${rowCount} > 0`, 'name hits');
   await until(shown('f-sort-pill'), '«Orden» on «Nombres»');
+  // Record the chosen tab at every name request: a «Nombres» refresh may still run before
+  // the switch, but none may start on «Documentos» (tabs render before the search runs).
+  await evaluate(`(async () => {
+    const { api } = await import('/ui/api.js');
+    const real = api.searchSources;
+    window.__nameTabs = [];
+    api.searchSources = (...a) => { window.__nameTabs.push(document.querySelector('#tabs [aria-selected="true"]').dataset.tab); return real(...a); };
+  })()`);
   await resetCalls();
   await page.tab(ResultsTab.DOCUMENTS);
   await until(`${hitCount} > 0`, 'the content hits');
-  let c = await evaluate(calls);
-  assert.equal(c.contentSearch, 1, 'one content search');
-  // A name request sent before the switch may still land; a new text on «Documentos» must
-  // start no name search.
-  await resetCalls();
+  assert.equal((await evaluate(calls)).contentSearch, 1, 'one content search');
   await page.type('fotos');
-  await until(`(async () => (await import('/ui/api.js')).api.fakeCalls.contentSearch >= 1)()`, 'the new content search');
-  await until(`${hitCount} > 0`, 'the content hits');
-  c = await evaluate(calls);
-  assert.equal(c.searchSources, 0, 'no name search on «Documentos»');
+  await until(`(async () => (await import('/ui/api.js')).api.fakeCalls.contentSearch >= 2)()`, 'the new content search');
+  assert.deepEqual((await evaluate(`window.__nameTabs`)).filter((t) => t === ResultsTab.DOCUMENTS), [], 'no name search on «Documentos»');
   await page.type('foto');
   await until(`(() => { const m = [...document.querySelectorAll('#content-list mark')]; return m.length > 0 && m.every((x) => x.textContent === 'foto'); })()`, 'the content hits for «foto» again');
   assert.equal(await evaluate(rowCount), 0, 'no name list');
@@ -335,7 +337,10 @@ test('«Nombres» with nothing found offers to drop the filters', async () => {
   await page.choose('f-source', SourceChoice.FILES); // a suggestion is asked only when files are searched
   await page.kinds([FileKind.AUDIO]);
   await page.type('recetas zz');
-  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('1'))}`, 'the suggestion');
+  // Wait for the last search's own view: an earlier search's suggestion, or a re-render that
+  // made «Quitar filtros» the main button, must not take the click.
+  await until(`document.querySelector('#empty h3')?.textContent === ${JSON.stringify(S.emptyNoHitsTitle('recetas zz'))}
+    && document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('1'))}`, 'the suggestion for the last search');
   await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('#kind-chips input:checked').length`), 0, 'the type cleared');
   await until(`document.getElementById('f-folder').value === ${JSON.stringify(root)}`, 'the bookmark folder kept');
