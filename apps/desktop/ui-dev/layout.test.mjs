@@ -115,7 +115,7 @@ for (const viewport of VIEWPORTS) {
      *  shown), the bottom bar keeps every button on one row: on a short window from 50 rem
      *  wide at normal text the whole bar is one row, the reading progress cut to one line
      *  with its whole text as tooltip (it wrapped to three lines and pushed «Ajustes» onto a
-     *  row of its own). Then at 1280×720 at 125 % the content section shows its first whole
+     *  row of its own). Then at 1280×720 at 125 % (1024×496 CSS px) the content section shows its first whole
      *  hit below the name hits. */
     test(`bottom bar one row while reading documents at ${where}`, async () => {
       for (const locale of ['', '&locale=en-US']) {

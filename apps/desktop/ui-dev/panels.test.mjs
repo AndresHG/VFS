@@ -45,7 +45,9 @@ test('a click outside a side panel closes it', async () => {
   const panel = await evaluate(`(() => { const r = document.getElementById('settings').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()`);
   await press(panel[0] + 40, panel[1] + 140);
   assert.equal(await isOpen('settings'), true, 'a click inside keeps it open');
-  await press(panel[0] + 40, panel[1] + 140, 20, 300);
+  // Start on plain text: a form control would take the whole gesture and prove nothing.
+  const title = await evaluate(`(() => { const r = document.getElementById('settings-title').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+  await press(title[0], title[1], 20, 300);
   assert.equal(await isOpen('settings'), true, 'a press that starts inside keeps it open');
   await press(20, 300);
   assert.equal(await isOpen('settings'), false, 'a click outside closes it');

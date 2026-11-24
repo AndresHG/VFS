@@ -407,7 +407,7 @@ test('the size field looks off while only bookmarks are searched', async () => {
 /** VFS-38 R2, VFS-27 R12: under «Todo» with content search on, the content section shows
  *  below the name hits with its count, bookmarks on and «Archivos y marcadores» included (the
  *  default source sends no source list, which read as "no files" and hid the section), and
- *  its heading is in sight at 1280×720 at 125 % even with thousands of name hits. Only
+ *  its heading is in sight at 1280×720 at 125 % (1024×496 CSS px) even with thousands of name hits. Only
  *  «Solo marcadores» leaves it out. */
 test('content hits show under «Todo» with bookmarks on', async () => {
   try {
