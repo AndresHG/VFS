@@ -15,8 +15,9 @@ pub(crate) const DELETED_KEY: &str = "fts_deleted";
 /// Compaction is due once this many deletions, or a tenth of the indexed files if more,
 /// have piled up (R2, D2).
 pub(crate) const FLOOR: u64 = 50_000;
-/// FTS5 merge argument of one slice: negative merges regardless of `automerge` (D3).
-const MERGE_STEP: i64 = -64;
+/// FTS5 merge argument of one slice: negative merges regardless of `automerge`; small, so a
+/// slice holds the write lock briefly (D3).
+const MERGE_STEP: i64 = -16;
 /// Tables merged, in this order: the largest first.
 const TABLES: [&str; 3] = ["file_paths_fts", "files_fts", "dirs_fts"];
 /// `VACUUM` limits (R3): at least this much free…

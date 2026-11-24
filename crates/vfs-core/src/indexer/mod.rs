@@ -182,6 +182,12 @@ fn data_dir(conn: &Connection) -> Option<PathBuf> {
 }
 
 fn begin(conn: &Connection) -> Result<Transaction<'_>> {
+    // Starved very-low-priority I/O would hold the write lock while other writers time out
+    // (VFS-5 R3, VFS-40 R2).
+    debug_assert!(
+        !sched::IN_BACKGROUND.get(),
+        "VFS-5 R3: a write transaction in background mode"
+    );
     Ok(Transaction::new_unchecked(
         conn,
         TransactionBehavior::Immediate,
@@ -1461,7 +1467,10 @@ impl Worker {
             }
         }
         let conn = &self.conn;
-        let more = self.sched.background(|| compact::merge_slice(conn));
+        // At the indexer's own priority, never in background mode: a slice holds the write
+        // lock, and starved very-low-priority I/O would hold it while other writers time out
+        // (VFS-5 R3).
+        let more = compact::merge_slice(conn);
         let took = now.elapsed();
         let Some(c) = self.compaction.as_mut() else {
             return;
@@ -1473,10 +1482,7 @@ impl Worker {
             Ok(false) => {
                 let (started_at, slices, busy) = (c.started_at, c.slices, c.busy);
                 let conn = &self.conn;
-                match self
-                    .sched
-                    .background(|| compact::finish(conn, started_at, compact::VACUUM_MIN_FREE))
-                {
+                match compact::finish(conn, started_at, compact::VACUUM_MIN_FREE) {
                     Ok((vacuumed, before, after)) => {
                         let line = format!(
                             "compact deleted={started_at} slices={slices} busy_ms={} \

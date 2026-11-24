@@ -159,7 +159,9 @@ OCR of scanned PDFs, embeddings, any machine-learning model, any desktop-UI chan
   version on disk differs from the app's, THEN THE content indexer SHALL rebuild the store
   from scratch rather than read it. VFS-27 asks the user first.
 - R20. THE content indexer SHALL write only `files.content_state` in `index.db`, in short
-  transactions with a busy timeout. The name indexer remains the only writer of every other
+  transactions with a busy timeout. WHILE another connection holds `index.db`'s write lock
+  past that timeout, it SHALL wait and try again until the write succeeds or the run is
+  stopped, never stop the run. The name indexer remains the only writer of every other
   column, and of the schema.
 - R21. WHEN a content run starts, and WHEN it meets a document whose file id is no longer in
   `index.db`, THE content indexer SHALL delete that document's rows (text, chunks, FTS keys,

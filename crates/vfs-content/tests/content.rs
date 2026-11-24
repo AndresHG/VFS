@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
 use rusqlite::Connection;
-use vfs_content::indexer::{OutcomeKind, StopReason};
+use vfs_content::indexer::{Admit, Gate, OutcomeKind, StopReason};
 use vfs_content::protocol::{FailReason, SkipReason};
 use vfs_content::{store, IndexOptions};
 use vfs_core::content::ContentState;
@@ -942,6 +942,57 @@ fn ac20_offline_root_is_passed_over() {
     std::fs::rename(&away, &other).unwrap();
     s.run(&s.opts());
     assert_eq!(s.state("ausente.txt").0, INDEXED);
+}
+
+/// VFS-2 R20, VFS-40 R2: another writer holding `index.db` past the run's busy timeout, as
+/// the name indexer's compaction did on a busy Windows runner, makes the run wait, never
+/// stop: once the lock is released every document is read and its state mirrored.
+#[test]
+fn busy_index_is_a_wait_not_a_stop() {
+    /// Takes the write lock from another connection before the first document, and holds
+    /// it longer than `store::open_index_rw`'s 10 s busy timeout.
+    struct LockAtFirst {
+        db: PathBuf,
+        holder: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Gate for LockAtFirst {
+        fn before_document(&mut self, _path: &Path) -> Admit {
+            if self.holder.is_none() {
+                let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+                let db = self.db.clone();
+                self.holder = Some(std::thread::spawn(move || {
+                    let mut conn = Connection::open(&db).unwrap();
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .unwrap();
+                    locked_tx.send(()).unwrap();
+                    std::thread::sleep(Duration::from_secs(12));
+                    tx.commit().unwrap();
+                }));
+                locked_rx.recv().unwrap();
+            }
+            Admit::Read
+        }
+        fn after_document(&mut self, _outcome: OutcomeKind, _worker_ms: u64) {}
+    }
+
+    let s = setup();
+    s.write("a/uno.txt", "primera nota");
+    s.write("a/dos.txt", "segunda nota");
+    s.scan();
+    let mut gate = LockAtFirst {
+        db: s.db.clone(),
+        holder: None,
+    };
+    let sum = vfs_content::indexer::run_with(&s.db, &s.opts(), &AtomicBool::new(false), &mut gate)
+        .unwrap();
+    gate.holder.take().unwrap().join().unwrap();
+    assert_eq!(sum.stopped, None, "{sum:?}");
+    assert_eq!(sum.indexed, 2, "{sum:?}");
+    assert_eq!(
+        s.content_states(),
+        vec![("dos.txt".into(), INDEXED), ("uno.txt".into(), INDEXED)]
+    );
 }
 
 /// VFS-2 AC-20, R18: a worker whose parent is gone (its stdin pipe closed) exits within 2 s,

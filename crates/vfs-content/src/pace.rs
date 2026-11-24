@@ -27,6 +27,9 @@ pub struct PaceConfig {
     pub low_space_resume: u64,
     /// How long to wait before asking again while paused for low space.
     pub low_space_wait: Duration,
+    /// A run stopped because `index.db` could not be written starts again after this long
+    /// (VFS-27 R15).
+    pub index_write_retry: Duration,
 }
 
 impl Default for PaceConfig {
@@ -39,6 +42,7 @@ impl Default for PaceConfig {
             low_space_pause: 1 << 30,
             low_space_resume: 2 << 30,
             low_space_wait: Duration::from_secs(30),
+            index_write_retry: Duration::from_secs(300),
         }
     }
 }

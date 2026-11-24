@@ -647,6 +647,8 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
     // The documents as they were when the last run finished with nothing left, and when
     // (R10).
     let mut finished_at: Option<(Signature, Instant)> = None;
+    // When a run stopped by `index.db` refusing writes starts again on its own (R15).
+    let mut index_retry_at: Option<Instant> = None;
     let mut pace = Pace::new(cfg.pace.clone());
     // Shown from the start, also while paused (R8: «300 de 1.000» after a restart).
     let (done, total) = progress_counts(&cfg.index_db);
@@ -746,7 +748,8 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                 .diag("content store deleted to read the documents again");
         }
         checked = true;
-        // A run-level stop waits for «Reintentar» (R15). The guard is dropped before waiting.
+        // A run-level stop waits for «Reintentar» (R15), or, when `index.db` refused writes,
+        // for its retry time. The guard is dropped before waiting.
         let stopped = matches!(
             shared
                 .state
@@ -757,11 +760,15 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             Phase::Stopped { .. }
         );
         if stopped && !retry {
-            if wait(&shared, None) {
-                break;
+            let left = index_retry_at.map(|at| at.saturating_duration_since(Instant::now()));
+            if left != Some(Duration::ZERO) {
+                if wait(&shared, left) {
+                    break;
+                }
+                continue;
             }
-            continue;
         }
+        index_retry_at = None;
 
         // A run starts with a full rebuild of the queue in SQL: never while a name walk or a
         // large name pass runs (R7 rule 1; the post-update re-walk of #178).
@@ -851,8 +858,10 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                             detail: sum.stop_detail.clone().unwrap_or_default(),
                         },
                     );
-                    if wait(&shared, None) {
-                        break;
+                    // `index.db` refusing writes is the name indexer's or the disk's, never
+                    // the run's: the guard above starts the run again later on its own (R15).
+                    if reason == StopReason::IndexWrite {
+                        index_retry_at = Some(Instant::now() + cfg.pace.index_write_retry);
                     }
                 } else if sum.remaining == 0 && !shared.stop_run.load(Ordering::SeqCst) {
                     finished_at = signature.clone().map(|sig| (sig, Instant::now()));
