@@ -192,7 +192,6 @@ fn shrink(conn: &Connection, min_free: u64) -> Result<(bool, u64, u64)> {
 mod tests {
     use super::*;
     use crate::db::{self, ingest};
-    use std::path::Path;
 
     const MIB: u64 = 1 << 20;
     const PAGE: u64 = 16384;
@@ -270,8 +269,11 @@ mod tests {
         root_id
     }
 
-    fn file_size(db: &Path) -> u64 {
-        std::fs::metadata(db).unwrap().len()
+    /// Bytes of the index's pages. On Windows the file itself grows and shrinks in 32 MB
+    /// chunks (VFS-5 R10), so its length on disk is not comparable.
+    fn page_bytes(conn: &Connection) -> u64 {
+        let (size, count, _) = pages(conn).unwrap();
+        size * count
     }
 
     fn data_rows(conn: &Connection) -> i64 {
@@ -339,7 +341,7 @@ mod tests {
         fresh
             .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
             .unwrap();
-        let (got, want) = (file_size(&db_path), file_size(&fresh_path));
+        let (got, want) = (page_bytes(&conn), page_bytes(&fresh));
         assert_eq!(got, after);
         assert!(
             got * 4 <= want * 5,
