@@ -1395,7 +1395,10 @@ impl Worker {
                         }
                         Err(e) => log::warn!("link pass: {e}"),
                     }
-                    self.compact_step();
+                    // A stop, pause or wake cut the link pass short: not idle yet (VFS-40 R2).
+                    if !yield_now() {
+                        self.compact_step();
+                    }
                     self.publish(IndexerState::Idle);
                     let mut timeout = match self.dirty_since {
                         Some(t) => DIRTY_COALESCE.saturating_sub(t.elapsed()),
