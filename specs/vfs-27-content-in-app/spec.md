@@ -156,8 +156,10 @@ Search
 Run-level failures and diagnostics
 
 - R15. WHEN the run stops for a run-level reason (VFS-2 R17: worker missing or blocked,
-  version mismatch, store not writable, worker unstable), THE status area
-  SHALL show the reason in plain words with «Reintentar». Per-file states are not touched.
+  version mismatch, store not writable, worker unstable, `index.db` not writable), THE status
+  area SHALL show the reason in plain words with «Reintentar». Per-file states are not
+  touched. A run stopped because `index.db` could not be written SHALL also start again on
+  its own after 5 minutes.
 - R16. THE diagnostic log SHALL record, with no file or folder name (VFS-5 R8):
   - each content run's start and stop;
   - each pause and its reason;

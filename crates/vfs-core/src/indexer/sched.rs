@@ -566,15 +566,6 @@ impl Sched {
         r
     }
 
-    /// Runs `f` at background priority whatever the mode: idle maintenance such as the
-    /// index compaction (VFS-40 R2).
-    pub(crate) fn background<T>(&mut self, f: impl FnOnce() -> T) -> T {
-        self.prio.begin_background();
-        let r = f();
-        self.prio.end_background();
-        r
-    }
-
     /// The back-off decision for the next listing; always `Work` outside walk mode.
     pub(crate) fn step(&mut self) -> Step {
         if self.mode != Mode::Walk {

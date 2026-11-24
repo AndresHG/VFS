@@ -391,6 +391,41 @@ fn retry_after_a_run_level_stop() {
     assert_eq!(fin.done, 2);
 }
 
+/// VFS-43 AC-3, VFS-27 R15: a run stopped because `index.db` could not be written starts again on its
+/// own after `index_write_retry`, with no «Reintentar», and finishes once the index takes
+/// writes again.
+#[test]
+fn index_write_stop_is_retried_on_its_own() {
+    let s = setup(2);
+    let conn = rusqlite::Connection::open(&s.db).unwrap();
+    // Any write of a content state fails, as on an I/O error.
+    conn.execute_batch(
+        "CREATE TRIGGER no_states BEFORE UPDATE OF content_state ON files
+         BEGIN SELECT RAISE(ABORT, 'no states'); END;",
+    )
+    .unwrap();
+    let mut cfg = s.config(Vec::new());
+    cfg.pace.index_write_retry = Duration::from_millis(300);
+    let (svc, _rec) = s.start(cfg, IDLE);
+    svc.set_enabled(true);
+    let st = wait_for(&svc, "stopped", |st| {
+        matches!(st.phase, Phase::Stopped { .. })
+    });
+    assert!(
+        matches!(
+            st.phase,
+            Phase::Stopped {
+                reason: StopReason::IndexWrite,
+                ..
+            }
+        ),
+        "{st:?}"
+    );
+    conn.execute_batch("DROP TRIGGER no_states;").unwrap();
+    let fin = wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    assert_eq!(fin.done, 2);
+}
+
 /// VFS-27 AC-2 (R2): with content search off, the name indexer's change notices write no
 /// settings file and start nothing.
 #[test]

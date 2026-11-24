@@ -157,8 +157,8 @@ pub enum StopReason {
     WorkerUnstable,
     /// `content.db` could not be written (disk full, I/O error).
     StoreWrite,
-    /// `index.db` `content_state` could not be written (busy past the timeout, I/O error).
-    /// The next run reconciles it from `content.db`.
+    /// `index.db` `content_state` could not be written (I/O error, disk full; a busy index
+    /// is waited out). The next run reconciles it from `content.db`.
     IndexWrite,
 }
 
@@ -544,6 +544,29 @@ fn write_states(conn: &mut Connection, batch: &[Done]) -> Result<()> {
     Ok(())
 }
 
+/// Whether `e` is SQLite's busy or locked: another connection, such as the name indexer's
+/// compaction, held `index.db`'s write lock past the busy timeout.
+fn is_busy(e: &crate::Error) -> bool {
+    matches!(e, crate::Error::Db(rusqlite::Error::SqliteFailure(f, _))
+        if matches!(f.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+}
+
+/// Runs `write` on `index.db` until it is done, `stop` is set, or it fails for a reason
+/// other than a busy index: each try waits out the busy timeout, so a long write by another
+/// connection is a wait, never a stop (VFS-2 R20, VFS-43 R2). After a stop the states are left to the
+/// next run's [`mirror`].
+fn write_index(stop: &AtomicBool, mut write: impl FnMut() -> Result<()>) -> Result<()> {
+    loop {
+        match write() {
+            Err(e) if is_busy(&e) && !stop.load(Ordering::Relaxed) => {
+                std::thread::sleep(GATE_POLL);
+            }
+            Err(e) if is_busy(&e) => return Ok(()),
+            r => return r,
+        }
+    }
+}
+
 /// Commits a batch: the content store first, then the states in `index.db`. A failure
 /// says which file could not be written (R17).
 fn commit_batch(
@@ -551,12 +574,14 @@ fn commit_batch(
     batch: &mut Vec<Done>,
     analyzer: &Analyzer,
     sum: &mut RunSummary,
+    stop: &AtomicBool,
 ) -> std::result::Result<(), (StopReason, String)> {
     if batch.is_empty() {
         return Ok(());
     }
     write_store(conn, batch, analyzer, sum).map_err(|e| (StopReason::StoreWrite, e.to_string()))?;
-    write_states(conn, batch).map_err(|e| (StopReason::IndexWrite, e.to_string()))?;
+    write_index(stop, || write_states(conn, batch))
+        .map_err(|e| (StopReason::IndexWrite, e.to_string()))?;
     batch.clear();
     Ok(())
 }
@@ -650,7 +675,7 @@ pub fn run_with(
             return Ok(finish(sum, &conn, &sup, started));
         }
     }
-    if let Err(e) = mirror(&mut conn, &offline) {
+    if let Err(e) = write_index(stop, || mirror(&mut conn, &offline)) {
         sum.stop(StopReason::IndexWrite, e.to_string());
         return Ok(finish(sum, &conn, &sup, started));
     }
@@ -722,7 +747,7 @@ pub fn run_with(
                             if !batch.is_empty() && last_commit.elapsed() + d >= COMMIT_BEFORE_WAIT
                             {
                                 if let Err((reason, detail)) =
-                                    commit_batch(&mut conn, &mut batch, &analyzer, &mut sum)
+                                    commit_batch(&mut conn, &mut batch, &analyzer, &mut sum, stop)
                                 {
                                     sum.stop(reason, detail);
                                     break 'outer;
@@ -793,7 +818,7 @@ pub fn run_with(
             }
             if batch.len() >= opts.batch_size || last_commit.elapsed() > Duration::from_secs(2) {
                 if let Err((reason, detail)) =
-                    commit_batch(&mut conn, &mut batch, &analyzer, &mut sum)
+                    commit_batch(&mut conn, &mut batch, &analyzer, &mut sum, stop)
                 {
                     sum.stop(reason, detail);
                     break 'outer;
@@ -802,7 +827,7 @@ pub fn run_with(
             }
         }
     }
-    if let Err((reason, detail)) = commit_batch(&mut conn, &mut batch, &analyzer, &mut sum) {
+    if let Err((reason, detail)) = commit_batch(&mut conn, &mut batch, &analyzer, &mut sum, stop) {
         if sum.stopped.is_none() {
             sum.stop(reason, detail);
         }

@@ -1,6 +1,7 @@
 # VFS-40 — The index gives back space after large deletions
 
-- **Status**: implemented (PR pending)
+- **Status**: implemented (PR #202); R2's merge size and priority, D3 and the pre-mortem's
+  priority superseded by VFS-43
 - **Size**: M (indexer idle work and one `meta` key; no schema change)
 - **Links**: VFS-4 (schema v3: `files_fts` and `file_paths_fts` without `contentless_delete`,
   `docs/research/index-footprint.md`); VFS-1 AC-6 (integrity check after an unclean exit);
