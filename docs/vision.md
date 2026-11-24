@@ -50,6 +50,13 @@ those; content, concept and cross-source search do.
   notes) is inside VFS on Windows and macOS; no plugins, vaults or manual linking to set
   up. Footprint on a slow PC, background-friendliness and a simple interface come before
   features.
+- **Lightweight above all.** VFS is a program centred on optimisation and lightness: it must
+  never weigh on the computer it runs on, from a slow Windows PC with a spinning disk and a
+  busy sync client to a fast laptop. That is why the core is Rust. Every new
+  feature, source or research line is judged first by its cost in memory, CPU, disk I/O and
+  index size, and background work yields to the user and to other programs by measuring
+  real load. Where an open-source framework or library is too heavy or slow for this, we
+  measure it and are willing to build our own focused replacement.
 - **Sources are a first-class concept.** The user chooses which sources to include and can
   search one, several or all of them.
 
