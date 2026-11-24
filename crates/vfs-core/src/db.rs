@@ -58,6 +58,30 @@ const WRITER_CHUNK_BYTES: i32 = 32 * 1024 * 1024;
 /// ingest helpers and the indexer loop stays cached.
 const WRITER_STATEMENT_CACHE: usize = 32;
 
+/// Soft limit on SQLite's heap for the whole process (VFS-41 R3): above it, page caches
+/// recycle their own pages instead of growing. Every SQLite database of the app (index,
+/// content store, bookmarks) shares it.
+pub(crate) const SOFT_HEAP_LIMIT_BYTES: i64 = 96 << 20;
+
+/// Sets [`SOFT_HEAP_LIMIT_BYTES`] for this process (VFS-41 R3).
+pub(crate) fn limit_sqlite_heap() {
+    // SAFETY: a process-wide setting with no pointer arguments, safe to call at any time.
+    unsafe {
+        rusqlite::ffi::sqlite3_soft_heap_limit64(SOFT_HEAP_LIMIT_BYTES);
+    }
+}
+
+/// SQLite's heap in bytes for this process: (in use now, highest since start).
+pub(crate) fn sqlite_heap() -> (u64, u64) {
+    // SAFETY: read-only counters; `0` leaves the high-water mark as it is.
+    unsafe {
+        (
+            rusqlite::ffi::sqlite3_memory_used().max(0) as u64,
+            rusqlite::ffi::sqlite3_memory_highwater(0).max(0) as u64,
+        )
+    }
+}
+
 /// Suffixes of SQLite's companion files next to the index.
 pub(crate) const WAL_SUFFIX: &str = "-wal";
 const SHM_SUFFIX: &str = "-shm";
@@ -330,6 +354,7 @@ pub(crate) fn begin_session(db_path: &Path) -> Result<(Session, bool)> {
 /// locked, I/O, and `SchemaTooNew`: a newer build's index) is returned and nothing is moved
 /// (VFS-3 AC-3, AC-9).
 pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)> {
+    let started = std::time::Instant::now();
     let (session, unclean) = begin_session(db_path)?;
     if !db_path.exists() && fresh_path(db_path).exists() && bad_path(db_path).exists() {
         // A recovery was killed after moving the damaged index aside.
@@ -340,8 +365,10 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
     } else {
         open_rw(db_path)
     };
+    let mut checked = false;
     let opened = opened.and_then(|c| {
         if unclean {
+            checked = true;
             quick_check(&c)?;
         }
         Ok(c)
@@ -359,7 +386,25 @@ pub(crate) fn open_session(db_path: &Path) -> Result<(Connection, bool, Session)
     if let Err(e) = sync_roots_backup(db_path, &conn) {
         log::warn!("root list backup not written: {e}");
     }
+    log::info!(target: crate::indexer::DIAG_TARGET, "{}", open_record(
+        started.elapsed(),
+        checked,
+        recovered,
+        std::fs::metadata(db_path).ok().map(|m| m.len()),
+    ));
     Ok((conn, recovered, session))
+}
+
+/// The diagnostic record of an index open (VFS-41 R4): its time, whether the integrity
+/// check ran (after an unclean exit) and whether the index was rebuilt.
+fn open_record(took: Duration, checked: bool, recovered: bool, bytes: Option<u64>) -> String {
+    format!(
+        "open ms={} checked={} recovered={} index_mb={}",
+        took.as_millis(),
+        u8::from(checked),
+        u8::from(recovered),
+        crate::indexer::sched::mb(bytes)
+    )
 }
 
 /// [`open_session`] whose session ends when this returns (one-shot tools). Returns the
@@ -1848,6 +1893,28 @@ mod tests {
             join_rel("/r", "a/b c"),
             Path::new("/r").join("a").join("b c")
         );
+    }
+
+    /// VFS-41 AC-4: the open record gives the time, whether the check ran, whether the
+    /// index was rebuilt and its size, and nothing else.
+    #[test]
+    fn open_record_carries_time_check_and_size() {
+        let line = open_record(Duration::from_millis(43_210), true, false, Some(1874 << 20));
+        assert_eq!(line, "open ms=43210 checked=1 recovered=0 index_mb=1874");
+        assert_eq!(
+            open_record(Duration::ZERO, false, true, None),
+            "open ms=0 checked=0 recovered=1 index_mb=?"
+        );
+    }
+
+    /// VFS-41 AC-3: opening the index sets the process's SQLite soft heap limit.
+    #[test]
+    fn open_sets_the_soft_heap_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let _vfs = crate::Vfs::open(&dir.path().join("index.db")).unwrap();
+        // SAFETY: a negative argument only reads the current limit.
+        let limit = unsafe { rusqlite::ffi::sqlite3_soft_heap_limit64(-1) };
+        assert_eq!(limit, SOFT_HEAP_LIMIT_BYTES);
     }
 
     /// Builds an index whose last page is overwritten: it opens, but fails quick_check.

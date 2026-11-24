@@ -267,6 +267,19 @@ fn avg_ms(total: Duration, n: u64) -> u128 {
     }
 }
 
+/// The process's bytes read and written so far, where known.
+type Io = (Option<u64>, Option<u64>);
+
+fn io_now() -> Io {
+    let p = platform::proc_stats();
+    (p.read_bytes, p.written_bytes)
+}
+
+/// Whole megabytes, or `?` when unknown.
+pub(crate) fn mb(b: Option<u64>) -> String {
+    b.map_or_else(|| "?".to_owned(), |b| (b >> 20).to_string())
+}
+
 fn per_min(n: u64, period: Duration) -> u64 {
     let secs = period.as_secs_f64();
     if secs <= 0.0 {
@@ -296,6 +309,10 @@ pub(crate) struct Diag {
     period: Period,
     pass_start: Option<Instant>,
     pass: Period,
+    /// The process's (read, written) bytes when the current period began, and when the
+    /// current pass began (VFS-41 R2).
+    period_io: Io,
+    pass_io: Option<Io>,
     last_memory: Option<Instant>,
     overflows: u64,
 }
@@ -311,6 +328,8 @@ impl Diag {
             period: Period::default(),
             pass_start: None,
             pass: Period::default(),
+            period_io: io_now(),
+            pass_io: None,
             last_memory: None,
             overflows: 0,
         }
@@ -389,6 +408,7 @@ impl Diag {
     ) {
         if self.pass_start.is_none() {
             self.pass_start = Some(self.period_start);
+            self.pass_io = Some(self.period_io);
         }
         let span = now.saturating_duration_since(self.period_start);
         if span < self.every {
@@ -405,6 +425,7 @@ impl Diag {
         self.period = Period::default();
         self.period_base = summary.clone();
         self.period_start = now;
+        self.period_io = io_now();
     }
 
     /// Called when a pass ends: writes a `pass_end` record with the totals of the whole pass
@@ -420,11 +441,16 @@ impl Diag {
         self.take_checkpoints(ckpt);
         self.pass.add(&self.period);
         let start = self.pass_start.take().unwrap_or(self.period_start);
+        let start_io = self.pass_io.take().unwrap_or(self.period_io);
+        let end_io = io_now();
         if summary.dirs_listed > 0 || summary.errors > 0 {
             let span = now.saturating_duration_since(start);
+            let moved = |a: Option<u64>, b: Option<u64>| a.zip(b).map(|(a, b)| b.saturating_sub(a));
             let line = format!(
-                "pass_end {}",
-                Self::fields(mode, summary, &self.pass, span, retries)
+                "pass_end {} read_mb={} written_mb={}",
+                Self::fields(mode, summary, &self.pass, span, retries),
+                mb(moved(start_io.0, end_io.0)),
+                mb(moved(start_io.1, end_io.1)),
             );
             self.emit(&line);
         }
@@ -432,6 +458,7 @@ impl Diag {
         self.period = Period::default();
         self.period_base = ScanSummary::default();
         self.period_start = now;
+        self.period_io = end_io;
     }
 
     /// Whether a `memory` record is due: the first call, then every `diag_memory_every`.
@@ -440,15 +467,27 @@ impl Diag {
             .is_none_or(|t| now.saturating_duration_since(t) >= self.memory_every)
     }
 
-    /// Writes a `memory` record: working set, WAL and index size.
+    /// Writes a `memory` record: working set, WAL and index size, then the process's
+    /// footprint since it started (VFS-41 R1): peak memory, SQLite's heap now and at its
+    /// peak, CPU seconds and megabytes read and written. Idle CPU is the `cpu_s` difference
+    /// between two records over the time between them.
     pub(crate) fn memory(&mut self, now: Instant, wal_bytes: Option<u64>, db_bytes: Option<u64>) {
         self.last_memory = Some(now);
-        let mb = |b: Option<u64>| b.map_or_else(|| "?".to_owned(), |b| (b >> 20).to_string());
+        let p = platform::proc_stats();
+        let (sqlite_now, sqlite_peak) = crate::db::sqlite_heap();
         let line = format!(
-            "memory working_set_mb={} wal_mb={} index_mb={}",
+            "memory working_set_mb={} wal_mb={} index_mb={} peak_mb={} sqlite_mb={} \
+             sqlite_peak_mb={} cpu_s={} read_mb={} written_mb={}",
             mb(platform::working_set_bytes()),
             mb(wal_bytes),
-            mb(db_bytes)
+            mb(db_bytes),
+            mb(p.peak_bytes),
+            mb(Some(sqlite_now)),
+            mb(Some(sqlite_peak)),
+            p.cpu
+                .map_or_else(|| "?".to_owned(), |d| d.as_secs().to_string()),
+            mb(p.read_bytes),
+            mb(p.written_bytes),
         );
         self.emit(&line);
     }
@@ -711,7 +750,8 @@ pub(crate) mod tests {
     }
 
     /// VFS-5 AC-8: a period record and a pass-end record carry every field of R7, and a
-    /// memory record carries working set, WAL and index size.
+    /// memory record carries working set, WAL and index size. VFS-41 AC-2: the memory record
+    /// also carries the process footprint, and the pass-end record its I/O.
     #[test]
     fn diag_records_carry_every_field() {
         let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
@@ -766,6 +806,23 @@ pub(crate) mod tests {
         assert!(lines[1].contains("dirs=150 ") && lines[1].contains("errors=1"));
         assert!(lines[2].starts_with("memory working_set_mb="));
         assert!(lines[2].contains("wal_mb=5") && lines[2].contains("index_mb=900"));
+        // VFS-41 AC-2: the footprint fields; I/O per pass on the pass-end record.
+        for field in [
+            " peak_mb=",
+            " sqlite_mb=",
+            " sqlite_peak_mb=",
+            " cpu_s=",
+            " read_mb=",
+            " written_mb=",
+        ] {
+            assert!(lines[2].contains(field), "{field} missing in {}", lines[2]);
+        }
+        assert!(
+            !lines[2].contains('?'),
+            "known on this platform: {}",
+            lines[2]
+        );
+        assert!(lines[1].contains(" read_mb=") && lines[1].contains(" written_mb="));
         assert_eq!(lines[3], "watch_overflow root=7 total=1");
     }
 

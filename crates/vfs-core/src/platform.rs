@@ -176,6 +176,21 @@ pub(crate) fn working_set_bytes() -> Option<u64> {
     imp::working_set_bytes()
 }
 
+/// Footprint counters of this process since it started, for the diagnostic log (VFS-41):
+/// peak resident memory, CPU time, and bytes read and written (macOS: disk I/O; Windows: all
+/// I/O the process issued, files and devices). `None` where unknown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ProcStats {
+    pub peak_bytes: Option<u64>,
+    pub cpu: Option<Duration>,
+    pub read_bytes: Option<u64>,
+    pub written_bytes: Option<u64>,
+}
+
+pub(crate) fn proc_stats() -> ProcStats {
+    imp::proc_stats()
+}
+
 /// The Windows attributes of `path`, read by name (`GetFileAttributesW`: no handle is
 /// opened, so a cloud placeholder is not downloaded); `None` elsewhere or when unreadable.
 #[cfg(windows)]
@@ -331,6 +346,32 @@ mod imp {
             );
             (n == size).then_some(info.pti_resident_size)
         }
+    }
+
+    pub(super) fn proc_stats() -> super::ProcStats {
+        let tv =
+            |t: libc::timeval| std::time::Duration::new(t.tv_sec as u64, t.tv_usec as u32 * 1000);
+        let mut stats = super::ProcStats::default();
+        // SAFETY: `ru` is a plain C struct that `getrusage` fills on success.
+        unsafe {
+            let mut ru: libc::rusage = std::mem::zeroed();
+            if libc::getrusage(libc::RUSAGE_SELF, &mut ru) == 0 {
+                stats.cpu = Some(tv(ru.ru_utime) + tv(ru.ru_stime));
+            }
+        }
+        // SAFETY: `info` is a plain C struct of the V4 layout that `proc_pid_rusage` fills.
+        unsafe {
+            let mut info: libc::rusage_info_v4 = std::mem::zeroed();
+            let ptr = (&mut info as *mut libc::rusage_info_v4).cast();
+            if libc::proc_pid_rusage(libc::getpid(), libc::RUSAGE_INFO_V4, ptr) == 0 {
+                // The "peak physical footprint" `vmmap` shows; `ru_maxrss` can lag behind
+                // the resident size.
+                stats.peak_bytes = Some(info.ri_lifetime_max_phys_footprint);
+                stats.read_bytes = Some(info.ri_diskio_bytesread);
+                stats.written_bytes = Some(info.ri_diskio_byteswritten);
+            }
+        }
+        stats
     }
 
     pub(super) fn exclude_from_content_index(_dir: &Path) -> std::io::Result<()> {
@@ -582,6 +623,40 @@ mod imp {
         (ok != 0).then_some(pmc.WorkingSetSize as u64)
     }
 
+    pub(super) fn proc_stats() -> super::ProcStats {
+        use windows_sys::Win32::Foundation::FILETIME;
+        use windows_sys::Win32::System::Threading::{
+            GetProcessIoCounters, GetProcessTimes, IO_COUNTERS,
+        };
+        let mut stats = super::ProcStats::default();
+        // SAFETY: each struct is plain data of the size the call expects; the process
+        // pseudo-handle needs no closing.
+        unsafe {
+            let process = GetCurrentProcess();
+            let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            if GetProcessMemoryInfo(process, &mut pmc, pmc.cb) != 0 {
+                stats.peak_bytes = Some(pmc.PeakWorkingSetSize as u64);
+            }
+            let mut t: [FILETIME; 4] = std::mem::zeroed();
+            let [created, exited, kernel, user] = &mut t;
+            if GetProcessTimes(process, created, exited, kernel, user) != 0 {
+                let ticks =
+                    |f: &FILETIME| (u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime);
+                // FILETIME counts 100 ns ticks.
+                stats.cpu = Some(std::time::Duration::from_nanos(
+                    (ticks(kernel) + ticks(user)) * 100,
+                ));
+            }
+            let mut io: IO_COUNTERS = std::mem::zeroed();
+            if GetProcessIoCounters(process, &mut io) != 0 {
+                stats.read_bytes = Some(io.ReadTransferCount);
+                stats.written_bytes = Some(io.WriteTransferCount);
+            }
+        }
+        stats
+    }
+
     pub(super) fn exclude_from_content_index(dir: &Path) -> std::io::Result<()> {
         let p = wide(dir);
         // SAFETY: `p` is NUL-terminated.
@@ -635,6 +710,10 @@ mod imp {
 
     pub(super) fn working_set_bytes() -> Option<u64> {
         None
+    }
+
+    pub(super) fn proc_stats() -> super::ProcStats {
+        super::ProcStats::default()
     }
 
     pub(super) fn exclude_from_content_index(_dir: &Path) -> std::io::Result<()> {
@@ -855,5 +934,38 @@ mod tests {
             assert!(uptime().unwrap() > Duration::ZERO);
             assert!(working_set_bytes().unwrap() > 1 << 20);
         }
+    }
+
+    /// VFS-41 AC-1: the footprint counters are known on both platforms; the peak catches a
+    /// 64 MB allocation that is freed before the next reading; CPU time and bytes written
+    /// grow (a synced 4 MB write shows up in the written bytes).
+    #[test]
+    fn process_counters_grow() {
+        if !cfg!(any(windows, target_os = "macos")) {
+            return;
+        }
+        let before = proc_stats();
+        let touched = vec![1u8; 64 << 20];
+        std::hint::black_box(&touched);
+        drop(touched);
+        let peak = proc_stats().peak_bytes.unwrap();
+        assert!(
+            peak >= before.peak_bytes.unwrap().max(32 << 20),
+            "peak {peak}"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("x")).unwrap();
+        std::io::Write::write_all(&mut f, &vec![7u8; 4 << 20]).unwrap();
+        f.sync_all().unwrap();
+        let mut x = 0u64;
+        for i in 0..20_000_000u64 {
+            x = x.wrapping_mul(31).wrapping_add(i);
+        }
+        std::hint::black_box(x);
+        let after = proc_stats();
+        assert!(after.cpu.unwrap() > before.cpu.unwrap());
+        // Half of the 4 MB written: the OS may count a write it merges with another later.
+        assert!(after.written_bytes.unwrap() >= before.written_bytes.unwrap() + (2 << 20));
+        assert!(after.read_bytes.unwrap() >= before.read_bytes.unwrap());
     }
 }

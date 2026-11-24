@@ -248,7 +248,7 @@ Since VFS-5 a minimised VFS hides its WebView2 and asks it to suspend (study R8,
 the `msedgewebview2` working sets should drop clearly in the second reading and recover in
 the third. If they do not drop, the suspend call is not working on this runtime: note the
 WebView2 version from step 1. The log's `memory` lines (every 10 min: `working_set_mb`,
-`wal_mb`, `index_mb`) give the same figure for `vfs.exe` over weeks.
+`peak_mb`, `cpu_s` and the other VFS-41 fields) give the same figure for `vfs.exe` over weeks.
 
 ### 10. Journal growth rate (end of the field test, 1 min) → N2
 

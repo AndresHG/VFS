@@ -91,6 +91,7 @@ impl Vfs {
     /// `index.db.bad` and rebuilt from its roots, and a session starts (`db::open_session`).
     /// Starts no thread.
     pub fn open_with(db_path: &Path, config: SearchConfig) -> Result<Vfs> {
+        db::limit_sqlite_heap();
         let (conn, _recovered, session) = db::open_session(db_path)?;
         drop(conn);
         let reader = db::open_ro(db_path)?;
