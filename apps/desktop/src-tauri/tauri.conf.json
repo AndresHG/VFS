@@ -29,6 +29,7 @@
     "targets": ["nsis", "app"],
     "category": "Utility",
     "publisher": "VFS",
+    "copyright": "Copyright (c) 2026 Andrés Herranz. PolyForm Shield 1.0.0",
     "shortDescription": "Buscador de archivos",
     "icon": [
       "icons/32x32.png",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Public-repo hygiene: committed text never names the authors' relatives or private life.
 
-VFS is open source; anyone can read every tracked file. Docs, specs, fixtures and mockups
+VFS's source is public; anyone can read every tracked file. Docs, specs, fixtures and mockups
 describe users generically ("the user", "they") and use invented sample data. This check
 flags first-person kinship phrases ("my mother", "mi padre") and colloquial parent words
 ("mamá", "mom") in tracked text files.
