@@ -605,7 +605,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `open_link_url` | `id` | `null`; `unavailable` unless the Internet Shortcut has an `http`/`https` address (VFS-18 "Abrir en Firefox") |
 | `get_update_settings` | — | `{ checkOnOpen }` (VFS-21; on when `updates.json` is missing or unreadable) |
 | `set_update_check` | `enabled` | `{ checkOnOpen }` |
-| `check_for_update` | — | `{ version } \| null`; `null` without any connection when the setting is off; later calls in the same launch return the first answer (VFS-21) |
+| `check_for_update` | — | `{ version } \| null`; `null` without any connection when the setting is off; later calls in the same launch return the first answer (VFS-21); `io` when this launch's check failed, also on later calls (VFS-45) |
 | `install_update` | — | `null` (the app is replaced and relaunched); `not_found` when no update was offered, `io` when the download, signature or install fails |
 
 `rescan` with `id: null` ("Buscar cambios ahora") also wakes the bookmark reader.

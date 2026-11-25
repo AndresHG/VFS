@@ -186,3 +186,6 @@ export const KeyFallback = Object.freeze({
   PROTECTED_FILE: 'protected_file',
   SESSION_ONLY: 'session_only',
 });
+
+/** A project page «Acerca de» opens; the shell holds the addresses (VFS-45 R6). */
+export const ProjectPage = Object.freeze({ SOURCE: 'source', LICENSE: 'license' });

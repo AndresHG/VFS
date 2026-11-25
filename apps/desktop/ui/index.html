@@ -234,96 +234,137 @@
     </div>
   </dialog>
 
-  <!-- VFS-22: settings (language); VFS-21: the update check; VFS-33: advanced. -->
-  <dialog id="settings" class="drawer" aria-labelledby="settings-title" closedby="closerequest" data-light-dismiss>
-    <div class="drawer-head">
+  <!-- VFS-45: Ajustes is a centered window: a section list (one tab stop; Up, Down, Home and End
+       choose) ending with the version, and the chosen section. VFS-22: language; VFS-21: the
+       update check; VFS-27: documents; VFS-28: AI; VFS-33, VFS-34: advanced. -->
+  <dialog id="settings" class="settings" aria-labelledby="settings-title" closedby="closerequest" data-light-dismiss>
+    <nav class="settings-nav">
       <h2 id="settings-title" data-s="settingsTitle"></h2>
-      <form method="dialog"><button class="icon-btn" value="close">
+      <div id="settings-tabs" class="settings-tabs" role="tablist" aria-orientation="vertical" aria-labelledby="settings-title">
+        <button id="stab-general" class="stab" type="button" role="tab" aria-controls="spanel-general" aria-selected="true" data-s="settingsTabGeneral"></button>
+        <button id="stab-documents" class="stab" type="button" role="tab" aria-controls="spanel-documents" aria-selected="false" tabindex="-1" data-s="settingsTabDocuments"></button>
+        <button id="stab-ai" class="stab" type="button" role="tab" aria-controls="spanel-ai" aria-selected="false" tabindex="-1" data-s="settingsTabAi" hidden></button>
+        <button id="stab-advanced" class="stab" type="button" role="tab" aria-controls="spanel-advanced" aria-selected="false" tabindex="-1" data-s="advancedTitle"></button>
+        <button id="stab-about" class="stab" type="button" role="tab" aria-controls="spanel-about" aria-selected="false" tabindex="-1" data-s="settingsTabAbout"></button>
+      </div>
+      <p id="settings-version" class="settings-version"></p>
+    </nav>
+    <div class="settings-main">
+      <form method="dialog" class="settings-close"><button class="icon-btn" value="close">
         <svg aria-hidden="true"><use href="#i-close"/></svg>
         <span class="visually-hidden" data-s="close"></span>
       </button></form>
+      <div id="spanel-general" class="spanel" role="tabpanel" aria-labelledby="stab-general">
+        <h3 class="spanel-title" data-s="settingsTabGeneral"></h3>
+        <section class="setting setting-row">
+          <label for="language" data-s="languageLabel"></label>
+          <select id="language"></select>
+        </section>
+        <section class="setting" aria-labelledby="updates-title">
+          <h3 id="updates-title" data-s="updatesTitle"></h3>
+          <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
+          <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
+        </section>
+      </div>
+      <div id="spanel-documents" class="spanel" role="tabpanel" aria-labelledby="stab-documents" hidden>
+        <h3 class="spanel-title" data-s="settingsTabDocuments"></h3>
+        <!-- VFS-27 R5, R14: the content switch, the store's size, unread counts and delete. -->
+        <section class="setting" aria-labelledby="content-set-title">
+          <h3 id="content-set-title" data-s="contentSetTitle"></h3>
+          <label class="toggle"><input type="checkbox" id="content-on"> <span data-s="contentToggle"></span></label>
+          <p class="bookmarks-intro bookmarks-status" data-s="contentIntro"></p>
+          <p class="bookmarks-status" id="content-store" hidden></p>
+          <div id="content-unread" class="content-unread" hidden>
+            <p class="bookmarks-status" data-s="contentUnreadTitle"></p>
+            <ul id="content-unread-list" role="list"></ul>
+          </div>
+          <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
+        </section>
+      </div>
+      <div id="spanel-ai" class="spanel" role="tabpanel" aria-labelledby="stab-ai" hidden>
+        <h3 class="spanel-title" data-s="settingsTabAi"></h3>
+        <!-- VFS-28 R1: «Preguntar a sus documentos (IA)», off by default. The key field is
+             write-only: once saved, only its last 4 characters are shown. Hidden until the shell
+             answers ai_status: a build without the `ai` feature never shows it. -->
+        <section id="ai-section" class="setting" aria-labelledby="ai-set-title" hidden>
+          <h3 id="ai-set-title" data-s="aiSetTitle"></h3>
+          <label class="toggle"><input type="checkbox" id="ai-on"> <span data-s="aiToggle"></span></label>
+          <p class="bookmarks-intro bookmarks-status" data-s="aiIntro"></p>
+          <div id="ai-body" class="ai-body" hidden>
+            <fieldset id="ai-providers" class="ai-providers"><legend data-s="aiProviderLabel"></legend></fieldset>
+            <p id="ai-key-line" class="bookmarks-status"></p>
+            <form id="ai-key-form" class="ai-key-form">
+              <label for="ai-key" data-s="aiKeyLabel"></label>
+              <input id="ai-key" type="password" autocomplete="off" spellcheck="false">
+              <button class="btn" type="submit" data-s="aiKeySave"></button>
+            </form>
+            <div class="ai-key-actions">
+              <button id="ai-test" class="btn" type="button" data-s="aiTest"></button>
+              <button id="ai-replace" class="btn btn-quiet" type="button" data-s="aiReplace"></button>
+              <button id="ai-delete" class="btn btn-quiet" type="button" data-s="aiDelete"></button>
+            </div>
+            <p id="ai-msg" class="bookmarks-status" role="status" hidden></p>
+            <p class="bookmarks-intro" data-s="aiTestHelp"></p>
+            <div class="ai-cap">
+              <label for="ai-cap" data-s="aiCapLabel"></label>
+              <input id="ai-cap" type="number" min="0" step="0.5" inputmode="decimal">
+            </div>
+            <p id="ai-month" class="bookmarks-status"></p>
+            <label class="toggle"><input type="checkbox" id="ai-cheap"> <span data-s="aiCheap"></span></label>
+            <p class="bookmarks-intro" data-s="aiCheapHint"></p>
+            <button id="ai-open-record" class="btn btn-quiet" type="button" data-s="aiRecordOpen"></button>
+          </div>
+        </section>
+      </div>
+      <div id="spanel-advanced" class="spanel" role="tabpanel" aria-labelledby="stab-advanced" hidden>
+        <h3 class="spanel-title" data-s="advancedTitle"></h3>
+        <!-- VFS-33: the default folder exclusions; VFS-34: «Filtro de archivos». -->
+        <section class="setting setting-advanced">
+          <label class="toggle"><input type="checkbox" id="include-all"> <span data-s="includeAllToggle"></span></label>
+          <p class="bookmarks-intro bookmarks-status" data-s="includeAllIntro"></p>
+          <!-- VFS-34: «Filtro de archivos», global for every folder. -->
+          <section class="file-filter" aria-labelledby="file-filter-title">
+            <h3 id="file-filter-title" data-s="fileFilterTitle"></h3>
+            <p class="bookmarks-intro" data-s="fileFilterIntro"></p>
+            <ul id="file-filter-list" class="file-filter-list"></ul>
+            <form id="file-filter-form" class="file-filter-add">
+              <label for="file-filter-pattern" class="visually-hidden" data-s="fileFilterPlaceholder"></label>
+              <input id="file-filter-pattern" type="text" autocomplete="off" spellcheck="false">
+              <button id="file-filter-add" class="btn" type="submit">
+                <svg aria-hidden="true"><use href="#i-plus"/></svg><span class="visually-hidden" data-s="fileFilterAdd"></span>
+              </button>
+            </form>
+            <p id="file-filter-msg" class="bookmarks-intro" role="status"></p>
+            <button id="file-filter-reset" class="btn btn-quiet" type="button" data-s="fileFilterReset"></button>
+            <p class="bookmarks-intro" data-s="fileFilterBuiltIn"></p>
+            <!-- Shown only while content search is on (VFS-27). -->
+            <div id="content-max-row" class="file-filter-limit" hidden>
+              <label for="content-max-mb" data-s="contentMaxLabel"></label>
+              <input id="content-max-mb" type="number" min="0" max="100000" step="1" inputmode="numeric">
+              <p class="bookmarks-intro" data-s="contentMaxHint"></p>
+            </div>
+          </section>
+        </section>
+      </div>
+      <!-- VFS-45 R5, R6: the version, the update state and the credits; the license name and
+           «Ver en GitHub» open fixed project pages (LICENSE.md, the repository). -->
+      <div id="spanel-about" class="spanel about" role="tabpanel" aria-labelledby="stab-about" hidden>
+        <div class="about-head">
+          <svg class="about-logo" viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" rx="230" fill="#a3471f"/><g transform="translate(152 152) scale(7.2)"><path d="M6 26a7 7 0 0 1 7-7h23l9 9h42a7 7 0 0 1 7 7v47a7 7 0 0 1-7 7H13a7 7 0 0 1-7-7z" fill="#faf8f3"/><g stroke="#a3471f" stroke-width="4" stroke-linecap="round"><line x1="46" y1="56" x2="24" y2="64"/><line x1="46" y1="56" x2="70" y2="50"/><line x1="46" y1="56" x2="40" y2="79"/><line x1="46" y1="56" x2="72" y2="77"/><line x1="40" y1="79" x2="72" y2="77"/><line x1="70" y1="50" x2="72" y2="77"/></g><g fill="#a3471f"><circle cx="24" cy="64" r="5.5"/><circle cx="70" cy="50" r="5.5"/><circle cx="40" cy="79" r="5.5"/><circle cx="72" cy="77" r="5.5"/></g><circle cx="46" cy="56" r="9" fill="#1f1e1b" stroke="#a3471f" stroke-width="3.5"/></g></svg>
+          <h3 class="about-name" data-s="aboutName"></h3>
+          <p class="about-tagline" data-s="aboutTagline"></p>
+          <p class="about-version"><span id="about-version" class="about-pill"></span></p>
+          <p id="about-update" class="about-update" role="status"></p>
+          <button id="about-update-action" class="btn" type="button" hidden data-s="aboutCheck"></button>
+        </div>
+        <dl class="about-facts">
+          <div><dt data-s="aboutMadeBy"></dt><dd data-s="aboutAuthor"></dd></div>
+          <div><dt data-s="aboutLicense"></dt><dd><button id="about-license" class="link-btn" type="button" data-s="aboutLicenseName"></button></dd></div>
+          <div><dt data-s="aboutSource"></dt><dd><button id="about-source" class="link-btn" type="button" data-s="aboutSourceOpen"></button></dd></div>
+        </dl>
+        <p class="about-privacy" data-s="aboutPrivacy"></p>
+      </div>
     </div>
-    <section class="setting">
-      <label for="language" data-s="languageLabel"></label>
-      <select id="language"></select>
-    </section>
-    <section class="setting" aria-labelledby="updates-title">
-      <h3 id="updates-title" data-s="updatesTitle"></h3>
-      <label class="toggle"><input type="checkbox" id="updates-on"> <span data-s="updatesToggle"></span></label>
-      <p class="bookmarks-intro bookmarks-status" data-s="updatesIntro"></p>
-    </section>
-    <!-- VFS-27 R5, R14: the content switch, the store's size, unread counts and delete. -->
-    <section class="setting" aria-labelledby="content-set-title">
-      <h3 id="content-set-title" data-s="contentSetTitle"></h3>
-      <label class="toggle"><input type="checkbox" id="content-on"> <span data-s="contentToggle"></span></label>
-      <p class="bookmarks-intro bookmarks-status" data-s="contentIntro"></p>
-      <p class="bookmarks-status" id="content-store" hidden></p>
-      <div id="content-unread" class="content-unread" hidden>
-        <p class="bookmarks-status" data-s="contentUnreadTitle"></p>
-        <ul id="content-unread-list" role="list"></ul>
-      </div>
-      <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
-    </section>
-    <!-- VFS-28 R1: «Preguntar a sus documentos (IA)», off by default. The key field is
-         write-only: once saved, only its last 4 characters are shown. Hidden until the shell
-         answers ai_status: a build without the `ai` feature never shows it. -->
-    <section id="ai-section" class="setting" aria-labelledby="ai-set-title" hidden>
-      <h3 id="ai-set-title" data-s="aiSetTitle"></h3>
-      <label class="toggle"><input type="checkbox" id="ai-on"> <span data-s="aiToggle"></span></label>
-      <p class="bookmarks-intro bookmarks-status" data-s="aiIntro"></p>
-      <div id="ai-body" class="ai-body" hidden>
-        <fieldset id="ai-providers" class="ai-providers"><legend data-s="aiProviderLabel"></legend></fieldset>
-        <p id="ai-key-line" class="bookmarks-status"></p>
-        <form id="ai-key-form" class="ai-key-form">
-          <label for="ai-key" data-s="aiKeyLabel"></label>
-          <input id="ai-key" type="password" autocomplete="off" spellcheck="false">
-          <button class="btn" type="submit" data-s="aiKeySave"></button>
-        </form>
-        <div class="ai-key-actions">
-          <button id="ai-test" class="btn" type="button" data-s="aiTest"></button>
-          <button id="ai-replace" class="btn btn-quiet" type="button" data-s="aiReplace"></button>
-          <button id="ai-delete" class="btn btn-quiet" type="button" data-s="aiDelete"></button>
-        </div>
-        <p id="ai-msg" class="bookmarks-status" role="status" hidden></p>
-        <p class="bookmarks-intro" data-s="aiTestHelp"></p>
-        <div class="ai-cap">
-          <label for="ai-cap" data-s="aiCapLabel"></label>
-          <input id="ai-cap" type="number" min="0" step="0.5" inputmode="decimal">
-        </div>
-        <p id="ai-month" class="bookmarks-status"></p>
-        <label class="toggle"><input type="checkbox" id="ai-cheap"> <span data-s="aiCheap"></span></label>
-        <p class="bookmarks-intro" data-s="aiCheapHint"></p>
-        <button id="ai-open-record" class="btn btn-quiet" type="button" data-s="aiRecordOpen"></button>
-      </div>
-    </section>
-    <!-- VFS-33: the default folder exclusions; almost nobody needs this, so it stays folded. -->
-    <details class="setting setting-advanced">
-      <summary data-s="advancedTitle"></summary>
-      <label class="toggle"><input type="checkbox" id="include-all"> <span data-s="includeAllToggle"></span></label>
-      <p class="bookmarks-intro bookmarks-status" data-s="includeAllIntro"></p>
-      <!-- VFS-34: «Filtro de archivos», global for every folder. -->
-      <section class="file-filter" aria-labelledby="file-filter-title">
-        <h3 id="file-filter-title" data-s="fileFilterTitle"></h3>
-        <p class="bookmarks-intro" data-s="fileFilterIntro"></p>
-        <ul id="file-filter-list" class="file-filter-list"></ul>
-        <form id="file-filter-form" class="file-filter-add">
-          <label for="file-filter-pattern" class="visually-hidden" data-s="fileFilterPlaceholder"></label>
-          <input id="file-filter-pattern" type="text" autocomplete="off" spellcheck="false">
-          <button id="file-filter-add" class="btn" type="submit">
-            <svg aria-hidden="true"><use href="#i-plus"/></svg><span class="visually-hidden" data-s="fileFilterAdd"></span>
-          </button>
-        </form>
-        <p id="file-filter-msg" class="bookmarks-intro" role="status"></p>
-        <button id="file-filter-reset" class="btn btn-quiet" type="button" data-s="fileFilterReset"></button>
-        <p class="bookmarks-intro" data-s="fileFilterBuiltIn"></p>
-        <!-- Shown only while content search is on (VFS-27). -->
-        <div id="content-max-row" class="file-filter-limit" hidden>
-          <label for="content-max-mb" data-s="contentMaxLabel"></label>
-          <input id="content-max-mb" type="number" min="0" max="100000" step="1" inputmode="numeric">
-          <p class="bookmarks-intro" data-s="contentMaxHint"></p>
-        </div>
-      </section>
-    </details>
   </dialog>
 
   <dialog id="copies" class="drawer" aria-labelledby="copies-title" closedby="closerequest" data-light-dismiss>

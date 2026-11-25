@@ -225,13 +225,14 @@ test('cloud-only files and places get the badge', () => {
   assert.equal(showsCloudBadge(undefined), false);
 });
 
-/** VFS-33 AC-10: the switch for the excluded folders sits, unchecked, in a folded «Avanzado»
- *  section of Ajustes, with its copy in both catalogs. */
+/** VFS-33 AC-10, as amended by VFS-45 R2: the switch for the excluded folders sits, unchecked,
+ *  in the «Avanzado» section of Ajustes, which is not the one Ajustes opens on, with its copy in
+ *  both catalogs. */
 test('advanced switch for system and program folders', () => {
   const settings = html.slice(html.indexOf('<dialog id="settings"'), html.indexOf('</dialog>', html.indexOf('<dialog id="settings"')));
-  const details = settings.slice(settings.indexOf('<details class="setting setting-advanced"'));
-  assert.ok(details.startsWith('<details class="setting setting-advanced">'), 'folded by default (no open attribute)');
-  assert.match(details, /<input type="checkbox" id="include-all">/, 'unchecked by default');
+  const panel = settings.slice(settings.indexOf('<div id="spanel-advanced"'));
+  assert.match(panel, /^<div id="spanel-advanced" class="spanel" role="tabpanel" aria-labelledby="stab-advanced" hidden>/, 'not shown on open');
+  assert.match(panel, /<input type="checkbox" id="include-all">/, 'unchecked by default');
   for (const lang of Object.values(Lang)) {
     for (const key of ['advancedTitle', 'includeAllToggle', 'includeAllIntro']) {
       assert.ok(CATALOGS[lang][key], `${lang}.${key}`);

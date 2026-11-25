@@ -44,12 +44,13 @@
   --focus: #1f5fd6;
 
   --font: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
-  --t-search: 1.5rem;
-  --t-title: 1.375rem;
-  --t-name: 1.125rem;
-  --t-body: 1.125rem;
-  --t-meta: 1rem;
-  --t-small: 0.875rem;
+  /* One step under the first scale (VFS-45 R8). */
+  --t-search: 1.3125rem;
+  --t-title: 1.25rem;
+  --t-name: 1rem;
+  --t-body: 1rem;
+  --t-meta: 0.875rem;
+  --t-small: 0.8125rem;
 
   --s1: 0.25rem; --s2: 0.5rem; --s3: 0.75rem; --s4: 1rem;
   --s5: 1.5rem; --s6: 2rem; --s7: 3rem;
@@ -595,7 +596,7 @@ input[type="date"] {
   grid-template-columns: 2rem minmax(0, 1fr) auto auto;
   grid-template-areas: "ico main date reveal" "ico main size reveal";
   align-items: center;
-  column-gap: var(--s4);
+  column-gap: var(--s3);
   padding: var(--s2) var(--s3);
   border-block-end: 1px solid var(--line);
   contain: layout paint style;
@@ -603,9 +604,10 @@ input[type="date"] {
   user-select: none;
 }
 .row:hover { background: var(--sunk); }
+/* VFS-45 R7: the selection is a neutral background with a thin accent edge, no orange fill. */
 .row[aria-selected="true"] {
-  background: var(--accent-soft);
-  box-shadow: inset 4px 0 0 var(--accent);
+  background: var(--sunk-2);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .row .ico { grid-area: ico; display: grid; place-items: center; color: var(--ink-2); }
 .row .ico svg { width: 1.6rem; height: 1.6rem; }
@@ -672,7 +674,7 @@ input[type="date"] {
 .row mark { background: var(--mark); color: inherit; border-radius: 0.2rem; padding: 0 0.05em; }
 
 /* One action, on the selected row (and under the pointer). Enter and double-click do the same
-   on any row. */
+   on any row. Outlined: neutral under the pointer, accent on the selected row (VFS-45 R7). */
 .reveal {
   grid-area: reveal;
   display: none;
@@ -680,29 +682,30 @@ input[type="date"] {
   gap: var(--s2);
   min-block-size: var(--target);
   padding: 0 var(--s3) 0 var(--s4);
-  border: 1.5px solid var(--accent);
+  border: 1.5px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
 }
 .row:hover .reveal, .row[aria-selected="true"] .reveal { display: inline-flex; }
-.row[aria-selected="true"] .reveal { background: var(--accent); color: var(--on-accent); }
-.row[aria-selected="true"] .reveal:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.reveal:hover { background: var(--sunk); }
+.row[aria-selected="true"] .reveal { border-color: var(--accent); color: var(--accent); }
+.row[aria-selected="true"] .reveal:hover { background: var(--accent-soft); }
 .reveal .kbd {
   display: none;
   padding: 0 0.35em;
   border-radius: 0.3rem;
-  background: color-mix(in oklab, var(--on-accent) 22%, transparent);
+  background: var(--accent-soft);
   font-size: var(--t-small);
 }
 .row[aria-selected="true"] .reveal .kbd { display: inline; }
-/* The second action stays an outlined button next to the filled first one (VFS-18 D9). */
-.row[aria-selected="true"] .reveal-second { background: var(--surface); color: var(--accent); }
-.row[aria-selected="true"] .reveal-second:hover { background: var(--accent-soft); border-color: var(--accent); }
-.row[aria-selected="true"] .reveal-second .kbd { background: var(--accent-soft); }
+/* The second action stays neutral next to the accent first one (VFS-18 D9, VFS-45 R7). */
+.row[aria-selected="true"] .reveal-second { border-color: var(--line-strong); color: var(--ink); }
+.row[aria-selected="true"] .reveal-second:hover { background: var(--sunk); }
+.row[aria-selected="true"] .reveal-second .kbd { background: var(--sunk); }
 
 .row.loading .name-text, .row.loading .path {
   color: transparent;
@@ -763,7 +766,7 @@ input[type="date"] {
 .chit {
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr) auto;
-  column-gap: var(--s4);
+  column-gap: var(--s3);
   padding: var(--s2) var(--s3);
   border-block-end: 1px solid var(--line);
 }
@@ -775,7 +778,12 @@ input[type="date"] {
 .chit .fragment { margin: 0; font-size: var(--t-meta); line-height: 1.45; overflow-wrap: anywhere; }
 .chit .page { color: var(--ink-2); padding-inline-start: var(--s2); white-space: nowrap; }
 .chit mark { background: var(--mark); color: inherit; border-radius: 0.2rem; padding: 0 0.05em; }
-.chit .btn { align-self: center; }
+.chit:hover { background: var(--sunk); }
+/* VFS-45 R7, D7: «Mostrar en carpeta» shows on the hit under the pointer or holding the focus;
+   faded, not hidden, so it stays in the tab order and the row never changes width. */
+.chit .btn { align-self: center; opacity: 0; transition: opacity var(--ease); }
+.chit:hover .btn, .chit:focus-within .btn { opacity: 1; }
+@media (hover: none) { .chit .btn { opacity: 1; } }
 #content-more { margin: var(--s2) var(--s3) 0; }
 .content-line { margin: 0; color: var(--ink-2); font-size: var(--t-meta); flex: 1 1 14rem; min-width: 0; }
 .content-line[hidden] { display: none; }
@@ -1031,6 +1039,8 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 @media (prefers-reduced-motion: no-preference) {
   .drawer[open] { animation: slide-in 160ms ease-out; }
   @keyframes slide-in { from { translate: 2rem 0; opacity: 0; } }
+  .settings[open] { animation: fade-in 120ms ease-out; }
+  @keyframes fade-in { from { opacity: 0; scale: 0.98; } }
 }
 
 .confirm {
@@ -1060,6 +1070,10 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 
 @media (forced-colors: active) {
   .row[aria-selected="true"] { outline: 3px solid Highlight; outline-offset: -3px; }
+  /* VFS-45 R3: the system's own checkbox, which forced colours draw correctly. */
+  #settings .toggle input { appearance: auto; inline-size: 1.25rem; block-size: 1.25rem; }
+  #settings .toggle input::before { content: none; }
+  .stab[aria-selected="true"] { outline: 2px solid Highlight; }
   .filter, .filter-select select { border: 1px solid ButtonText; }
   .filter.is-on, .filter-select.is-on { outline: 2px solid Highlight; }
   .tab[aria-selected="true"] { border-block-end-color: Highlight; }
@@ -1080,8 +1094,80 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 
 /* VFS-6: bookmarks as a source (docs/design/system.md "Sources"). */
 .row .ico[data-kind="bookmark"], .row .ico[data-kind="bookmark-folder"] { color: var(--accent); }
-.setting { display: grid; gap: var(--s2); padding: 0 var(--s5) var(--s4); }
+/* ---------- Ajustes (VFS-45 R1–R3): a centered window, the section list on the left, the
+   settings as rows in bordered cards. */
+.settings {
+  width: min(50rem, calc(100% - 2rem));
+  height: min(38rem, calc(100dvh - 2rem));
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  border-radius: 0.875rem;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.22);
+  overflow: hidden;
+}
+.settings[open] { display: grid; grid-template-columns: 12.5rem minmax(0, 1fr); }
+.settings-nav {
+  display: flex; flex-direction: column; gap: var(--s1); min-block-size: 0;
+  padding: var(--s4) var(--s3); background: var(--sunk); overflow-y: auto;
+}
+.settings-nav h2 { font-size: var(--t-body); padding: var(--s1) var(--s3) var(--s2); }
+.settings-tabs { display: flex; flex-direction: column; gap: 2px; }
+.stab {
+  min-block-size: var(--target); padding: 0 var(--s3); border: 0; border-radius: 0.5rem;
+  background: none; color: var(--ink-2); text-align: start; cursor: pointer;
+}
+.stab:hover { background: var(--sunk-2); color: var(--ink); }
+.stab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+.settings-version { margin: auto 0 0; padding: var(--s3) var(--s3) 0; color: var(--ink-2); font-size: var(--t-meta); }
+.settings-version:empty { display: none; }
+.settings-main { position: relative; min-block-size: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s5); }
+.settings-close { position: absolute; inset-block-start: var(--s3); inset-inline-end: var(--s3); }
+.spanel { display: grid; gap: var(--s4); align-content: start; }
+.spanel-title { margin: 0; padding-inline-end: 3rem; font-size: var(--t-title); }
+.setting { display: grid; gap: var(--s1); padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .setting label { font-weight: 700; }
+.setting > h3 { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
+.setting-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--s4); }
+#settings .bookmarks-intro, #settings .bookmarks-status { margin: 0; font-size: var(--t-meta); text-wrap: pretty; }
+/* A switch: the label first, the native checkbox drawn as a switch at the row's end. */
+#settings .toggle { display: flex; flex-direction: row-reverse; justify-content: space-between; gap: var(--s4); }
+#settings .toggle input {
+  appearance: none; flex: none; position: relative; margin: 0;
+  inline-size: 2.75rem; block-size: 1.5rem; border-radius: 999px;
+  background: var(--line-strong); cursor: pointer; transition: background var(--ease);
+}
+#settings .toggle input::before {
+  content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px;
+  inline-size: calc(1.5rem - 6px); block-size: calc(1.5rem - 6px); border-radius: 50%;
+  background: #fff; transition: translate var(--ease);
+}
+#settings .toggle input:checked { background: var(--accent); }
+#settings .toggle input:checked::before { translate: 1.25rem 0; }
+/* «Acerca de» (VFS-45 R5). */
+.about-head { display: grid; justify-items: center; gap: var(--s1); text-align: center; padding-block-start: var(--s2); }
+.about-logo { width: 4rem; height: 4rem; }
+.about-name { margin: var(--s2) 0 0; font-size: var(--t-title); }
+.about-tagline { margin: 0; max-width: 36ch; color: var(--ink-2); font-size: var(--t-meta); text-wrap: balance; }
+.about-version { margin: var(--s2) 0 0; }
+.about-pill { padding: 0.15rem var(--s3); border-radius: 999px; background: var(--sunk); font-weight: 700; font-size: var(--t-meta); }
+.about-update { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
+.about-update:empty { display: none; }
+.about-facts { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.about-facts > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s4); padding: var(--s3) var(--s4); border-block-end: 1px solid var(--line); }
+.about-facts > div:last-child { border-block-end: 0; }
+.about-facts dt { color: var(--ink-2); }
+.about-facts dd { margin: 0; font-weight: 700; }
+.about-privacy { margin: 0; color: var(--ink-2); font-size: var(--t-meta); text-align: center; }
+/* Narrow or large text: the section list becomes a wrapping row above the section (R1). */
+@media (max-width: 44rem) {
+  .settings[open] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); padding: var(--s2) 3.5rem var(--s2) var(--s3); overflow: visible; }
+  .settings-nav h2 { padding: 0 var(--s2); }
+  .settings-tabs { flex-direction: row; flex-wrap: wrap; }
+  .settings-version { margin: 0; padding: 0; }
+  .settings-main { position: static; padding: var(--s4); }
+}
 .setting select {
   min-block-size: 2.5rem; padding: 0 var(--s3); border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--surface);
@@ -1092,7 +1178,6 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .bookmarks-setting summary { padding-block: var(--s3); font-weight: 700; cursor: pointer; }
 .bookmarks-summary { font-weight: 400; color: var(--ink-2); }
 .bookmarks-intro { margin: var(--s1) 0 0; color: var(--ink-2); }
-.setting-advanced summary { cursor: pointer; font-weight: 700; }
 .toggle { display: inline-flex; align-items: center; gap: var(--s2); min-block-size: 2.5rem; font-weight: 700; }
 .toggle input { inline-size: 1.25rem; block-size: 1.25rem; accent-color: var(--accent); }
 .bookmarks-status { margin: var(--s1) 0 var(--s4); color: var(--ink-2); }

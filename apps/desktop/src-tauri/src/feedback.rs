@@ -35,6 +35,12 @@ pub const OMITTED: &str = "<omitido>";
 /// holds all.
 pub const PREVIEW_LOG_BYTES: usize = 200 * 1024;
 
+/// The project's public page, opened by «Código fuente» in Ajustes › Acerca de (VFS-45 R6).
+pub const SOURCE_URL: &str = "https://github.com/AndresHG/VFS";
+
+/// The license text, opened by the license's name in Ajustes › Acerca de (VFS-45 R6).
+pub const LICENSE_URL: &str = "https://github.com/AndresHG/VFS/blob/main/LICENSE.md";
+
 /// New-issue page of the project; the `comentarios` form lives in `.github/ISSUE_TEMPLATE/`.
 pub const ISSUE_URL: &str = "https://github.com/AndresHG/VFS/issues/new";
 
@@ -561,8 +567,43 @@ pub fn write_zip(path: &Path, text: &str) -> std::io::Result<()> {
     result
 }
 
-/// Opens a web address in the default browser (R6). Only [`github_url`]'s output reaches it:
-/// fully percent-encoded, so it is one safe argument.
+/// A page of the project that «Acerca de» links to (VFS-45 R6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectPage {
+    Source,
+    License,
+}
+
+impl ProjectPage {
+    /// Every page, for the contract test (VFS-1 X1).
+    pub fn all() -> [ProjectPage; 2] {
+        let all = [ProjectPage::Source, ProjectPage::License];
+        for p in &all {
+            match p {
+                ProjectPage::Source | ProjectPage::License => {}
+            }
+        }
+        all
+    }
+
+    pub fn url(self) -> &'static str {
+        match self {
+            ProjectPage::Source => SOURCE_URL,
+            ProjectPage::License => LICENSE_URL,
+        }
+    }
+}
+
+/// «Código fuente» and the license (VFS-45 R6, D8): opens a fixed project address in the
+/// default browser. The page names the page, never the address, so it can open no other.
+#[tauri::command]
+pub fn open_project_page(page: ProjectPage) -> Result<(), ApiError> {
+    open_url(page.url()).map_err(io_error)
+}
+
+/// Opens a web address in the default browser (R6). Only [`github_url`]'s output and the fixed
+/// [`ProjectPage`] addresses reach it: fully percent-encoded, so each is one safe argument.
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -1401,6 +1442,27 @@ mod tests {
             export_dir(&[Some(missing), None, Some(tmp.path().into())]),
             Some(tmp.path().to_path_buf())
         );
+    }
+
+    /// VFS-45 AC-6: the page names a project page as `source` or `license`, never an
+    /// address; both open under the project, the one the issue form lives under, and need no
+    /// encoding to be one safe argument. Anything else is refused.
+    #[test]
+    fn project_pages_are_fixed_addresses() {
+        let page = |s: &str| serde_json::from_str::<ProjectPage>(s);
+        assert_eq!(page(r#""source""#).unwrap(), ProjectPage::Source);
+        assert_eq!(page(r#""license""#).unwrap(), ProjectPage::License);
+        assert!(page(r#""https://example.com""#).is_err());
+        assert!(ISSUE_URL.starts_with(&format!("{SOURCE_URL}/")));
+        assert!(ProjectPage::License
+            .url()
+            .starts_with(&format!("{SOURCE_URL}/")));
+        for p in ProjectPage::all() {
+            assert!(p
+                .url()
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || ":/.-".contains(c)));
+        }
     }
 
     /// VFS-20 AC-5: the issue URL uses the `comentarios` form, carries the (shortened) text

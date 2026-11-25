@@ -60,6 +60,7 @@ macro_rules! app_commands {
             crate::updates::install_update,
             crate::feedback::feedback_report,
             crate::feedback::feedback_save,
+            crate::feedback::open_project_page,
             crate::content::content_status,
             crate::content::content_set_enabled,
             crate::content::content_set_paused,

@@ -69,9 +69,10 @@ pub fn is_newer(current: &Version, remote: &Version) -> bool {
 }
 
 /// The result of the one check per launch (VFS-21 R1). Concurrent callers wait for the first
-/// check and share its result; a failed check counts as "no update" until the next launch.
+/// check and share its result; a failed check is not retried until the next launch, and is
+/// reported as failed so «Acerca de» can say so (VFS-45 R5).
 pub struct CheckOnce<T> {
-    slot: Mutex<Option<Option<T>>>,
+    slot: Mutex<Option<Result<Option<T>, String>>>,
 }
 
 impl<T: Clone> Default for CheckOnce<T> {
@@ -83,7 +84,7 @@ impl<T: Clone> Default for CheckOnce<T> {
 }
 
 impl<T: Clone> CheckOnce<T> {
-    pub async fn get_or_check<F, Fut, E>(&self, fetch: F) -> Option<T>
+    pub async fn get_or_check<F, Fut, E>(&self, fetch: F) -> Result<Option<T>, String>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Option<T>, E>>,
@@ -93,9 +94,9 @@ impl<T: Clone> CheckOnce<T> {
         if let Some(done) = slot.as_ref() {
             return done.clone();
         }
-        let found = fetch().await.unwrap_or_else(|e| {
+        let found = fetch().await.map_err(|e| {
             log::warn!("update check failed: {e}");
-            None
+            e.to_string()
         });
         *slot = Some(found.clone());
         found
@@ -103,7 +104,12 @@ impl<T: Clone> CheckOnce<T> {
 
     /// The update the check found, if it ran and found one.
     pub async fn found(&self) -> Option<T> {
-        self.slot.lock().await.clone().flatten()
+        self.slot
+            .lock()
+            .await
+            .clone()
+            .and_then(Result::ok)
+            .flatten()
     }
 }
 
@@ -246,7 +252,8 @@ pub fn set_update_check(
 }
 
 /// The UI asks once after load; with the setting off this returns `None` without any
-/// connection (VFS-21 R6), and later calls in the same launch reuse the first answer.
+/// connection (VFS-21 R6), and later calls in the same launch reuse the first answer. A failed
+/// check rejects, so «Acerca de» can tell it from "no update" (VFS-45 R5).
 #[tauri::command]
 pub async fn check_for_update<R: Runtime>(
     app: AppHandle<R>,
@@ -259,7 +266,8 @@ pub async fn check_for_update<R: Runtime>(
     let found = state
         .check
         .get_or_check(|| fetch_update(&app, stopped))
-        .await;
+        .await
+        .map_err(io_error)?;
     Ok(found.map(|u| UpdateInfo { version: u.version }))
 }
 
@@ -392,15 +400,21 @@ mod tests {
             Ok::<_, String>(Some("0.2.1".to_string()))
         };
         tauri::async_runtime::block_on(async {
-            assert_eq!(once.get_or_check(fetch).await.as_deref(), Some("0.2.1"));
-            assert_eq!(once.get_or_check(fetch).await.as_deref(), Some("0.2.1"));
+            assert_eq!(
+                once.get_or_check(fetch).await,
+                Ok(Some("0.2.1".to_string()))
+            );
+            assert_eq!(
+                once.get_or_check(fetch).await,
+                Ok(Some("0.2.1".to_string()))
+            );
             assert_eq!(once.found().await.as_deref(), Some("0.2.1"));
         });
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
-    /// VFS-21 AC-6: an unreachable endpoint or a bad manifest is "no update", and is not
-    /// retried in the same launch.
+    /// VFS-21 AC-6 as amended by VFS-45 AC-5: an unreachable endpoint or a bad manifest
+    /// offers no update, is reported as failed, and is not retried in the same launch.
     #[test]
     fn failed_check_is_no_update_until_next_launch() {
         let calls = AtomicUsize::new(0);
@@ -410,8 +424,9 @@ mod tests {
             Err::<Option<String>, _>("network unreachable")
         };
         tauri::async_runtime::block_on(async {
-            assert_eq!(once.get_or_check(fetch).await, None);
-            assert_eq!(once.get_or_check(fetch).await, None);
+            let failed = Err("network unreachable".to_string());
+            assert_eq!(once.get_or_check(fetch).await, failed);
+            assert_eq!(once.get_or_check(fetch).await, failed);
             assert_eq!(once.found().await, None);
         });
         assert_eq!(calls.load(Ordering::SeqCst), 1);

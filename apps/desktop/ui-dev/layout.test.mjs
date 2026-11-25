@@ -175,7 +175,8 @@ for (const viewport of VIEWPORTS) {
       await assertNoSideScroll(`folders panel, ${where}`);
     });
 
-    /** VFS-34 AC-6, VFS-35 AC-5: in Ajustes › Avanzado, the file filter shows the five
+    /** VFS-34 AC-6, VFS-35 AC-5, VFS-45 AC-8: the Ajustes window fits inside the window and
+     *  none of its sections scrolls sideways; in «Avanzado», the file filter shows the five
      *  defaults (none a shortcut), its add field, add button and reset button fit and are
      *  not covered once scrolled to, and the size field is hidden while content search is
      *  off. */
@@ -183,9 +184,16 @@ for (const viewport of VIEWPORTS) {
       await open(viewport, text);
       await evaluate(`document.getElementById('open-settings').click()`);
       await until(`document.getElementById('settings').open`, 'the settings panel');
-      // The drawer slides in from 2rem to the right (160 ms): measure once it stops.
-      await until(`document.getElementById('settings').getAnimations().every((a) => a.playState === 'finished')`, 'the slide-in');
-      await evaluate(`document.querySelector('#settings .setting-advanced').open = true`);
+      // The window fades in (120 ms): measure once it stops.
+      await until(`document.getElementById('settings').getAnimations().every((a) => a.playState === 'finished')`, 'the fade-in');
+      const box = await evaluate(`(() => { const r = document.getElementById('settings').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom, innerWidth, innerHeight]; })()`);
+      assert.ok(box[0] >= 0 && box[1] >= 0 && box[2] <= box[4] && box[3] <= box[5], `Ajustes inside the window ${JSON.stringify(box)} (${where})`);
+      for (const tab of ['stab-general', 'stab-documents', 'stab-advanced', 'stab-about']) {
+        await evaluate(`document.getElementById('${tab}').click()`);
+        const over = await evaluate(`[...document.querySelectorAll('#settings, .settings-nav, .settings-main')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.className || e.id)`);
+        assert.deepEqual(over, [], `no sideways scroll in Ajustes › ${tab} (${where})`);
+      }
+      await evaluate(`document.getElementById('stab-advanced').click()`);
       await until(`document.querySelectorAll('#file-filter-list li').length === 5`, 'the default list');
       const items = await evaluate(`[...document.querySelectorAll('#file-filter-list code')].map((c) => c.textContent)`);
       for (const p of items) assert.doesNotMatch(p, /lnk|url/i, 'no default hides a shortcut');

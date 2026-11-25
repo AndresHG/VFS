@@ -24,7 +24,8 @@
 // Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
 // scan); `content=on` starts it reading, `content=damaged` and `content=stopped` show those states. A content query with
 // "alguna" is partial; one with "zzzz" finds nothing; one with "fallo" fails. `api.fakeCalls`
-// counts the name searches, content searches and content offers sent (VFS-42 AC-2, AC-4).
+// counts the name searches, content searches and content offers sent (VFS-42 AC-2, AC-4), reveals
+// and the project pages opened from «Acerca de» (VFS-45 AC-6, AC-7). The app version is 0.3.1.
 
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
@@ -494,7 +495,7 @@ export function createFakeBackend(params) {
     if (fileExclusions.some((x) => x.toLowerCase() === p.toLowerCase())) fail(PatternReason.DUPLICATE);
   };
   const updateCbs = new Set();
-  const fakeCalls = { searchSources: 0, contentSearch: 0, contentOffer: 0 };
+  const fakeCalls = { searchSources: 0, contentSearch: 0, contentOffer: 0, reveal: 0, openProjectPage: 0, lastProjectPage: null };
   const content = fakeContent(params.get('content'), corpus.files, fakeCalls);
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
@@ -681,6 +682,7 @@ export function createFakeBackend(params) {
     },
 
     async reveal(id, isDir) {
+      fakeCalls.reveal++;
       await sleep(80);
       const e = (isDir ? corpus.dirs : corpus.files).find((x) => x.id === id);
       if (!e) throw { code: ErrorCode.NOT_FOUND, message: `not found: ${id}` };
@@ -792,6 +794,8 @@ export function createFakeBackend(params) {
     async setContentMaxMb(mb) { contentMaxMb = mb; return contentMaxMb; },
     async getUpdateSettings() { return { ...updateSettings }; },
     async setUpdateCheck(enabled) { updateSettings.checkOnOpen = enabled; return { ...updateSettings }; },
+    async appVersion() { return '0.3.1'; },
+    async openProjectPage(page) { fakeCalls.openProjectPage++; fakeCalls.lastProjectPage = page; },
     async checkForUpdate() {
       await sleep(50);
       return updateSettings.checkOnOpen && params.has('update') ? { version: '0.9.0' } : null;
