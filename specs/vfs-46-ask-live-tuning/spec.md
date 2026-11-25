@@ -3,8 +3,8 @@
 - **Status**: implemented (PR pending)
 - **Size**: M (one subsystem; it supersedes VFS-28 R6.4's passage order, D8's not-found rule for
   OpenAI answers, and the live run's model tier in AC-12)
-- **Links**: VFS-28 (ask your archive), PRs #218 and #219, `rag-live` runs 45689319159 and
-  45690948017
+- **Links**: VFS-28 (ask your archive), PRs #218 and #219, `rag-live` runs 45689319159,
+  45690948017 and 45693384399
 
 ## Problem
 
@@ -35,6 +35,9 @@ Three golden cases also asked for facts their question does not ask for (q10, q1
   («duración», «vigencia» for «cuánto dura») among the synonyms, and the `found` description
   SHALL say it is false when the answer would have to be guessed or calculated (q19 and q40 of
   the second run).
+- R3b. THE answer prompt SHALL ask for citations through the provider's citation mechanism and
+  forbid passage numbers, references and repeated quotations in the answer text: Haiku wrote
+  «(1-1)» and repeated the quote in the text instead of citing, and Luna wrote «citeP0».
 - R4. THE OpenAI calls SHALL send reasoning effort `none`, the least the models take
   (`gpt-6-luna` rejects `minimal` with a 400; VFS-28 D7).
 - R5. THE live run SHALL use the cheap tier by default (owner, 2026-11-25), SHALL take an
