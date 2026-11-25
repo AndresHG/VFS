@@ -31,6 +31,10 @@ Three golden cases also asked for facts their question does not ask for (q10, q1
   R8). Supersedes VFS-28 D8 for OpenAI; Anthropic answers keep D8.
 - R3. THE OpenAI answer schema SHALL describe a quote as a short span copied character for
   character from the passage's text, without its `[P]` header.
+- R3a. THE rewrite prompt SHALL ask for the nouns a document uses for what is asked
+  («duración», «vigencia» for «cuánto dura») among the synonyms, and the `found` description
+  SHALL say it is false when the answer would have to be guessed or calculated (q19 and q40 of
+  the second run).
 - R4. THE OpenAI calls SHALL send reasoning effort `none`, the least the models take
   (`gpt-6-luna` rejects `minimal` with a 400; VFS-28 D7).
 - R5. THE live run SHALL use the cheap tier by default (owner, 2026-11-25), SHALL take an

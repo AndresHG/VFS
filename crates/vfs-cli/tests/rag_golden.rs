@@ -544,21 +544,23 @@ followed by the first unsupported statement. Plain text, one line.";
                         text: s.text.clone(),
                     })
                     .collect();
-                let g = grader
-                    .answer(
-                        &AnswerRequest {
-                            system_prompt: GRADER_PROMPT.into(),
-                            passages,
-                            earlier: Vec::new(),
-                            question: format!("Question: {}\nAnswer: {text}", c.question),
-                            cheap: true,
-                            model: None,
-                        },
-                        &cancel,
-                        &mut |_| {},
-                    )
-                    .unwrap_or_else(|e| panic!("{}: grader {e}", c.id));
-                verdict = g.text().trim().to_owned();
+                let g = grader.answer(
+                    &AnswerRequest {
+                        system_prompt: GRADER_PROMPT.into(),
+                        passages,
+                        earlier: Vec::new(),
+                        question: format!("Question: {}\nAnswer: {text}", c.question),
+                        cheap: true,
+                        model: None,
+                    },
+                    &cancel,
+                    &mut |_| {},
+                );
+                // A grader failure is reported, not fatal: the asking already cost money.
+                verdict = match g {
+                    Ok(g) => g.text().trim().to_owned(),
+                    Err(e) => format!("grader error: {e} ({})", e.kind()),
+                };
                 graded += 1;
                 faithful += usize::from(verdict.starts_with("FAITHFUL"));
             }

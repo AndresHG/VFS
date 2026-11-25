@@ -39,7 +39,7 @@ fn answer_schema() -> Value {
             "answer": {"type": "string"},
             "found": {
                 "type": "boolean",
-                "description": "true only if the passages contain the answer to the question",
+                "description": "true only if the passages state the answer to the question; false when it would have to be guessed or calculated from other facts",
             },
             "citations": {
                 "type": "array",
