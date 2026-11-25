@@ -188,8 +188,8 @@ pub fn anthropic_rewrite(rewrite: &crate::Rewrite) -> MockResponse {
     MockResponse::json(200, body.to_string())
 }
 
-/// An Anthropic streamed answer of `blocks`, each citation sent as a `citations_delta` with its
-/// `search_result_index`, in the shape of `tests/fixtures/anthropic_answer.sse`.
+/// An Anthropic streamed answer of `blocks`: one text block holding the JSON answer (VFS-46
+/// R6), in the shape of `tests/fixtures/anthropic_answer.sse`.
 pub fn anthropic_answer(blocks: &[crate::AnswerBlock]) -> MockResponse {
     let event = |name: &str, data: serde_json::Value| format!("event: {name}\ndata: {data}\n\n");
     let mut sse = event(

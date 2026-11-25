@@ -224,8 +224,8 @@ fn golden_set_has_its_shape() {
     }
 }
 
-/// VFS-28 AC-12: for every answerable question, every gold passage is among the passages
-/// sent, with the recorded rewrite. Every miss is listed at once.
+/// VFS-28 AC-12, VFS-46 AC-5: for every answerable question, every gold passage is among the
+/// passages sent, with the recorded rewrite. Every miss is listed at once.
 #[test]
 fn golden_retrieval_sends_every_gold_passage() {
     let db = index();
@@ -258,8 +258,8 @@ fn golden_retrieval_sends_every_gold_passage() {
     );
 }
 
-/// VFS-28 AC-12: the recorded answers, checked offline against the passages retrieval sends
-/// now: every citation resolves to a sent passage and its quote, every `must_contain` fact is
+/// VFS-28 AC-12, VFS-46 AC-5: the recorded answers, checked offline against the passages retrieval
+/// sends now: every citation resolves to a sent passage and its quote, every `must_contain` fact is
 /// in the answer, and every unanswerable question gets the not-found answer.
 #[test]
 fn golden_recorded_answers_check_offline() {

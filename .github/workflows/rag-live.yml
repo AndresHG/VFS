@@ -1,8 +1,9 @@
 # VFS-28 AC-12: the manual live run of the RAG golden set with the owner's keys. One provider
 # answers every golden question with the cheap tier, or with `answer_model` for the reference run
-# (VFS-46), and the other grades faithfulness (the same provider when only one key is set). It costs real money, so it runs only when dispatched by
-# hand, never on push or pull request. The keys come from the repository secrets
-# VFS_ANTHROPIC_KEY and VFS_OPENAI_KEY and are never printed or written.
+# (VFS-46), and the other grades faithfulness (the same provider when only one key is set).
+# It costs real money, so it runs only when dispatched by hand, never on push or pull request.
+# The keys come from the repository secrets VFS_ANTHROPIC_KEY and VFS_OPENAI_KEY and are never
+# printed or written.
 # The run pushes the re-recorded `recorded.jsonl` and its report to a `rag-live/` branch, which
 # a PR then reviews; nothing lands on main from here.
 name: rag-live

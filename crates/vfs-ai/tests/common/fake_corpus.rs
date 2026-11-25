@@ -14,7 +14,7 @@ pub struct FakeDoc {
     pub dir: String,
     /// Chunk texts, by ordinal; chunk `i` is on page `i + 1`.
     pub chunks: Vec<String>,
-    /// Ordinals of the matching chunks, best first (at most 3, as `retrieve` returns).
+    /// Ordinals of the matching chunks, best first (at most 6, as `retrieve` returns; VFS-46 R8).
     pub best: Vec<u32>,
 }
 

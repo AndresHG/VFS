@@ -298,7 +298,7 @@ function fakeAi(mode) {
     return api;
   }
   const st = {
-    settings: { enabled: Boolean(mode), provider: Provider.ANTHROPIC, cheap: false, noticeSeen: false },
+    settings: { enabled: Boolean(mode), provider: Provider.ANTHROPIC, cheap: true, noticeSeen: false },
     // provider -> {last4, place}; with `?ai=` the screen starts ready to ask.
     keys: mode ? { [Provider.ANTHROPIC]: { last4: 'a1b2', place: KeyPlace.CREDENTIAL_STORE } } : {},
     capNano: 5e9,

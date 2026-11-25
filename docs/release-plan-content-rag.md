@@ -73,5 +73,6 @@ shows a problem, the fix ships first as a 0.3.x.
 - Which folders have their content read (#198): every indexed folder by default, with a
   «Leer contenido» switch per folder row to leave one out, in the same row as VFS-29's
   per-folder consent (owner, 2026-11-25). Needs its own spec.
-- Model selector in Ajustes (#220): choose the answer and rewrite models and the reasoning level, with the cost of each (owner, 2026-11-25). Needs its own spec.
+- Model selector in Ajustes (#220): choose the answer and rewrite models and the reasoning
+  level, with the cost of each (owner, 2026-11-25). Needs its own spec.
 - MCP connector, knowledge graph, Markdown notes: each with its own spec.

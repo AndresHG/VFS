@@ -176,9 +176,9 @@ impl AnswerRequest {
 /// is in it (R7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawCitation {
-    /// Anthropic `search_result_index`, or OpenAI `passage_id`.
+    /// The answer schema's `passage_id` (both providers, VFS-46 R6).
     pub passage: usize,
-    /// Anthropic `cited_text`, or OpenAI `quote`.
+    /// The answer schema's `quote`.
     pub quote: String,
 }
 

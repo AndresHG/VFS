@@ -999,6 +999,7 @@ pub fn ai_export_ris<R: Runtime>(
 mod tests {
     use super::*;
 
+    /// VFS-46 AC-7: with no saved settings AI is off and the cheap tier is on.
     #[test]
     fn settings_default_off_and_round_trip() {
         let dir = tempfile::tempdir().unwrap();
