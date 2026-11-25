@@ -71,4 +71,7 @@ shows a problem, the fix ships first as a 0.3.x.
 
 - VFS-29 (hybrid search), after its gate on the golden set.
 - OCR (#28).
+- Which folders have their content read (#198): every indexed folder by default, with a
+  «Leer contenido» switch per folder row to leave one out, in the same row as VFS-29's
+  per-folder consent (owner, 2026-11-25). Needs its own spec.
 - MCP connector, knowledge graph, Markdown notes: each with its own spec.
