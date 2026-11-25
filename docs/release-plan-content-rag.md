@@ -40,15 +40,21 @@ release.
 ## v0.4: ask your archive
 
 v0.3.0 shipped on 2026-11-25 without the AI. 28b, 28c and 28d are merged behind the desktop
-Cargo feature `ai`, which release builds leave off (`default = []` in
-`apps/desktop/src-tauri/Cargo.toml`, #200). What is left before v0.4:
+Cargo feature `ai`, now on by default (`default = ["ai"]` in
+`apps/desktop/src-tauri/Cargo.toml`; `default = []` turns it off, and CI keeps that build
+compiling). The live runs and their fixes are VFS-46 (#218, #219, #223; Haiku 50/50, Luna
+49/50 on the golden set). Cost of the switch (R11), from the release dry run 45708968171
+against the v0.3.0 assets, as compressed download sizes: Windows installer 15.2 MB against
+14.6 MB, macOS app (zip and updater tarball) 34.3 MB against 33.7 MB, a gap that also holds
+v0.3.1's settings window. With no key the AI does no background work, makes no network call
+and holds no resident memory beyond an idle `AiState`. The update check is no longer the only
+connection: VFS-28 D15 supersedes VFS-21 R6, R7 and D1's wording. What is
+left before v0.4:
 
 | Order | Step | What | Who | Effort |
 |---|---|---|---|---|
-| 1 | `--live` runs | One `golden_live` run per provider with the owner's keys, cheap tier (owner, 2026-11-25), through the `rag-live` workflow: the keys are the secrets `VFS_ANTHROPIC_KEY` and `VFS_OPENAI_KEY`, a `limit` input gives a smoke run first, and the recordings land on a `rag-live/` branch; commit those of one run (AC-12) | session; the owner sets the secrets | ½ |
-| 2 | Fixes | Whatever the live runs show: OpenAI `reasoning.effort`, Anthropic `citations_delta` shape, `thinking` on the answer model | session | 0–2 |
-| 3 | Switch on | `default = ["ai"]`, release notes, version 0.4.0 | session | ½ |
-| 4 | Owner test | A release-candidate build tried on the owner's Mac and, if possible, on the target PC | owner | ½ |
+| 1 | Owner test | A release-candidate build (a `release` dry run) tried on the owner's Mac and, if possible, on the target PC | owner | ½ |
+| 2 | Tag | Tag `v0.4.0`; replace the draft release's generated notes with hand-written ones | session; the owner publishes | ¼ |
 
 28a, the stable macOS signing identity, shipped in v0.3.1 with the settings window (VFS-45),
 so v0.4 brings one new risk (the AI) and v0.3.1 brought the other (the signature change).

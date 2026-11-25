@@ -7,15 +7,17 @@
 
 <p align="center">
   <b>Find any file in a huge personal archive, by name or folder, as you type.</b><br>
-  Offline desktop app for Windows and macOS · designed for 5 million files · Spanish and English interface
+  Local desktop app for Windows and macOS · designed for 5 million files · Spanish and English interface
 </p>
 
-# VFS: offline file search for huge personal archives
+# VFS: local file search for huge personal archives
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS that works offline, in Spanish and English (the
-system language by default, changeable in Settings). Its only connection to the internet is a
-check for a new version when it opens, which can be turned off in Settings.
+system language by default, changeable in Settings). It connects to the internet only to check
+for a new version when it opens, which can be turned off in Settings, and, once you turn on
+«Preguntar a sus documentos» with your own OpenAI or Anthropic key, to send each question and
+the passages it uses to that provider.
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -98,7 +100,7 @@ in [`docs/vision.md`](docs/vision.md).
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
-| `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`, and the ask flow (retrieval rounds, passages, citation checks, follow-ups). In the app behind the desktop crate's `ai` feature, off in releases until 0.4. |
+| `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`, and the ask flow (retrieval rounds, passages, citation checks, follow-ups). In the app behind the desktop crate's `ai` feature, on by default from 0.4. |
 | `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app is VFS-27. |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`, `--names-only`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off` and `ask` (a real provider, key in `VFS_AI_KEY`). |
 | `bench/` | Standalone evaluation and measurement tools for content search (extractors, engines, corpus); outside the workspace. |
@@ -211,7 +213,8 @@ GitHub (it downloads `latest.json` from the latest release, about 1 KB, and send
 about your files). If there is one it offers "Actualizar"; one click downloads it, checks its
 signature against the public key built into the app, installs it and reopens VFS. Nothing is
 downloaded or installed without that click. The check can be turned off in Settings ("Ajustes") →
-"Check for updates when opening"; then VFS never connects to the internet. v0.1.1 has no
+"Check for updates when opening"; then VFS makes no connection unless you ask your
+documents with your own AI key (VFS-28). v0.1.1 has no
 updater: install v0.2.0 by hand once. How it is built, the signing key and the manual test:
 [`docs/updates.md`](docs/updates.md); spec: [VFS-21](specs/vfs-21-updates/spec.md).
 
@@ -307,12 +310,13 @@ documents is off by default; the app offers it once after the first scan, and "A
 it on or off ([spec](specs/vfs-27-content-in-app/spec.md)).
 
 **Does it send my data anywhere?**
-No. VFS works offline: no account, no cloud service, no LLM. Its only connection is the
-update check when it opens (it downloads a small file from GitHub and sends nothing about
-your files), and it can be turned off. It reads only names, sizes
-and dates, and never opens, moves or changes your files. Future AI features (answers over
-your archive, a knowledge graph) would be opt-in, through a model API you configure
-yourself; see [`docs/vision.md`](docs/vision.md).
+Not unless you ask it to. VFS works offline: no account, no cloud service. It makes two kinds
+of connection. The update check when it opens downloads a small file from GitHub, sends
+nothing about your files, and can be turned off. «Preguntar a sus documentos» (from 0.4) is off
+until you turn it on with your own OpenAI or Anthropic key; then each question sends the
+question and the few passages used to answer it, with their file names and pages, to that
+provider, and the app shows which ones. It never moves or changes your files; see
+[`docs/vision.md`](docs/vision.md).
 
 **Does it need administrator rights?**
 No. It installs per user and does not read the NTFS master file table or install a service,

@@ -148,7 +148,7 @@ test('the cap prompt, then the cost line', async () => {
   }
 });
 
-/** VFS-28 (0.3.0 ships without AI): a build without the `ai` feature has no AI command, and
+/** VFS-28 (the `default = []` off switch, D14): a build without the `ai` feature has no AI command, and
  *  the screen shows nothing about AI: no Ajustes section, no «Preguntar». */
 test('without the ai feature nothing about AI shows', async () => {
   const b = await startBrowser();
