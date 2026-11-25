@@ -1,7 +1,7 @@
 # VFS-44 — Sources and notes: one item model, the user's own notes, collections
 
-- **Status**: draft. The owner decided D1–D3 on 2026-11-25; D4–D7 are asked and carry the
-  recommended choice until answered.
+- **Status**: draft. The owner decided D1–D3 on 2026-11-25; D7 too; D4–D6 are asked and carry
+  the recommended choice until answered.
 - **Size**: L. VFS writes files for the first time (the user's notes, in a folder VFS owns),
   it adds a third source and a derived store, it reads a platform-specific default folder
   (Documents) on Windows and macOS, and it is multi-PR.
@@ -197,10 +197,10 @@ Tests cite these ids (`VFS-44 AC-<m>`) in their doc comments.
 | D4 | Where is the notes folder? | Visible, `Documentos/VFS Notas`, changeable (recommended; asked) | owner | pending |
 | D5 | How are notes written? | A plain-text editor in VFS plus «Abrir en tu editor» (recommended; asked) | owner | pending |
 | D6 | What is a collection? | A saved search plus pinned and excluded items, stored as `.md` (recommended; asked) | owner | pending |
-| D7 | Do export importers come now? | No, one spec each later (recommended; asked) | owner | pending |
+| D7 | Do export importers come now? | No, one spec each later | owner | 2026-11-25 |
 | D8 | How are notes searched with content search off? | A small derived `notes.db` (FTS5 over folded title and body, same analysis as `content.db`) rebuilt from the folder; the `.md` files are the truth | agent | 2026-11-25 |
 
 ## Open questions
 
-- D4–D7 wait for the owner; each changes a requirement above, none changes the index
+- D4–D6 wait for the owner; each changes a requirement above, none changes the index
   schema.
