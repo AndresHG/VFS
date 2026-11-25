@@ -71,7 +71,7 @@ windows-core = "0.62"
 tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
-# VFS-28: tests run with the AI on, the release builds without it until 0.4.
+# VFS-28: tests turn the AI on explicitly; release builds get it through `default`.
 vfs-desktop = { path = ".", features = ["ai"] }
 vfs-ai = { path = "../../../crates/vfs-ai", features = ["test-support"] }
 vfs-bookmarks = { workspace = true, features = ["test-support"] }
