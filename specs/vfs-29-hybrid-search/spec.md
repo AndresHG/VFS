@@ -1,8 +1,6 @@
 # VFS-29 — Search by meaning: embeddings by API (and later a local model), fused with BM25
 
-- **Status**: draft. The owner decided D1–D6 (research E1, E2, P1 of 2026-11-21, the
-  rest on 2026-11-25). Approval needs the owner; code waits for approval and for
-  0.4 to ship.
+- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with 29a.
 - **Size**: L. It sends whole document text to an outside service for the first time (with
   consent, per folder), adds a store beside `content.db`, and is multi-PR (29a, 29b, 29c).
 - **Links**:
