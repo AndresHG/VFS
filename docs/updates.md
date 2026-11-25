@@ -55,8 +55,8 @@ Spec: [VFS-28](../specs/vfs-28-ask-archive/spec.md) R3, AC-3, D6, D12. Script:
   notarized. With one stable identity, a keychain item (an AI key) saved by one version stays
   readable by the next without a prompt. An ad-hoc signature changes with every build, so
   the next version would be denied the item.
-- The certificate's OU is `VFSSELFSGN`. codesign takes the Team ID from it, and the keychain
-  files items under that Team ID, not under one build's hash.
+- The signature has no Team ID. Its designated requirement is the app identifier plus the
+  certificate's hash, the same for every build, and that is what the keychain checks.
 - The certificate and its key are the Actions secrets `MACOS_SIGNING_CERTIFICATE` (a base64
   .p12) and `MACOS_SIGNING_CERTIFICATE_PASSWORD`. Only `release.yml` reads them. The
   maintainer keeps the offline backup: the three files `new-cert` writes, in the same private

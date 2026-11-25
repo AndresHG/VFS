@@ -57,9 +57,9 @@ Policy: Code Signing
 @unittest.skipUnless(shutil.which("openssl") and sys.platform != "win32",
                      "needs openssl; the certificate is made on a Mac or Linux")
 class CertificateTest(unittest.TestCase):
-    def test_certificate_is_a_long_lived_code_signing_leaf_with_a_team_id(self):
-        """VFS-28 R3, D12: valid ≥ 10 years, code signing only, OU = the Team ID, and the
-        .p12 opens with its password."""
+    def test_certificate_is_a_long_lived_code_signing_leaf(self):
+        """VFS-28 R3, D12: valid ≥ 10 years, code signing only, named «VFS Self-Signed Code
+        Signing», and the .p12 opens with its password."""
         with tempfile.TemporaryDirectory() as tmp:
             p12, sha1 = ms.make_certificate(tmp, "pw-for-test")
             pem = subprocess.run(
@@ -71,7 +71,7 @@ class CertificateTest(unittest.TestCase):
                                   capture_output=True, text=True, check=True).stdout
             self.assertIn("Code Signing", text)
             self.assertIn("CA:FALSE", text)
-            self.assertIn(f"OU = {ms.TEAM_ID}", text.replace("OU=", "OU = "))
+            self.assertIn(ms.COMMON_NAME, text)
             ten_years = str(10 * 365 * 24 * 3600)
             still_valid = subprocess.run(
                 ["openssl", "x509", "-in", str(cert), "-noout", "-checkend", ten_years],

@@ -41,10 +41,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The certificate's subject. codesign takes the signature's Team ID from the leaf's OU, and
-# the keychain files items under it ("teamid:" partition) rather than under one build's hash.
+# The certificate's subject. A self-signed signature has no Team ID ("not set"); the
+# designated requirement names the certificate itself, which is what keeps it stable.
 COMMON_NAME = "VFS Self-Signed Code Signing"
-TEAM_ID = "VFSSELFSGN"
 # R3: at least 10 years.
 VALID_DAYS = 7305
 # The app's bundle identifier (tauri.conf.json), so the probes' designated requirement has
@@ -63,7 +62,6 @@ prompt = no
 
 [dn]
 CN = {COMMON_NAME}
-OU = {TEAM_ID}
 O = VFS
 
 [ext]
@@ -149,7 +147,7 @@ def cmd_new_cert(args):
     b64.write_text(base64.b64encode(p12.read_bytes()).decode("ascii") + "\n", encoding="ascii")
     for f in (p12, pw_file, b64):
         os.chmod(f, 0o600)
-    print(f"Certificate «{COMMON_NAME}», Team ID {TEAM_ID}, SHA-1 {sha1}, {VALID_DAYS} days.")
+    print(f"Certificate «{COMMON_NAME}», SHA-1 {sha1}, {VALID_DAYS} days.")
     print(f"Wrote {p12}, {pw_file} and {b64}.")
     print("Next: back the folder up offline, then set the two Actions secrets:")
     print(f"  gh secret set {P12_ENV} -R AndresHG/VFS < {b64}")
@@ -211,10 +209,8 @@ def signature_info(binary):
             text=True)
     text = p.stdout + p.stderr
     cdhash = re.search(r"CDHash=([0-9a-f]+)", text)
-    team = re.search(r"TeamIdentifier=(\S+)", text)
     return {
         "cdhash": cdhash.group(1) if cdhash else None,
-        "team": team.group(1) if team else None,
         "requirement": designated_requirement(text),
     }
 
@@ -256,8 +252,8 @@ def cmd_ab_check(args):
             errors.append("builds A and B have the same code hash: not two builds")
         if not info_a["requirement"] or info_a["requirement"] != info_b["requirement"]:
             errors.append("A and B do not share one designated requirement")
-        if info_a["team"] != TEAM_ID:
-            errors.append(f"Team ID is {info_a['team']}, not {TEAM_ID}")
+        if f'certificate root = H"{args.identity.lower()}"' not in (info_a["requirement"] or ""):
+            errors.append("the designated requirement does not name the identity's certificate")
         account = f"vfs-ab-check-{secrets.token_hex(4)}"
         secret = secrets.token_urlsafe(16)
         # The probes' OsStore saves to the default keychain: the throwaway one, unlocked.
@@ -290,11 +286,11 @@ def cmd_check_app(args):
     for code in [app, *sorted((app / "Contents" / "MacOS").iterdir())]:
         p = run(["codesign", "-d", "--verbose=4", str(code)], capture_output=True, text=True)
         text = p.stdout + p.stderr
-        if f"Authority={COMMON_NAME}" not in text or f"TeamIdentifier={TEAM_ID}" not in text:
+        if f"Authority={COMMON_NAME}" not in text:
             print(text)
-            errors.append(f"{code} is not signed by «{COMMON_NAME}» with Team ID {TEAM_ID}")
+            errors.append(f"{code} is not signed by «{COMMON_NAME}»")
         else:
-            print(f"{code}: signed by «{COMMON_NAME}», Team ID {TEAM_ID}")
+            print(f"{code}: signed by «{COMMON_NAME}»")
     if errors:
         raise SystemExit("\n".join(errors))
 
