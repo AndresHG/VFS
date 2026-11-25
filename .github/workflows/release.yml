@@ -3,7 +3,9 @@
 # TAURI_SIGNING_PRIVATE_KEY and _PASSWORD) and the `manifest` job writes `latest.json`, which
 # installed apps fetch from the latest published release. A `workflow_dispatch` run is a dry
 # run (artifacts only); a `v*` tag also creates a draft release with every asset, published
-# by hand. Actions are pinned by commit SHA (tag in the comment); no build cache, so a release
+# by hand. VFS-28 R3: the macOS app is signed with the stable self-signed identity (Actions
+# secrets MACOS_SIGNING_CERTIFICATE and _PASSWORD, `docs/updates.md`), and AC-3's A/B keychain
+# check runs with it before anything is uploaded. Actions are pinned by commit SHA (tag in the comment); no build cache, so a release
 # is built only from the locked sources.
 name: release
 
@@ -51,7 +53,18 @@ jobs:
         shell: bash
         run: python3 scripts/sidecar.py build
 
-      # Not OS code signing: the minisign signature the updater checks before installing.
+      # VFS-28 R3: the identity in a throwaway keychain; its SHA-1 is Tauri's signing identity
+      # (local builds keep the ad-hoc "-" of tauri.conf.json).
+      - name: macOS signing identity (VFS-28 R3)
+        id: signid
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGNING_CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: python3 scripts/macos_signing.py import --keychain "$RUNNER_TEMP/vfs-signing.keychain-db"
+
+      # Updater signing is the minisign signature the updater checks before installing; on
+      # macOS the bundle is also code-signed with the identity above.
       # createUpdaterArtifacts is set only here, so local builds need no key.
       - name: Build (updater-signed)
         working-directory: apps/desktop/src-tauri
@@ -59,6 +72,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signid.outputs.identity }}
         run: |
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
           npx --yes "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --ci --bundles ${{ matrix.bundles }} \
@@ -68,6 +82,13 @@ jobs:
       - name: Check the bundle (worker inside, its version, installer size; VFS-27 AC-1)
         shell: bash
         run: python3 scripts/sidecar.py check
+
+      - name: macOS signature and A/B keychain check (VFS-28 R3, AC-3)
+        if: runner.os == 'macOS'
+        run: |
+          python3 scripts/macos_signing.py check-app target/release/bundle/macos/VFS.app
+          python3 scripts/macos_signing.py ab-check --keychain "$RUNNER_TEMP/vfs-signing.keychain-db" \
+            --identity "${{ steps.signid.outputs.identity }}"
 
       - name: Collect Windows installer
         if: runner.os == 'Windows'
