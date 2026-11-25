@@ -1,0 +1,54 @@
+# RAG golden live run: OpenAI (cheap tier), graded by OpenAI (self-graded: no other provider's key)
+
+- q01 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q02 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q03 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q04 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q05 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q06 found-ok=true facts-ok=false dropped=0 grade: FAITHFUL
+- q07 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q08 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q09 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q10 found-ok=true facts-ok=false dropped=0 grade: FAITHFUL
+- q11 found-ok=false facts-ok=true dropped=1 grade: -
+- q12 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q13 found-ok=true facts-ok=true dropped=0 grade: UNFAITHFUL: Tienes cita con la endocrina el 14 de octubre.
+- q14 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q15 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q16 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q17 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q18 found-ok=true facts-ok=false dropped=0 grade: FAITHFUL
+- q19 found-ok=false facts-ok=false dropped=0 grade: -
+- q20 found-ok=false facts-ok=false dropped=0 grade: -
+- q21 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q22 found-ok=false facts-ok=true dropped=1 grade: -
+- q23 found-ok=true facts-ok=true dropped=0 grade: Lo firmó Raúl Martín Martín, en calidad de Vicerrector de la Universidad de Castilla-La Mancha.
+- q24 found-ok=true facts-ok=false dropped=0 grade: FAITHFUL
+- q25 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q26 found-ok=false facts-ok=true dropped=1 grade: -
+- q27 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q28 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q29 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q30 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q31 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q32 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q33 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q34 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q35 found-ok=true facts-ok=false dropped=0 grade: FAITHFUL
+- q36 found-ok=true facts-ok=true dropped=0 grade: -
+- q37 found-ok=true facts-ok=true dropped=0 grade: -
+- q38 found-ok=false facts-ok=true dropped=0 grade: -
+- q39 found-ok=true facts-ok=true dropped=0 grade: -
+- q40 found-ok=false facts-ok=true dropped=0 grade: -
+- q41 found-ok=false facts-ok=true dropped=0 grade: -
+- q42 found-ok=true facts-ok=true dropped=0 grade: -
+- q43 found-ok=false facts-ok=true dropped=0 grade: -
+- q44 found-ok=true facts-ok=true dropped=0 grade: -
+- q45 found-ok=false facts-ok=true dropped=0 grade: -
+- q46 found-ok=true facts-ok=true dropped=0 grade: -
+- q47 found-ok=true facts-ok=true dropped=0 grade: -
+- q48 found-ok=true facts-ok=true dropped=0 grade: -
+- q49 found-ok=true facts-ok=true dropped=0 grade: -
+- q50 found-ok=true facts-ok=true dropped=0 grade: -
+
+found/not-found right: 40/50; facts: 43/50; faithful: 28/30; cost of the asking: 0.0201 $
