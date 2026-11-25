@@ -7,15 +7,17 @@
 
 <p align="center">
   <b>Find any file in a huge personal archive, by name or folder, as you type.</b><br>
-  Offline desktop app for Windows and macOS · designed for 5 million files · Spanish and English interface
+  Local desktop app for Windows and macOS · designed for 5 million files · Spanish and English interface
 </p>
 
-# VFS: offline file search for huge personal archives
+# VFS: local file search for huge personal archives
 
 VFS finds any file in a huge personal archive by its name or by the folders it sits in. It
 is a desktop app for Windows 10+ and macOS that works offline, in Spanish and English (the
-system language by default, changeable in Settings). Its only connection to the internet is a
-check for a new version when it opens, which can be turned off in Settings.
+system language by default, changeable in Settings). It connects to the internet only to check
+for a new version when it opens, which can be turned off in Settings, and, once you turn on
+«Preguntar a sus documentos» with your own OpenAI or Anthropic key, to send each question and
+the passages it uses to that provider.
 
 It is a fast, effective file finder for archives of millions of files (designed for 5 million),
 meant for anyone. It is tuned to stay fast and light even on a slow Windows PC whose 4–5 TB
@@ -307,12 +309,13 @@ documents is off by default; the app offers it once after the first scan, and "A
 it on or off ([spec](specs/vfs-27-content-in-app/spec.md)).
 
 **Does it send my data anywhere?**
-No. VFS works offline: no account, no cloud service, no LLM. Its only connection is the
-update check when it opens (it downloads a small file from GitHub and sends nothing about
-your files), and it can be turned off. It reads only names, sizes
-and dates, and never opens, moves or changes your files. Future AI features (answers over
-your archive, a knowledge graph) would be opt-in, through a model API you configure
-yourself; see [`docs/vision.md`](docs/vision.md).
+Not unless you ask it to. VFS works offline: no account, no cloud service. It makes two kinds
+of connection. The update check when it opens downloads a small file from GitHub, sends
+nothing about your files, and can be turned off. «Preguntar a sus documentos» (from 0.4) is off
+until you turn it on with your own OpenAI or Anthropic key; then each question sends the
+question and the few passages used to answer it, with their file names and pages, to that
+provider, and the app shows which ones. It never moves or changes your files; see
+[`docs/vision.md`](docs/vision.md).
 
 **Does it need administrator rights?**
 No. It installs per user and does not read the NTFS master file table or install a service,

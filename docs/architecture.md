@@ -687,8 +687,9 @@ startup failure shows an error dialog in the OS language (the UI's, once it has 
 VFS-22) and quits. A
 second launch focuses the running window (single-instance plugin). The webview may only use
 core IPC (`capabilities/default.json`) under a strict content security policy
-(`tauri.conf.json`); the web view has no network access. The only connection is the update
-check, made in Rust by the updater plugin (VFS-21, [`updates.md`](updates.md)).
+(`tauri.conf.json`); the web view has no network access. The connections are the update
+check, made in Rust by the updater plugin (VFS-21, [`updates.md`](updates.md)), and, only once
+the user turns on asking with their own key, each question's call to that provider (VFS-28).
 
 ## Bookmarks (VFS-6)
 
