@@ -47,8 +47,8 @@ compiling). The live runs and their fixes are VFS-46 (#218, #219, #223; Haiku 50
 against the v0.3.0 assets, as compressed download sizes: Windows installer 15.2 MB against
 14.6 MB, macOS app (zip and updater tarball) 34.3 MB against 33.7 MB, a gap that also holds
 v0.3.1's settings window. With no key the AI does no background work, makes no network call
-and holds no resident memory beyond an idle `AiState`. The update check text no longer calls
-itself the only connection (VFS-21 R7 and its wording in D1 give way to VFS-28 R1). What is
+and holds no resident memory beyond an idle `AiState`. The update check is no longer the only
+connection: VFS-28 D15 supersedes VFS-21 R6, R7 and D1's wording. What is
 left before v0.4:
 
 | Order | Step | What | Who | Effort |

@@ -1,6 +1,6 @@
 # VFS-21 — App updates: offer on open, install with one click
 
-- **Status**: implemented (PR on branch feat/vfs-21-updates; independent spec review 2026-11-21 added the install-failure path and step order)
+- **Status**: implemented (PR on branch feat/vfs-21-updates; independent spec review 2026-11-21 added the install-failure path and step order); R6, R7 and D1's «only connection» wording superseded by VFS-28 D15
 - **Size**: L. It changes the installer and release pipeline (signed updater artifacts,
   `latest.json`), adds the app's only network connection, and behaves differently on Windows
   (the NSIS installer replaces the app and the app exits) and macOS (the bundle is replaced
