@@ -71,4 +71,7 @@ shows a problem, the fix ships first as a 0.3.x.
 
 - VFS-29 (hybrid search), after its gate on the golden set.
 - OCR (#28).
+- Which folders have their content read (#198): today one switch reads every indexed
+  folder; the lean option is a «Leer contenido» switch per folder row, beside VFS-29's
+  per-folder consent. Owner decision pending.
 - MCP connector, knowledge graph, Markdown notes: each with its own spec.
