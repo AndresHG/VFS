@@ -335,9 +335,21 @@ Toward a local personal knowledge base over files, bookmarks, chats and notes: f
 questions with answers that cite the original files, and browse an automatically built graph
 of connections. See [`docs/vision.md`](docs/vision.md).
 
+## License
+
+VFS is source-available under the [PolyForm Shield License 1.0.0](LICENSE.md). Anyone may
+use it for free, at home or at work, read the code, change it and share it. What
+the license does not allow is using VFS to provide a product that competes with it, even a
+free one. Anyone who passes on a copy, changed or not, passes on the license and its
+`Required Notice:` line. This is not an OSI open-source license.
+
 ## Contributing
 
 Read [`CLAUDE.md`](CLAUDE.md) first: specs before code, tests cite acceptance criteria
 (`/// VFS-1 AC-10: …`), branches `feat/vfs-<n>-<slug>`, squash-merged pull requests. Code,
 comments and docs are in English; everything the user sees is in both string catalogs,
 Spanish and English.
+
+By opening a pull request you agree that your contribution is licensed under the same
+[PolyForm Shield License 1.0.0](LICENSE.md) as the rest of VFS, and that the author may
+relicense future versions of VFS, your contribution included.
