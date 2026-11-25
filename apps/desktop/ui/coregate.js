@@ -7,7 +7,7 @@
 /** Commands that need no index: they run at once, also while it opens. */
 export const NO_CORE = new Set([
   'wait_core', 'system_locale', 'set_language', 'pick_folder',
-  'get_update_settings', 'set_update_check', 'check_for_update', 'install_update',
+  'get_update_settings', 'set_update_check', 'check_for_update', 'install_update', 'open_source_page',
 ]);
 
 /** Wraps Tauri's `invoke` so index commands wait for one shared `wait_core`. */

@@ -35,6 +35,9 @@ pub const OMITTED: &str = "<omitido>";
 /// holds all.
 pub const PREVIEW_LOG_BYTES: usize = 200 * 1024;
 
+/// The project's public page, opened by «Código fuente» in Ajustes › Acerca de (VFS-45 R6).
+pub const SOURCE_URL: &str = "https://github.com/AndresHG/VFS";
+
 /// New-issue page of the project; the `comentarios` form lives in `.github/ISSUE_TEMPLATE/`.
 pub const ISSUE_URL: &str = "https://github.com/AndresHG/VFS/issues/new";
 
@@ -561,8 +564,15 @@ pub fn write_zip(path: &Path, text: &str) -> std::io::Result<()> {
     result
 }
 
-/// Opens a web address in the default browser (R6). Only [`github_url`]'s output reaches it:
-/// fully percent-encoded, so it is one safe argument.
+/// «Código fuente» (VFS-45 R6, D8): opens [`SOURCE_URL`] in the default browser. It takes no
+/// argument, so the page can never make it open another address.
+#[tauri::command]
+pub fn open_source_page() -> Result<(), ApiError> {
+    open_url(SOURCE_URL).map_err(io_error)
+}
+
+/// Opens a web address in the default browser (R6). Only [`github_url`]'s output and the fixed
+/// [`SOURCE_URL`] reach it: fully percent-encoded, so each is one safe argument.
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -1401,6 +1411,17 @@ mod tests {
             export_dir(&[Some(missing), None, Some(tmp.path().into())]),
             Some(tmp.path().to_path_buf())
         );
+    }
+
+    /// VFS-45 AC-6: «Código fuente» opens the project's public page, the one the issue form
+    /// lives under, and the address needs no encoding to be one safe argument.
+    #[test]
+    fn source_page_is_the_project() {
+        assert_eq!(SOURCE_URL, "https://github.com/AndresHG/VFS");
+        assert!(ISSUE_URL.starts_with(&format!("{SOURCE_URL}/")));
+        assert!(SOURCE_URL
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ":/.-".contains(c)));
     }
 
     /// VFS-20 AC-5: the issue URL uses the `comentarios` form, carries the (shortened) text

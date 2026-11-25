@@ -7,7 +7,8 @@ import { createVirtualList } from './vlist.js';
 import { placesOf, showsCloudBadge } from './copies.js';
 import { ROW_KINDS, rowKindOf } from './kinds.js';
 import { SecondAction, secondActionOf } from './links.js';
-import { createUpdates } from './updates.js';
+import { aboutUpdateView, createUpdates } from './updates.js';
+import { ABOUT } from './about.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
@@ -1310,7 +1311,73 @@ function main(L) {
     $('language').value = choiceFor(savedLanguage());
     refreshContentStore();
     ai.refresh();
+    setSettingsTab('stab-general'); // VFS-45 D5: Ajustes opens on «General» each time
     settingsDialog.showModal();
+  });
+
+  // VFS-45 R2: the section list, one tab stop; Up, Down, Home and End move and choose.
+  const settingsTabList = $('settings-tabs');
+  const settingsTabs = () => [...settingsTabList.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden);
+  function setSettingsTab(id) {
+    for (const t of settingsTabList.querySelectorAll('[role="tab"]')) {
+      const on = t.id === id;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      $(t.getAttribute('aria-controls')).hidden = !on;
+    }
+    if (id === 'stab-about') renderAbout();
+  }
+  settingsTabList.addEventListener('click', (e) => {
+    const t = e.target.closest('[role="tab"]');
+    if (t) setSettingsTab(t.id);
+  });
+  const SETTINGS_STEPS = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+  settingsTabList.addEventListener('keydown', (e) => {
+    const all = settingsTabs();
+    const at = all.indexOf(e.target);
+    if (at < 0) return;
+    let next;
+    if (e.key in SETTINGS_STEPS) next = (at + SETTINGS_STEPS[e.key] + all.length) % all.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = all.length - 1;
+    else return;
+    e.preventDefault();
+    all[next].focus();
+    setSettingsTab(all[next].id);
+  });
+
+  // VFS-45 R4, R5: the version (read once from the shell), the update state and the credits.
+  let appVersion = '';
+  api.appVersion().then((v) => {
+    appVersion = v ?? '';
+    $('settings-version').textContent = appVersion ? S.appVersion(appVersion) : '';
+    $('about-version').textContent = appVersion ? S.aboutVersion(appVersion) : '';
+    $('about-version').hidden = !appVersion;
+  }).catch(() => { $('about-version').hidden = true; });
+  $('about-license-row').hidden = !ABOUT.license;
+  $('about-license').textContent = ABOUT.license ?? '';
+  $('about-source').addEventListener('click', () => api.openSourcePage().catch((err) => showError(errorText(err))));
+
+  let aboutChecking = false;
+  function renderAbout() {
+    const view = aboutUpdateView({ checkOn: $('updates-on').checked, ...updates.result() }, S);
+    $('about-update').textContent = aboutChecking ? S.aboutChecking : view.text;
+    const action = $('about-update-action');
+    action.hidden = !view.action || aboutChecking;
+    action.textContent = view.action === 'install' ? S.updateInstall : S.aboutCheck;
+    action.dataset.action = view.action ?? '';
+  }
+  $('about-update-action').addEventListener('click', async (e) => {
+    if (e.currentTarget.dataset.action === 'install') {
+      updates.install();
+      return;
+    }
+    aboutChecking = true;
+    renderAbout();
+    try { await updates.checkNow(); } finally {
+      aboutChecking = false;
+      renderAbout();
+    }
   });
   // A new language redraws the whole screen in it: the page reloads with the new choice.
   $('language').addEventListener('change', (e) => {
@@ -1742,6 +1809,8 @@ function main(L) {
     const show = button(S.revealButton, 'btn', () => revealFile(hit.id, false));
     show.setAttribute('aria-label', `${S.revealButton}: ${S.contentHitLabel(hit.name, hit.dir, page && N.count(page))}`);
     li.append(ico, main, show);
+    // VFS-45 R7: a double click reveals the document, as on a name hit.
+    li.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) revealFile(hit.id, false); });
     return li;
   }
   $('content-more').addEventListener('click', () => contentSearch.more());

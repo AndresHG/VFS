@@ -12,7 +12,7 @@ and the problems listed in [audit.md](audit.md).
    tabs «Nombres» and «Documentos» head them (VFS-42); the rest of the filters are one click
    away in «Más filtros», and any filter in use shows as a chip below the line (VFS-38 R7,
    R8). Quiet until used.
-4. **Big by default, bigger on request.** Sizes in `rem`; the layout survives 200 % text.
+4. **Legible by default, bigger on request.** Sizes in `rem`; the layout survives 200 % text.
 5. **Nothing moves unless the person moved it.**
 
 ## Type
@@ -20,16 +20,17 @@ and the problems listed in [audit.md](audit.md).
 Atkinson Hyperlegible (OFL, bundled as TrueType, regular 400 and bold 700). No second family.
 The bundled copy has a plain zero: the face's slashed zero ("2Ø19") reads as a letter to some
 older readers, so `scripts/plain_zero.py` replaces its slashed counter with one oval (issue 111).
-Base size is the system size (`1rem`); the body runs one step above it.
+Base size is the system size (`1rem`); body copy and names use it, one step under the first
+scale (VFS-45 R8).
 
 | Token | Size | Line height | Weight | Use |
 |---|---|---|---|---|
-| `--t-search` | 1.5rem | 1.3 | 400 | Text typed in the search box |
-| `--t-title` | 1.375rem | 1.3 | 700 | Empty-state headline, dialog title |
-| `--t-name` | 1.125rem | 1.35 | 700 | Result name |
-| `--t-body` | 1.125rem | 1.5 | 400 | Body copy, buttons, notices |
-| `--t-meta` | 1rem | 1.4 | 400 | Path, date, size, filter controls, status |
-| `--t-small` | 0.875rem | 1.3 | 700 | Badges only ("No disponible") |
+| `--t-search` | 1.3125rem | 1.3 | 400 | Text typed in the search box |
+| `--t-title` | 1.25rem | 1.3 | 700 | Empty-state headline, dialog title |
+| `--t-name` | 1rem | 1.35 | 700 | Result name |
+| `--t-body` | 1rem | 1.5 | 400 | Body copy, buttons, notices |
+| `--t-meta` | 0.875rem | 1.4 | 400 | Path, date, size, filter controls, status |
+| `--t-small` | 0.8125rem | 1.3 | 700 | Badges only ("No disponible") |
 
 Rules: never below `--t-small`; no light weights; no all-caps; `text-wrap: balance` on
 headlines and `pretty` on paragraphs; tabular numerals for dates and sizes.

@@ -102,6 +102,7 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
   function render(next) {
     status = next;
     $('ai-section').hidden = false;
+    $('stab-ai').hidden = false; // VFS-45 R2: its section in Ajustes
     const s = next.settings;
     on.checked = s.enabled;
     $('ai-body').hidden = !s.enabled;

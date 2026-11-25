@@ -70,7 +70,7 @@ test('a click outside Ajustes keeps unsaved input', async () => {
   await page.load('&content=on');
   await until(`!document.getElementById('content-max-row').hidden`, 'the content size limit');
   await openSettings();
-  await evaluate(`document.querySelector('#settings .setting-advanced').open = true`);
+  await evaluate(`document.getElementById('stab-advanced').click()`);
   await evaluate(`(() => {
     const p = document.getElementById('file-filter-pattern');
     p.value = '*.bak';

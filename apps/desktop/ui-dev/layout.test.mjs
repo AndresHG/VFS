@@ -183,9 +183,9 @@ for (const viewport of VIEWPORTS) {
       await open(viewport, text);
       await evaluate(`document.getElementById('open-settings').click()`);
       await until(`document.getElementById('settings').open`, 'the settings panel');
-      // The drawer slides in from 2rem to the right (160 ms): measure once it stops.
+      // The window fades in (120 ms): measure once it stops.
       await until(`document.getElementById('settings').getAnimations().every((a) => a.playState === 'finished')`, 'the slide-in');
-      await evaluate(`document.querySelector('#settings .setting-advanced').open = true`);
+      await evaluate(`document.getElementById('stab-advanced').click()`);
       await until(`document.querySelectorAll('#file-filter-list li').length === 5`, 'the default list');
       const items = await evaluate(`[...document.querySelectorAll('#file-filter-list code')].map((c) => c.textContent)`);
       for (const p of items) assert.doesNotMatch(p, /lnk|url/i, 'no default hides a shortcut');

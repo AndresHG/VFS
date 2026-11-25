@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createUpdates, updateView, UpdatePhase, CHECK_DELAY_MS } from '../ui/updates.js';
+import { aboutUpdateView, CheckResult, createUpdates, updateView, UpdatePhase, CHECK_DELAY_MS } from '../ui/updates.js';
 import { CATALOGS, Lang } from '../ui/strings.js';
 
 const S = CATALOGS[Lang.ES];
@@ -104,4 +104,42 @@ test('dismissing hides the notice', async () => {
   u.onProgress({ downloaded: 1, total: 2 });
   assert.equal(views.at(-1), null);
   assert.equal(updateView({ phase: UpdatePhase.HIDDEN }, S), null);
+});
+
+/** VFS-45 AC-5 (R5): the update line of «Acerca de» for each check result, in both languages:
+ *  up to date, an update with «Actualizar», a failure and not run yet with «Buscar
+ *  actualizaciones», and nothing to press while the setting is off. */
+test('«Acerca de» says what this launch\'s check found', () => {
+  for (const lang of Object.values(Lang)) {
+    const C = CATALOGS[lang];
+    const view = (o) => aboutUpdateView({ checkOn: true, version: null, ...o }, C);
+    assert.deepEqual(view({ result: CheckResult.NONE }), { text: C.aboutUpToDate, action: null });
+    assert.deepEqual(view({ result: CheckResult.FOUND, version: '0.4.0' }), { text: C.aboutUpdateFound('0.4.0'), action: 'install' });
+    assert.match(C.aboutUpdateFound('0.4.0'), /0\.4\.0/);
+    assert.deepEqual(view({ result: CheckResult.FAILED }), { text: C.aboutUpdateFailed, action: 'check' });
+    assert.deepEqual(view({ result: CheckResult.NOT_RUN }), { text: '', action: 'check' });
+    for (const result of Object.values(CheckResult)) {
+      assert.deepEqual(view({ result, checkOn: false }), { text: C.aboutUpdatesOff, action: null }, `${lang} off, ${result}`);
+    }
+  }
+});
+
+/** VFS-45 R5: «Buscar actualizaciones» runs the check at once, records its result, and a second
+ *  press while it runs shares it; an update found then is also offered in the notice. */
+test('checking now records the result', async () => {
+  let n = 0;
+  let answer = null;
+  const { u, views } = harness({ checkForUpdate: async () => { n++; if (answer instanceof Error) throw answer; return answer; } });
+  assert.equal(u.result().result, CheckResult.NOT_RUN);
+  await Promise.all([u.checkNow(), u.checkNow()]);
+  assert.equal(n, 1, 'one check for two presses');
+  assert.equal(u.result().result, CheckResult.NONE);
+  answer = new Error('offline');
+  await u.checkNow();
+  assert.equal(u.result().result, CheckResult.FAILED);
+  answer = { version: '0.4.0' };
+  await u.checkNow();
+  assert.deepEqual(u.result(), { result: CheckResult.FOUND, version: '0.4.0' });
+  assert.equal(u.phase(), UpdatePhase.OFFERED);
+  assert.equal(views.at(-1).action, S.updateInstall);
 });
