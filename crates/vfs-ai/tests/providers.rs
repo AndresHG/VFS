@@ -75,7 +75,8 @@ fn anthropic_rewrite() {
 }
 
 /// VFS-28 R6.1, R7: the OpenAI rewrite uses the cheap model, strict JSON schema and
-/// `max_output_tokens` 300; cached tokens are split from the input.
+/// `max_output_tokens` 300; cached tokens are split from the input. Reasoning is `none` (D7):
+/// the live run showed `gpt-6-luna` rejects `minimal` with a 400.
 #[test]
 fn openai_rewrite() {
     let mock = MockServer::start(vec![ok_json(OPENAI_REWRITE)]);
@@ -90,6 +91,7 @@ fn openai_rewrite() {
     let body = mock.requests()[0].json();
     assert_eq!(mock.requests()[0].path, "/v1/responses");
     assert_eq!(body["model"], models_for(Provider::OpenAi).rewrite);
+    assert_eq!(body["reasoning"]["effort"], "none");
     assert_eq!(body["max_output_tokens"], REWRITE_MAX_TOKENS);
     assert_eq!(body["text"]["format"]["strict"], true);
     assert_eq!(body["store"], false);
@@ -245,6 +247,7 @@ fn openai_answer_parses_json_citations() {
     assert_eq!(answer.usage.output_tokens, 120);
     let body = mock.requests()[0].json();
     assert_eq!(body["model"], models_for(Provider::OpenAi).answer);
+    assert_eq!(body["reasoning"]["effort"], "none");
     assert_eq!(body["max_output_tokens"], ANSWER_MAX_TOKENS);
     assert_eq!(body["text"]["format"]["strict"], true);
     assert!(!body["instructions"]

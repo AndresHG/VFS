@@ -15,8 +15,9 @@ use crate::provider::{
     Provider, RawCitation, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
 };
 
-/// Reasoning effort for both calls: the least the models take (D7, "thinking off or minimal").
-const REASONING_EFFORT: &str = "minimal";
+/// Reasoning effort for both calls: none, the least the models take (D7, "thinking off or
+/// minimal"). `gpt-6-luna` rejects `minimal` with a 400 (first live run, VFS-28 AC-12).
+const REASONING_EFFORT: &str = "none";
 
 pub(crate) struct OpenAi {
     http: Http,
