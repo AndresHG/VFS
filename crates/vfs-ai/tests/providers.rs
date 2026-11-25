@@ -214,6 +214,26 @@ fn follow_up_carries_the_thread() {
     }
 }
 
+/// VFS-28 R7, R8: OpenAI's answer schema asks for a `found` verdict. When the model says the
+/// passages lack the answer, its citations are discarded, so the answer shows as not found
+/// even though a cheap model cited a nearby fact (first live run).
+#[test]
+fn openai_found_false_discards_citations() {
+    let sse = OPENAI_ANSWER.replace("\\\"found\\\":true", "\\\"found\\\":false");
+    assert_ne!(sse, OPENAI_ANSWER, "the fixture carries found");
+    let mock = MockServer::start(vec![MockResponse::sse(&sse)]);
+    let answer = model_at(Provider::OpenAi, &mock)
+        .answer(&answer_request(), &CancelToken::new(), &mut |_| {})
+        .unwrap();
+    assert!(answer.blocks.iter().all(|b| b.citations.is_empty()));
+    let body = mock.requests()[0].json();
+    let schema = &body["text"]["format"]["schema"];
+    assert!(schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&"found".into()));
+}
+
 /// VFS-28 R7: the OpenAI answer numbers the passages in the input, asks for strict JSON and
 /// returns its citations as given (28c drops the one whose quote is not in its passage).
 #[test]

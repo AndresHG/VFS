@@ -29,25 +29,36 @@ impl OpenAi {
     }
 }
 
+/// The answer's schema (R7, R8). `found` is the model's own verdict: a cheap model that says
+/// the passages lack the answer still cites a nearby fact (first live run), so `found: false`
+/// discards its citations and the answer shows as not found.
 fn answer_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
             "answer": {"type": "string"},
+            "found": {
+                "type": "boolean",
+                "description": "true only if the passages contain the answer to the question",
+            },
             "citations": {
                 "type": "array",
+                "description": "empty when found is false",
                 "items": {
                     "type": "object",
                     "properties": {
                         "passage_id": {"type": "integer"},
-                        "quote": {"type": "string"},
+                        "quote": {
+                            "type": "string",
+                            "description": "a short span copied character for character from that passage's text, without its [P] header",
+                        },
                     },
                     "required": ["passage_id", "quote"],
                     "additionalProperties": false,
                 },
             },
         },
-        "required": ["answer", "citations"],
+        "required": ["answer", "found", "citations"],
         "additionalProperties": false,
     })
 }
@@ -134,6 +145,7 @@ fn output_text(response: &Value) -> Result<String, AiError> {
 #[derive(Deserialize)]
 struct JsonAnswer {
     answer: String,
+    found: bool,
     citations: Vec<JsonCitation>,
 }
 
@@ -233,8 +245,12 @@ impl ChatModel for OpenAi {
         let parsed: JsonAnswer = serde_json::from_str(&text)
             .map_err(|_| AiError::BadResponse("answer is not the schema".into()))?;
         on_event(AnswerEvent::Text(parsed.answer.clone()));
-        let citations = parsed
-            .citations
+        let cited = if parsed.found {
+            parsed.citations
+        } else {
+            Vec::new()
+        };
+        let citations = cited
             .into_iter()
             .map(|c| RawCitation {
                 passage: usize::try_from(c.passage_id).unwrap_or(usize::MAX),
