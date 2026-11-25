@@ -1,7 +1,7 @@
-# VFS-44 — Sources: one item model, and bookmarks from Chrome, Brave and Edge
+# VFS-44 — Sources: one item model, and bookmarks from Chrome and Brave
 
-- **Status**: draft. The owner set the direction on 2026-11-25 (D1–D3, D7, D9); the
-  questions still open are in "Open questions".
+- **Status**: draft, not scheduled: the owner put semantic search (VFS-29) first after 0.4
+  (D3). The owner's decisions of 2026-11-25 are D1–D3, D7, D9 and D11–D13.
 - **Size**: L. It reads files outside the chosen folders (other browsers' profiles), on
   paths that differ between Windows and macOS, and it changes the hit shape that every
   source and the screen share.
@@ -15,14 +15,14 @@
 
 ## Problem
 
-VFS reads bookmarks only from Firefox; users of Chrome, Brave or Edge get nothing, and the
+VFS reads bookmarks only from Firefox; users of Chrome or Brave get nothing, and the
 owner, testing 0.3.0, asked for Chrome and Brave first (#197). The owner's direction for VFS
 is an encyclopedia built from what it ingests, across every source: names, then content,
 then meaning, then questions. More sources is the first step, and each new source today
 would need its own hit type, its own merge rule and its own row on screen, because
 `SourceHit` is `Files | Bookmarks`. Chat exports (WhatsApp, Telegram) and YouTube come next,
 each in its own spec (D7). This spec adds one item model every source fills, and uses it
-for the cheapest new source: the Chromium family's bookmarks.
+for the cheapest new source: Chrome's and Brave's bookmarks.
 
 ## What we know
 
@@ -47,14 +47,13 @@ for the cheapest new source: the Chromium family's bookmarks.
   |---|---|---|
   | Chrome | `Google\Chrome\User Data` | `Google/Chrome` |
   | Brave | `BraveSoftware\Brave-Browser\User Data` | `BraveSoftware/Brave-Browser` |
-  | Edge | `Microsoft\Edge\User Data` | `Microsoft Edge` |
 
 ## Requirements (EARS)
 
 Common item model
 
 - R1. Every hit from every source SHALL carry `source` (`files`, `bookmarks`), `browser`
-  for a bookmark (`firefox`, `chrome`, `brave`, `edge`), `kind`, a `locator` (an absolute
+  for a bookmark (`firefox`, `chrome`, `brave`), `kind`, a `locator` (an absolute
   path or an address) and a `title`, in one shape the screen renders without a branch per
   source. Later sources (chat exports, YouTube) add a `source` value and fill the same
   fields.
@@ -62,7 +61,7 @@ Common item model
 Chromium bookmarks
 
 - R2. THE folder panel SHALL list each supported browser found on the computer with its own
-  switch («Incluir marcadores de Chrome», «… de Brave», «… de Edge»), off by default like
+  switch («Incluir marcadores de Chrome», «… de Brave»), off by default like
   Firefox (VFS-6 R1), and SHALL not list a browser that is not installed.
 - R3. WHEN a browser's switch is on, THE app SHALL read the `Bookmarks` file of every profile
   that `Local State` lists, read-only: it SHALL never write, lock or rename a browser file,
@@ -96,8 +95,8 @@ Tests cite these ids (`VFS-44 AC-<m>`) in their doc comments.
 - AC-1 (R1) Given a file, a Firefox bookmark and a Chrome bookmark matching one query, When it
   is searched, Then every hit carries `source`, `kind`, `locator`, `title`, and the bookmarks
   carry their `browser`.
-- AC-2 (R2) Given a computer with Chrome and Brave profiles and no Edge, When the folder panel
-  opens, Then it shows Chrome and Brave switches, both off, and no Edge switch.
+- AC-2 (R2) Given a computer with Chrome profiles and no Brave, When the folder panel opens,
+  Then it shows a Chrome switch, off, and no Brave switch.
 - AC-3 (R3, R6) Given a fixture `Local State` with two Chrome profiles, When the Chrome switch
   is turned on, Then a word from a bookmark in each profile finds it, and the fixture files'
   bytes and modification times are unchanged.
@@ -115,7 +114,7 @@ Tests cite these ids (`VFS-44 AC-<m>`) in their doc comments.
 
 ## Non-goals
 
-- Safari (its bookmarks are a binary plist under a privacy-protected folder on macOS),
+- Edge (the owner does not need it, D3), Safari (its bookmarks are a binary plist under a privacy-protected folder on macOS),
   Vivaldi, Opera and Arc: later, on request.
 - Chat and YouTube importers (D7), each in its own spec on this item model.
 - Writing to any browser, merging duplicates across browsers, or reorganising bookmarks.
@@ -137,7 +136,7 @@ Tests cite these ids (`VFS-44 AC-<m>`) in their doc comments.
   profile folder that is a symlink is followed once.
 - Opening, writing, moving or deleting user files: no. It reads browser files outside the
   chosen folders, like VFS-6, and only `Local State` and `Bookmarks`(`.bak`).
-- Does any of this already ship? `grep -rn "chrome\|brave\|edge" crates apps/desktop/ui`
+- Does any of this already ship? `grep -rn "chrome\|brave" crates apps/desktop/ui`
   finds no Chromium reader; `Browser` has only `Firefox`.
 
 ## Decisions
@@ -146,10 +145,13 @@ Tests cite these ids (`VFS-44 AC-<m>`) in their doc comments.
 |---|----------|--------|-----|------|
 | D1 | What may leave the PC to build knowledge? | Only what the user touches: the passages of a question or a compiled page, as in VFS-28; no background processing by an LLM API | owner | 2026-11-25 |
 | D2 | Where do compiled pages (fichas) live, when they come? | Markdown in a folder VFS owns, one per entity or topic | owner | 2026-11-25 |
-| D3 | What goes first after 0.4? | More sources, before entities and AI pages (this spec) | owner | 2026-11-25 |
+| D3 | What goes first after 0.4? | Semantic search (VFS-29); this spec comes later, Chrome and Brave only, no Edge | owner | 2026-11-25 |
 | D7 | Do export importers come now? | No, one spec each later | owner | 2026-11-25 |
 | D9 | Hand-written notes and collections? | Not a goal for now; the encyclopedia is built from what VFS ingests | owner | 2026-11-25 |
 | D10 | One switch per browser or one for all? | One per browser, so a user can leave out a work profile's browser | agent | 2026-11-25 |
+| D11 | May semantic search send folder text to an embedding API? | Yes, per folder, with the user's permission and the cost and volume shown first, or a local model (keeps research E1) | owner | 2026-11-25 |
+| D12 | Keep the knowledge questions produce? | Yes: each answer with its citations becomes a searchable page, marked out of date when a cited source changes | owner | 2026-11-25 |
+| D13 | Which chat export comes first? | Telegram (Desktop export, `result.json`), then WhatsApp | owner | 2026-11-25 |
 
 ## Open questions
 
