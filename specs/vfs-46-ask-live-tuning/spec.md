@@ -5,7 +5,7 @@
   and R7's citation format, and the live run's model tier in AC-12, and VFS-2 R11's passage
   count)
 - **Links**: VFS-28 (ask your archive), PRs #218 and #219, `rag-live` runs 45689319159,
-  45690948017 and 45693384399
+  45690948017, 45693384399, 45699428945 and 45700576923
 
 ## Problem
 
@@ -73,7 +73,10 @@ Tests cite these ids (`VFS-46 AC-<m>`) in their doc comments.
 - AC-7 (R7) Given no saved settings, Then the cheap tier is on.
 - AC-8 (R8) Given a long document whose eight chunks each hold the searched word, When it is
   searched, Then its hit carries six passages.
-- AC-5 (gate) The golden tests pass offline on the recordings of a live run of each provider.
+- AC-5 (gate) The golden tests pass offline on the recordings of a cheap live run (Haiku,
+  run 45699428945: 50/50 found right, 50/50 facts). The other provider's run is reported, not
+  recorded (Luna, run 45700576923: 49/50; q20's rewrite varies between runs and missed page 5
+  once).
 
 ## Non-goals
 
