@@ -166,8 +166,26 @@ fn blocks_of(r: &Recorded) -> Vec<AnswerBlock> {
         .collect()
 }
 
+/// Folded for the fact check: accents, case and spacing aside, and a thousands separator
+/// between digits («450.000», «450 000») dropped, so a number matches however it is grouped
+/// (VFS-46 D2).
 fn folded(s: &str) -> String {
-    fold_key(s).split_whitespace().collect::<Vec<_>>().join(" ")
+    let words = fold_key(s).split_whitespace().collect::<Vec<_>>().join(" ");
+    let chars: Vec<char> = words.chars().collect();
+    let mut out = String::with_capacity(words.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let between_digits = i > 0
+            && chars[i - 1].is_ascii_digit()
+            && chars
+                .get(i + 1..i + 4)
+                .is_some_and(|g| g.iter().all(char::is_ascii_digit))
+            && !chars.get(i + 4).is_some_and(char::is_ascii_digit);
+        if (c == '.' || c == ' ') && between_digits {
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// VFS-28 D9: about 50 questions, 35 answerable and 15 not; ids unique; every answerable one

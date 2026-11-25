@@ -35,7 +35,8 @@ Three golden cases also asked for facts their question does not ask for (q10, q1
 - R3a. THE rewrite prompt SHALL ask for the nouns a document uses for what is asked
   («duración», «vigencia» for «cuánto dura») among the synonyms, and the `found` description
   SHALL say it is false when the answer would have to be guessed or calculated (q19 and q40 of
-  the second run).
+  the second run), and true for a fact stated in other words (Luna said not found to a deposit
+  of «dos mensualidades», q07 of the fourth run).
 - R3b. THE answer prompt SHALL ask for citations through the provider's citation mechanism and
   forbid passage numbers, references and repeated quotations in the answer text: Haiku wrote
   «(1-1)» and repeated the quote in the text instead of citing, and Luna wrote «citeP0».
@@ -93,7 +94,7 @@ Tests cite these ids (`VFS-46 AC-<m>`) in their doc comments.
 | # | Question | Choice | Who | Date |
 |---|----------|--------|-----|------|
 | D1 | Weak share | A quarter of the best score: in the live runs the strong document scored 4 to 20 times the next one, and a quarter keeps documents of similar scores together. | agent | 2026-11-25 |
-| D2 | Golden fixes | q10 and q18 drop a fact the question does not ask for; q24 checks «tres» and «concurso-oposición», which any right answer holds, instead of two exact phrasings. | agent | 2026-11-25 |
+| D2 | Golden fixes | q10, q14 and q18 drop a fact the question does not ask for; q24 checks «cuatro», the count asked (three by concurso plus one by concurso-oposición); the fact check drops a thousands separator between digits, so «450.000» matches «450 000». | agent | 2026-11-25 |
 | D3 | Model of the live runs | The cheap tier, plus one reference run with the best model if the owner approves its cost. | owner | 2026-11-25 |
 | D4 | Default tier | The cheap tier: Luna answered 48 of 50 right against Opus's 48, at 0.02 $ per 50 questions. | owner | 2026-11-25 |
 

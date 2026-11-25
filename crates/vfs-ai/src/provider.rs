@@ -261,7 +261,7 @@ pub(crate) fn answer_schema() -> Value {
             "answer": {"type": "string"},
             "found": {
                 "type": "boolean",
-                "description": "true only if the passages state the answer to the question; false when it would have to be guessed or calculated from other facts",
+                "description": "true only if the passages state the answer to the question; false when it would have to be guessed or calculated from other facts; a fact the passages state in other words (a deposit of «dos mensualidades») is found",
             },
             "citations": {
                 "type": "array",
