@@ -54,6 +54,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      # VFS-28 AC-3: one stable self-signed identity lets build B read the keychain item build A
+      # saved. Pull requests use a throwaway certificate; release.yml repeats it with the real one.
+      - name: Signing identity, throwaway (VFS-28 R3)
+        id: signid
+        if: runner.os == 'macOS'
+        run: python3 scripts/macos_signing.py import --ephemeral --keychain "$RUNNER_TEMP/vfs-signing.keychain-db"
+      - name: A/B keychain check (VFS-28 AC-3)
+        if: runner.os == 'macOS'
+        run: |
+          python3 scripts/macos_signing.py ab-check --keychain "$RUNNER_TEMP/vfs-signing.keychain-db" \
+            --identity "${{ steps.signid.outputs.identity }}"
       - name: The app as released, without the AI (VFS-28, `ai` feature off until 0.4)
         run: cargo clippy -p vfs-desktop --lib --locked -- -D warnings
       - name: UI tests

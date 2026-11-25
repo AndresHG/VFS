@@ -1,4 +1,4 @@
-# App updates: how they work, the signing key, releasing, testing
+# App updates: how they work, the signing keys, releasing, testing
 
 Spec: [VFS-21](../specs/vfs-21-updates/spec.md). Code: `apps/desktop/src-tauri/src/updates.rs`,
 `apps/desktop/ui/updates.js`, `.github/workflows/release.yml`, `scripts/release_manifest.py`.
@@ -44,6 +44,37 @@ Spec: [VFS-21](../specs/vfs-21-updates/spec.md). Code: `apps/desktop/src-tauri/s
   <password> -w <file>`), set both secrets, put the new public key in `tauri.conf.json`, and
   release. Copies still on the old key update one last time only if that release is also
   signed with the old key; otherwise they need a manual install.
+
+## The macOS signing identity
+
+Spec: [VFS-28](../specs/vfs-28-ask-archive/spec.md) R3, AC-3, D6, D12. Script:
+`scripts/macos_signing.py`. This is OS code signing, separate from the updater key above.
+
+- Every macOS release is signed with one self-signed certificate, «VFS Self-Signed Code
+  Signing», valid for 20 years. No Apple account is involved, and the app is still not
+  notarized. With one stable identity, a keychain item (an AI key) saved by one version stays
+  readable by the next without a prompt. An ad-hoc signature changes with every build, so
+  the next version would be denied the item.
+- The certificate's OU is `VFSSELFSGN`. codesign takes the Team ID from it, and the keychain
+  files items under that Team ID, not under one build's hash.
+- The certificate and its key are the Actions secrets `MACOS_SIGNING_CERTIFICATE` (a base64
+  .p12) and `MACOS_SIGNING_CERTIFICATE_PASSWORD`. Only `release.yml` reads them. The
+  maintainer keeps the offline backup: the three files `new-cert` writes, in the same private
+  place as the updater key.
+- To make it (once, on the maintainer's Mac): run `python3 scripts/macos_signing.py new-cert
+  --out <private folder>`, then the two `gh secret set` commands it prints. Never commit the
+  files or paste them anywhere.
+- **If the certificate is lost or replaced**, the next release cannot read the keys that
+  users saved. The app says «No se puede leer la clave guardada; vuelva a introducirla» and
+  keeps working without AI. Each user types the key once more, and macOS may ask once more
+  for folder access. Nothing crashes, and search is not affected.
+- The first release signed this way (v0.4) changes the signature once. Its release notes say
+  that macOS may ask once again for folder access (D12).
+- A v0.3.x hotfix is cut from the `v0.3.0` tag, not from `main`, so it keeps the ad-hoc
+  signature. The signature change ships only in v0.4.
+- Checks: every pull request runs AC-3 on the macOS runner with a throwaway certificate
+  (`ci.yml`). Each release runs it again with the real one, after `check-app` confirms that
+  the app and the `vfs-extract` worker carry the identity (`release.yml`).
 
 ## Releasing
 
