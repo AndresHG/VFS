@@ -69,10 +69,8 @@ Spec: [VFS-28](../specs/vfs-28-ask-archive/spec.md) R3, AC-3, D6, D12. Script:
   users saved. The app says «No se puede leer la clave guardada; vuelva a introducirla» and
   keeps working without AI. Each user types the key once more, and macOS may ask once more
   for folder access. Nothing crashes, and search is not affected.
-- The first release signed this way (v0.4) changes the signature once. Its release notes say
-  that macOS may ask once again for folder access (D12).
-- A v0.3.x hotfix is cut from the `v0.3.0` tag, not from `main`, so it keeps the ad-hoc
-  signature. The signature change ships only in v0.4.
+- The first release signed this way (v0.3.1) changes the signature once. Its release notes
+  say that macOS may ask once again for folder access (D12).
 - Checks: every pull request runs AC-3 on the macOS runner with a throwaway certificate
   (`ci.yml`). Each release runs it again with the real one, after `check-app` confirms that
   the app and the `vfs-extract` worker carry the identity (`release.yml`).

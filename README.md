@@ -181,7 +181,7 @@ macOS runners and produces:
   language), per-user install (no administrator rights), with the WebView2 bootstrapper embedded (the PC needs internet
   while installing if WebView2 is missing). It is unsigned, so Windows SmartScreen warns on
   first run and the user has to choose to run it anyway.
-- `vfs-macos`: a zipped, ad-hoc signed `VFS.app`, and `VFS.app.tar.gz`, the updater's
+- `vfs-macos`: a zipped `VFS.app` signed with the stable self-signed identity (`docs/updates.md`), and `VFS.app.tar.gz`, the updater's
   macOS payload.
 - `vfs-release`: every release asset together, the updater signatures (`.sig`),
   `latest.json` for the updater and one combined `SHA256SUMS.txt`. On a tag, the workflow
