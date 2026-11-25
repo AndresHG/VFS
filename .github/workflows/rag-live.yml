@@ -1,0 +1,76 @@
+# VFS-28 AC-12: the manual live run of the RAG golden set with the owner's keys. One provider
+# answers every golden question with the cheap tier and the other grades faithfulness (the same
+# provider when only one key is set). It costs real money, so it runs only when dispatched by
+# hand, never on push or pull request. The keys come from the repository secrets
+# VFS_ANTHROPIC_KEY and VFS_OPENAI_KEY and are never printed or written.
+# The run pushes the re-recorded `recorded.jsonl` and its report to a `rag-live/` branch, which
+# a PR then reviews; nothing lands on main from here.
+name: rag-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider that answers (the other one grades)
+        required: true
+        type: choice
+        options: [anthropic, openai]
+      limit:
+        description: Ask only the first n questions (a smoke run that records nothing); empty asks all 50
+        required: false
+        type: string
+
+concurrency:
+  group: rag-live
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain (pinned in rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+      - name: Build the golden test without keys
+        run: cargo test -p vfs-cli --features content --test rag_golden --locked --no-run
+      - name: Live run (VFS-28 AC-12)
+        env:
+          VFS_LIVE_PROVIDER: ${{ inputs.provider }}
+          LIMIT: ${{ inputs.limit }}
+          PROVIDER_UPPER: ${{ inputs.provider == 'anthropic' && 'ANTHROPIC' || 'OPENAI' }}
+          VFS_AI_KEY: ${{ inputs.provider == 'anthropic' && secrets.VFS_ANTHROPIC_KEY || secrets.VFS_OPENAI_KEY }}
+          VFS_GRADER_KEY: ${{ inputs.provider == 'anthropic' && secrets.VFS_OPENAI_KEY || secrets.VFS_ANTHROPIC_KEY }}
+        run: |
+          if [ -z "$VFS_AI_KEY" ]; then
+            echo "Set the secret VFS_${PROVIDER_UPPER}_KEY"; exit 1; fi
+          # Without the other provider's key the same provider grades (the report says so).
+          if [ -z "$VFS_GRADER_KEY" ]; then unset VFS_GRADER_KEY; fi
+          if [ -n "$LIMIT" ]; then export VFS_LIVE_LIMIT="$LIMIT"; fi
+          cargo test -p vfs-cli --features content --test rag_golden --locked golden_live -- --nocapture
+      - name: The golden tests pass offline on the new recordings
+        run: cargo test -p vfs-cli --features content --test rag_golden --locked
+      - name: Push the recordings and the report to a rag-live branch
+        if: always()
+        run: |
+          report="target/rag-live-${{ inputs.provider }}.md"
+          if [ -f "$report" ]; then
+            cp "$report" "crates/vfs-cli/tests/rag/live-${{ inputs.provider }}.md"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          git add crates/vfs-cli/tests/rag/
+          if git diff --cached --quiet; then echo "Nothing recorded"; exit 0; fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "test(vfs-28): live golden run, ${{ inputs.provider }} (run ${{ github.run_id }})"
+          git push origin "HEAD:refs/heads/rag-live/${{ inputs.provider }}-${{ github.run_id }}"

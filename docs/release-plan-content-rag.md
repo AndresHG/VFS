@@ -46,7 +46,7 @@ Cargo feature `ai`, which release builds leave off (`default = []` in
 | Order | Step | What | Who | Effort |
 |---|---|---|---|---|
 | 1 | VFS-28 28a | Stable self-signed macOS signing identity: certificate as a CI secret with an offline backup, Tauri `signingIdentity`, the A/B keychain check on the macOS runner (AC-3) | session; the owner makes the certificate and sets its two secrets (`docs/updates.md`) | 1–2 |
-| 2 | `--live` runs | One `golden_live` run per provider with the owner's keys, commands in #191's test plan; commit the recordings of one run and re-run the golden tests offline (AC-12) | owner | ½ |
+| 2 | `--live` runs | One `golden_live` run per provider with the owner's keys, cheap tier (owner, 2026-11-25), through the `rag-live` workflow: the keys are the secrets `VFS_ANTHROPIC_KEY` and `VFS_OPENAI_KEY`, a `limit` input gives a smoke run first, and the recordings land on a `rag-live/` branch; commit those of one run (AC-12) | session; the owner sets the secrets | ½ |
 | 3 | Fixes | Whatever the live runs show: OpenAI `reasoning.effort`, Anthropic `citations_delta` shape, `thinking` on the answer model | session | 0–2 |
 | 4 | Switch on | `default = ["ai"]`, release notes (macOS may ask once more for folder access, D12), version 0.4.0 | session | ½ |
 | 5 | Owner test | A release-candidate build tried on the owner's Mac and, if possible, on the target PC | owner | ½ |

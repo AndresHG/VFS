@@ -343,10 +343,14 @@ fn dump(out: &Path, db: &Path) {
 /// provider grade each answer's faithfulness to the passages sent. The report is printed and
 /// written to `target/rag-live-<provider>.md`.
 ///
-/// Needs `VFS_LIVE_PROVIDER` (`anthropic` or `openai`), `VFS_AI_KEY` (that provider's key) and
-/// `VFS_GRADER_KEY` (the other provider's key). Keys are read from the environment only and
+/// Needs `VFS_LIVE_PROVIDER` (`anthropic` or `openai`) and `VFS_AI_KEY` (that provider's key).
+/// `VFS_GRADER_KEY` is the other provider's key; without it the same provider grades, and the
+/// report says so. Both calls use the cheap tier («Respuestas más baratas», D7) unless
+/// `VFS_LIVE_MID=1` asks for the mid-tier answer model. Keys are read from the environment only and
 /// never printed or written. Without `VFS_LIVE_PROVIDER` it does nothing, so CI, which has no
-/// keys, spends nothing. See the PR for the exact command.
+/// keys, spends nothing. `VFS_LIVE_LIMIT=<n>` asks only the first n questions, a cheap smoke run
+/// that writes the report but leaves `recorded.jsonl` alone. `.github/workflows/rag-live.yml`
+/// runs it with the keys kept as repository secrets.
 #[test]
 fn golden_live() {
     let Some(var) = std::env::var("VFS_LIVE_PROVIDER").ok() else {
@@ -381,7 +385,13 @@ followed by the first unsupported statement. Plain text, one line.";
             Provider::OpenAi => Provider::Anthropic,
         };
         let asker = model(provider, "VFS_AI_KEY");
-        let grader = model(grader_provider, "VFS_GRADER_KEY");
+        let cross = std::env::var("VFS_GRADER_KEY").is_ok_and(|k| !k.is_empty());
+        let (grader_provider, grader) = if cross {
+            (grader_provider, model(grader_provider, "VFS_GRADER_KEY"))
+        } else {
+            (provider, model(provider, "VFS_AI_KEY"))
+        };
+        let cheap = std::env::var("VFS_LIVE_MID").map_or(true, |v| v != "1");
         let searcher = vfs_content::Searcher::open(db).unwrap();
         let vfs = Vfs::open(db).unwrap();
         let corpus = LocalCorpus {
@@ -393,16 +403,30 @@ followed by the first unsupported statement. Plain text, one line.";
         let opts = AskOptions {
             provider,
             lang: Lang::Es,
-            cheap: false,
+            cheap,
             over_cap_confirmed: true,
             now: chrono::Local::now(),
         };
         let cancel = CancelToken::new();
         let mut lines = Vec::new();
-        let mut report =
-            format!("# RAG golden live run: {provider}, graded by {grader_provider}\n\n");
+        let mut report = format!(
+            "# RAG golden live run: {provider} ({}), graded by {grader_provider}{}\n\n",
+            if cheap { "cheap tier" } else { "mid tier" },
+            if cross {
+                ""
+            } else {
+                " (self-graded: no other provider's key)"
+            }
+        );
         let (mut faithful, mut graded, mut found_ok, mut facts_ok) = (0, 0, 0, 0);
-        let cases = cases();
+        let limit = std::env::var("VFS_LIVE_LIMIT").ok().map(|n| {
+            n.parse::<usize>()
+                .unwrap_or_else(|_| panic!("VFS_LIVE_LIMIT is not a number: {n:?}"))
+        });
+        let mut cases = cases();
+        if let Some(n) = limit {
+            cases.truncate(n);
+        }
         for c in &cases {
             let asked = ask::ask(
                 asker.as_ref(),
@@ -480,7 +504,7 @@ followed by the first unsupported statement. Plain text, one line.";
                             passages,
                             earlier: Vec::new(),
                             question: format!("Question: {}\nAnswer: {text}", c.question),
-                            cheap: false,
+                            cheap: true,
                         },
                         &cancel,
                         &mut |_| {},
@@ -495,8 +519,10 @@ followed by the first unsupported statement. Plain text, one line.";
                 c.id, reply.dropped
             );
         }
-        lines.push(String::new());
-        std::fs::write(rag_dir().join("recorded.jsonl"), lines.join("\n")).unwrap();
+        if limit.is_none() {
+            lines.push(String::new());
+            std::fs::write(rag_dir().join("recorded.jsonl"), lines.join("\n")).unwrap();
+        }
         let spent = ai_db.month_total(&opts.now).unwrap();
         report += &format!(
             "\nfound/not-found right: {found_ok}/{n}; facts: {facts_ok}/{n}; faithful: \
