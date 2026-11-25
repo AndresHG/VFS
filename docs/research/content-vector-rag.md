@@ -239,6 +239,61 @@ Prices: [OpenAI](https://developers.openai.com/api/docs/pricing),
   ([commercial terms](https://www.anthropic.com/legal/commercial-terms)) **[published]**.
   Voyage's terms were not checked.
 
+### Cost review (2026-11-25)
+
+Asked by the owner: is meaning search cheap enough, local or API, and how does it fit the
+answer provider? Prices re-checked on 2026-11-25; volumes assume ~450 tokens per chunk.
+
+| [published price; estimate] | $/M tokens | 60,000 docs (243 M tokens) | 500,000 docs (2.0 B tokens) | Text leaves the PC | Time on the target PC |
+|---|---|---|---|---|---|
+| Voyage-4-lite, standard, first 200 M tokens free per account | 0.02 | **≈ $0.9** | ≈ $37 | yes | hours (upload) |
+| OpenAI text-embedding-3-small, Batch API (−50 %, ≤ 24 h) | 0.01 | ≈ $2.4 | ≈ $20 | yes | hours, then a wait |
+| OpenAI text-embedding-3-small, standard | 0.02 | ≈ $4.9 | ≈ $41 | yes | hours (upload) |
+| Voyage-4, 200 M free | 0.06 | ≈ $2.6 | ≈ $110 | yes | hours |
+| Gemini Embedding 2 | 0.10 | ≈ $24 | ≈ $200 | yes | hours |
+| Local static model (bekko-static, model2vec potion) | 0 | $0 | $0 | no | minutes to ~2 h |
+| Local small transformer (granite-97m-r2, e5-small, bekko-a8m) | 0 | $0 | $0 | no | 25–90 h / 1.5–4 weeks |
+
+Prices: [Voyage](https://docs.voyageai.com/docs/pricing) (page of 2026-09-29: batch −33 %, free
+tokens do not apply to batch), [OpenAI, checked 2026-11-04](https://www.activepieces.com/blog/openai-embeddings-api-pricing-in-2026-dated-and-checked)
+(third-party page), [Gemini Embedding 2](https://openrouter.ai/google/gemini-embedding-2:batch).
+
+What this shows:
+
+- **Money is not the expensive part.** A first pass over a 60,000-document archive costs
+  about $1–5 once, and keeping it current costs cents a month: only new or changed chunks are
+  sent (R4, R6). Each query costs ~$0.0000003. The real costs are **the text leaving the PC**
+  (API) or **CPU time** on a slow PC (local transformer).
+- **Static models change the local picture.** bekko-static-embedding-v1 (Oct 2026, 40
+  languages including Spanish, no transformer layers, 52–206 MB int8) scores 49.96 on MMTEB
+  retrieval against multilingual-e5-small's 50.9, and claims 100–400× e5-small's CPU speed
+  ([blog](https://huggingface.co/blog/hotchpotch/bekko-static-embedding)) **[published, by the
+  author]**. On the Nano sets it is below BM25 (43.8 vs 46.5 on MNanoBEIR), so alone it is
+  weak; fused with BM25 it may still win the meaning-only queries. It runs in pure Rust
+  (`model2vec-rs` style), with no ONNX DLL and no AVX2 risk. Its licence was not checked.
+- **The best small transformer beats OpenAI's small model on paper.**
+  granite-embedding-97m-multilingual-r2: 60.3 on MTEB multilingual retrieval against
+  text-embedding-3-small's 50.7 and e5-small's 50.9, Apache-2.0, Spanish "enhanced", 98 MB
+  ONNX ([IBM](https://huggingface.co/blog/ibm-granite/granite-embedding-multilingual-r2))
+  **[published]**. No CPU figure was published; e5-small's class is 25–90 h per 60,000
+  documents on the target PC **[estimate, §4]**.
+- **Embeddings do not depend on the answer model.** `retrieve` returns passages as text, so a
+  vector set built locally, with Voyage or with OpenAI serves questions answered by Claude or
+  by GPT alike. Changing the answer model costs nothing; changing the embedding model means
+  building a new vector set (VFS-29 R10). Anthropic has no embeddings API.
+
+Ways to send less, in order of value **[estimate; to measure on the owner's archive]**:
+
+1. **Embed each distinct chunk text once.** Personal archives hold copies (backups, exported
+   folders, versions); vectors keyed by the hash of the chunk text are shared by every copy.
+2. **Per-folder consent** (VFS-29 R3) and the per-folder «Leer contenido» switch (#198).
+3. **Batch API for the first pass** with OpenAI (−50 %). With Voyage, standard calls while the
+   200 M free tokens last, since batch does not use them.
+4. **Skip chunks with almost no words** (tables of numbers, short fragments under ~200
+   characters); BM25 still finds them.
+5. Measure before capping chunks per document: a few long PDFs may dominate the volume, but a
+   cap hides them from meaning search.
+
 ## 5. Hybrid fusion and reranking
 
 - **RRF** (k = 60) needs no tuning and no score calibration. It gave +18 % nDCG@10 over BM25

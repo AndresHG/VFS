@@ -14,7 +14,8 @@
   - [VFS-42](../vfs-42-scope-tabs/spec.md): the «Documentos» tab, where content hits show.
   - [VFS-38](../vfs-38-search-modes/spec.md) R12, AC-10: the «relacionado por tema» label
     this spec builds.
-  - Research: `docs/research/content-vector-rag.md` §3–§5, §9 (E1, E2, P1).
+  - Research: `docs/research/content-vector-rag.md` §3–§5 (with the 2026-11-25 cost review),
+    §9 (E1, E2, P1).
   - Issue #41.
 
 ## Problem
@@ -54,12 +55,15 @@ Building the vectors
   a vector always points to a chunk that search, citations and questions already use.
 - R6. THE app SHALL keep vectors in `vectors.db` beside `content.db`, as one vector set per
   (provider, model, dimension): a 1-bit row per chunk for the scan and an int8 row for the
-  rescore. Deleting or rebuilding `content.db` SHALL NOT delete `vectors.db`; vectors whose
-  chunk no longer exists or changed (by hash) SHALL be dropped and recomputed only for the
-  changed chunks.
+  rescore, keyed by the hash of the chunk text so that copies of a document share one vector
+  and are sent once (D10). Deleting or rebuilding `content.db` SHALL NOT delete `vectors.db`;
+  vectors whose text no longer occurs in any chunk SHALL be dropped, and only new texts sent.
 - R7. WHILE embedding runs, THE app SHALL follow VFS-27 R7's pace and pause rules, send
   batches of at most the provider's limit, retry a failed batch with backoff, show progress
   with time left, and resume after a restart where it stopped.
+- R7a. THE first pass of a folder SHALL use the provider's batch endpoint when it is cheaper
+  and its free allowance does not apply (OpenAI Batch, −50 %); while Voyage's free tokens last,
+  it SHALL use standard calls (D11).
 - R8. THE app SHALL count embedding cost against VFS-28 R10's monthly total and cap. IF the
   next batch would pass the cap, THEN THE app SHALL pause embedding and ask, never spend
   past the cap silently.
@@ -95,7 +99,8 @@ Local model (29b, 29c)
 
 - R16. A local model SHALL NOT ship until 29b has measured the candidates (bekko-a8m,
   granite-97m-multilingual-r2, multilingual-e5-small, a model2vec static model) on the target
-  PC: time per chunk, peak RSS and the AVX2 check. When it ships, it is downloaded on
+  PC: time per chunk, peak RSS and the AVX2 check. bekko-static-embedding-v1 joins the
+  candidates as the static model (cost review, research §4). When it ships, it is downloaded on
   request after showing its size, the estimated time for this archive and the RAM needed,
   runs in a child process with its own memory cap, and sends nothing off the PC.
 
@@ -145,6 +150,10 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
   meaning-only and keyword conditions of the gate hold, and the run is recorded in the PR.
 - AC-13 (R15) Given vectors loaded, When neither «Documentos» nor a question is used for 5
   minutes, Then the matrix memory is released.
+- AC-14 (R6, D10) Given the same document in two allowed folders, When both are embedded, Then
+  each distinct chunk text is sent once and both copies are found by meaning.
+- AC-15 (R7a) Given an OpenAI key and a first pass of a folder, When embedding starts, Then the
+  chunks go through the Batch API, and the cost shown uses the batch price.
 
 ## Non-goals
 
@@ -185,12 +194,14 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D7 | Fusion | RRF, k = 60, no tuning; a weighted sum only if the golden set shows a gain | agent | 2026-11-25 |
 | D8 | Where vectors live | `vectors.db`, so a content rebuild never wipes paid vectors | agent | 2026-11-22 |
 | D9 | Dimension | API models cut to 512 dimensions (OpenAI `dimensions`, Voyage 512) | agent | 2026-11-25 |
+| D10 | Duplicates | Vectors keyed by chunk-text hash: each distinct text is embedded and paid once | agent | 2026-11-25 (cost review) |
+| D11 | First pass | OpenAI Batch API (−50 %); Voyage standard while its 200 M free tokens last | agent | 2026-11-25 (cost review) |
 
 ## Expected PRs
 
 | PR | Scope | ACs | Effort |
 |---|---|---|---|
-| 29a | `vectors.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, fallback, «relacionado por tema», golden-set gate | AC-1–AC-13 | 6–8 days **[estimate]** |
+| 29a | `vectors.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, fallback, «relacionado por tema», golden-set gate | AC-1–AC-15 | 6–8 days **[estimate]** |
 | 29b | Local model spike on the Mac and the target PC; pick model and runtime | R16 | 3–4 days **[estimate]** |
 | 29c | Local model download, check and child-process `Embedder` | R16, AC-12 | 4–6 days **[estimate]** |
 
