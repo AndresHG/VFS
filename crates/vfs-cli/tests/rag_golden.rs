@@ -346,7 +346,8 @@ fn dump(out: &Path, db: &Path) {
 /// Needs `VFS_LIVE_PROVIDER` (`anthropic` or `openai`) and `VFS_AI_KEY` (that provider's key).
 /// `VFS_GRADER_KEY` is the other provider's key; without it the same provider grades, and the
 /// report says so. Both calls use the cheap tier («Respuestas más baratas», D7) unless
-/// `VFS_LIVE_MID=1` asks for the mid-tier answer model. Keys are read from the environment only and
+/// `VFS_LIVE_MID=1` asks for the mid-tier answer model; `VFS_LIVE_ANSWER_MODEL=claude-opus-5-5`
+/// answers with Opus for the reference run (VFS-46). Keys are read from the environment only and
 /// never printed or written. Without `VFS_LIVE_PROVIDER` it does nothing, so CI, which has no
 /// keys, spends nothing. `VFS_LIVE_LIMIT=<n>` asks only the first n questions, a cheap smoke run
 /// that writes the report but leaves `recorded.jsonl` alone. `.github/workflows/rag-live.yml`
@@ -429,6 +430,14 @@ followed by the first unsupported statement. Plain text, one line.";
             (provider, model(provider, "VFS_AI_KEY"))
         };
         let cheap = std::env::var("VFS_LIVE_MID").map_or(true, |v| v != "1");
+        // The reference run (VFS-46): one pass with the best model sets the flow's ceiling.
+        let answer_model = match std::env::var("VFS_LIVE_ANSWER_MODEL").ok().as_deref() {
+            None | Some("") => None,
+            Some(vfs_ai::cost::CLAUDE_OPUS) if provider == Provider::Anthropic => {
+                Some(vfs_ai::cost::CLAUDE_OPUS)
+            }
+            Some(other) => panic!("VFS_LIVE_ANSWER_MODEL {other:?} is not a reference model"),
+        };
         let searcher = vfs_content::Searcher::open(db).unwrap();
         let vfs = Vfs::open(db).unwrap();
         let corpus = LocalCorpus {
@@ -441,6 +450,7 @@ followed by the first unsupported statement. Plain text, one line.";
             provider,
             lang: Lang::Es,
             cheap,
+            answer_model,
             over_cap_confirmed: true,
             now: chrono::Local::now(),
         };
@@ -448,7 +458,7 @@ followed by the first unsupported statement. Plain text, one line.";
         let mut lines = Vec::new();
         let mut report = format!(
             "# RAG golden live run: {provider} ({}), graded by {grader_provider}{}\n\n",
-            if cheap { "cheap tier" } else { "mid tier" },
+            answer_model.unwrap_or(if cheap { "cheap tier" } else { "mid tier" }),
             if cross {
                 ""
             } else {
@@ -542,6 +552,7 @@ followed by the first unsupported statement. Plain text, one line.";
                             earlier: Vec::new(),
                             question: format!("Question: {}\nAnswer: {text}", c.question),
                             cheap: true,
+                            model: None,
                         },
                         &cancel,
                         &mut |_| {},

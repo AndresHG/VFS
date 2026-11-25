@@ -723,6 +723,7 @@ impl AiState {
             provider: s.provider,
             lang: lang_of(lang),
             cheap: s.cheap,
+            answer_model: None,
             over_cap_confirmed: confirmed,
             now: chrono::Local::now(),
         }

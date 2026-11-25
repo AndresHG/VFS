@@ -19,6 +19,11 @@ on:
         description: Ask only the first n questions (a smoke run that records nothing); empty asks all 50
         required: false
         type: string
+      answer_model:
+        description: Answer with this model instead of the cheap tier (the reference run, VFS-46)
+        required: false
+        type: choice
+        options: ["", claude-opus-5-5]
 
 concurrency:
   group: rag-live
@@ -48,6 +53,7 @@ jobs:
         env:
           VFS_LIVE_PROVIDER: ${{ inputs.provider }}
           LIMIT: ${{ inputs.limit }}
+          VFS_LIVE_ANSWER_MODEL: ${{ inputs.answer_model }}
           PROVIDER_UPPER: ${{ inputs.provider == 'anthropic' && 'ANTHROPIC' || 'OPENAI' }}
           VFS_AI_KEY: ${{ inputs.provider == 'anthropic' && secrets.VFS_ANTHROPIC_KEY || secrets.VFS_OPENAI_KEY }}
           VFS_GRADER_KEY: ${{ inputs.provider == 'anthropic' && secrets.VFS_OPENAI_KEY || secrets.VFS_ANTHROPIC_KEY }}

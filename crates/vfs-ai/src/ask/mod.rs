@@ -62,6 +62,8 @@ pub struct AskOptions {
     pub lang: Lang,
     /// «Respuestas más baratas» (D7).
     pub cheap: bool,
+    /// A model to answer with instead of the tier's; `None` in the app (VFS-46).
+    pub answer_model: Option<&'static str>,
     /// The user confirmed asking with the month's cap reached (R10).
     pub over_cap_confirmed: bool,
     /// The time of asking: the record's date, the month of the total, «today» for the rewrite.
@@ -213,12 +215,7 @@ fn answer_call(
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(AnswerEvent),
 ) -> (Result<Answer, AiError>, Option<CallRecord>) {
-    let models = models_for(model.provider());
-    let id = if request.cheap {
-        models.cheap_answer
-    } else {
-        models.answer
-    };
+    let id = request.answer_model(model.provider());
     match model.answer(request, cancel, on_event) {
         Ok(a) => {
             let call = priced(kind, &a.model, a.usage);
@@ -327,6 +324,7 @@ fn ask_inner(
         earlier: Vec::new(),
         question: question.to_owned(),
         cheap: opts.cheap,
+        model: opts.answer_model,
     };
     let (answer, call) = answer_call(model, &request, CallKind::Answer, cancel, on_event);
     if let Some(call) = call {
@@ -404,6 +402,7 @@ pub fn follow_up(
             earlier: thread.turns.clone(),
             question: question.to_owned(),
             cheap: opts.cheap,
+            model: opts.answer_model,
         };
         let (answer, call) = answer_call(model, &request, CallKind::FollowUp, cancel, on_event);
         let calls: Vec<CallRecord> = call.into_iter().collect();

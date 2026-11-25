@@ -7,7 +7,7 @@
 
 use serde_json::{json, Value};
 
-use crate::cost::{models_for, Usage, CLAUDE_SONNET};
+use crate::cost::{models_for, Usage, CLAUDE_OPUS, CLAUDE_SONNET};
 use crate::error::AiError;
 use crate::http::{Http, SseReader, SHORT_CALL_TIMEOUT, STREAM_TIMEOUT};
 use crate::provider::{
@@ -31,6 +31,18 @@ fn thinking_off(model: &str) -> Value {
         json!({"type": "between_tools"})
     } else {
         json!({"type": "disabled"})
+    }
+}
+
+/// Sets the least thinking `model` takes on an answer body. Opus 5.5 cannot turn thinking off
+/// (a 400), so it thinks adaptively at `low` effort, with room for that thinking in
+/// `max_tokens`; every other model turns it off (D7, VFS-46).
+fn set_least_thinking(body: &mut Value, model: &str) {
+    if model == CLAUDE_OPUS {
+        body["output_config"] = json!({"effort": "low"});
+        body["max_tokens"] = json!(ANSWER_MAX_TOKENS * 4);
+    } else {
+        body["thinking"] = thinking_off(model);
     }
 }
 
@@ -62,14 +74,15 @@ pub(crate) fn answer_body(request: &AnswerRequest, model: &str) -> Value {
             .map_or(request.question.as_str(), |t| &t.question);
         messages.push(json!({"role": "user", "content": next}));
     }
-    json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": ANSWER_MAX_TOKENS,
         "stream": true,
         "system": request.system_prompt,
-        "thinking": thinking_off(model),
         "messages": messages,
-    })
+    });
+    set_least_thinking(&mut body, model);
+    body
 }
 
 fn usage_of(v: &Value) -> Usage {
@@ -138,12 +151,7 @@ impl ChatModel for Anthropic {
         cancel: &CancelToken,
         on_event: &mut dyn FnMut(AnswerEvent),
     ) -> Result<Answer, AiError> {
-        let models = models_for(Provider::Anthropic);
-        let model = if request.cheap {
-            models.cheap_answer
-        } else {
-            models.answer
-        };
+        let model = request.answer_model(Provider::Anthropic);
         let body = answer_body(request, model);
         let response = self.http.send(cancel, STREAM_TIMEOUT, || {
             self.http.post("/v1/messages").json(&body)

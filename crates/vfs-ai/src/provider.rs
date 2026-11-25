@@ -153,6 +153,22 @@ pub struct AnswerRequest {
     pub question: String,
     /// «Respuestas más baratas»: answer with the cheap model (D7).
     pub cheap: bool,
+    /// A model to answer with instead of the tier's; `None` in the app. The live reference run
+    /// sets it (VFS-46).
+    pub model: Option<&'static str>,
+}
+
+impl AnswerRequest {
+    /// The model this request answers with on `provider`: [`AnswerRequest::model`], else the
+    /// tier's (D7).
+    pub fn answer_model(&self, provider: Provider) -> &'static str {
+        let models = crate::cost::models_for(provider);
+        match self.model {
+            Some(m) => m,
+            None if self.cheap => models.cheap_answer,
+            None => models.answer,
+        }
+    }
 }
 
 /// A citation as the provider returned it. 28c checks that `passage` was sent and that `quote`

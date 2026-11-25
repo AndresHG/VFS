@@ -16,7 +16,7 @@ use crate::provider::{
 };
 
 /// Reasoning effort for both calls: none, the least the models take (D7, "thinking off or
-/// minimal"). `gpt-6-luna` rejects `minimal` with a 400 (first live run, VFS-28 AC-12).
+/// minimal"). `gpt-6-luna` rejects `minimal` with a 400 (VFS-46 R4).
 const REASONING_EFFORT: &str = "none";
 
 pub(crate) struct OpenAi {
@@ -30,7 +30,7 @@ impl OpenAi {
 }
 
 /// The answer's schema (R7, R8). `found` is the model's own verdict: a cheap model that says
-/// the passages lack the answer still cites a nearby fact (first live run), so `found: false`
+/// the passages lack the answer still cites a nearby fact (VFS-46 R2), so `found: false`
 /// discards its citations and the answer shows as not found.
 fn answer_schema() -> Value {
     json!({
@@ -202,12 +202,7 @@ impl ChatModel for OpenAi {
         cancel: &CancelToken,
         on_event: &mut dyn FnMut(AnswerEvent),
     ) -> Result<Answer, AiError> {
-        let models = models_for(Provider::OpenAi);
-        let model = if request.cheap {
-            models.cheap_answer
-        } else {
-            models.answer
-        };
+        let model = request.answer_model(Provider::OpenAi);
         let body = answer_body(request, model);
         let response = self.http.send(cancel, STREAM_TIMEOUT, || {
             self.http.post("/v1/responses").json(&body)
