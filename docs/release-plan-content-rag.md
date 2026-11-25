@@ -39,22 +39,33 @@ release.
 
 ## v0.4: ask your archive
 
-| Order | PR | What | Effort |
-|---|---|---|---|
-| 1 | VFS-28 28a | Stable self-signed macOS signing identity | 1–2 |
-| 2 | VFS-28 28b | `vfs-ai` crate: providers, keys, errors, cost, `ai.db` | 4–5 |
-| 3 | VFS-28 28c | Ask flow, citations, follow-ups, RAG golden set | 4–6 |
-| 4 | VFS-28 28d | Interface: answer view, cost cap, «Qué se ha enviado», bibliography | 5–6 |
+v0.3.0 shipped on 2026-11-25 without the AI. 28b, 28c and 28d are merged behind the desktop
+Cargo feature `ai`, which release builds leave off (`default = []` in
+`apps/desktop/src-tauri/Cargo.toml`, #200). What is left before v0.4:
 
-28b does not depend on content search, so a second session can build it during v0.3. 28a
-(the macOS signing change) is merged only after v0.3 ships, to keep one new risk per
-release. With 28b done during v0.3, the gap between the releases is about 10–14 days
-(28a + 28c + 28d). With one session only, it is the full 14–19.
+| Order | Step | What | Who | Effort |
+|---|---|---|---|---|
+| 1 | VFS-28 28a | Stable self-signed macOS signing identity: certificate as a CI secret with an offline backup, Tauri `signingIdentity`, the A/B keychain check on the macOS runner (AC-3) | session | 1–2 |
+| 2 | `--live` runs | One `golden_live` run per provider with the owner's keys, commands in #191's test plan; commit the recordings of one run and re-run the golden tests offline (AC-12) | owner | ½ |
+| 3 | Fixes | Whatever the live runs show: OpenAI `reasoning.effort`, Anthropic `citations_delta` shape, `thinking` on the answer model | session | 0–2 |
+| 4 | Switch on | `default = ["ai"]`, release notes (macOS may ask once more for folder access, D12), version 0.4.0 | session | ½ |
+| 5 | Owner test | A release-candidate build tried on the owner's Mac and, if possible, on the target PC | owner | ½ |
+
+Steps 1 and 2 are independent and can run at the same time. 28a ships only in v0.4: it
+changes the macOS signature, so one new risk per release still holds.
 
 **Gate before release:**
-- the RAG golden set passes on the recorded answers;
-- one manual `--live` run with each provider is recorded in 28c's PR;
-- cost per question is shown.
+- the RAG golden set passes on recordings from a real provider, not the hand-written ones;
+- one manual `--live` run with each provider is recorded in a PR;
+- AC-3 passes on the macOS runner: build B reads the keychain item that build A saved;
+- cost per question is shown, and the cost cap stops a question that would exceed it;
+- CI and the e2e journeys are green on both platforms with the feature on;
+- the footprint rule holds: with no key configured, the AI adds no background work, no
+  network call and no resident memory (CLAUDE.md «Lightweight first»).
+
+**Still open from v0.3:** the real-PC measurement 27m (busy-HDD pacing, the Windows CPU
+probe, index size after compaction) needs the field visit. It does not block v0.4, but if it
+shows a problem, the fix ships first as a 0.3.x.
 
 ## Later
 
