@@ -213,7 +213,8 @@ GitHub (it downloads `latest.json` from the latest release, about 1 KB, and send
 about your files). If there is one it offers "Actualizar"; one click downloads it, checks its
 signature against the public key built into the app, installs it and reopens VFS. Nothing is
 downloaded or installed without that click. The check can be turned off in Settings ("Ajustes") →
-"Check for updates when opening"; then VFS never connects to the internet. v0.1.1 has no
+"Check for updates when opening"; then VFS makes no connection unless you ask your
+documents with your own AI key (VFS-28). v0.1.1 has no
 updater: install v0.2.0 by hand once. How it is built, the signing key and the manual test:
 [`docs/updates.md`](docs/updates.md); spec: [VFS-21](specs/vfs-21-updates/spec.md).
 

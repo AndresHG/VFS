@@ -43,7 +43,13 @@ v0.3.0 shipped on 2026-11-25 without the AI. 28b, 28c and 28d are merged behind 
 Cargo feature `ai`, now on by default (`default = ["ai"]` in
 `apps/desktop/src-tauri/Cargo.toml`; `default = []` turns it off, and CI keeps that build
 compiling). The live runs and their fixes are VFS-46 (#218, #219, #223; Haiku 50/50, Luna
-49/50 on the golden set). What is left before v0.4:
+49/50 on the golden set). Cost of the switch (R11), from the release dry run 45708968171
+against the v0.3.0 assets, as compressed download sizes: Windows installer 15.2 MB against
+14.6 MB, macOS app (zip and updater tarball) 34.3 MB against 33.7 MB, a gap that also holds
+v0.3.1's settings window. With no key the AI does no background work, makes no network call
+and holds no resident memory beyond an idle `AiState`. The update check text no longer calls
+itself the only connection (VFS-21 R7 and its wording in D1 give way to VFS-28 R1). What is
+left before v0.4:
 
 | Order | Step | What | Who | Effort |
 |---|---|---|---|---|
