@@ -69,6 +69,7 @@ fn question_log_has_counts_and_no_content() {
         provider: Provider::Anthropic,
         lang: Lang::Es,
         cheap: false,
+        answer_model: None,
         over_cap_confirmed: false,
         now: Local.with_ymd_and_hms(2026, 11, 23, 12, 0, 0).unwrap(),
     };

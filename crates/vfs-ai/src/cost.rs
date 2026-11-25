@@ -17,6 +17,8 @@ pub const NANO_PER_USD: i64 = 1_000_000_000;
 /// Model ids, as listed by the providers on [`PRICES_AS_OF`].
 pub const CLAUDE_HAIKU: &str = "claude-haiku-5-5";
 pub const CLAUDE_SONNET: &str = "claude-sonnet-5-5";
+/// Not a tier of the app: only the live reference run asks with it (VFS-46).
+pub const CLAUDE_OPUS: &str = "claude-opus-5-5";
 pub const GPT_LUNA: &str = "gpt-6-luna";
 pub const GPT_SOL: &str = "gpt-6.2-sol";
 
@@ -73,6 +75,13 @@ const PRICES: &[Price] = &[
         output: 10_000,
         cache_read: 100,
         cache_write: 2_500,
+    },
+    Price {
+        model: CLAUDE_OPUS,
+        input: 4_000,
+        output: 20_000,
+        cache_read: 200,
+        cache_write: 5_000,
     },
     Price {
         model: GPT_LUNA,

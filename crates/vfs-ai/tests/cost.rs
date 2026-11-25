@@ -126,6 +126,7 @@ fn unknown_model_costs_the_highest_price() {
             let m = models_for(*p);
             [m.rewrite, m.answer, m.cheap_answer]
         })
+        .chain([vfs_ai::cost::CLAUDE_OPUS])
         .map(|id| cost_nano(id, &usage))
         .max()
         .unwrap();

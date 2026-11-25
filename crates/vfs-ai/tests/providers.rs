@@ -75,8 +75,8 @@ fn anthropic_rewrite() {
 }
 
 /// VFS-28 R6.1, R7: the OpenAI rewrite uses the cheap model, strict JSON schema and
-/// `max_output_tokens` 300; cached tokens are split from the input. Reasoning is `none` (D7):
-/// the live run showed `gpt-6-luna` rejects `minimal` with a 400.
+/// `max_output_tokens` 300; cached tokens are split from the input. VFS-46 AC-3: reasoning is
+/// `none`, since `gpt-6-luna` rejects `minimal` with a 400.
 #[test]
 fn openai_rewrite() {
     let mock = MockServer::start(vec![ok_json(OPENAI_REWRITE)]);
@@ -177,6 +177,22 @@ fn cheap_answers_use_the_cheap_model() {
     assert_eq!(body["thinking"]["type"], "disabled");
 }
 
+/// VFS-46 AC-4: a request naming a model answers with it. Opus 5.5 cannot turn thinking off,
+/// so it is sent no `thinking` and `low` effort.
+#[test]
+fn a_named_model_answers_and_opus_thinks_at_low_effort() {
+    let mock = MockServer::start(vec![MockResponse::sse(ANTHROPIC_ANSWER)]);
+    let mut request = answer_request();
+    request.model = Some(vfs_ai::cost::CLAUDE_OPUS);
+    model_at(Provider::Anthropic, &mock)
+        .answer(&request, &CancelToken::new(), &mut |_| {})
+        .unwrap();
+    let body = mock.requests()[0].json();
+    assert_eq!(body["model"], "claude-opus-5-5");
+    assert!(body.get("thinking").is_none());
+    assert_eq!(body["output_config"]["effort"], "low");
+}
+
 /// VFS-28 R9: a follow-up sends the same passages, then the earlier question and answer, then
 /// the new question.
 #[test]
@@ -214,7 +230,7 @@ fn follow_up_carries_the_thread() {
     }
 }
 
-/// VFS-28 R7, R8: OpenAI's answer schema asks for a `found` verdict. When the model says the
+/// VFS-46 AC-2: OpenAI's answer schema asks for a `found` verdict. When the model says the
 /// passages lack the answer, its citations are discarded, so the answer shows as not found
 /// even though a cheap model cited a nearby fact (first live run).
 #[test]

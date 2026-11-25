@@ -19,6 +19,7 @@ fn opts(provider: Provider) -> AskOptions {
         provider,
         lang: Lang::Es,
         cheap: false,
+        answer_model: None,
         over_cap_confirmed: false,
         now: Local.with_ymd_and_hms(2026, 11, 23, 12, 0, 0).unwrap(),
     }
@@ -314,6 +315,29 @@ fn passages_go_round_robin_and_merge() {
         sources[0].text,
         "Uno.pdf trozo 1. Uno.pdf trozo 2. Uno.pdf trozo 3. Uno.pdf trozo 4. Uno.pdf trozo 5."
     );
+}
+
+/// VFS-46 AC-1: a document scoring under a quarter of the best one is weak, and gets passages
+/// only after the strong documents have given all of theirs. In the first live run a long
+/// agreement scoring 22 lost the passages holding the answers to documents scoring 1 to 5.
+#[test]
+fn weak_documents_wait_for_the_strong_ones() {
+    let mut docs = vec![FakeDoc::new(1, "/A", "Convenio.pdf", 20, &[0, 8, 14])];
+    docs.extend((2..=11).map(|i| FakeDoc::new(i, "/A", &format!("D{i}.txt"), 3, &[1])));
+    let corpus = FakeCorpus::new(docs);
+    let mut hits = corpus.retrieve_all();
+    hits[0].score = 22.0;
+    for h in &mut hits[1..] {
+        h.score = 5.0;
+    }
+    let sources = ask::pick_passages(&corpus, &hits).unwrap();
+    let firsts: Vec<(i64, u32)> = sources
+        .iter()
+        .map(|s| (s.file_id, s.first_ordinal))
+        .take(4)
+        .collect();
+    assert_eq!(firsts, [(1, 0), (1, 7), (1, 13), (2, 0)]);
+    assert_eq!(sources.len(), MAX_PASSAGES);
 }
 
 /// Ten documents with three passages each: ten passages are picked, the best of each.
