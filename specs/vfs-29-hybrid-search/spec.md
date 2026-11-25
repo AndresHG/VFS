@@ -111,9 +111,12 @@ Local model (29b, 29c)
 ## Gate before building any interface
 
 Fixed now, before any run:
-- **Meaning-only subset.** The content golden set (VFS-2 AC-17) gains at least 15 labelled
-  meaning-only queries where the document shares no keyword with the query. Hybrid search
-  must put the expected document in the top 5 for at least 3 more of them than BM25 does.
+- **Meaning-only subset.** The content golden set (VFS-2 AC-17) gains at least 20 labelled
+  Spanish and 8 English meaning-only queries where the document shares no keyword with the
+  query, over Spanish and English documents of the kind a family archive holds (invoices,
+  letters, school and medical papers, manuals). Hybrid search must put the expected document
+  in the top 5 for at least 4 more Spanish queries and 1 more English query than BM25 does,
+  and Spanish results decide between candidates (D14).
 - **Keyword subset.** On the existing keyword queries, hybrid search must not lose any query
   that BM25 has in its top 5.
 - **Which models.** One run, before any interface: at least one API model (Voyage-4-lite or
@@ -205,6 +208,8 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D11 | First pass | OpenAI Batch API (−50 %); Voyage standard while its 200 M free tokens last | agent | 2026-11-25 (cost review) |
 | D12 | Order after the cost review | 29b's measurement and the gate run first, local light model beside the API; whichever passes ships first, local preferred | owner | 2026-11-25 |
 | D13 | Default embedder | The local light model; the API is an optional alternative, not paid by default | owner | 2026-11-25 |
+| D14 | Languages | A model good in Spanish and English; the gate weighs Spanish most (the owner's and family's documents), English still checked for open-source users | owner | 2026-11-25 |
+| D15 | Questions with vectors | Questions (VFS-28) retrieve with vectors as soon as 29c ships, through the fused `retrieve` (R11); no change of their own | owner | 2026-11-25 |
 
 ## Expected PRs
 
