@@ -356,6 +356,7 @@ export const en = {
   aboutMadeBy: 'Made by',
   aboutAuthor: 'Andrés Herranz',
   aboutLicense: 'License',
+  aboutLicenseName: 'PolyForm Shield 1.0.0',
   aboutSource: 'Source code',
   aboutSourceOpen: 'View on GitHub',
   aboutPrivacy: 'Your files never leave your computer.',

@@ -14,13 +14,16 @@ export const UpdatePhase = Object.freeze({
 export const CHECK_DELAY_MS = 10_000;
 
 /** What this launch's check found (VFS-45 R5): not run yet, nothing newer, an update, or a
- *  failure. */
+ *  failure (the shell rejects a failed check). */
 export const CheckResult = Object.freeze({
   NOT_RUN: 'not-run',
   NONE: 'none',
   FOUND: 'found',
   FAILED: 'failed',
 });
+
+/** The button of the «Acerca de» update line (VFS-45 R5). */
+export const AboutAction = Object.freeze({ INSTALL: 'install', CHECK: 'check' });
 
 /**
  * The update line of «Acerca de» (VFS-45 R5) in the catalog `S`: `text`, the `action` button
@@ -30,10 +33,10 @@ export const CheckResult = Object.freeze({
 export function aboutUpdateView({ checkOn, result, version }, S) {
   if (!checkOn) return { text: S.aboutUpdatesOff, action: null };
   switch (result) {
-    case CheckResult.FOUND: return { text: S.aboutUpdateFound(version), action: 'install' };
+    case CheckResult.FOUND: return { text: S.aboutUpdateFound(version), action: AboutAction.INSTALL };
     case CheckResult.NONE: return { text: S.aboutUpToDate, action: null };
-    case CheckResult.FAILED: return { text: S.aboutUpdateFailed, action: 'check' };
-    default: return { text: '', action: 'check' };
+    case CheckResult.FAILED: return { text: S.aboutUpdateFailed, action: AboutAction.CHECK };
+    default: return { text: '', action: AboutAction.CHECK };
   }
 }
 
@@ -62,19 +65,22 @@ export function updateView(st, S) {
  * gets updateView's result in the catalog `S` after every change; `schedule` is setTimeout
  * (injected for tests).
  */
-export function createUpdates({ api, S, render, schedule = setTimeout, delay = CHECK_DELAY_MS }) {
+export function createUpdates({ api, S, render, schedule = setTimeout, delay = CHECK_DELAY_MS, checkOn = () => true }) {
   const st = { phase: UpdatePhase.HIDDEN, version: null, downloaded: 0, total: null, result: CheckResult.NOT_RUN };
   const show = () => render(updateView(st, S));
   let running = null;
 
-  /** One check; the shell runs it at most once per launch and answers the same after. A null
-   *  answer is also what the shell gives while the setting is off: the caller knows which. */
+  /** One check; the shell runs it at most once per launch and answers the same after. While
+   *  the setting is off (`checkOn`) the shell answers null without checking, which is not
+   *  "nothing newer": the result stays not run, so «Acerca de» offers the check once the
+   *  setting is turned on. */
   function check() {
     running ??= (async () => {
       try {
+        const on = checkOn();
         const info = await api.checkForUpdate();
         if (!info) {
-          st.result = CheckResult.NONE;
+          if (on) st.result = CheckResult.NONE;
           return;
         }
         st.result = CheckResult.FOUND;

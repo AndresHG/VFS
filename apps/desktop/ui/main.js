@@ -7,8 +7,7 @@ import { createVirtualList } from './vlist.js';
 import { placesOf, showsCloudBadge } from './copies.js';
 import { ROW_KINDS, rowKindOf } from './kinds.js';
 import { SecondAction, secondActionOf } from './links.js';
-import { aboutUpdateView, createUpdates } from './updates.js';
-import { ABOUT } from './about.js';
+import { AboutAction, aboutUpdateView, createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
@@ -23,7 +22,7 @@ import {
 } from './content.js';
 import {
   ContentPhase, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus,
-  Scope, SortOrder, Source, TruncatedBy, UiErrorCode,
+  ProjectPage, Scope, SortOrder, Source, TruncatedBy, UiErrorCode,
 } from './contract.js';
 import {
   DateChoice, LanguageChoice, ResultsTab, SearchState, SizeChoice, SourceChoice, TypeChecklist, View, typeChecklistMode,
@@ -1354,9 +1353,9 @@ function main(L) {
     $('about-version').textContent = appVersion ? S.aboutVersion(appVersion) : '';
     $('about-version').hidden = !appVersion;
   }).catch(() => { $('about-version').hidden = true; });
-  $('about-license-row').hidden = !ABOUT.license;
-  $('about-license').textContent = ABOUT.license ?? '';
-  $('about-source').addEventListener('click', () => api.openSourcePage().catch((err) => showError(errorText(err))));
+  const openPage = (page) => api.openProjectPage(page).catch((err) => showError(errorText(err)));
+  $('about-source').addEventListener('click', () => openPage(ProjectPage.SOURCE));
+  $('about-license').addEventListener('click', () => openPage(ProjectPage.LICENSE));
 
   let aboutChecking = false;
   function renderAbout() {
@@ -1364,11 +1363,11 @@ function main(L) {
     $('about-update').textContent = aboutChecking ? S.aboutChecking : view.text;
     const action = $('about-update-action');
     action.hidden = !view.action || aboutChecking;
-    action.textContent = view.action === 'install' ? S.updateInstall : S.aboutCheck;
+    action.textContent = view.action === AboutAction.INSTALL ? S.updateInstall : S.aboutCheck;
     action.dataset.action = view.action ?? '';
   }
   $('about-update-action').addEventListener('click', async (e) => {
-    if (e.currentTarget.dataset.action === 'install') {
+    if (e.currentTarget.dataset.action === AboutAction.INSTALL) {
       updates.install();
       return;
     }
@@ -1637,7 +1636,7 @@ function main(L) {
   /* ---------------------------------------------------------------- updates (VFS-21) */
 
   const updatesToggle = $('updates-on');
-  const updates = createUpdates({ api, S, render: renderUpdate });
+  const updates = createUpdates({ api, S, render: renderUpdate, checkOn: () => updatesToggle.checked });
 
   function renderUpdate(view) {
     $('banner-update').hidden = !view;

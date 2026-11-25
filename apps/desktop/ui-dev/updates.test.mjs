@@ -143,3 +143,17 @@ test('checking now records the result', async () => {
   assert.equal(u.phase(), UpdatePhase.OFFERED);
   assert.equal(views.at(-1).action, S.updateInstall);
 });
+
+/** VFS-45 AC-5 (R5): a check made while the setting is off (the shell answers null without
+ *  checking) is not "nothing newer": the result stays not run, so «Acerca de» offers the check
+ *  once the setting is on again. */
+test('a check with the setting off records nothing', async () => {
+  let on = false;
+  const views = [];
+  const u = createUpdates({ api: { checkForUpdate: async () => null }, S, render: (v) => views.push(v), schedule: () => {}, checkOn: () => on });
+  await u.checkNow();
+  assert.equal(u.result().result, CheckResult.NOT_RUN);
+  on = true;
+  await u.checkNow();
+  assert.equal(u.result().result, CheckResult.NONE);
+});

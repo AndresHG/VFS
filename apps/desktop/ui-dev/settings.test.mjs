@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { startBrowser } from './browser.mjs';
 import { CATALOGS, Lang } from '../ui/strings.js';
 import { ResultsTab } from '../ui/choices.js';
+import { ProjectPage } from '../ui/contract.js';
 
 const S = CATALOGS[Lang.ES];
 
@@ -124,24 +125,27 @@ test('the version shows under the sections', async () => {
   await closeSettings();
 });
 
-/** VFS-45 AC-5, AC-6 (R5, R6): «Acerca de» shows the version, the author and «Código fuente»,
- *  no license row while none is set; «Buscar actualizaciones» says it is up to date; with an
- *  update it offers «Actualizar»; with the setting off it offers nothing. «Código fuente» asks
- *  the shell to open the project page once. */
+/** VFS-45 AC-5, AC-6 (R5, R6): «Acerca de» shows the version, the author, the license and
+ *  «Código fuente»; «Buscar actualizaciones» says it is up to date; with an update it offers
+ *  «Actualizar»; with the setting off it offers nothing. The license name and «Ver en GitHub»
+ *  each ask the shell to open their project page once, by name. */
 test('«Acerca de» shows the version, the update state and the credits', async () => {
   await page.load();
   await openSettings();
   await evaluate(`document.getElementById('stab-about').click()`);
   const text = await evaluate(`document.getElementById('spanel-about').innerText`);
-  for (const s of [S.aboutVersion('0.3.1'), S.aboutAuthor, S.aboutSourceOpen]) assert.ok(text.includes(s), s);
-  assert.equal(await evaluate(panelShown('about-license-row')), false, 'no license row yet');
+  for (const s of [S.aboutVersion('0.3.1'), S.aboutAuthor, S.aboutLicenseName, S.aboutSourceOpen]) assert.ok(text.includes(s), s);
   assert.equal(await evaluate(`document.getElementById('about-update-action').textContent`), S.aboutCheck);
   await evaluate(`document.getElementById('about-update-action').click()`);
   await until(`document.getElementById('about-update').textContent === ${JSON.stringify(S.aboutUpToDate)}`, '«Está al día»');
   assert.equal(await evaluate(`document.getElementById('about-update-action').hidden`), true);
 
   await evaluate(`document.getElementById('about-source').click()`);
-  await until(`${calls}.then((c) => c.openSourcePage === 1)`, 'the project page opened');
+  await until(`${calls}.then((c) => c.openProjectPage === 1)`, 'the project page opened');
+  assert.equal((await evaluate(calls)).lastProjectPage, ProjectPage.SOURCE);
+  await evaluate(`document.getElementById('about-license').click()`);
+  await until(`${calls}.then((c) => c.openProjectPage === 2)`, 'the license opened');
+  assert.equal((await evaluate(calls)).lastProjectPage, ProjectPage.LICENSE);
 
   await evaluate(`document.getElementById('stab-general').click()`);
   await evaluate(`document.getElementById('updates-on').click()`);

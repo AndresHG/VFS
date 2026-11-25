@@ -26,7 +26,8 @@
 //   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead, roots: {id, root, profile}[]}
 //   (VFS-21) UpdateSettings {checkOnOpen}; check_for_update -> {version} | null (null when the
 //     setting is off); install_update emits 'update-progress' {downloaded, total|null}
-//   (VFS-45) open_source_page() opens the project's page, a fixed address, in the browser
+//   (VFS-45) open_project_page(page: ProjectPage) opens a fixed project address in the browser;
+//     check_for_update rejects when the check failed
 //   (VFS-20) feedback_report(description, includeNames) -> string;
 //     feedback_save(description, includeNames, github) -> {folder, file}
 //   (VFS-27) ContentStatus {settings: {enabled, paused, offered}, phase: {kind: ContentPhase,
@@ -102,7 +103,7 @@ function tauriBackend(t) {
     checkForUpdate: () => invoke('check_for_update'),
     // VFS-45: the app version (Tauri core, no index) and the project page, at a fixed address.
     appVersion: () => t.app.getVersion(),
-    openSourcePage: () => invoke('open_source_page'),
+    openProjectPage: (page) => invoke('open_project_page', { page }),
     installUpdate: () => invoke('install_update'),
     onUpdateProgress: (cb) => listen('update-progress', (e) => cb(e.payload)),
     // VFS-27: content search.
@@ -160,7 +161,7 @@ function missingBackend() {
     getIncludeAllFolders: fail, setIncludeAllFolders: fail,
     searchSources: fail, getBookmarksStatus: fail, setBookmarksEnabled: fail, openBookmark: fail,
     getUpdateSettings: fail, setUpdateCheck: fail, checkForUpdate: fail, installUpdate: fail,
-    appVersion: fail, openSourcePage: fail,
+    appVersion: fail, openProjectPage: fail,
     onUpdateProgress: async () => () => {},
     feedbackReport: fail, feedbackSave: fail,
     contentStatus: fail, contentSetEnabled: fail, contentSetPaused: fail, contentRetry: fail, contentRebuild: fail,

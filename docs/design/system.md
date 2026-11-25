@@ -59,7 +59,7 @@ background (ratios in brackets; AA text needs 4.5, controls 3).
 | `--line-strong` | `#8a8579` (3.5) | `#77726a` (3.6) | Borders that define a control |
 | `--accent` | `#a3471f` (5.7) | `#e39a73` (7.5) | Primary action, selection edge, links |
 | `--on-accent` | `#ffffff` (6.0) | `#2a1408` (7.6) | Text on accent |
-| `--accent-soft` | `#f6e6dc` | `#3b2b22` | Selected row background (ink 13.7 / 11.2) |
+| `--accent-soft` | `#f6e6dc` | `#3b2b22` | Active filter and chip background, the selected row's key hint (ink 13.7 / 11.2) |
 | `--mark` | `#f5dfb3` | `#5a4520` | Match highlight background (ink 12.8 / 7.6) |
 | `--warn-bg` / `--warn-ink` | `#fbf0d9` / `#7a4f00` (6.3) | `#2e2615` / `#f0c987` (9.6) | Unavailable disk |
 | `--danger` | `#a8321e` (6.3) | `#ff9b85` (8.4) | Destructive confirm only |
@@ -84,12 +84,14 @@ Implementation: raw values as custom properties, switched under
 | Filter control | `--sunk` bg, ink text, chevron | 4 % darker | ring | accent-soft bg, bold, chosen value as the label; «Más filtros (n)» counts the filters behind it | — |
 | Results tabs | «Nombres» and «Documentos» at the start of the results header, `--t-body` words in ink-2 with no counts, then the count and «Orden»; named «Buscar en» for screen readers; the tabs never shrink or wrap, the count and «Orden» wrap below them | `--sunk` bg, ink text | ring; one tab stop, the arrows, Home and End choose | chosen tab bold ink with a 3px accent bar under it (its bold width reserved, so nothing beside it moves) | — |
 | Filter chip | accent-soft bg, accent border, bold, `×`; one per filter in use behind «Más filtros», on a line below the filters with «Quitar filtros (n)» at its end, which clears every filter but keeps the order and the tab | `--sunk-2` | ring | — | — |
-| Result row | paper, hairline below | `--sunk` | ring inset on the list | accent-soft bg + 4px accent edge, action button shown, full path shown | unavailable: ink-2 name, badge |
+| Result row | paper, hairline below | `--sunk`, neutral outlined action button | ring inset on the list | `--sunk-2` bg + 3px accent edge, accent outlined action button (no fill), full path shown (VFS-45 R7) | unavailable: ink-2 name, badge |
+| Document hit | paper, hairline below, «Mostrar en carpeta» faded out | `--sunk`, button shown | button shown while the hit holds the focus | — | — |
 | Badge | warn-bg, warn-ink, `--t-small` (only "No disponible" today) | — | — | — | — |
 | Notice | one line, warn-bg, icon + sentence + quiet button | — | — | — | — |
 | Popover («Tipo», «Más filtros») | surface, 1px `--line-strong`, under its button; as tall as its fields, moved left and scrolling inside so it never leaves the window; native selects drawn by the page at the target height | — | ring; Esc closes it and the focus goes back to the button | — | a field that does not apply (size with bookmarks only) at 50 % opacity |
 | Bottom bar | paper, hairline above; status, reading progress, then the quiet buttons. The buttons stay together on one row; from 56 rem wide the whole bar is one row, the texts cut (one line on a short window) with their whole text as tooltip | — | ring | — | — |
-| Side panel (Carpetas, Ajustes, …) | paper, slides in from the right; closes on Esc, its × or a click outside it, in WebKit too; a number being edited is applied and typed text stays in its field | — | — | — | — |
+| Side panel (Carpetas, Enviar comentarios, …) | paper, slides in from the right; closes on Esc, its × or a click outside it, in WebKit too; a number being edited is applied and typed text stays in its field | — | — | — | — |
+| Ajustes window | surface, centered, the section list (`--sunk`) on the left ending with the version, the section on the right; settings are rows in bordered cards, a switch at the row's end; closes like a side panel (VFS-45) | section: `--sunk-2` | ring | section: surface bg, bold | — |
 
 The reveal action appears on the selected row and on hover; Return and double-click perform it
 on any row. Hidden-until-hover is never the only path: keyboard selection shows it too.
@@ -97,7 +99,8 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
 ## Motion
 
 - Colour/background transitions only, 120 ms ease-out.
-- Panel open: 160 ms slide + fade, only under `prefers-reduced-motion: no-preference`.
+- Panel open: 160 ms slide + fade; Ajustes: 120 ms fade and slight scale. Only under
+  `prefers-reduced-motion: no-preference`.
 - Busy indicator: a small 3-dot pulse or slow indeterminate bar beside the status text; slows
   to 12 s under reduced motion. Never a spinner over the results.
 - No scroll-linked effects, no blur, no shadows larger than `0 1px 2px`.
