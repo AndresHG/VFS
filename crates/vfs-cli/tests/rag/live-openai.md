@@ -1,0 +1,55 @@
+# RAG golden live run: OpenAI (cheap tier), graded by Anthropic
+
+- q01 found-ok=true facts-ok=true dropped=0 grade: La derrama es de 1.200 euros por vivienda, pagaderos en tres plazos.
+- q02 found-ok=true facts-ok=true dropped=0 grade: Pagas 312 euros al año.
+- q03 found-ok=true facts-ok=true dropped=0 grade: Hay que pagar 25 euros y van a Segovia.
+- q04 found-ok=true facts-ok=true dropped=0 grade: La luz costó 68,40 euros.
+- q05 found-ok=true facts-ok=true dropped=0 grade: Pago 750 euros al mes.
+- q06 found-ok=true facts-ok=true dropped=0 grade: El dueño del piso se llama Luis Pérez Gil.
+- q07 found-ok=true facts-ok=true dropped=0 grade: La fianza fue de dos mensualidades, es decir, 1.500 euros.
+- q08 found-ok=true facts-ok=true dropped=0 grade: La garantía cubre tres años desde la compra, realizada el 18 de mayo de 2021.
+- q09 found-ok=true facts-ok=true dropped=0 grade: 4401-2283
+- q10 found-ok=true facts-ok=true dropped=0 grade: El banco prestó 180.000 euros.
+- q11 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q12 found-ok=true facts-ok=true dropped=0 grade: Según el documento, con 38 años cotizados puedes jubilarte ordinariamente a los 66 años y cuatro meses.
+- q13 found-ok=true facts-ok=true dropped=0 grade: El 14 de octubre.
+- q14 found-ok=true facts-ok=true dropped=0 grade: El jueves entre las nueve y las doce.
+- q15 found-ok=true facts-ok=true dropped=0 grade: Se la pusieron el 3 de febrero.
+- q16 found-ok=true facts-ok=true dropped=0 grade: Lleva garbanzos remojados, morcillo, tocino, chorizo, morcilla y un hueso de jamón.
+- q17 found-ok=true facts-ok=true dropped=0 grade: La renta de 2022 te salió a devolver 412 euros.
+- q18 found-ok=true facts-ok=true dropped=0 grade: Del 2 al 12 de agosto.
+- q19 found-ok=true facts-ok=true dropped=0 grade: El convenio dura cuatro años.
+- q20 found-ok=false facts-ok=false dropped=0 grade: -
+  answer: «Los pasajes no indican si los estudiantes reciben una remuneración por las prácticas en Francia.»
+- q21 found-ok=true facts-ok=true dropped=0 grade: Se pueden finalizar con un preaviso de al menos quince días.
+- q22 found-ok=true facts-ok=true dropped=0 grade: Debe presentar a la Universidad el Certificado de Delitos de Naturaleza Sexual.
+- q23 found-ok=true facts-ok=true dropped=0 grade: 
+- q24 found-ok=true facts-ok=true dropped=0 grade: El Ayuntamiento de Monzón convoca cuatro plazas de limpiador.
+- q25 found-ok=true facts-ok=true dropped=0 grade: Ofrece una plaza de Operario Matarife Albañil, mediante concurso en turno libre/estabilización.
+- q26 found-ok=true facts-ok=true dropped=0 grade: El complemento específico es de 22.910,30.
+- q27 found-ok=true facts-ok=true dropped=0 grade: La Universidad de Córdoba nombró a Aida Gema de Haro García.
+- q28 found-ok=true facts-ok=true dropped=0 grade: Alrededor de cuatro huevos.
+- q29 found-ok=true facts-ok=true dropped=0 grade: Peñalara tiene 2428 metros sobre el nivel del mar.
+- q30 found-ok=true facts-ok=true dropped=0 grade: El 9 de noviembre de 2021.
+- q31 found-ok=true facts-ok=true dropped=0 grade: La Ley 35/2006, de 28 de noviembre, regula el IRPF, excepto en el País Vasco y Navarra.
+- q32 found-ok=true facts-ok=true dropped=0 grade: Se tiene constancia escrita de la tortilla de patatas en España desde 1767, según el libro La Agricultura General, Tomo III de Joseph Antonio Valcárcel.
+- q33 found-ok=true facts-ok=true dropped=0 grade: Se dice que ha fallecido abintestato o intestada.
+- q34 found-ok=true facts-ok=true dropped=0 grade: Como máximo, debería destinarse menos del 30 % de los ingresos disponibles del hogar al pago de la hipoteca.
+- q35 found-ok=true facts-ok=true dropped=0 grade: Se usa el fuego para calentarse desde que el ser humano lo dominó; se estima que el Homo erectus lo consiguió hace unos 450 000 años.
+- q36 found-ok=true facts-ok=true dropped=0 grade: -
+- q37 found-ok=true facts-ok=true dropped=0 grade: -
+- q38 found-ok=true facts-ok=true dropped=0 grade: -
+- q39 found-ok=true facts-ok=true dropped=0 grade: -
+- q40 found-ok=true facts-ok=true dropped=0 grade: -
+- q41 found-ok=true facts-ok=true dropped=0 grade: -
+- q42 found-ok=true facts-ok=true dropped=0 grade: -
+- q43 found-ok=true facts-ok=true dropped=0 grade: -
+- q44 found-ok=true facts-ok=true dropped=0 grade: -
+- q45 found-ok=true facts-ok=true dropped=0 grade: -
+- q46 found-ok=true facts-ok=true dropped=0 grade: -
+- q47 found-ok=true facts-ok=true dropped=0 grade: -
+- q48 found-ok=true facts-ok=true dropped=0 grade: -
+- q49 found-ok=true facts-ok=true dropped=0 grade: -
+- q50 found-ok=true facts-ok=true dropped=0 grade: -
+
+found/not-found right: 49/50; facts: 49/50; faithful: 1/34; cost of the asking: 0.0265 $
