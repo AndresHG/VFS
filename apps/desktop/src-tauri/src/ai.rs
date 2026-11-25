@@ -45,7 +45,8 @@ impl Default for AiSettings {
         AiSettings {
             enabled: false,
             provider: Provider::Anthropic,
-            cheap: false,
+            // The cheap tier answers by default (owner, VFS-46 D4).
+            cheap: true,
             notice_seen: false,
         }
     }
@@ -1004,10 +1005,12 @@ mod tests {
         let path = dir.path().join(SETTINGS_FILE);
         assert_eq!(load_settings(&path), AiSettings::default());
         assert!(!AiSettings::default().enabled);
+        // VFS-46 D4: the cheap tier answers unless the user turns it off.
+        assert!(AiSettings::default().cheap);
         let s = AiSettings {
             enabled: true,
             provider: Provider::OpenAi,
-            cheap: true,
+            cheap: false,
             notice_seen: true,
         };
         save_settings(&path, &s).unwrap();

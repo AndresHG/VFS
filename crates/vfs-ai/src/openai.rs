@@ -4,15 +4,15 @@
 //! the input and the answer is strict JSON `{answer, citations[{passage_id, quote}]}` (R7).
 //! `store` is off: nothing is kept on OpenAI's side beyond its abuse logs.
 
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::cost::{models_for, Usage};
 use crate::error::AiError;
 use crate::http::{Http, SseReader, SHORT_CALL_TIMEOUT, STREAM_TIMEOUT};
 use crate::provider::{
-    rewrite_schema, Answer, AnswerBlock, AnswerEvent, AnswerRequest, CancelToken, ChatModel,
-    Provider, RawCitation, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
+    answer_schema, numbered_passages, parse_json_answer, rewrite_schema, Answer, AnswerEvent,
+    AnswerRequest, CancelToken, ChatModel, Provider, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS,
+    REWRITE_MAX_TOKENS,
 };
 
 /// Reasoning effort for both calls: none, the least the models take (D7, "thinking off or
@@ -27,49 +27,6 @@ impl OpenAi {
     pub fn new(http: Http) -> Self {
         OpenAi { http }
     }
-}
-
-/// The answer's schema (R7, R8). `found` is the model's own verdict: a cheap model that says
-/// the passages lack the answer still cites a nearby fact (VFS-46 R2), so `found: false`
-/// discards its citations and the answer shows as not found.
-fn answer_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "answer": {"type": "string"},
-            "found": {
-                "type": "boolean",
-                "description": "true only if the passages state the answer to the question; false when it would have to be guessed or calculated from other facts",
-            },
-            "citations": {
-                "type": "array",
-                "description": "empty when found is false",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "passage_id": {"type": "integer"},
-                        "quote": {
-                            "type": "string",
-                            "description": "a short span copied character for character from that passage's text, without its [P] header",
-                        },
-                    },
-                    "required": ["passage_id", "quote"],
-                    "additionalProperties": false,
-                },
-            },
-        },
-        "required": ["answer", "found", "citations"],
-        "additionalProperties": false,
-    })
-}
-
-/// The passages as numbered data, one block each: `[P3] Contrato.pdf · p. 4` then the text.
-fn numbered_passages(request: &AnswerRequest) -> String {
-    let mut out = String::new();
-    for (i, p) in request.passages.iter().enumerate() {
-        out.push_str(&format!("[P{i}] {}\n{}\n\n", p.title, p.text));
-    }
-    out
 }
 
 /// The answer call's body (R7, R7a, R9): passages in the first user message, never in
@@ -140,19 +97,6 @@ fn output_text(response: &Value) -> Result<String, AiError> {
             response["incomplete_details"]["reason"]
         ))),
     }
-}
-
-#[derive(Deserialize)]
-struct JsonAnswer {
-    answer: String,
-    found: bool,
-    citations: Vec<JsonCitation>,
-}
-
-#[derive(Deserialize)]
-struct JsonCitation {
-    passage_id: i64,
-    quote: String,
 }
 
 impl ChatModel for OpenAi {
@@ -237,27 +181,11 @@ impl ChatModel for OpenAi {
             .ok_or_else(|| AiError::BadResponse("stream ended before completion".into()))?;
         let usage = usage_of(&response["usage"]);
         let text = output_text(&response)?;
-        let parsed: JsonAnswer = serde_json::from_str(&text)
-            .map_err(|_| AiError::BadResponse("answer is not the schema".into()))?;
-        on_event(AnswerEvent::Text(parsed.answer.clone()));
-        let cited = if parsed.found {
-            parsed.citations
-        } else {
-            Vec::new()
-        };
-        let citations = cited
-            .into_iter()
-            .map(|c| RawCitation {
-                passage: usize::try_from(c.passage_id).unwrap_or(usize::MAX),
-                quote: c.quote,
-            })
-            .collect();
+        let block = parse_json_answer(&text)?;
+        on_event(AnswerEvent::Text(block.text.clone()));
         Ok(Answer {
             model: model.to_owned(),
-            blocks: vec![AnswerBlock {
-                text: parsed.answer,
-                citations,
-            }],
+            blocks: vec![block],
             usage,
             stop_reason: response["status"].as_str().map(str::to_owned),
         })
