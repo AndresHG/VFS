@@ -4,19 +4,19 @@
 //! the input and the answer is strict JSON `{answer, citations[{passage_id, quote}]}` (R7).
 //! `store` is off: nothing is kept on OpenAI's side beyond its abuse logs.
 
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::cost::{models_for, Usage};
 use crate::error::AiError;
 use crate::http::{Http, SseReader, SHORT_CALL_TIMEOUT, STREAM_TIMEOUT};
 use crate::provider::{
-    rewrite_schema, Answer, AnswerBlock, AnswerEvent, AnswerRequest, CancelToken, ChatModel,
-    Provider, RawCitation, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
+    answer_schema, numbered_passages, parse_json_answer, rewrite_schema, Answer, AnswerEvent,
+    AnswerRequest, CancelToken, ChatModel, Provider, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS,
+    REWRITE_MAX_TOKENS,
 };
 
 /// Reasoning effort for both calls: none, the least the models take (D7, "thinking off or
-/// minimal"). `gpt-6-luna` rejects `minimal` with a 400 (first live run, VFS-28 AC-12).
+/// minimal"). `gpt-6-luna` rejects `minimal` with a 400 (VFS-46 R4).
 const REASONING_EFFORT: &str = "none";
 
 pub(crate) struct OpenAi {
@@ -27,38 +27,6 @@ impl OpenAi {
     pub fn new(http: Http) -> Self {
         OpenAi { http }
     }
-}
-
-fn answer_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "answer": {"type": "string"},
-            "citations": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "passage_id": {"type": "integer"},
-                        "quote": {"type": "string"},
-                    },
-                    "required": ["passage_id", "quote"],
-                    "additionalProperties": false,
-                },
-            },
-        },
-        "required": ["answer", "citations"],
-        "additionalProperties": false,
-    })
-}
-
-/// The passages as numbered data, one block each: `[P3] Contrato.pdf · p. 4` then the text.
-fn numbered_passages(request: &AnswerRequest) -> String {
-    let mut out = String::new();
-    for (i, p) in request.passages.iter().enumerate() {
-        out.push_str(&format!("[P{i}] {}\n{}\n\n", p.title, p.text));
-    }
-    out
 }
 
 /// The answer call's body (R7, R7a, R9): passages in the first user message, never in
@@ -131,18 +99,6 @@ fn output_text(response: &Value) -> Result<String, AiError> {
     }
 }
 
-#[derive(Deserialize)]
-struct JsonAnswer {
-    answer: String,
-    citations: Vec<JsonCitation>,
-}
-
-#[derive(Deserialize)]
-struct JsonCitation {
-    passage_id: i64,
-    quote: String,
-}
-
 impl ChatModel for OpenAi {
     fn provider(&self) -> Provider {
         Provider::OpenAi
@@ -190,12 +146,7 @@ impl ChatModel for OpenAi {
         cancel: &CancelToken,
         on_event: &mut dyn FnMut(AnswerEvent),
     ) -> Result<Answer, AiError> {
-        let models = models_for(Provider::OpenAi);
-        let model = if request.cheap {
-            models.cheap_answer
-        } else {
-            models.answer
-        };
+        let model = request.answer_model(Provider::OpenAi);
         let body = answer_body(request, model);
         let response = self.http.send(cancel, STREAM_TIMEOUT, || {
             self.http.post("/v1/responses").json(&body)
@@ -230,23 +181,11 @@ impl ChatModel for OpenAi {
             .ok_or_else(|| AiError::BadResponse("stream ended before completion".into()))?;
         let usage = usage_of(&response["usage"]);
         let text = output_text(&response)?;
-        let parsed: JsonAnswer = serde_json::from_str(&text)
-            .map_err(|_| AiError::BadResponse("answer is not the schema".into()))?;
-        on_event(AnswerEvent::Text(parsed.answer.clone()));
-        let citations = parsed
-            .citations
-            .into_iter()
-            .map(|c| RawCitation {
-                passage: usize::try_from(c.passage_id).unwrap_or(usize::MAX),
-                quote: c.quote,
-            })
-            .collect();
+        let block = parse_json_answer(&text)?;
+        on_event(AnswerEvent::Text(block.text.clone()));
         Ok(Answer {
             model: model.to_owned(),
-            blocks: vec![AnswerBlock {
-                text: parsed.answer,
-                citations,
-            }],
+            blocks: vec![block],
             usage,
             stop_reason: response["status"].as_str().map(str::to_owned),
         })

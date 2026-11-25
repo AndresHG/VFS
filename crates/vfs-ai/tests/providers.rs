@@ -75,8 +75,8 @@ fn anthropic_rewrite() {
 }
 
 /// VFS-28 R6.1, R7: the OpenAI rewrite uses the cheap model, strict JSON schema and
-/// `max_output_tokens` 300; cached tokens are split from the input. Reasoning is `none` (D7):
-/// the live run showed `gpt-6-luna` rejects `minimal` with a 400.
+/// `max_output_tokens` 300; cached tokens are split from the input. VFS-46 AC-3: reasoning is
+/// `none`, since `gpt-6-luna` rejects `minimal` with a 400.
 #[test]
 fn openai_rewrite() {
     let mock = MockServer::start(vec![ok_json(OPENAI_REWRITE)]);
@@ -97,10 +97,10 @@ fn openai_rewrite() {
     assert_eq!(body["store"], false);
 }
 
-/// VFS-28 R7, R7a: the Anthropic answer sends passages as `search_result` blocks with
-/// citations on, never in the system prompt, with no structured output and `max_tokens` 1,200;
-/// the stream yields the text and every citation as returned, including an index never sent
-/// (28c drops it).
+/// VFS-28 R7, R7a and VFS-46 AC-6: the Anthropic answer sends the numbered passages ahead of
+/// the question, never in the system prompt, asks for the JSON answer schema with `max_tokens`
+/// 1,200, and returns the text and every citation as given, including an index never sent (28c
+/// drops it).
 #[test]
 fn anthropic_answer_streams_text_and_citations() {
     let mock = MockServer::start(vec![MockResponse::sse(ANTHROPIC_ANSWER)]);
@@ -124,7 +124,7 @@ fn anthropic_answer_streams_text_and_citations() {
         .collect();
     assert_eq!(cited, [0, 2, 12]);
     assert_eq!(
-        answer.blocks[1].citations[0].quote,
+        answer.blocks[0].citations[0].quote,
         "La fianza asciende a 1.200 euros."
     );
     assert_eq!(
@@ -143,24 +143,21 @@ fn anthropic_answer_streams_text_and_citations() {
     assert_eq!(body["max_tokens"], ANSWER_MAX_TOKENS);
     assert_eq!(body["stream"], true);
     assert_eq!(body["thinking"]["type"], "between_tools");
-    assert!(
-        body.get("output_config").is_none(),
-        "no structured output with citations (D8)"
-    );
+    let schema = &body["output_config"]["format"]["schema"];
+    assert!(schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&"found".into()));
     let system = body["system"].as_str().unwrap();
     assert!(
         !system.contains("La fianza asciende"),
         "passage text in the system prompt"
     );
     let content = body["messages"][0]["content"].as_array().unwrap();
-    assert_eq!(content.len(), 11);
-    assert_eq!(content[0]["type"], "search_result");
-    assert_eq!(content[0]["citations"]["enabled"], true);
-    assert_eq!(
-        content[0]["content"][0]["text"],
-        "La fianza asciende a 1.200 euros."
-    );
-    assert_eq!(content[10]["text"], "¿Cuánto pagué de fianza?");
+    assert_eq!(content.len(), 2);
+    let passages = content[0]["text"].as_str().unwrap();
+    assert!(passages.starts_with("[P0] Documento0.pdf · p. 1\nLa fianza asciende a 1.200 euros."));
+    assert_eq!(content[1]["text"], "¿Cuánto pagué de fianza?");
 }
 
 /// VFS-28 D7: «Respuestas más baratas» answers with the cheap model, thinking disabled.
@@ -175,6 +172,22 @@ fn cheap_answers_use_the_cheap_model() {
     let body = mock.requests()[0].json();
     assert_eq!(body["model"], models_for(Provider::Anthropic).cheap_answer);
     assert_eq!(body["thinking"]["type"], "disabled");
+}
+
+/// VFS-46 AC-4: a request naming a model answers with it. Opus 5.5 cannot turn thinking off,
+/// so it is sent no `thinking` and `low` effort.
+#[test]
+fn a_named_model_answers_and_opus_thinks_at_low_effort() {
+    let mock = MockServer::start(vec![MockResponse::sse(ANTHROPIC_ANSWER)]);
+    let mut request = answer_request();
+    request.model = Some(vfs_ai::cost::CLAUDE_OPUS);
+    model_at(Provider::Anthropic, &mock)
+        .answer(&request, &CancelToken::new(), &mut |_| {})
+        .unwrap();
+    let body = mock.requests()[0].json();
+    assert_eq!(body["model"], "claude-opus-5-5");
+    assert!(body.get("thinking").is_none());
+    assert_eq!(body["output_config"]["effort"], "low");
 }
 
 /// VFS-28 R9: a follow-up sends the same passages, then the earlier question and answer, then
@@ -214,8 +227,29 @@ fn follow_up_carries_the_thread() {
     }
 }
 
+/// VFS-46 AC-2: OpenAI's answer schema asks for a `found` verdict. When the model says the
+/// passages lack the answer, its citations are discarded, so the answer shows as not found
+/// even though a cheap model cited a nearby fact (first live run).
+#[test]
+fn openai_found_false_discards_citations() {
+    let sse = OPENAI_ANSWER.replace("\\\"found\\\":true", "\\\"found\\\":false");
+    assert_ne!(sse, OPENAI_ANSWER, "the fixture carries found");
+    let mock = MockServer::start(vec![MockResponse::sse(&sse)]);
+    let answer = model_at(Provider::OpenAi, &mock)
+        .answer(&answer_request(), &CancelToken::new(), &mut |_| {})
+        .unwrap();
+    assert!(answer.blocks.iter().all(|b| b.citations.is_empty()));
+    let body = mock.requests()[0].json();
+    let schema = &body["text"]["format"]["schema"];
+    assert!(schema["required"]
+        .as_array()
+        .unwrap()
+        .contains(&"found".into()));
+}
+
 /// VFS-28 R7: the OpenAI answer numbers the passages in the input, asks for strict JSON and
 /// returns its citations as given (28c drops the one whose quote is not in its passage).
+/// VFS-46 AC-3: the answer request also sends reasoning `none`.
 #[test]
 fn openai_answer_parses_json_citations() {
     let mock = MockServer::start(vec![MockResponse::sse(OPENAI_ANSWER)]);

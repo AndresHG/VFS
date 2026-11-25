@@ -232,19 +232,31 @@ impl Source {
     }
 }
 
-/// Picks up to [`MAX_PASSAGES`] passages from `hits`: the best of each document in document
-/// order, then each one's second best, and so on. Each is expanded with its previous and next
-/// chunk, and passages of one document whose chunk ranges overlap or touch are merged into one,
-/// at the place of the first (R6.4).
+/// A document scoring under this share of the best document's score is a weak match: it gets
+/// passages only after every strong document has given all of its own (VFS-46 R1, D1). In the first live
+/// run, a 12-page agreement scoring 22 lost its second and third passages, which held the
+/// answers, to documents scoring 1 to 5.
+pub const WEAK_SHARE: f64 = 0.25;
+
+/// Picks up to [`MAX_PASSAGES`] passages from `hits`: among the strong documents (see
+/// [`WEAK_SHARE`]), the best of each in document order, then each one's second best, and so
+/// on; then the weak documents the same way. Each is expanded with its previous and next chunk,
+/// and passages of one document whose chunk ranges overlap or touch are merged into one, at the
+/// place of the first (R6.4).
 pub fn pick_passages(corpus: &dyn Corpus, hits: &[ContentHit]) -> vfs_content::Result<Vec<Source>> {
+    let top = hits.iter().map(|h| h.score).fold(0.0, f64::max);
+    let (strong, weak): (Vec<&ContentHit>, Vec<&ContentHit>) =
+        hits.iter().partition(|h| h.score >= top * WEAK_SHARE);
     let mut picked: Vec<(&ContentHit, &vfs_content::Passage)> = Vec::new();
-    let depth = hits.iter().map(|h| h.passages.len()).max().unwrap_or(0);
-    'pick: for i in 0..depth {
-        for h in hits {
-            if let Some(p) = h.passages.get(i) {
-                picked.push((h, p));
-                if picked.len() == MAX_PASSAGES {
-                    break 'pick;
+    'pick: for group in [strong, weak] {
+        let depth = group.iter().map(|h| h.passages.len()).max().unwrap_or(0);
+        for i in 0..depth {
+            for h in &group {
+                if let Some(p) = h.passages.get(i) {
+                    picked.push((h, p));
+                    if picked.len() == MAX_PASSAGES {
+                        break 'pick;
+                    }
                 }
             }
         }

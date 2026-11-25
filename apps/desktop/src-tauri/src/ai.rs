@@ -45,7 +45,8 @@ impl Default for AiSettings {
         AiSettings {
             enabled: false,
             provider: Provider::Anthropic,
-            cheap: false,
+            // The cheap tier answers by default (owner, VFS-46 D4).
+            cheap: true,
             notice_seen: false,
         }
     }
@@ -723,6 +724,7 @@ impl AiState {
             provider: s.provider,
             lang: lang_of(lang),
             cheap: s.cheap,
+            answer_model: None,
             over_cap_confirmed: confirmed,
             now: chrono::Local::now(),
         }
@@ -997,16 +999,19 @@ pub fn ai_export_ris<R: Runtime>(
 mod tests {
     use super::*;
 
+    /// VFS-46 AC-7: with no saved settings AI is off and the cheap tier is on.
     #[test]
     fn settings_default_off_and_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SETTINGS_FILE);
         assert_eq!(load_settings(&path), AiSettings::default());
         assert!(!AiSettings::default().enabled);
+        // VFS-46 D4: the cheap tier answers unless the user turns it off.
+        assert!(AiSettings::default().cheap);
         let s = AiSettings {
             enabled: true,
             provider: Provider::OpenAi,
-            cheap: true,
+            cheap: false,
             notice_seen: true,
         };
         save_settings(&path, &s).unwrap();

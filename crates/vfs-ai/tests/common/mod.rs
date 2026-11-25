@@ -78,6 +78,7 @@ pub fn answer_request() -> AnswerRequest {
         earlier: Vec::new(),
         question: "¿Cuánto pagué de fianza?".into(),
         cheap: false,
+        model: None,
     }
 }
 

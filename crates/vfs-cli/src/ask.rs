@@ -46,6 +46,7 @@ pub fn run(a: AskArgs) -> AnyResult<()> {
         provider: a.provider,
         lang: a.lang,
         cheap: a.cheap,
+        answer_model: None,
         over_cap_confirmed: a.yes,
         now: chrono::Local::now(),
     };

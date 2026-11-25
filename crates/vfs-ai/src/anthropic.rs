@@ -1,18 +1,20 @@
 //! Anthropic Messages API (VFS-28 R4, R6.1, R7).
 //!
 //! Shapes follow Anthropic's API reference for version `2026-10-21`: structured output through
-//! `output_config.format` for the rewrite only, and `search_result` blocks with citations for
-//! the answer (D8). Thinking is off: `disabled` on Haiku 5.5, `between_tools` on Sonnet 5.5,
-//! which rejects `disabled`.
+//! `output_config.format` for the rewrite and for the answer, which carries its citations as
+//! quotes, like OpenAI's (VFS-46 R6: Haiku answered without native citations in 11 of 50 live
+//! questions). Thinking is off: `disabled` on Haiku 5.5, `between_tools` on Sonnet 5.5, which
+//! rejects `disabled`.
 
 use serde_json::{json, Value};
 
-use crate::cost::{models_for, Usage, CLAUDE_SONNET};
+use crate::cost::{models_for, Usage, CLAUDE_OPUS, CLAUDE_SONNET};
 use crate::error::AiError;
 use crate::http::{Http, SseReader, SHORT_CALL_TIMEOUT, STREAM_TIMEOUT};
 use crate::provider::{
-    rewrite_schema, Answer, AnswerBlock, AnswerEvent, AnswerRequest, CancelToken, ChatModel,
-    Provider, RawCitation, Rewrite, RewriteRequest, ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
+    answer_schema, numbered_passages, parse_json_answer, rewrite_schema, Answer, AnswerEvent,
+    AnswerRequest, AnswerStreamer, CancelToken, ChatModel, Provider, Rewrite, RewriteRequest,
+    ANSWER_MAX_TOKENS, REWRITE_MAX_TOKENS,
 };
 
 pub(crate) struct Anthropic {
@@ -34,26 +36,27 @@ fn thinking_off(model: &str) -> Value {
     }
 }
 
-/// The answer call's body (R7, R7a, R9): passages as `search_result` blocks with citations on,
-/// ahead of the first question; earlier turns of the thread; no structured output.
+/// Sets the least thinking `model` takes on an answer body. Opus 5.5 cannot turn thinking off
+/// (a 400), so it thinks adaptively at `low` effort, with room for that thinking in
+/// `max_tokens`; every other model turns it off (D7, VFS-46).
+fn set_least_thinking(body: &mut Value, model: &str) {
+    if model == CLAUDE_OPUS {
+        body["output_config"]["effort"] = json!("low");
+        body["max_tokens"] = json!(ANSWER_MAX_TOKENS * 4);
+    } else {
+        body["thinking"] = thinking_off(model);
+    }
+}
+
+/// The answer call's body (R7, R7a, R9, VFS-46 R6): the numbered passages ahead of the first
+/// question, never in the system prompt; earlier turns of the thread; the JSON answer schema.
 pub(crate) fn answer_body(request: &AnswerRequest, model: &str) -> Value {
-    let mut first: Vec<Value> = request
-        .passages
-        .iter()
-        .map(|p| {
-            json!({
-                "type": "search_result",
-                "source": p.source,
-                "title": p.title,
-                "content": [{"type": "text", "text": p.text}],
-                "citations": {"enabled": true},
-            })
-        })
-        .collect();
     let mut questions = request.earlier.iter().map(|t| t.question.as_str());
     let first_question = questions.next().unwrap_or(&request.question);
-    first.push(json!({"type": "text", "text": first_question}));
-    let mut messages = vec![json!({"role": "user", "content": first})];
+    let mut messages = vec![json!({"role": "user", "content": [
+        {"type": "text", "text": numbered_passages(request)},
+        {"type": "text", "text": first_question},
+    ]})];
     for (i, turn) in request.earlier.iter().enumerate() {
         messages.push(json!({"role": "assistant", "content": turn.answer}));
         let next = request
@@ -62,14 +65,16 @@ pub(crate) fn answer_body(request: &AnswerRequest, model: &str) -> Value {
             .map_or(request.question.as_str(), |t| &t.question);
         messages.push(json!({"role": "user", "content": next}));
     }
-    json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": ANSWER_MAX_TOKENS,
         "stream": true,
         "system": request.system_prompt,
-        "thinking": thinking_off(model),
+        "output_config": {"format": {"type": "json_schema", "schema": answer_schema()}},
         "messages": messages,
-    })
+    });
+    set_least_thinking(&mut body, model);
+    body
 }
 
 fn usage_of(v: &Value) -> Usage {
@@ -138,12 +143,7 @@ impl ChatModel for Anthropic {
         cancel: &CancelToken,
         on_event: &mut dyn FnMut(AnswerEvent),
     ) -> Result<Answer, AiError> {
-        let models = models_for(Provider::Anthropic);
-        let model = if request.cheap {
-            models.cheap_answer
-        } else {
-            models.answer
-        };
+        let model = request.answer_model(Provider::Anthropic);
         let body = answer_body(request, model);
         let response = self.http.send(cancel, STREAM_TIMEOUT, || {
             self.http.post("/v1/messages").json(&body)
@@ -151,8 +151,8 @@ impl ChatModel for Anthropic {
         let mut reader = SseReader::new(response);
         let mut usage = Usage::default();
         let mut reported = false;
-        let mut blocks: Vec<AnswerBlock> = Vec::new();
-        let mut current: Option<AnswerBlock> = None;
+        let mut text = String::new();
+        let mut streamer = AnswerStreamer::default();
         let mut stop_reason = None;
         loop {
             if cancel.is_cancelled() {
@@ -169,37 +169,10 @@ impl ChatModel for Anthropic {
                     usage = usage_of(&v["message"]["usage"]);
                     reported = true;
                 }
-                "content_block_start" => {
-                    let block = &v["content_block"];
-                    current = (block["type"] == "text").then(|| AnswerBlock {
-                        text: block["text"].as_str().unwrap_or("").to_owned(),
-                        citations: Vec::new(),
-                    });
+                "content_block_delta" if v["delta"]["type"] == "text_delta" => {
+                    text.push_str(v["delta"]["text"].as_str().unwrap_or(""));
+                    streamer.feed(&text, on_event);
                 }
-                "content_block_delta" => {
-                    let delta = &v["delta"];
-                    let Some(block) = current.as_mut() else {
-                        continue;
-                    };
-                    match delta["type"].as_str() {
-                        Some("text_delta") => {
-                            let text = delta["text"].as_str().unwrap_or("");
-                            block.text.push_str(text);
-                            on_event(AnswerEvent::Text(text.to_owned()));
-                        }
-                        Some("citations_delta") => {
-                            let c = &delta["citation"];
-                            if let Some(index) = c["search_result_index"].as_u64() {
-                                block.citations.push(RawCitation {
-                                    passage: usize::try_from(index).unwrap_or(usize::MAX),
-                                    quote: c["cited_text"].as_str().unwrap_or("").to_owned(),
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                "content_block_stop" => blocks.extend(current.take()),
                 "message_delta" => {
                     let u = &v["usage"];
                     if let Some(out) = u["output_tokens"].as_u64() {
@@ -217,15 +190,16 @@ impl ChatModel for Anthropic {
                 _ => {}
             }
         }
-        blocks.extend(current.take());
         if stop_reason.is_none() {
             return Err(AiError::BadResponse(
                 "stream ended before message_stop".into(),
             ));
         }
+        let block = parse_json_answer(&text)?;
+        streamer.finish(&block.text, on_event);
         Ok(Answer {
             model: model.to_owned(),
-            blocks,
+            blocks: vec![block],
             usage,
             stop_reason,
         })

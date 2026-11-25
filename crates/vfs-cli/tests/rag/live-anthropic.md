@@ -1,0 +1,54 @@
+# RAG golden live run: Anthropic (cheap tier), graded by OpenAI
+
+- q01 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q02 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q03 found-ok=true facts-ok=true dropped=0 grade: UNFAITHFUL: “y se debe firmar la autorización antes del viernes.”
+- q04 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q05 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q06 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q07 found-ok=true facts-ok=true dropped=0 grade: El contrato de alquiler de la calle Peñalara 12 indica que la arrendataria entrega una fianza de dos mensualidades. Como la renta mensual es de 750 euros, la fianza equivale a 1.500 euros, cantidad que se deduce de la renta indicada en el propio contrato.
+- q08 found-ok=true facts-ok=true dropped=0 grade: La garantía de la lavadora cubre tres años de piezas y mano de obra en el servicio técnico oficial, contados desde la fecha de compra, 18 de mayo de 2021.
+- q09 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q10 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q11 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q12 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q13 found-ok=true facts-ok=true dropped=0 grade: La cita con la endocrina es el 14 de octubre.
+- q14 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q15 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q16 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q17 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q18 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q19 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q20 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q21 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q22 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q23 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q24 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q25 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q26 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q27 found-ok=true facts-ok=true dropped=0 grade: grader error: provider error 0: Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt: https://platform.openai.com/docs/guides/reasoning#advice-on-prompting (provider)
+- q28 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q29 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q30 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q31 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q32 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q33 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q34 found-ok=true facts-ok=true dropped=0 grade: UNFAITHFUL: «el máximo de todos los ingresos del hogar destinados al pago del crédito sea inferior al 30% de todos los ingresos disponibles»
+- q35 found-ok=true facts-ok=true dropped=0 grade: FAITHFUL
+- q36 found-ok=true facts-ok=true dropped=0 grade: -
+- q37 found-ok=true facts-ok=true dropped=0 grade: -
+- q38 found-ok=true facts-ok=true dropped=0 grade: -
+- q39 found-ok=true facts-ok=true dropped=0 grade: -
+- q40 found-ok=true facts-ok=true dropped=0 grade: -
+- q41 found-ok=true facts-ok=true dropped=0 grade: -
+- q42 found-ok=true facts-ok=true dropped=0 grade: -
+- q43 found-ok=true facts-ok=true dropped=0 grade: -
+- q44 found-ok=true facts-ok=true dropped=0 grade: -
+- q45 found-ok=true facts-ok=true dropped=0 grade: -
+- q46 found-ok=true facts-ok=true dropped=0 grade: -
+- q47 found-ok=true facts-ok=true dropped=0 grade: -
+- q48 found-ok=true facts-ok=true dropped=0 grade: -
+- q49 found-ok=true facts-ok=true dropped=0 grade: -
+- q50 found-ok=true facts-ok=true dropped=0 grade: -
+
+found/not-found right: 50/50; facts: 50/50; faithful: 29/35; cost of the asking: 0.0482 $

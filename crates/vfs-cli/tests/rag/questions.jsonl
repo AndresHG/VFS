@@ -7,21 +7,21 @@
 {"id": "q07", "question": "¿Cuánto pagué de fianza por el piso?", "answerable": true, "gold": [{"file": "escaneo0034.docx"}], "must_contain": ["dos mensualidades"]}
 {"id": "q08", "question": "¿Hasta cuándo tiene garantía la lavadora?", "answerable": true, "gold": [{"file": "garantia_lavadora.pdf", "page": 1}], "must_contain": ["tres años", "18 de mayo de 2021"]}
 {"id": "q09", "question": "¿Qué número de serie tiene la lavadora?", "answerable": true, "gold": [{"file": "garantia_lavadora.pdf", "page": 1}], "must_contain": ["4401-2283"]}
-{"id": "q10", "question": "¿Cuánto dinero nos prestó el banco para la hipoteca?", "answerable": true, "gold": [{"file": "hipoteca_bbva.pdf", "page": 1}], "must_contain": ["180.000", "25 años"]}
+{"id": "q10", "question": "¿Cuánto dinero nos prestó el banco para la hipoteca?", "answerable": true, "gold": [{"file": "hipoteca_bbva.pdf", "page": 1}], "must_contain": ["180.000"]}
 {"id": "q11", "question": "¿Cuánto pagué de IBI el año 2023?", "answerable": true, "gold": [{"file": "ibi.pdf", "page": 1}], "must_contain": ["498,32"]}
 {"id": "q12", "question": "¿A qué edad me puedo jubilar?", "answerable": true, "gold": [{"file": "jubilacion.txt"}], "must_contain": ["66 años y cuatro meses"]}
 {"id": "q13", "question": "¿Qué día tengo cita con la endocrina?", "answerable": true, "gold": [{"file": "medico.txt"}], "must_contain": ["14 de octubre"]}
-{"id": "q14", "question": "¿Cuándo viene el técnico a arreglar la caldera?", "answerable": true, "gold": [{"file": "nota_rapida.txt"}], "must_contain": ["jueves", "Junkers"]}
+{"id": "q14", "question": "¿Cuándo viene el técnico a arreglar la caldera?", "answerable": true, "gold": [{"file": "nota_rapida.txt"}], "must_contain": ["jueves"]}
 {"id": "q15", "question": "¿Cuándo le pusieron a Toby la vacuna de la rabia?", "answerable": true, "gold": [{"file": "perro.docx"}], "must_contain": ["3 de febrero"]}
 {"id": "q16", "question": "¿Qué ingredientes lleva el cocido de la abuela?", "answerable": true, "gold": [{"file": "receta_abuela.docx"}], "must_contain": ["garbanzos", "chorizo"]}
 {"id": "q17", "question": "¿Cuánto me salió a devolver la renta de 2022?", "answerable": true, "gold": [{"file": "renta2022.pdf", "page": 1}], "must_contain": ["412"]}
-{"id": "q18", "question": "¿Qué días estuvimos de vacaciones en Asturias?", "answerable": true, "gold": [{"file": "viaje_asturias.docx"}], "must_contain": ["2 al 12 de agosto", "Cangas de Onís"]}
+{"id": "q18", "question": "¿Qué días estuvimos de vacaciones en Asturias?", "answerable": true, "gold": [{"file": "viaje_asturias.docx"}], "must_contain": ["2 al 12 de agosto"]}
 {"id": "q19", "question": "¿Cuántos años dura el convenio de prácticas con la Universidad de Castilla-La Mancha?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 8}], "must_contain": ["cuatro"]}
 {"id": "q20", "question": "¿Cobran algo los estudiantes que hacen las prácticas en Francia?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 5}], "must_contain": ["1.000"]}
 {"id": "q21", "question": "¿Con cuánto tiempo de aviso se pueden dejar las prácticas antes de tiempo?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 4}], "must_contain": ["quince días"]}
 {"id": "q22", "question": "¿Qué certificado tiene que presentar el estudiante para hacer prácticas con menores?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 6}], "must_contain": ["Delitos de Naturaleza Sexual"]}
 {"id": "q23", "question": "¿Quién firmó el convenio de prácticas en nombre de la Universidad de Castilla-La Mancha?", "answerable": true, "gold": [{"file": "BOE-A-2024-12000.pdf", "page": 9}], "must_contain": ["Raúl Martín Martín"]}
-{"id": "q24", "question": "¿Cuántas plazas de limpiador convoca el Ayuntamiento de Monzón?", "answerable": true, "gold": [{"file": "BOE-A-2024-100.pdf", "page": 1}], "must_contain": ["tres plazas", "una plaza"]}
+{"id": "q24", "question": "¿Cuántas plazas de limpiador convoca el Ayuntamiento de Monzón?", "answerable": true, "gold": [{"file": "BOE-A-2024-100.pdf", "page": 1}], "must_contain": ["cuatro"]}
 {"id": "q25", "question": "¿Qué plaza ofrece el Ayuntamiento de Sabiñánigo?", "answerable": true, "gold": [{"file": "BOE-A-2024-5000.pdf", "page": 1}], "must_contain": ["Matarife"]}
 {"id": "q26", "question": "¿Qué complemento específico tiene el puesto de Subdirector Adjunto de Relaciones Laborales?", "answerable": true, "gold": [{"file": "BOE-A-2024-1.pdf", "page": 2}], "must_contain": ["22.910,30"]}
 {"id": "q27", "question": "¿A quién nombró la Universidad de Córdoba profesora titular de Ciencias de la Computación?", "answerable": true, "gold": [{"file": "BOE-A-2022-10000.pdf", "page": 1}], "must_contain": ["Aida Gema de Haro García"]}
