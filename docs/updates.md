@@ -11,7 +11,8 @@ Spec: [VFS-21](../specs/vfs-21-updates/spec.md). Code: `apps/desktop/src-tauri/s
 2. Otherwise the Tauri updater plugin downloads
    `https://github.com/AndresHG/VFS/releases/latest/download/latest.json` (20 s timeout).
    GitHub serves it from the newest **published, non-prerelease** release. A failure is
-   logged to `logs/vfs.log` and nothing is shown; the next launch tries again.
+   logged to `logs/vfs.log` and no notice is shown (only Ajustes › Acerca de says the check
+   failed, VFS-45); the next launch tries again.
 3. If the manifest's version is newer (`updates::is_newer`; a stable build is never offered a
    pre-release), a notice offers "Actualizar" / "Ahora no".
 4. "Actualizar" downloads the platform's asset, checks its minisign signature against the

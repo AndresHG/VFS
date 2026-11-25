@@ -21,6 +21,9 @@
     is now a centered window with sections (R1–R3 here). Their settings and rules are
     unchanged. VFS-33 AC-10's "folded «Avanzado»" becomes "«Avanzado» is its own section".
   - The type scale in `docs/design/system.md` steps down once (R8 here).
+  - VFS-21 AC-6: a failed check still offers nothing and shows no notice, but
+    `check_for_update` now rejects (still once per launch) so «Acerca de» can say it failed
+    (R5, D10).
 
 ## Problem
 

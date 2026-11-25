@@ -413,8 +413,8 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
-    /// VFS-21 AC-6, VFS-45 AC-5: an unreachable endpoint or a bad manifest offers no update,
-    /// is reported as failed, and is not retried in the same launch.
+    /// VFS-21 AC-6 as amended by VFS-45 AC-5: an unreachable endpoint or a bad manifest
+    /// offers no update, is reported as failed, and is not retried in the same launch.
     #[test]
     fn failed_check_is_no_update_until_next_launch() {
         let calls = AtomicUsize::new(0);
