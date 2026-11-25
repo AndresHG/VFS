@@ -681,6 +681,23 @@ fn ac12_passages_are_addressable() {
     assert!(n >= 3, "{n}");
 }
 
+/// VFS-46 AC-8: a hit carries up to six passages, so the answer chunk of a long document that
+/// ranks below the third still reaches the ask flow.
+#[test]
+fn ac8_a_long_document_gives_six_passages() {
+    let s = setup();
+    let filler = "Párrafo de relleno sobre la comunidad de propietarios y la derrama. ".repeat(30);
+    let body: String = (1..=8)
+        .map(|i| format!("{filler}\n\nEl pingüino número {i} vive en Peñalara.\n\n"))
+        .collect();
+    s.write("a/largo.txt", body);
+    s.scan();
+    s.run(&s.opts());
+
+    let r = s.search("pingüino");
+    assert_eq!(r.hits[0].passages.len(), 6);
+}
+
 // ---- PR 2a: cloud-only files, run-level stops, worker lifetime, store version, budget ----
 
 impl Setup {

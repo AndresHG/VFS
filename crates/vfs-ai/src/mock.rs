@@ -200,34 +200,28 @@ pub fn anthropic_answer(blocks: &[crate::AnswerBlock]) -> MockResponse {
             "usage": {"input_tokens": 9000, "output_tokens": 1,
                       "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}}),
     );
-    for (i, b) in blocks.iter().enumerate() {
-        sse += &event(
-            "content_block_start",
-            serde_json::json!({"type": "content_block_start", "index": i,
-                               "content_block": {"type": "text", "text": "", "citations": []}}),
-        );
-        for c in &b.citations {
-            sse += &event(
-                "content_block_delta",
-                serde_json::json!({"type": "content_block_delta", "index": i, "delta": {
-                    "type": "citations_delta", "citation": {
-                        "type": "search_result_location",
-                        "source": format!("vfs://passage/{}", c.passage),
-                        "title": "", "cited_text": c.quote,
-                        "search_result_index": c.passage,
-                        "start_block_index": 0, "end_block_index": 0}}}),
-            );
-        }
-        sse += &event(
-            "content_block_delta",
-            serde_json::json!({"type": "content_block_delta", "index": i,
-                               "delta": {"type": "text_delta", "text": b.text}}),
-        );
-        sse += &event(
-            "content_block_stop",
-            serde_json::json!({"type": "content_block_stop", "index": i}),
-        );
-    }
+    // The answer as the JSON schema returns it (VFS-46 R6): the blocks' texts joined, every
+    // citation as a quote, `found` true.
+    let answer = serde_json::json!({
+        "answer": blocks.iter().map(|b| b.text.as_str()).collect::<String>(),
+        "found": true,
+        "citations": blocks.iter().flat_map(|b| &b.citations).map(|c| serde_json::json!({
+            "passage_id": c.passage, "quote": c.quote})).collect::<Vec<_>>(),
+    });
+    sse += &event(
+        "content_block_start",
+        serde_json::json!({"type": "content_block_start", "index": 0,
+                           "content_block": {"type": "text", "text": ""}}),
+    );
+    sse += &event(
+        "content_block_delta",
+        serde_json::json!({"type": "content_block_delta", "index": 0,
+                           "delta": {"type": "text_delta", "text": answer.to_string()}}),
+    );
+    sse += &event(
+        "content_block_stop",
+        serde_json::json!({"type": "content_block_stop", "index": 0}),
+    );
     sse += &event(
         "message_delta",
         serde_json::json!({"type": "message_delta",

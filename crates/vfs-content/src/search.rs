@@ -29,8 +29,8 @@ const BODY_WEIGHT: f64 = 1.0;
 /// Words of context before the first highlighted word, and the snippet length in words.
 const SNIPPET_LEAD: usize = 8;
 const SNIPPET_WORDS: usize = 32;
-/// Passages returned per document hit.
-const MAX_PASSAGES: usize = 3;
+/// Passages returned per document hit (VFS-46 R8, superseding VFS-2 R11's three).
+const MAX_PASSAGES: usize = 6;
 
 /// A matching chunk of a document (VFS-2 R11): where it is, so a caller can cite or fetch
 /// it, and a highlighted snippet of it.

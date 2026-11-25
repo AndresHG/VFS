@@ -83,20 +83,22 @@ fn answer_json(mock: &MockServer) -> serde_json::Value {
         .json()
 }
 
-/// The search_result blocks of an Anthropic answer request: (title, text) per passage.
+/// The numbered passages of an answer request (VFS-46 R6): (title, text) per passage. A
+/// passage is `[P<i>] <title>` then its text, and passages are separated by a blank line.
 fn sent(body: &serde_json::Value) -> Vec<(String, String)> {
-    body["messages"][0]["content"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|b| b["type"] == "search_result")
-        .map(|b| {
-            (
-                b["title"].as_str().unwrap().to_owned(),
-                b["content"][0]["text"].as_str().unwrap().to_owned(),
-            )
-        })
-        .collect()
+    let all = body["messages"][0]["content"][0]["text"].as_str().unwrap();
+    let mut out = Vec::new();
+    for (i, part) in all.split("\n\n[P").enumerate() {
+        let part = if i == 0 {
+            part.strip_prefix("[P").unwrap()
+        } else {
+            part
+        };
+        let (head, text) = part.split_once('\n').unwrap();
+        let title = head.split_once("] ").unwrap().1;
+        out.push((title.to_owned(), text.trim_end_matches('\n').to_owned()));
+    }
+    out
 }
 
 fn household() -> Vec<FakeDoc> {
