@@ -355,6 +355,27 @@ test('a suggestion that lands after a new keystroke is dropped', async () => {
   assert.notEqual(primary, S.suggestDropFilters('7'), 'the old answer is not shown');
 });
 
+/** VFS-13 R5, R6: an index change while a typed search waits for its debounce starts no
+ *  background refresh; only the typed search runs, so the screen does not show a passing
+ *  suggestion that the typed search then takes away. */
+test('no background refresh while a typed search waits', async () => {
+  await start();
+  await page.kinds([FileKind.AUDIO]);
+  await page.type('ordesa');
+  await until(`document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('2'))}`, 'the suggestion for «ordesa»');
+  await resetCalls();
+  const names = await evaluate(`(async () => {
+    const { api } = await import('/ui/api.js');
+    const q = document.getElementById('q');
+    q.value = 'ordesa zz';
+    q.dispatchEvent(new Event('input', { bubbles: true }));
+    api.fakeIndexChanged(); // inside the debounce
+    return api.fakeCalls.searchSources;
+  })()`);
+  assert.equal(names, 0, 'no name search before the typed one');
+  await until(`(async () => (await import('/ui/api.js')).api.fakeCalls.searchSources === 1)()`, 'the typed search');
+});
+
 /** VFS-42 AC-6 (R6): a «Nombres» search with a type that finds nothing offers `dropFilters`
  *  with no scope wording; pressing it clears the type and keeps a chosen bookmark folder. */
 test('«Nombres» with nothing found offers to drop the filters', async () => {
@@ -380,11 +401,15 @@ test('«Nombres» with nothing found offers to drop the filters', async () => {
   await page.choose('f-source', SourceChoice.FILES); // a suggestion is asked only when files are searched
   await page.kinds([FileKind.AUDIO]);
   await page.type('recetas zz');
-  // Wait for the last search's own view: an earlier search's suggestion, or a re-render that
-  // made «Quitar filtros» the main button, must not take the click.
-  await until(`document.querySelector('#empty h3')?.textContent === ${JSON.stringify(S.emptyNoHitsTitle('recetas zz'))}
-    && document.querySelector('#empty .actions .btn-primary')?.textContent === ${JSON.stringify(S.suggestDropFilters('1'))}`, 'the suggestion for the last search');
-  await evaluate(`document.querySelector('#empty .actions .btn-primary').click()`);
+  // Check and click in the same task, on the last search's own view: a redraw between a
+  // check and a separate click (a background refresh) could put «Quitar filtros» there.
+  await until(`(() => {
+    const b = document.querySelector('#empty .actions .btn-primary');
+    if (document.querySelector('#empty h3')?.textContent !== ${JSON.stringify(S.emptyNoHitsTitle('recetas zz'))}
+      || b?.textContent !== ${JSON.stringify(S.suggestDropFilters('1'))}) return false;
+    b.click();
+    return true;
+  })()`, 'the suggestion for the last search, clicked');
   assert.equal(await evaluate(`document.querySelectorAll('#kind-chips input:checked').length`), 0, 'the type cleared');
   await until(`document.getElementById('f-folder').value === ${JSON.stringify(root)}`, 'the bookmark folder kept');
 });

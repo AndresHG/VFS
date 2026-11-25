@@ -809,6 +809,8 @@ export function createFakeBackend(params) {
 
     ...content.api,
     fakeCalls,
+    /** Tests: the index-change event the indexer sends while it scans. */
+    fakeIndexChanged() { for (const cb of changedCbs) cb(); },
     ...fakeAi(params.get('ai') || ''),
 
     async getProgress() { await sleep(20); return progress(); },
