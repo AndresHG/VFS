@@ -15,9 +15,9 @@ crate-type = ["rlib"]
 # drive the window on Windows and macOS (no external driver attached to the release build).
 # Never enabled in release builds.
 [features]
-# VFS-28: «Preguntar a sus documentos» (AI) ships in 0.4. The one switch: to turn it on in
-# release builds, write `default = ["ai"]`. Tests turn it on through the dev-dependency below.
-default = []
+# VFS-28: «Preguntar a sus documentos» (AI) is on in release builds from 0.4; `default = []`
+# is the one switch that turns it off. Tests also turn it on through the dev-dependency below.
+default = ["ai"]
 ai = []
 webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 

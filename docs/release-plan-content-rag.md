@@ -40,8 +40,10 @@ release.
 ## v0.4: ask your archive
 
 v0.3.0 shipped on 2026-11-25 without the AI. 28b, 28c and 28d are merged behind the desktop
-Cargo feature `ai`, which release builds leave off (`default = []` in
-`apps/desktop/src-tauri/Cargo.toml`, #200). What is left before v0.4:
+Cargo feature `ai`, now on by default (`default = ["ai"]` in
+`apps/desktop/src-tauri/Cargo.toml`). Steps 1–3 are done: the live runs and their fixes are
+VFS-46 (#218, #219, #223; Haiku 50/50, Luna 49/50 on the golden set), and the switch and
+version 0.4.0 are the release PR. What is left before v0.4:
 
 | Order | Step | What | Who | Effort |
 |---|---|---|---|---|
