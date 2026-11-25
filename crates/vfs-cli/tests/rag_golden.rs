@@ -363,10 +363,44 @@ fn golden_live() {
 
 mod live {
     use super::*;
+    use std::sync::Mutex;
     use vfs_ai::ask::{AskOptions, Lang};
     use vfs_ai::{
-        chat_model, AiDb, AnswerRequest, ApiKey, CancelToken, ChatModel, Endpoint, Passage,
+        chat_model, AiDb, AiError, Answer, AnswerEvent, AnswerRequest, ApiKey, CancelToken,
+        ChatModel, Endpoint, Passage, RewriteRequest, Usage,
     };
+
+    /// Keeps the last raw answer, so the report can show the citations the check dropped.
+    struct Recording {
+        inner: Box<dyn ChatModel>,
+        last: Mutex<Option<Answer>>,
+    }
+
+    impl ChatModel for Recording {
+        fn provider(&self) -> Provider {
+            self.inner.provider()
+        }
+        fn validate_key(&self) -> Result<(), AiError> {
+            self.inner.validate_key()
+        }
+        fn rewrite(
+            &self,
+            request: &RewriteRequest,
+            cancel: &CancelToken,
+        ) -> Result<(Rewrite, String, Usage), AiError> {
+            self.inner.rewrite(request, cancel)
+        }
+        fn answer(
+            &self,
+            request: &AnswerRequest,
+            cancel: &CancelToken,
+            on_event: &mut dyn FnMut(AnswerEvent),
+        ) -> Result<Answer, AiError> {
+            let answer = self.inner.answer(request, cancel, on_event)?;
+            *self.last.lock().unwrap() = Some(answer.clone());
+            Ok(answer)
+        }
+    }
 
     fn model(provider: Provider, var: &str) -> Box<dyn ChatModel> {
         let key = std::env::var(var).unwrap_or_else(|_| panic!("set {var}"));
@@ -384,7 +418,10 @@ followed by the first unsupported statement. Plain text, one line.";
             Provider::Anthropic => Provider::OpenAi,
             Provider::OpenAi => Provider::Anthropic,
         };
-        let asker = model(provider, "VFS_AI_KEY");
+        let asker = Recording {
+            inner: model(provider, "VFS_AI_KEY"),
+            last: Mutex::new(None),
+        };
         let cross = std::env::var("VFS_GRADER_KEY").is_ok_and(|k| !k.is_empty());
         let (grader_provider, grader) = if cross {
             (grader_provider, model(grader_provider, "VFS_GRADER_KEY"))
@@ -429,7 +466,7 @@ followed by the first unsupported statement. Plain text, one line.";
         }
         for c in &cases {
             let asked = ask::ask(
-                asker.as_ref(),
+                &asker,
                 &corpus,
                 &mut ai_db,
                 &c.question,
@@ -518,6 +555,25 @@ followed by the first unsupported statement. Plain text, one line.";
                 "- {} found-ok={ok_found} facts-ok={ok_facts} dropped={} grade: {verdict}\n",
                 c.id, reply.dropped
             );
+            if !ok_found || !ok_facts {
+                report += &format!("  answer: «{}»\n", text.trim());
+            }
+            // The citations the check dropped (R7), with the passage they named.
+            let raw = asker.last.lock().unwrap().take();
+            for b in raw.iter().flat_map(|a| &a.blocks) {
+                for x in &b.citations {
+                    let kept = reply.blocks.iter().any(|k| {
+                        k.citations
+                            .iter()
+                            .any(|y| y.passage == x.passage && y.quote == x.quote)
+                    });
+                    if !kept {
+                        let passage = asked.thread.sources.get(x.passage).map(|s| s.title());
+                        report +=
+                            &format!("  dropped P{} ({passage:?}): «{}»\n", x.passage, x.quote);
+                    }
+                }
+            }
         }
         if limit.is_none() {
             lines.push(String::new());
