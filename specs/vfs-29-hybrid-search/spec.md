@@ -1,6 +1,6 @@
 # VFS-29 — Search by meaning: embeddings by API (and later a local model), fused with BM25
 
-- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with 29a.
+- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with the 29b measurement (D12).
 - **Size**: L. It sends whole document text to an outside service for the first time (with
   consent, per folder), adds a store beside `content.db`, and is multi-PR (29a, 29b, 29c).
 - **Links**:
@@ -112,8 +112,10 @@ Fixed now, before any run:
   must put the expected document in the top 5 for at least 3 more of them than BM25 does.
 - **Keyword subset.** On the existing keyword queries, hybrid search must not lose any query
   that BM25 has in its top 5.
-- **Which models.** The gate runs first with at least one API model; the chosen local model
-  must pass it before 29c ships.
+- **Which models.** One run, before any interface: at least one API model (Voyage-4-lite or
+  OpenAI 3-small) and the light local candidates of 29b, bekko-static-embedding-v1 first. The
+  first to ship is the one that passes; if both pass, the local model ships first, since it
+  is free and sends nothing off the PC (D12).
 
 If no API model passes the gate, meaning search is not built.
 
@@ -189,20 +191,21 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D2 | Embedding key when the user has only an Anthropic key | A separate optional key, OpenAI or Voyage | owner | 2026-11-21 (E2) |
 | D3 | May document text go to an embedding API? | Yes, per folder, with permission and the cost and volume shown first | owner | 2026-11-25 |
 | D4 | Order | After 0.4 and before new sources (VFS-44) | owner | 2026-11-25 |
-| D5 | Local model in this spec | 29a API first; the local model after the 29b measurement | owner | 2026-11-25 |
+| D5 | Local model in this spec | ~~29a API first; the local model after the 29b measurement~~ replaced by D12 | owner | 2026-11-25 |
 | D6 | Providers in 29a | OpenAI and Voyage | owner | 2026-11-25 |
 | D7 | Fusion | RRF, k = 60, no tuning; a weighted sum only if the golden set shows a gain | agent | 2026-11-25 |
 | D8 | Where vectors live | `vectors.db`, so a content rebuild never wipes paid vectors | agent | 2026-11-22 |
 | D9 | Dimension | API models cut to 512 dimensions (OpenAI `dimensions`, Voyage 512) | agent | 2026-11-25 |
 | D10 | Duplicates | Vectors keyed by chunk-text hash: each distinct text is embedded and paid once | agent | 2026-11-25 (cost review) |
 | D11 | First pass | OpenAI Batch API (−50 %); Voyage standard while its 200 M free tokens last | agent | 2026-11-25 (cost review) |
+| D12 | Order after the cost review | 29b's measurement and the gate run first, local light model beside the API; whichever passes ships first, local preferred | owner | 2026-11-25 |
 
 ## Expected PRs
 
 | PR | Scope | ACs | Effort |
 |---|---|---|---|
 | 29a | `vectors.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, fallback, «relacionado por tema», golden-set gate | AC-1–AC-15 | 6–8 days **[estimate]** |
-| 29b | Local model spike on the Mac and the target PC; pick model and runtime | R16 | 3–4 days **[estimate]** |
+| 29b (first) | Local model spike on the Mac and the target PC, and the gate run with an API model beside it; pick what ships first | R16, AC-12 | 3–4 days **[estimate]** |
 | 29c | Local model download, check and child-process `Embedder` | R16, AC-12 | 4–6 days **[estimate]** |
 
 ## Open questions
