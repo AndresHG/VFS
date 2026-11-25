@@ -568,7 +568,7 @@ pub fn write_zip(path: &Path, text: &str) -> std::io::Result<()> {
 }
 
 /// A page of the project that «Acerca de» links to (VFS-45 R6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProjectPage {
     Source,
@@ -576,6 +576,17 @@ pub enum ProjectPage {
 }
 
 impl ProjectPage {
+    /// Every page, for the contract test (VFS-1 X1).
+    pub fn all() -> [ProjectPage; 2] {
+        let all = [ProjectPage::Source, ProjectPage::License];
+        for p in &all {
+            match p {
+                ProjectPage::Source | ProjectPage::License => {}
+            }
+        }
+        all
+    }
+
     pub fn url(self) -> &'static str {
         match self {
             ProjectPage::Source => SOURCE_URL,
@@ -1446,7 +1457,7 @@ mod tests {
         assert!(ProjectPage::License
             .url()
             .starts_with(&format!("{SOURCE_URL}/")));
-        for p in [ProjectPage::Source, ProjectPage::License] {
+        for p in ProjectPage::all() {
             assert!(p
                 .url()
                 .chars()

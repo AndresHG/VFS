@@ -368,7 +368,7 @@ fn all_providers() -> Vec<vfs_ai::Provider> {
 
 /// VFS-1 X1, AC-12: every set of contract.js equals the serde values of its Rust enum, and
 /// contract.js has no set this test does not check (besides the UI's own `UiErrorCode`).
-/// VFS-38 R14: `Scope` is checked like VFS-6 AC-11's `Source`.
+/// VFS-38 R14: `Scope` is checked like VFS-6 AC-11's `Source`. VFS-45 R6: `ProjectPage`.
 #[test]
 fn contract_js_matches_the_rust_enums() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/contract.js");
@@ -400,6 +400,10 @@ fn contract_js_matches_the_rust_enums() {
         ("KeyState", ai::key_states()),
         ("KeyPlace", serde_names(&ai::KeyPlace::all())),
         ("KeyFallback", serde_names(&ai::KeyFallback::all())),
+        (
+            "ProjectPage",
+            serde_names(&vfs_desktop_lib::feedback::ProjectPage::all()),
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
