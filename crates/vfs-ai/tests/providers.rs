@@ -252,6 +252,7 @@ fn openai_found_false_discards_citations() {
 
 /// VFS-28 R7: the OpenAI answer numbers the passages in the input, asks for strict JSON and
 /// returns its citations as given (28c drops the one whose quote is not in its passage).
+/// VFS-46 AC-3: the answer request also sends reasoning `none`.
 #[test]
 fn openai_answer_parses_json_citations() {
     let mock = MockServer::start(vec![MockResponse::sse(OPENAI_ANSWER)]);
