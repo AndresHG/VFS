@@ -1,7 +1,7 @@
 # VFS-29 — Search by meaning: embeddings by API (and later a local model), fused with BM25
 
-- **Status**: draft. The owner decided D1–D4 on 2026-11-22 (research E1, E2, P1) and
-  2026-11-25; D5–D6 are asked. Approval needs the owner; code waits for approval and for
+- **Status**: draft. The owner decided D1–D6 (research E1, E2, P1 of 2026-11-21, the
+  rest on 2026-11-25). Approval needs the owner; code waits for approval and for
   0.4 to ship.
 - **Size**: L. It sends whole document text to an outside service for the first time (with
   consent, per folder), adds a store beside `content.db`, and is multi-PR (29a, 29b, 29c).
@@ -182,8 +182,8 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D2 | Embedding key when the user has only an Anthropic key | A separate optional key, OpenAI or Voyage | owner | 2026-11-21 (E2) |
 | D3 | May document text go to an embedding API? | Yes, per folder, with permission and the cost and volume shown first | owner | 2026-11-25 |
 | D4 | Order | After 0.4 and before new sources (VFS-44) | owner | 2026-11-25 |
-| D5 | Local model in this spec | 29a API first; the local model after the 29b measurement (recommended; asked) | owner | pending |
-| D6 | Providers in 29a | OpenAI and Voyage (recommended; asked) | owner | pending |
+| D5 | Local model in this spec | 29a API first; the local model after the 29b measurement | owner | 2026-11-25 |
+| D6 | Providers in 29a | OpenAI and Voyage | owner | 2026-11-25 |
 | D7 | Fusion | RRF, k = 60, no tuning; a weighted sum only if the golden set shows a gain | agent | 2026-11-25 |
 | D8 | Where vectors live | `vectors.db`, so a content rebuild never wipes paid vectors | agent | 2026-11-22 |
 | D9 | Dimension | API models cut to 512 dimensions (OpenAI `dimensions`, Voyage 512) | agent | 2026-11-25 |
@@ -198,4 +198,4 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 
 ## Open questions
 
-- D5 and D6 wait for the owner; neither changes the store or the interface of `retrieve`.
+None.
