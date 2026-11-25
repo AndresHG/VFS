@@ -217,11 +217,11 @@ export const en = {
   bookmarksSummary: (on) => (on ? '· included' : '· not included'),
   bookmarksIntro: 'Also searches the bookmarks saved in Firefox. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
 
-  // VFS-21: updates. Besides asking with the user's own key (VFS-28), the check is the app's
-  // only connection to the internet; say so.
+  // VFS-21: updates. What the check sends. It names no other connection: a build without the
+  // AI shows nothing about it (VFS-28), and the AI section states its own.
   updatesTitle: 'Updates',
   updatesToggle: 'Check for updates when opening',
-  updatesIntro: 'When it opens, VFS checks GitHub for a new version. It sends nothing about your files. Apart from this, VFS connects only if you turn on «Ask your documents» with your own key.',
+  updatesIntro: 'When it opens, VFS checks GitHub for a new version. It sends nothing about your files, and if you turn this off the check is not made.',
   // VFS-33: the default folder exclusions, folded under "Advanced".
   advancedTitle: 'Advanced',
   includeAllToggle: 'Include system and program folders',
