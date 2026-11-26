@@ -403,6 +403,10 @@ function fakeAi(mode) {
     async aiClearRecords() { st.records = []; },
     async onAnswerText(cb) { textCbs.add(cb); return () => textCbs.delete(cb); },
     async aiAsk(askId, question, filters, confirmed) {
+      // VFS-47 AC-2: the answer model the shell would pick from the saved settings, for tests.
+      const [cheapModel, midModel] = st.settings.provider === Provider.OPENAI
+        ? ['gpt-6-luna', 'gpt-6.2-sol'] : ['claude-haiku-5-5', 'claude-sonnet-5-5'];
+      globalThis.vfsFakeAnswerModel = st.settings.cheap ? cheapModel : midModel;
       if (mode === 'cap' && !confirmed) throw { code: AiErrorCode.CAP_REACHED, message: 'spent 5000000000 of 5000000000' };
       const a = answers[mode] || answers.ok;
       await streamOut(askId, a.blocks);

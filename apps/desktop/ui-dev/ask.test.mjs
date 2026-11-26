@@ -225,8 +225,8 @@ test('a hostile answer stays text and loads nothing', async () => {
   }
 });
 
-/** VFS-47 AC-2, AC-4: with nothing saved the cheap model is selected; a pick is saved at once and
- *  shown again when the dialog reopens; while an answer streams the selector is disabled. */
+/** VFS-47 AC-2, AC-4: with nothing saved the cheap model is selected; a pick is saved at once,
+ *  so the next question goes to the mid model; while an answer streams the selector is disabled. */
 test('the model pick is saved and locked while answering', async () => {
   const b = await startBrowser();
   try {
@@ -238,15 +238,13 @@ test('the model pick is saved and locked while answering', async () => {
     assert.equal(await b.evaluate(`document.getElementById('ai-model').value`), ModelTier.CHEAP);
     await b.evaluate(`(() => { const m = document.getElementById('ai-model');
       m.value = ${JSON.stringify(ModelTier.MID)}; m.dispatchEvent(new Event('change')); })()`);
-    await b.evaluate(`document.getElementById('ai-ask').close()`);
-    await b.evaluate(`document.getElementById('ask-open').click()`);
-    await b.until(`document.getElementById('ai-model').value === ${JSON.stringify(ModelTier.MID)}`, 'the saved pick');
     await ask(b, '¿fianza?');
     await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
     await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
     await b.until(`document.getElementById('ai-model').disabled`, 'locked while answering');
     await b.until(`document.querySelector('.ai-cost')`, 'the answer');
     await b.until(`!document.getElementById('ai-model').disabled`, 'unlocked after');
+    assert.equal(await b.evaluate(`globalThis.vfsFakeAnswerModel`), 'claude-sonnet-5-5', 'the saved pick reached the ask');
   } finally {
     b.close();
   }
