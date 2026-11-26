@@ -11,13 +11,16 @@ export function askVisible(status) {
   return Boolean(status?.settings.enabled && status.key.state === KeyState.SAVED && status.store);
 }
 
-/** The answer models the selector offers (VFS-47 R1, D2), cheap first; `cheap` is the saved
- *  tier (`AiSettings.cheap`). Names are the providers' own; the hints come from the catalog. */
+/** VFS-47: the answer tier the selector beside «Preguntar» picks. UI-only (the shell stores it
+ *  as `AiSettings.cheap`), so it lives here, not in contract.js, which mirrors Rust enums. */
+export const ModelTier = Object.freeze({ CHEAP: 'cheap', MID: 'mid' });
+
+/** The answer models the selector offers (VFS-47 R1, D2), cheap first, each with its tier. Names are the providers' own; the hints come from the catalog. */
 export function modelChoices(S, provider) {
   const [cheap, mid] = provider === Provider.OPENAI ? ['Luna', 'Sol'] : ['Haiku', 'Sonnet'];
   return [
-    { cheap: true, label: S.aiModelCheap(cheap) },
-    { cheap: false, label: S.aiModelMid(mid) },
+    { tier: ModelTier.CHEAP, label: S.aiModelCheap(cheap) },
+    { tier: ModelTier.MID, label: S.aiModelMid(mid) },
   ];
 }
 
@@ -92,13 +95,13 @@ export function setupAsk({ api, S, lang, $, el, filters, aiStatus, updateAi, ref
     // VFS-47 R1, R2, R5: the active provider's models, the saved tier selected.
     model.replaceChildren(...modelChoices(S, status.settings.provider).map((c) => {
       const o = el('option', null, c.label);
-      o.value = c.cheap ? 'cheap' : 'mid';
+      o.value = c.tier;
       return o;
     }));
-    model.value = status.settings.cheap ? 'cheap' : 'mid';
+    model.value = status.settings.cheap ? ModelTier.CHEAP : ModelTier.MID;
   }
 
-  model.addEventListener('change', () => setCheap(model.value === 'cheap'));
+  model.addEventListener('change', () => setCheap(model.value === ModelTier.CHEAP));
 
   function busy(id) {
     running = id;

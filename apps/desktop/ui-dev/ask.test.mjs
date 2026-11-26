@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { answerRuns, askVisible, bibLine, copyText, modelChoices, sourceTitle } from '../ui/ask.js';
+import { answerRuns, askVisible, bibLine, copyText, modelChoices, ModelTier, sourceTitle } from '../ui/ask.js';
 import { KeyPlace, KeyState, Provider } from '../ui/contract.js';
 import { Lang, localeFor } from '../ui/strings.js';
 import { startBrowser } from './browser.mjs';
@@ -30,7 +30,7 @@ test('«Preguntar» shows only when it can ask', () => {
  *  named, with the cost hint from the catalog. */
 test('the selector names the provider\'s models, cheap first', () => {
   assert.deepEqual(modelChoices(S, Provider.OPENAI), [
-    { cheap: true, label: 'Luna · más barato' }, { cheap: false, label: 'Sol · unas 20 veces más caro' }]);
+    { tier: ModelTier.CHEAP, label: 'Luna · más barato' }, { tier: ModelTier.MID, label: 'Sol · unas 20 veces más caro' }]);
   assert.deepEqual(modelChoices(S, Provider.ANTHROPIC).map((c) => c.label), ['Haiku · más barato', 'Sonnet · unas 20 veces más caro']);
   const { S: en } = localeFor(Lang.EN, 'en-US');
   assert.deepEqual(modelChoices(en, Provider.OPENAI).map((c) => c.label), ['Luna · cheapest', 'Sol · about 20 times dearer']);
@@ -235,12 +235,12 @@ test('the model pick is saved and locked while answering', async () => {
     await b.evaluate(`document.getElementById('ask-open').click()`);
     const opts = await b.evaluate(`[...document.querySelectorAll('#ai-model option')].map((o) => o.textContent)`);
     assert.deepEqual(opts, ['Haiku · más barato', 'Sonnet · unas 20 veces más caro']);
-    assert.equal(await b.evaluate(`document.getElementById('ai-model').value`), 'cheap');
+    assert.equal(await b.evaluate(`document.getElementById('ai-model').value`), ModelTier.CHEAP);
     await b.evaluate(`(() => { const m = document.getElementById('ai-model');
-      m.value = 'mid'; m.dispatchEvent(new Event('change')); })()`);
+      m.value = ${JSON.stringify(ModelTier.MID)}; m.dispatchEvent(new Event('change')); })()`);
     await b.evaluate(`document.getElementById('ai-ask').close()`);
     await b.evaluate(`document.getElementById('ask-open').click()`);
-    await b.until(`document.getElementById('ai-model').value === 'mid'`, 'the saved pick');
+    await b.until(`document.getElementById('ai-model').value === ${JSON.stringify(ModelTier.MID)}`, 'the saved pick');
     await ask(b, '¿fianza?');
     await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
     await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
