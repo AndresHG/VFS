@@ -362,8 +362,8 @@ fn update_check_off_makes_no_connection() {
     assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
 }
 
-/// VFS-20 AC-7, AC-3: "Ver el informe" answers over IPC with the frontend's payload; the root
-/// path appears only when the names box is ticked.
+/// VFS-20 AC-7, VFS-48 AC-1, AC-2: "Ver el informe" answers over IPC with the frontend's
+/// payload (the text only), and never carries the root path, even when the text names it.
 #[test]
 fn feedback_report_over_ipc() {
     let data = tempfile::tempdir().unwrap();
@@ -373,22 +373,21 @@ fn feedback_report_over_ipc() {
     let root = vfs.add_root(tree.path()).unwrap();
     app.manage(AppState::open(vfs));
 
-    let args = |names: bool| json!({ "description": "Va lento", "includeNames": names });
-    let text = invoke(&webview, "feedback_report", args(false)).unwrap();
+    let description = format!("Va lento en {}", root.path);
+    let text = invoke(
+        &webview,
+        "feedback_report",
+        json!({ "description": description }),
+    )
+    .unwrap();
     let text = text.as_str().unwrap();
     assert!(text.starts_with("VFS diagnostic report"), "{text}");
-    assert!(text.contains("Va lento"));
+    assert!(text.contains("Va lento en <ruta>"), "{text}");
     assert!(
         text.contains(&format!("root {}: drive=", root.id)),
         "{text}"
     );
     assert!(!text.contains(&root.path), "{text}");
-
-    let text = invoke(&webview, "feedback_report", args(true)).unwrap();
-    assert!(text
-        .as_str()
-        .unwrap()
-        .contains(&format!("path: {}", root.path)));
 }
 
 /// Polls `content_status` until `f` holds, for at most 60 s.

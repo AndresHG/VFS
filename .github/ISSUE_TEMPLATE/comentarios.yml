@@ -11,7 +11,7 @@ body:
         Gracias por escribirnos. Si ha llegado aquí desde VFS, el programa ya ha guardado un
         archivo `vfs-informe-….zip` en su carpeta de Descargas y lo ha mostrado en pantalla.
         **Arrastre ese archivo al cuadro «Informe completo» de abajo** antes de enviar.
-        El informe no incluye nombres de archivos ni de carpetas salvo que usted lo eligiera.
+        El informe es anónimo: no incluye nombres de archivos, de carpetas ni de usuario.
   - type: textarea
     id: que-paso
     attributes:

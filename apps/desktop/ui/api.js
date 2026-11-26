@@ -28,8 +28,8 @@
 //     setting is off); install_update emits 'update-progress' {downloaded, total|null}
 //   (VFS-45) open_project_page(page: ProjectPage) opens a fixed project address in the browser;
 //     check_for_update rejects when the check failed
-//   (VFS-20) feedback_report(description, includeNames) -> string;
-//     feedback_save(description, includeNames, github) -> {folder, file}
+//   (VFS-20, VFS-48) feedback_report(description) -> string;
+//     feedback_save(description, github) -> {folder, file}
 //   (VFS-27) ContentStatus {settings: {enabled, paused, offered}, phase: {kind: ContentPhase,
 //                   reason?: ContentWait|ContentStop, detail?}, done, total, perHour|null,
 //                   secondsLeft|null}; the switch, pause, retry, rebuild, mark-offered and delete
@@ -95,8 +95,8 @@ function tauriBackend(t) {
     setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),
     openBookmark: (id) => invoke('open_bookmark', { id }),
     // VFS-20: the report text, and saving it (-> {folder, file}); `github` also opens the issue.
-    feedbackReport: (description, includeNames) => invoke('feedback_report', { description, includeNames }),
-    feedbackSave: (description, includeNames, github) => invoke('feedback_save', { description, includeNames, github }),
+    feedbackReport: (description) => invoke('feedback_report', { description }),
+    feedbackSave: (description, github) => invoke('feedback_save', { description, github }),
     onBookmarksChanged: (cb) => listen('bookmarks-changed', (e) => cb(e.payload)),
     getUpdateSettings: () => invoke('get_update_settings'),
     setUpdateCheck: (enabled) => invoke('set_update_check', { enabled }),

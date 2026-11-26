@@ -1,7 +1,7 @@
 # VFS-30 — Diagnostic report: no free text from panics, bounded preview
 
 - **Status**: implemented (PR #149); a follow-up to VFS-20 from an independent pre-release
-  review
+  review; R1–R3 hold always since VFS-48 removed the names box
 - **Size**: M (one module, `feedback.rs`, and its dialog; no schema change)
 - **Links**: supersedes VFS-20 R1 (the preview), R3 (redaction) and R5 (what the `.zip`
   holds); VFS-20 AC-2 and AC-4 still hold as written, AC-7 is extended by AC-5 here

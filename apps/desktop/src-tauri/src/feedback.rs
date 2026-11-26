@@ -2,9 +2,10 @@
 //! anywhere, saved as a `.zip` and optionally handed to a prefilled GitHub issue. Nothing here
 //! makes a network request (R8): the browser is opened on the user's click.
 //!
-//! The report never holds a root path, a file or folder name or any other path unless the user
-//! ticks the names box (R3, R4). Diagnostic records (`vfs::diag`, VFS-5 R8) carry only counts
-//! and durations and are kept as written; every other log line goes through [`redact_line`].
+//! The report never holds a root path, a file or folder name, any other path or the user's
+//! account name, and the user's own text is redacted the same way (VFS-48). Diagnostic
+//! records (`vfs::diag`, VFS-5 R8) carry only counts and durations and are kept as written;
+//! every other log line goes through [`redact_line`].
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -26,6 +27,9 @@ const PANIC_PREFIX: &str = "panic at ";
 
 /// What replaces a path in a redacted line.
 pub const REDACTED: &str = "<ruta>";
+
+/// What replaces the user's account name in the report (VFS-48 R3).
+pub const USER: &str = "<usuario>";
 
 /// What replaces a panic's message, or a whole continuation line, when names are left out
 /// (VFS-30 R1, R3).
@@ -98,6 +102,9 @@ pub struct Environment {
     /// Strings to redact wherever they appear, besides anything that reads as a path: the root
     /// paths and the user's home folder.
     pub private: Vec<String>,
+    /// The user's account name (the home folder's last part), redacted as a word wherever it
+    /// stands (VFS-48 R3); `None` when shorter than 3 characters.
+    pub user: Option<String>,
     /// Unix time the report is built at, and the local time as text.
     pub now: i64,
     pub now_text: String,
@@ -110,12 +117,14 @@ pub struct LogFile {
     pub text: String,
 }
 
-/// The report: `summary` is everything but the user's text, the log lines and the root paths
-/// (what the public issue URL carries), `text` the report with the log lines its budget allows
-/// (all of them for the `.zip`, the newest [`PREVIEW_LOG_BYTES`] for the preview).
+/// The report: `summary` is everything but the user's text and the log lines (what the public
+/// issue URL carries), `description` the user's text redacted (VFS-48 R2, R3), `text` the
+/// report with the log lines its budget allows (all of them for the `.zip`, the newest
+/// [`PREVIEW_LOG_BYTES`] for the preview).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub summary: String,
+    pub description: String,
     pub text: String,
 }
 
@@ -294,6 +303,72 @@ pub fn redact_line(line: &str, private: &[String], after_diag: bool) -> String {
     }
 }
 
+/// The byte length of `user` at the start of `s`, compared case-insensitively, if it is there.
+fn starts_with_ignore_case(s: &str, user: &str) -> Option<usize> {
+    let mut chars = s.char_indices();
+    let mut end = 0;
+    for want in user.chars() {
+        let (i, c) = chars.next()?;
+        if !c.to_lowercase().eq(want.to_lowercase()) {
+            return None;
+        }
+        end = i + c.len_utf8();
+    }
+    Some(end)
+}
+
+/// `text` with every whole-word, case-insensitive occurrence of `user` replaced by [`USER`]
+/// (VFS-48 R3): a longer word containing it is kept.
+pub fn redact_user(text: &str, user: Option<&str>) -> String {
+    let Some(user) = user.filter(|u| !u.is_empty()) else {
+        return text.to_owned();
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut prev_alnum = false;
+    while i < text.len() {
+        if !prev_alnum {
+            if let Some(len) = starts_with_ignore_case(&text[i..], user) {
+                let next_alnum = text[i + len..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric);
+                if !next_alnum {
+                    out.push_str(USER);
+                    i += len;
+                    prev_alnum = false;
+                    continue;
+                }
+            }
+        }
+        let c = text[i..].chars().next().unwrap_or(' ');
+        out.push(c);
+        prev_alnum = c.is_alphanumeric();
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// The account name to redact (VFS-48 R3): the home folder's last part, when it is at least 3
+/// characters (a shorter one would turn ordinary words into `<usuario>`).
+pub fn account_name(home: &Path) -> Option<String> {
+    home.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| n.chars().count() >= 3)
+}
+
+/// The user's "what happened" text as the report and the issue carry it (VFS-48 R2, R3): each
+/// line's paths redacted (a POSIX path runs to its line's end, never past it), then the
+/// account name.
+pub fn redact_description(description: &str, env: &Environment) -> String {
+    let lines: Vec<String> = description
+        .trim()
+        .lines()
+        .map(|l| redact_message(l, &env.private))
+        .collect();
+    redact_user(&lines.join("\n"), env.user.as_deref())
+}
+
 /// Counts of warnings, errors and panics in the logs (R2).
 fn log_counts(logs: &[LogFile]) -> (usize, usize, usize, usize) {
     let (mut lines, mut warnings, mut errors, mut panics) = (0, 0, 0, 0);
@@ -340,31 +415,25 @@ fn mb(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / (1024.0 * 1024.0))
 }
 
-/// Builds the report (VFS-20 R2–R4). Its labels are English: it is read by maintainers. Only
-/// the newest `log_budget` bytes of log lines are included, whole lines only (the preview passes
-/// [`PREVIEW_LOG_BYTES`], the `.zip` `usize::MAX`); the counts always cover every line.
+/// Builds the report (VFS-20 R2–R4), always anonymous (VFS-48 R1–R3). Its labels are English:
+/// it is read by maintainers. Only the newest `log_budget` bytes of log lines are included,
+/// whole lines only (the preview passes [`PREVIEW_LOG_BYTES`], the `.zip` `usize::MAX`); the
+/// counts always cover every line.
 pub fn build_report(
     env: &Environment,
     description: &str,
-    include_names: bool,
     logs: &[LogFile],
     log_budget: usize,
 ) -> Report {
     let mut s = String::new();
-    let yes_no = |b: bool| if b { "yes" } else { "no" };
     let _ = writeln!(s, "## App");
     let _ = writeln!(s, "version: {}", env.version);
     let _ = writeln!(s, "os: {}", env.os);
     let _ = writeln!(s, "generated: {}", env.now_text);
-    let _ = writeln!(s, "names_included: {}", yes_no(include_names));
     let _ = writeln!(s, "\n## Folders");
     if env.roots.is_empty() {
         let _ = writeln!(s, "(none)");
     }
-    // The root paths go only into the saved report, never into the summary the public issue
-    // URL carries (R6): `named_roots` is this section with them.
-    let roots_start = s.len();
-    let mut named_roots = String::new();
     for (root, disk) in &env.roots {
         // Why a cloud-synced root looks small (VFS-37 R1): counts only, no path or name (R5).
         let known = |n: Option<u64>| n.map_or_else(|| "?".to_owned(), |n| n.to_string());
@@ -384,12 +453,7 @@ pub fn build_report(
             age(env.now, root.last_full_scan),
         );
         s.push_str(&line);
-        named_roots.push_str(&line);
-        if include_names {
-            let _ = writeln!(named_roots, "  path: {}", root.path);
-        }
     }
-    let roots_end = s.len();
     let _ = writeln!(s, "\n## Index");
     match &env.stats {
         Some(st) => {
@@ -438,16 +502,14 @@ pub fn build_report(
     let mut skip = total.saturating_sub(log_budget);
     let mut text = String::with_capacity(summary.len() + total.min(log_budget) + 512);
     text.push_str("VFS diagnostic report\n\n## What happened\n");
-    let description = description.trim();
+    let description = redact_description(description, env);
     text.push_str(if description.is_empty() {
         "(empty)"
     } else {
-        description
+        &description
     });
     text.push_str("\n\n");
-    text.push_str(&summary[..roots_start]);
-    text.push_str(&named_roots);
-    text.push_str(&summary[roots_end..]);
+    text.push_str(&summary);
     text.push_str("\n## Log lines\n");
     if skip > 0 {
         text.push_str("(older lines are left out of this preview; the .zip holds them all)\n");
@@ -470,18 +532,19 @@ pub fn build_report(
         let _ = writeln!(text, "--- {} ---", file.name);
         let mut after_diag = false;
         for line in file.text[start..].lines() {
-            if include_names {
-                text.push_str(line);
-            } else {
-                text.push_str(&redact_line(line, &env.private, after_diag));
-            }
+            let line_out = redact_line(line, &env.private, after_diag);
+            text.push_str(&redact_user(&line_out, env.user.as_deref()));
             text.push('\n');
             if let Some((target, _, _)) = parse_line(line) {
                 after_diag = target == vfs_core::DIAG_TARGET;
             }
         }
     }
-    Report { summary, text }
+    Report {
+        summary,
+        description,
+        text,
+    }
 }
 
 /// Percent-encodes everything but RFC 3986 unreserved characters.
@@ -866,9 +929,11 @@ pub fn gather<R: Runtime>(app: &AppHandle<R>, vfs: &Vfs) -> Environment {
         })
         .collect();
     let mut private: Vec<String> = roots.iter().map(|(r, _)| r.path.clone()).collect();
-    if let Ok(home) = app.path().home_dir() {
+    let home = app.path().home_dir().ok();
+    if let Some(home) = &home {
         private.push(home.to_string_lossy().into_owned());
     }
+    let user = home.as_deref().and_then(account_name);
     // Longest first, so a root inside the home folder is matched whole; very short strings
     // ("/", "C:\") are left to the generic rule.
     private.retain(|p| p.len() > 3);
@@ -897,6 +962,7 @@ pub fn gather<R: Runtime>(app: &AppHandle<R>, vfs: &Vfs) -> Environment {
         indexer: vfs.progress().state,
         bookmarks,
         private,
+        user,
         now: now.timestamp(),
         now_text: now.format("%Y-%m-%d %H:%M %:z").to_string(),
     }
@@ -910,7 +976,6 @@ fn current_report<R: Runtime>(
     app: &AppHandle<R>,
     state: &AppState,
     description: &str,
-    include_names: bool,
     log_budget: usize,
 ) -> Result<Report, ApiError> {
     let logs = app
@@ -921,7 +986,6 @@ fn current_report<R: Runtime>(
     Ok(build_report(
         &gather(app, &state.vfs()?),
         description,
-        include_names,
         &logs,
         log_budget,
     ))
@@ -934,9 +998,8 @@ pub fn feedback_report<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     description: String,
-    include_names: bool,
 ) -> Result<String, ApiError> {
-    Ok(current_report(&app, &state, &description, include_names, PREVIEW_LOG_BYTES)?.text)
+    Ok(current_report(&app, &state, &description, PREVIEW_LOG_BYTES)?.text)
 }
 
 /// Where the report was saved.
@@ -955,10 +1018,9 @@ pub fn feedback_save<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     description: String,
-    include_names: bool,
     github: bool,
 ) -> Result<FeedbackSaved, ApiError> {
-    let report = current_report(&app, &state, &description, include_names, usize::MAX)?;
+    let report = current_report(&app, &state, &description, usize::MAX)?;
     let p = app.path();
     let dir = export_dir(&[
         p.download_dir().ok(),
@@ -973,7 +1035,7 @@ pub fn feedback_save<R: Runtime>(
         log::warn!("reveal report: {e}");
     }
     if github {
-        open_url(&github_url(&description, &report.summary)).map_err(io_error)?;
+        open_url(&github_url(&report.description, &report.summary)).map_err(io_error)?;
     }
     Ok(FeedbackSaved {
         folder: dir.to_string_lossy().into_owned(),
@@ -1015,6 +1077,7 @@ mod tests {
         private.push("/Users/ana".into());
         private.sort_by_key(|p| std::cmp::Reverse(p.len()));
         Environment {
+            user: Some("ana".into()),
             version: "0.2.0".into(),
             os: "windows 10.0.19045 22H2 (x86_64)".into(),
             roots,
@@ -1117,7 +1180,6 @@ mod tests {
         let r = build_report(
             &env(&[r"D:\Fotos familia"]),
             "Va lento",
-            false,
             &logs(),
             usize::MAX,
         );
@@ -1131,7 +1193,6 @@ mod tests {
             "indexer: idle",
             "firefox_bookmarks: on (profiles=1 bookmarks=230)",
             "files: 2\nlines: 21\nwarnings: 13\nerrors: 4\npanics: 3",
-            "names_included: no",
         ] {
             assert!(r.text.contains(want), "missing {want:?} in\n{}", r.text);
         }
@@ -1155,7 +1216,7 @@ mod tests {
         (r.cloud_only, r.links, r.unreadable, r.unpopulated) = (Some(7), Some(2), 3, 4);
         let r = &mut e.roots[1].0;
         (r.cloud_only, r.links) = (None, None);
-        let report = build_report(&e, "", true, &[], usize::MAX);
+        let report = build_report(&e, "", &[], usize::MAX);
         for want in [
             "root 1: drive=local disk=hdd status=ready files=1200 folders=80 cloud_only=7 \
              links=2 unreadable=3 unpopulated=4 last_full_scan=3 d ago",
@@ -1169,11 +1230,11 @@ mod tests {
             );
             assert!(report.text.contains(want));
         }
-        assert!(report.text.contains(r"path: C:\Users\ana\OneDrive"));
+        assert!(!report.text.contains("OneDrive"));
         assert!(!report.summary.contains("OneDrive"));
     }
 
-    /// VFS-20 AC-2: with the box unticked no root path, file or folder name survives in any
+    /// VFS-20 AC-2, VFS-48 AC-1: no root path, file or folder name survives in any
     /// warning format, `<ruta>` takes their place, and diagnostic lines are unchanged.
     /// VFS-30 AC-1: nor in a panic payload or a name's tail after a line break; each panic
     /// keeps only its location.
@@ -1182,7 +1243,6 @@ mod tests {
         let r = build_report(
             &env(&[r"D:\Fotos familia", r"E:\Archivo (2019)"]),
             "",
-            false,
             &logs(),
             usize::MAX,
         );
@@ -1330,21 +1390,13 @@ mod tests {
         let text = build_report(
             &env,
             "",
-            false,
             &log("[d][t][vfs_core::indexer][WARN] cannot list /a/Nota\nsecreta banco: denied\n"),
             usize::MAX,
         )
         .text;
         assert!(!text.contains("secreta"), "{text}");
         assert!(text.ends_with("cannot list <ruta>\n<omitido>\n"), "{text}");
-        let text = build_report(
-            &env,
-            "",
-            false,
-            &log(&format!("{DIAG}\n  dirs=3\n")),
-            usize::MAX,
-        )
-        .text;
+        let text = build_report(&env, "", &log(&format!("{DIAG}\n  dirs=3\n")), usize::MAX).text;
         assert!(text.ends_with(&format!("{DIAG}\n  dirs=3\n")), "{text}");
     }
 
@@ -1368,7 +1420,7 @@ mod tests {
             },
         ];
         let env = env(&[]);
-        let preview = build_report(&env, "", false, &logs, PREVIEW_LOG_BYTES);
+        let preview = build_report(&env, "", &logs, PREVIEW_LOG_BYTES);
         assert!(
             preview.text.len() <= preview.summary.len() + PREVIEW_LOG_BYTES + 1024,
             "{}",
@@ -1382,22 +1434,87 @@ mod tests {
         assert!(first_kept.starts_with("[2026-11-21]"), "{first_kept}");
 
         // A budget that ends exactly at a line start keeps that whole line.
-        let one = build_report(&env, "", false, &logs, line(0).len() + 1);
+        let one = build_report(&env, "", &logs, line(0).len() + 1);
         let kept: Vec<&str> = one.text.lines().filter(|l| l.contains("[WARN]")).collect();
         assert_eq!(kept, [line(59_999)]);
 
-        let full = build_report(&env, "", false, &logs, usize::MAX);
+        let full = build_report(&env, "", &logs, usize::MAX);
         assert!(full.text.contains(&line(0)));
         assert!(!full.text.contains("the .zip holds them all"));
     }
 
-    /// VFS-20 AC-3: with the box ticked the root paths and the original lines appear.
+    /// VFS-48 AC-1: roots named after a person or an institution's synced folder never reach
+    /// the report: no path line, no `names_included` line, no name.
     #[test]
-    fn report_with_names_keeps_them() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "", true, &logs(), usize::MAX);
-        assert!(r.text.contains(r"path: D:\Fotos familia"));
-        assert!(r.text.contains(&hostile_log()));
-        assert!(r.text.contains("names_included: yes"));
+    fn report_is_always_anonymous() {
+        let roots = [
+            r"G:\MARIA\Música",
+            r"C:\Users\ana\OneDrive - Universidad X\Docencia",
+        ];
+        let r = build_report(&env(&roots), "", &logs(), usize::MAX);
+        for secret in [
+            "MARIA",
+            "Música",
+            "Universidad",
+            "Docencia",
+            "path: ",
+            "names_included",
+        ] {
+            assert!(!r.text.contains(secret), "{secret:?} leaked in\n{}", r.text);
+        }
+        assert!(r.text.contains(DIAG));
+    }
+
+    /// VFS-48 AC-2: the user's text loses its paths, in the report and in the issue URL; a
+    /// POSIX path ends at its line, so the next line survives.
+    #[test]
+    fn description_paths_are_redacted() {
+        let e = env(&[r"D:\Fotos familia"]);
+        let text =
+            "Cogí /Users/ana/Documentos entera\ny D:\\Fotos familia\\Roma\nluego E:\\X\\y.pdf";
+        let r = build_report(&e, text, &[], usize::MAX);
+        assert_eq!(r.description, "Cogí <ruta>\ny <ruta>\nluego <ruta>");
+        assert!(r
+            .text
+            .contains("## What happened\nCogí <ruta>\ny <ruta>\nluego <ruta>\n"));
+        let url = github_url(&r.description, &r.summary);
+        for secret in ["Documentos", "Fotos", "Roma", "y.pdf"] {
+            assert!(!url.contains(secret), "{secret:?} in {url}");
+        }
+    }
+
+    /// VFS-48 AC-3: the account name alone, in any case, becomes `<usuario>` in the user's text
+    /// and in a warning; a longer word holding it is kept; a 2-character name is ignored.
+    #[test]
+    fn account_name_is_redacted_as_a_word() {
+        let mut e = env(&[]);
+        let log = vec![LogFile {
+            name: "vfs.log".into(),
+            text: "[d][t][vfs_core::indexer][WARN] owner ana lacks access\n".into(),
+        }];
+        let r = build_report(
+            &e,
+            "Soy ANA, la de Mariana y anaquel. ana.",
+            &log,
+            usize::MAX,
+        );
+        assert_eq!(
+            r.description,
+            "Soy <usuario>, la de Mariana y anaquel. <usuario>."
+        );
+        assert!(
+            r.text.contains("[WARN] owner <usuario> lacks access"),
+            "{}",
+            r.text
+        );
+        e.user = account_name(Path::new("/Users/al"));
+        assert_eq!(e.user, None);
+        assert_eq!(redact_user("al ana", e.user.as_deref()), "al ana");
+        assert_eq!(account_name(Path::new("/home/ana")), Some("ana".into()));
+        assert_eq!(
+            redact_user("Ñandú vio a ñandú", Some("ñandú")),
+            "<usuario> vio a <usuario>"
+        );
     }
 
     /// VFS-20 AC-4: the zip is named by date and time, never overwrites an earlier one, and
@@ -1406,7 +1523,7 @@ mod tests {
     #[test]
     fn report_zip_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
-        let text = build_report(&env(&[]), "Hola ñandú", false, &logs(), usize::MAX).text;
+        let text = build_report(&env(&[]), "Hola ñandú", &logs(), usize::MAX).text;
         let path = report_path(tmp.path(), "2026-11-21-1030");
         assert_eq!(path.file_name().unwrap(), "vfs-informe-2026-11-21-1030.zip");
         write_zip(&path, &text).unwrap();
@@ -1470,7 +1587,7 @@ mod tests {
     /// the form declares the fields the URL fills.
     #[test]
     fn github_url_is_short_and_encoded() {
-        let r = build_report(&env(&[r"D:\Fotos familia"]), "", false, &logs(), usize::MAX);
+        let r = build_report(&env(&[r"D:\Fotos familia"]), "", &logs(), usize::MAX);
         let long = "No encuentra la escritura & <otras> cosas ñ ".repeat(500);
         let url = github_url(&long, &r.summary);
         assert!(
@@ -1504,21 +1621,20 @@ mod tests {
         assert!(form.contains(&format!("id: {FIELD_SUMMARY}")));
     }
 
-    /// VFS-20 AC-5: with the names box ticked the root paths are in the saved report but never
-    /// in the issue URL, which becomes a public page.
+    /// VFS-20 AC-5: the issue URL, a public page, never holds a root path.
     #[test]
     fn github_url_never_holds_root_paths() {
         let roots = [r"D:\Fotos familia", "/Volumes/Archivo/Notaría"];
-        let r = build_report(&env(&roots), "Va lento", true, &logs(), usize::MAX);
-        let url = github_url("Va lento", &r.summary);
+        let r = build_report(&env(&roots), "Va lento", &logs(), usize::MAX);
+        let url = github_url(&r.description, &r.summary);
         for root in roots {
-            assert!(r.text.contains(&format!("path: {root}")), "{}", r.text);
+            assert!(!r.text.contains(root), "{}", r.text);
             assert!(!url.contains(&encode(root)), "{url}");
         }
         for secret in ["Fotos", "Notar", "path%3A"] {
             assert!(!url.contains(secret), "{secret:?} in {url}");
         }
-        assert!(url.contains("names_included%3A%20yes"), "{url}");
+        assert!(url.contains("Va%20lento"), "{url}");
         assert!(url.contains("root%201%3A%20drive%3Dlocal"), "{url}");
     }
 

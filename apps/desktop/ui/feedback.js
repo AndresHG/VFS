@@ -1,6 +1,7 @@
 // "Enviar comentarios" (VFS-20): the user writes what happened, may read the exact report,
 // and saves it (R5) or saves it and opens a prefilled GitHub issue (R6). Nothing is sent by
-// the program itself (R8); the report is built in the shell (feedback.rs).
+// the program itself (R8); the report is built in the shell (feedback.rs), always anonymous
+// (VFS-48).
 
 /** The message shown once the report is saved: where it is and what to do with it. */
 export function savedMessage(S, saved, github) {
@@ -11,7 +12,6 @@ export function savedMessage(S, saved, github) {
 export function setupFeedback({ api, S, $, errorText }) {
   const dialog = $('feedback');
   const text = $('feedback-text');
-  const names = $('feedback-names');
   const details = $('feedback-details');
   const report = $('feedback-report');
   const actions = [$('feedback-github'), $('feedback-export')];
@@ -24,15 +24,15 @@ export function setupFeedback({ api, S, $, errorText }) {
     $('feedback-msg').scrollIntoView({ block: 'nearest' });
   }
 
-  // The preview is built only while "Ver el informe" is open, and again when the names box
-  // changes or it is opened again, never on typing (the shell reads the whole log for it); a
+  // The preview is built only while "Ver el informe" is open, and again when it is opened
+  // again, never on typing (the shell reads the whole log for it); a
   // slower, older answer never overwrites a newer one.
   async function refreshPreview() {
     if (!details.open) return;
     const token = ++previewToken;
     report.value = S.feedbackLoading;
     try {
-      const value = await api.feedbackReport(text.value, names.checked);
+      const value = await api.feedbackReport(text.value);
       if (token === previewToken) report.value = value;
     } catch (err) {
       if (token === previewToken) report.value = errorText(err);
@@ -43,7 +43,7 @@ export function setupFeedback({ api, S, $, errorText }) {
     for (const b of actions) b.disabled = true;
     message(S.feedbackLoading);
     try {
-      const saved = await api.feedbackSave(text.value, names.checked, github);
+      const saved = await api.feedbackSave(text.value, github);
       message(savedMessage(S, saved, github));
     } catch (err) {
       message(errorText(err), true);
@@ -54,14 +54,12 @@ export function setupFeedback({ api, S, $, errorText }) {
 
   $('open-feedback').addEventListener('click', () => {
     $('feedback-msg').hidden = true;
-    names.checked = false;
     details.open = false;
     report.value = '';
     dialog.showModal();
     text.focus();
   });
   details.addEventListener('toggle', refreshPreview);
-  names.addEventListener('change', refreshPreview);
   $('feedback-github').addEventListener('click', () => save(true));
   $('feedback-export').addEventListener('click', () => save(false));
 }
