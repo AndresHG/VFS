@@ -160,7 +160,7 @@ fn anthropic_answer_streams_text_and_citations() {
     assert_eq!(content[1]["text"], "¿Cuánto pagué de fianza?");
 }
 
-/// VFS-28 D7: «Respuestas más baratas» answers with the cheap model, thinking disabled.
+/// VFS-28 D7: the cheap tier answers with the cheap model, thinking disabled.
 #[test]
 fn cheap_answers_use_the_cheap_model() {
     let mock = MockServer::start(vec![MockResponse::sse(ANTHROPIC_ANSWER)]);

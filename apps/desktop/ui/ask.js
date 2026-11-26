@@ -3,12 +3,25 @@
 // «Copiar respuesta» and «Bibliografía» (R12). Nothing here builds HTML from answer or passage
 // text: every string goes through textContent or a text node.
 
-import { AiErrorCode, KeyState } from './contract.js';
+import { AiErrorCode, KeyState, Provider } from './contract.js';
 import { aiErrorText, formatUsd, providerName } from './ai.js';
 
 /** «Preguntar» shows only while AI is on, a key is saved and content search has a store (R5). */
 export function askVisible(status) {
   return Boolean(status?.settings.enabled && status.key.state === KeyState.SAVED && status.store);
+}
+
+/** VFS-47: the answer tier the selector beside «Preguntar» picks. UI-only (the shell stores it
+ *  as `AiSettings.cheap`), so it lives here, not in contract.js, which mirrors Rust enums. */
+export const ModelTier = Object.freeze({ CHEAP: 'cheap', MID: 'mid' });
+
+/** The answer models the selector offers (VFS-47 R1, D2), cheap first, each with its tier. Names are the providers' own; the hints come from the catalog. */
+export function modelChoices(S, provider) {
+  const [cheap, mid] = provider === Provider.OPENAI ? ['Luna', 'Sol'] : ['Haiku', 'Sonnet'];
+  return [
+    { tier: ModelTier.CHEAP, label: S.aiModelCheap(cheap) },
+    { tier: ModelTier.MID, label: S.aiModelMid(mid) },
+  ];
 }
 
 /** A passage's title as the model saw it (D11): the file name and its page or pages. */
@@ -59,12 +72,13 @@ export function bibLine(S, e) {
  * `updateAi(status)` hands a newer one to the settings panel and `refreshAi()` reads it again.
  * Returns `setStatus(status)` for the settings panel to call.
  */
-export function setupAsk({ api, S, lang, $, el, filters, aiStatus, updateAi, refreshAi, revealFile, toast }) {
+export function setupAsk({ api, S, lang, $, el, filters, aiStatus, updateAi, refreshAi, setCheap, revealFile, toast }) {
   const dialog = $('ai-ask');
   const form = $('ai-ask-form');
   const input = $('ai-question');
   const turns = $('ai-turns');
   const cancel = $('ai-cancel');
+  const model = $('ai-model');
   let askId = 0;
   let running = 0; // the ask id in flight, 0 when idle
   let thread = null; // {id, sources, documents}
@@ -77,13 +91,24 @@ export function setupAsk({ api, S, lang, $, el, filters, aiStatus, updateAi, ref
 
   function setStatus(status) {
     $('ask-open').hidden = !askVisible(status);
+    if (!status) return;
+    // VFS-47 R1, R2, R5: the active provider's models, the saved tier selected.
+    model.replaceChildren(...modelChoices(S, status.settings.provider).map((c) => {
+      const o = el('option', null, c.label);
+      o.value = c.tier;
+      return o;
+    }));
+    model.value = status.settings.cheap ? ModelTier.CHEAP : ModelTier.MID;
   }
+
+  model.addEventListener('change', () => setCheap(model.value === ModelTier.CHEAP));
 
   function busy(id) {
     running = id;
     cancel.hidden = !id;
     for (const b of form.querySelectorAll('button[type="submit"]')) b.disabled = Boolean(id);
     $('ai-follow-submit').disabled = Boolean(id);
+    model.disabled = Boolean(id); // VFS-47 R4
   }
 
   /** Asks the user once, the first time ever (R6). */

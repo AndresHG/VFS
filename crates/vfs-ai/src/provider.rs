@@ -152,7 +152,7 @@ pub struct AnswerRequest {
     /// Earlier questions and answers of this thread, oldest first; empty for a new question.
     pub earlier: Vec<Turn>,
     pub question: String,
-    /// «Respuestas más baratas»: answer with the cheap model (D7).
+    /// The cheap tier: answer with the cheap model (D7).
     pub cheap: bool,
     /// A model to answer with instead of the tier's; `None` in the app. The live reference run
     /// sets it (VFS-46).

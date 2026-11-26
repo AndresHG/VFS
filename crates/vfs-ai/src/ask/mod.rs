@@ -60,7 +60,7 @@ impl AskError {
 pub struct AskOptions {
     pub provider: Provider,
     pub lang: Lang,
-    /// «Respuestas más baratas» (D7).
+    /// The cheap tier answers (D7; picked beside the question, VFS-47).
     pub cheap: bool,
     /// A model to answer with instead of the tier's; `None` in the app (VFS-46).
     pub answer_model: Option<&'static str>,

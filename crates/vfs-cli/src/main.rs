@@ -178,7 +178,7 @@ enum Cmd {
         /// Answer in English instead of Spanish.
         #[arg(long)]
         english: bool,
-        /// «Respuestas más baratas»: answer with the cheap model.
+        /// The cheap tier: answer with the cheap model.
         #[arg(long)]
         cheap: bool,
         /// Ask even when the month's cost cap is reached.

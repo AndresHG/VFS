@@ -22,8 +22,8 @@ pub const CLAUDE_OPUS: &str = "claude-opus-5-5";
 pub const GPT_LUNA: &str = "gpt-6-luna";
 pub const GPT_SOL: &str = "gpt-6.2-sol";
 
-/// The models used for each call (D7): the cheap tier rewrites, the mid tier answers, and
-/// «Respuestas más baratas» answers with the cheap tier too.
+/// The models used for each call (D7): the cheap model rewrites; the mid model answers, or
+/// the cheap one when the cheap tier is picked beside the question (VFS-47).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Models {
     pub rewrite: &'static str,

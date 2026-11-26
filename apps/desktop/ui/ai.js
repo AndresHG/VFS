@@ -107,7 +107,6 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
     on.checked = s.enabled;
     $('ai-body').hidden = !s.enabled;
     for (const r of radios) r.checked = r.value === s.provider;
-    $('ai-cheap').checked = s.cheap;
     $('ai-key-line').textContent = keyLine(S, next.key);
     const saved = next.key.state === KeyState.SAVED;
     keyForm.hidden = saved;
@@ -132,13 +131,14 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
     }
   }
 
-  function saveSettings() {
+  /** `cheap` is the answer tier, chosen beside the question since VFS-47 (R2); Ajustes keeps
+   *  whatever is saved. */
+  function saveSettings(cheap = status?.settings.cheap ?? true) {
     const provider = radios.find((r) => r.checked)?.value || Provider.ANTHROPIC;
-    return call(() => api.aiSetSettings(on.checked, provider, $('ai-cheap').checked));
+    return call(() => api.aiSetSettings(on.checked, provider, cheap));
   }
 
-  on.addEventListener('change', saveSettings);
-  $('ai-cheap').addEventListener('change', saveSettings);
+  on.addEventListener('change', () => saveSettings());
 
   keyForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -270,5 +270,5 @@ export function setupAiSettings({ api, S, lang, $, el, toast, onStatus }) {
     }
   }
   refresh();
-  return { refresh, update: render, status: () => status };
+  return { refresh, update: render, status: () => status, setCheap: (cheap) => saveSettings(cheap) };
 }

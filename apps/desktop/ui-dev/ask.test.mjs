@@ -4,8 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { answerRuns, askVisible, bibLine, copyText, sourceTitle } from '../ui/ask.js';
-import { KeyPlace, KeyState } from '../ui/contract.js';
+import { answerRuns, askVisible, bibLine, copyText, modelChoices, ModelTier, sourceTitle } from '../ui/ask.js';
+import { KeyPlace, KeyState, Provider } from '../ui/contract.js';
 import { Lang, localeFor } from '../ui/strings.js';
 import { startBrowser } from './browser.mjs';
 
@@ -24,6 +24,16 @@ test('«Preguntar» shows only when it can ask', () => {
   assert.equal(askVisible({ ...ok, key: { state: KeyState.NONE } }), false, 'AC-1: «Borrar» hides «Preguntar»');
   assert.equal(askVisible({ ...ok, store: false }), false);
   assert.equal(askVisible(null), false);
+});
+
+/** VFS-47 AC-1: the selector offers the active provider's cheap model, then its mid model,
+ *  named, with the cost hint from the catalog. */
+test('the selector names the provider\'s models, cheap first', () => {
+  assert.deepEqual(modelChoices(S, Provider.OPENAI), [
+    { tier: ModelTier.CHEAP, label: 'Luna · más barato' }, { tier: ModelTier.MID, label: 'Sol · unas 20 veces más caro' }]);
+  assert.deepEqual(modelChoices(S, Provider.ANTHROPIC).map((c) => c.label), ['Haiku · más barato', 'Sonnet · unas 20 veces más caro']);
+  const { S: en } = localeFor(Lang.EN, 'en-US');
+  assert.deepEqual(modelChoices(en, Provider.OPENAI).map((c) => c.label), ['Luna · cheapest', 'Sol · about 20 times dearer']);
 });
 
 /** VFS-28 AC-6 (UI part, R8): markers follow their block, each passage once per block, numbered
@@ -213,4 +223,36 @@ test('a hostile answer stays text and loads nothing', async () => {
   } finally {
     b.close();
   }
+});
+
+/** VFS-47 AC-2, AC-4: with nothing saved the cheap model is selected; a pick is saved at once,
+ *  so the next question goes to the mid model; while an answer streams the selector is disabled. */
+test('the model pick is saved and locked while answering', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await b.until(`!document.getElementById('ask-open').hidden`, '«Preguntar»');
+    await b.evaluate(`document.getElementById('ask-open').click()`);
+    const opts = await b.evaluate(`[...document.querySelectorAll('#ai-model option')].map((o) => o.textContent)`);
+    assert.deepEqual(opts, ['Haiku · más barato', 'Sonnet · unas 20 veces más caro']);
+    assert.equal(await b.evaluate(`document.getElementById('ai-model').value`), ModelTier.CHEAP);
+    await b.evaluate(`(() => { const m = document.getElementById('ai-model');
+      m.value = ${JSON.stringify(ModelTier.MID)}; m.dispatchEvent(new Event('change')); })()`);
+    await ask(b, '¿fianza?');
+    await b.until(`document.getElementById('ai-notice').open`, 'the first-use notice');
+    await b.evaluate(`document.querySelector('#ai-notice button[value=ok]').click()`);
+    await b.until(`document.getElementById('ai-model').disabled`, 'locked while answering');
+    await b.until(`document.querySelector('.ai-cost')`, 'the answer');
+    await b.until(`!document.getElementById('ai-model').disabled`, 'unlocked after');
+    assert.equal(await b.evaluate(`globalThis.vfsFakeAnswerModel`), 'claude-sonnet-5-5', 'the saved pick reached the ask');
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-47 AC-3: «Respuestas más baratas» is gone from Ajustes; the choice is beside the question. */
+test('Ajustes has no cheap-answers switch', () => {
+  const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /id="ai-cheap"|aiCheap/);
+  assert.match(html, /<select id="ai-model">/);
 });

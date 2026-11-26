@@ -1393,6 +1393,7 @@ function main(L) {
   const ask = setupAsk({
     api, S, lang: L.lang, $, el, filters, revealFile, toast,
     aiStatus: () => ai.status(), updateAi: (st) => ai.update(st), refreshAi: () => ai.refresh(),
+    setCheap: (cheap) => ai.setCheap(cheap),
   });
   const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast, onStatus: (st) => ask.setStatus(st) });
 
