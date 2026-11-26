@@ -3,8 +3,9 @@
 //! makes a network request (R8): the browser is opened on the user's click.
 //!
 //! The report never holds a root path, a file or folder name, any other path or the user's
-//! account name, and the user's own text is redacted the same way (VFS-48). Diagnostic records (`vfs::diag`, VFS-5 R8) carry only counts
-//! and durations and are kept as written; every other log line goes through [`redact_line`].
+//! account name, and the user's own text is redacted the same way (VFS-48). Diagnostic
+//! records (`vfs::diag`, VFS-5 R8) carry only counts and durations and are kept as written;
+//! every other log line goes through [`redact_line`].
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -346,6 +347,14 @@ pub fn redact_user(text: &str, user: Option<&str>) -> String {
         i += c.len_utf8();
     }
     out
+}
+
+/// The account name to redact (VFS-48 R3): the home folder's last part, when it is at least 3
+/// characters (a shorter one would turn ordinary words into `<usuario>`).
+pub fn account_name(home: &Path) -> Option<String> {
+    home.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| n.chars().count() >= 3)
 }
 
 /// The user's "what happened" text as the report and the issue carry it (VFS-48 R2, R3): each
@@ -924,11 +933,7 @@ pub fn gather<R: Runtime>(app: &AppHandle<R>, vfs: &Vfs) -> Environment {
     if let Some(home) = &home {
         private.push(home.to_string_lossy().into_owned());
     }
-    let user = home
-        .as_deref()
-        .and_then(Path::file_name)
-        .map(|n| n.to_string_lossy().into_owned())
-        .filter(|n| n.chars().count() >= 3);
+    let user = home.as_deref().and_then(account_name);
     // Longest first, so a root inside the home folder is matched whole; very short strings
     // ("/", "C:\") are left to the generic rule.
     private.retain(|p| p.len() > 3);
@@ -1502,8 +1507,10 @@ mod tests {
             "{}",
             r.text
         );
-        e.user = None;
-        assert_eq!(redact_user("ana", e.user.as_deref()), "ana");
+        e.user = account_name(Path::new("/Users/al"));
+        assert_eq!(e.user, None);
+        assert_eq!(redact_user("al ana", e.user.as_deref()), "al ana");
+        assert_eq!(account_name(Path::new("/home/ana")), Some("ana".into()));
         assert_eq!(
             redact_user("Ñandú vio a ñandú", Some("ñandú")),
             "<usuario> vio a <usuario>"

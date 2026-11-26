@@ -11,9 +11,9 @@ every log line. This page says what is in it and how to analyse it in a session 
   por GitHub" (a prefilled issue from the `comentarios` form, labelled `feedback-usuario`; they drag the `.zip` in) or
   "Exportar diagnóstico (.zip)" and hand the file over.
 - **For your own analysis of a PC after weeks of use**: on that PC open "Enviar comentarios",
-  leave the text empty, and press "Exportar diagnóstico (.zip)". Tick "Incluir en el informe
-  los nombres de carpetas y archivos" only with the owner's consent; it adds the root paths and
-  keeps folder names in warnings, which helps with "cannot list" and watcher problems.
+  leave the text empty, and press "Exportar diagnóstico (.zip)". The report never holds folder
+  or file names (VFS-48); for a "cannot list" or watcher problem that needs them, read the raw
+  log on that PC with the owner.
 - The raw log, if you need it without the app: `%LOCALAPPDATA%\app.vfs.desktop\logs\` on
   Windows, `~/Library/Application Support/app.vfs.desktop/logs/` on macOS (`vfs.log` and up to
   ten rotated `vfs_<date>.log`, 22 MB at most). The raw files are not redacted.
@@ -22,9 +22,9 @@ every log line. This page says what is in it and how to analyse it in a session 
 
 | Section | Content |
 |---|---|
-| `## What happened` | The user's own words. |
-| `## App` | Version, OS (`windows 10.0.<build> <release>`; a build ≥ 22000 is Windows 11), local time it was made, whether names are included. |
-| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, `cloud_only` and `links` (at the last full walk, `?` before one), `unreadable` and `unpopulated` folders (cloud placeholders that listed empty, Windows; VFS-37), time since the last full walk. Counts carry no name, so they go into the summary too. The path only with names included, and never in the GitHub issue's prefilled summary. |
+| `## What happened` | The user's own words, with every path as `<ruta>` and the account name as `<usuario>` (VFS-48). |
+| `## App` | Version, OS (`windows 10.0.<build> <release>`; a build ≥ 22000 is Windows 11), local time it was made. |
+| `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, `cloud_only` and `links` (at the last full walk, `?` before one), `unreadable` and `unpopulated` folders (cloud placeholders that listed empty, Windows; VFS-37), time since the last full walk. Counts carry no name, so they go into the summary too. The path never appears (VFS-48). |
 | `## Index` | Files, folders, roots, index size, WAL size (MB), schema version. |
 | `## Settings` | Indexer state (idle/scanning/paused), Firefox bookmarks on/off with profiles and count. |
 | `## Log` | Number of log files and lines; warnings, errors and panics in them. |
@@ -48,10 +48,10 @@ Log lines are `[date][time UTC][target][LEVEL] message`. Targets worth knowing:
   watcher lost events and a re-walk was queued; `root_add` (root id, roots, folders and files
   taken in, ms), `root_remove` (root id, ms) and `root_removed` when the indexer has deleted
   a removed root's rows (root id, folders, files, ms).
-- `vfs::panic` (ERROR): a panic, with the source location in this repo. Without names only
+- `vfs::panic` (ERROR): a panic, with the source location in this repo. Only
   `panic at <file>:<line>: <omitido>` is kept: the payload is free text and can name files.
 - Any other target (WARN/ERROR): problems such as unreadable folders or watcher failures.
-  Without names, every path in them reads `<ruta>`, and the redaction may swallow the rest of
+  Every path in them reads `<ruta>` and the account name `<usuario>`, and the redaction may swallow the rest of
   the clause (`root <ruta>` for "root … became unreachable"); after a macOS path (`/…`, `~/…`)
   it swallows the rest of the line, error text included, since a macOS name can hold `": "`.
   A continuation line (no `[date]…` prefix) reads `<omitido>` unless it follows a `vfs::diag`

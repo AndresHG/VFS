@@ -661,8 +661,9 @@ location.
 
 "Enviar comentarios" (VFS-20, `feedback.rs`) builds a plain-text report on demand: version,
 OS, drive and disk kind (SSD/HDD) per root, index stats, settings, log counts and every kept
-log file. Unless the user ticks the names box, root paths, the home folder and anything that
-reads as a path in non-diagnostic lines become `<ruta>` (`redact_line`); a panic keeps only
+log file, always anonymous (VFS-48): root paths, the home folder and anything that reads as a
+path in non-diagnostic lines and in the user's text become `<ruta>` (`redact_line`), and the
+account name becomes `<usuario>`; a panic keeps only
 its location and a continuation line not after a diagnostic record becomes `<omitido>`
 (VFS-30). "Ver el informe" shows only the newest 200 KB of log lines. The report is saved
 as `vfs-informe-<date>.zip` in Downloads and revealed; "Enviar por GitHub" also opens a
