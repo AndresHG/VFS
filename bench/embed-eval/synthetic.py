@@ -387,7 +387,7 @@ Total: 58,90 €. Domiciliado. Le recordamos que una fuga puede multiplicar su c
     "es_neg_factura_fibra.txt": """Digi — Factura mensual de fibra y teléfono fijo. Octubre de 2023.
 Fibra 1 Gb: 20,00 €. Línea fija con llamadas ilimitadas: incluida. Total: 20,00 €.
 Si cambia de compañía, recuerde devolver el router en 30 días.""",
-    "es_neg_comision_banco.txt": """Banco Santander — Comunicación de cambio de condiciones
+    "es_neg_comision_banco.txt": """Banco del Norte — Comunicación de cambio de condiciones
 A partir del 1 de enero de 2024 la comisión de mantenimiento de su cuenta pasa a 8 € al
 mes, salvo que domicilie una nómina o pensión superior a 600 €. Puede cancelar la cuenta
 sin gastos en los dos meses siguientes.""",
