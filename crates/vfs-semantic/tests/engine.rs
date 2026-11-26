@@ -104,8 +104,9 @@ fn chunk_count(db: &Path) -> usize {
         .sum()
 }
 
-/// VFS-29 AC-14 (R6, D10): the same document in two folders sends each distinct chunk text
-/// once, and both copies are found by meaning: the set holds a vector for every text.
+/// VFS-29 AC-14 (R6, D10), store side: the same document in two folders sends each distinct
+/// chunk text once, and the set holds a vector for every text (finding both copies by meaning
+/// is the retrieval side).
 #[test]
 fn copies_send_each_text_once() {
     let text = long_text("Factura del dentista", 3);
@@ -239,4 +240,34 @@ fn a_new_set_is_not_complete_while_documents_wait() {
     vfs_content::testing::set_queued(&a.db, 3, false).unwrap();
     assert!(embed(&a.db, &mut Fake::new(model("b"))).complete);
     assert_eq!(s.count(set_a).unwrap(), 0);
+}
+
+/// VFS-29 R6, R11: stored vectors read back as written: the sign bits, the int8 row and its
+/// scale, which rescore close to the float dot product; a read-only open sees them.
+#[test]
+fn stored_rows_read_back_for_the_rescore() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("index.db");
+    assert!(Store::open_ro(&db).unwrap().is_none());
+    let mut s = Store::open(&db).unwrap();
+    let set = s.set_id(&model("m")).unwrap();
+    let texts = ["factura del dentista", "recibo del agua"];
+    let batch: Vec<_> = texts
+        .iter()
+        .map(|t| (store::text_hash(t), fake_vector(t, DIM)))
+        .collect();
+    s.insert(set, &batch).unwrap();
+    let rows = Store::open_ro(&db).unwrap().unwrap().rows(set).unwrap();
+    assert_eq!(rows.len(), 2);
+    let q = fake_vector("factura del dentista", DIM);
+    for (hash, v) in &batch {
+        let row = rows.iter().find(|r| &r.hash == hash).unwrap();
+        let (q8, scale) = vfs_semantic::quant::int8(v);
+        assert_eq!(row.bits, vfs_semantic::quant::bits(v));
+        assert_eq!(row.q8, q8);
+        assert!((row.scale - scale).abs() < 1e-7);
+        let exact: f32 = q.iter().zip(v).map(|(a, b)| a * b).sum();
+        let approx = vfs_semantic::quant::dot_int8(&q, &row.q8, row.scale);
+        assert!((approx - exact).abs() < 0.02, "{approx} vs {exact}");
+    }
 }

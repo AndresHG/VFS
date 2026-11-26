@@ -367,8 +367,6 @@ impl Drop for Supervisor {
     }
 }
 
-/// Windows Job Object for one worker (VFS-2 R18): kill-on-close, so the worker dies with the
-/// parent's last handle, and a committed-memory limit just above the allocator cap.
 #[cfg(test)]
 mod tests {
     use super::*;
