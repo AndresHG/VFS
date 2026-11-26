@@ -269,6 +269,7 @@ impl Drop for WorkerEmbedder {
 /// with a job object instead).
 #[cfg(target_os = "macos")]
 fn resident_bytes(pid: u32) -> Option<u64> {
+    // SAFETY: proc_taskinfo is plain old data; all zeroes is a valid value.
     let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
     // SAFETY: proc_pidinfo writes at most `size` bytes into the zeroed struct we own.

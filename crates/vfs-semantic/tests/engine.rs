@@ -222,3 +222,21 @@ fn a_new_model_replaces_the_old_set_when_complete() {
     assert_eq!(s.search_set().unwrap(), Some((set_b, DIM)));
     assert_eq!(s.count(set_a).unwrap(), 0, "A's rows are gone");
 }
+
+/// VFS-29 R10: while documents wait in the content queue, a new model's set is not complete
+/// even with every stored text embedded, and the old complete set keeps serving searches.
+#[test]
+fn a_new_set_is_not_complete_while_documents_wait() {
+    let a = Archive::new(&[(1, "Primer documento."), (2, "Segundo documento.")]);
+    embed(&a.db, &mut Fake::new(model("a")));
+    vfs_content::testing::set_queued(&a.db, 3, true).unwrap();
+    let sum = embed(&a.db, &mut Fake::new(model("b")));
+    assert!(!sum.complete && sum.error.is_none() && !sum.stopped);
+    let s = Store::open(&a.db).unwrap();
+    let set_a = s.set_id(&model("a")).unwrap();
+    assert_eq!(s.search_set().unwrap(), Some((set_a, DIM)));
+    assert_eq!(s.count(set_a).unwrap(), 2);
+    vfs_content::testing::set_queued(&a.db, 3, false).unwrap();
+    assert!(embed(&a.db, &mut Fake::new(model("b"))).complete);
+    assert_eq!(s.count(set_a).unwrap(), 0);
+}

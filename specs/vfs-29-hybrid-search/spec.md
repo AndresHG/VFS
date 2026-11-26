@@ -179,6 +179,7 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 - Slow PC and HDD: embedding reads chunks from `content.db`, already compressed text, not
   user files; the pace follows VFS-27 R7, and the upload is the bottleneck, not the disk.
 - Long paths, NFC/NFD: n/a because vectors key on chunk ids, not paths.
+- A root offline or paused during a content rebuild: its documents are neither stored nor queued, so their vectors are dropped and embedded again when the root returns; the cost is CPU, not lost search, and a rebuild is rare.
 - Antivirus: `vectors.db` is one more SQLite file in the app data folder, like `content.db`.
 - Crash mid-write: each batch commits in one transaction with its chunk ids; resume reads
   what is stored (AC-6).

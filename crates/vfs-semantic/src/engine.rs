@@ -1,8 +1,8 @@
 //! The embedding run (VFS-29 R5–R7, R10, D10): embeds every distinct chunk text of
 //! `content.db` that the current vector set lacks, in batches stored one transaction each, so
-//! a run stopped at any point resumes where it was and sends no text twice. Texts no chunk has
-//! any more are dropped once the content indexer has nothing queued; a complete set replaces
-//! any older one.
+//! a run stopped at any point resumes where it was and sends no text twice. Once the content
+//! indexer has nothing queued, texts no chunk has any more are dropped, the set is complete and
+//! it replaces any older one.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -69,7 +69,7 @@ pub struct RunSummary {
     pub embedded: u64,
     /// Vectors dropped because no chunk has their text any more.
     pub dropped: u64,
-    /// Every chunk text has a vector in the set.
+    /// Every chunk text of the whole archive (nothing queued) has a vector in the set.
     pub complete: bool,
     pub stopped: bool,
     /// The worker's failure, when the run ended on one.
@@ -188,14 +188,13 @@ pub fn run(
         going = false;
     }
 
-    if going {
-        // Drop vectors of texts no chunk has, but only over a whole archive: while documents
-        // wait to be read, or the store is being rebuilt, their texts are just not there yet.
-        if content.queue_empty()? && !seen.is_empty() {
-            let gone: Vec<TextHash> = stored.difference(&seen).copied().collect();
-            store.delete(set, &gone)?;
-            sum.dropped = gone.len() as u64;
-        }
+    // The set covers the archive only when no document waits to be read and the store holds
+    // text: while the store is rebuilt or still filling, missing texts are just not there yet.
+    // Only then are vectors of vanished texts dropped and an older set replaced (R6, R10).
+    if going && content.queue_empty()? && !seen.is_empty() {
+        let gone: Vec<TextHash> = stored.difference(&seen).copied().collect();
+        store.delete(set, &gone)?;
+        sum.dropped = gone.len() as u64;
         sum.complete = true;
         store.set_complete(set, true)?;
         store.drop_other_sets(set)?;
