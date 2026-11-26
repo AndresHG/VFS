@@ -779,9 +779,9 @@ export function createFakeBackend(params) {
       if (!b.openable) throw { code: ErrorCode.UNAVAILABLE, message: 'not a web address' };
     },
     async onBookmarksChanged(cb) { bookmarkCbs.add(cb); return () => bookmarkCbs.delete(cb); },
-    async feedbackReport(description, includeNames) {
+    async feedbackReport(description) {
       await sleep(200);
-      return `VFS diagnostic report\n\n## What happened\n${description || '(empty)'}\n\n## App\nversion: dev\nnames_included: ${includeNames ? 'yes' : 'no'}\n`;
+      return `VFS diagnostic report\n\n## What happened\n${description || '(empty)'}\n\n## App\nversion: dev\n`;
     },
     async feedbackSave() { await sleep(300); return { folder: 'C:\\Users\\demo\\Downloads', file: 'vfs-informe-2026-11-21-1030.zip' }; },
 

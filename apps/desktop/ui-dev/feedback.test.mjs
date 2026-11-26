@@ -12,15 +12,15 @@ const S = CATALOGS[Lang.ES];
 const EN = CATALOGS[Lang.EN];
 const html = readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
 
-/** VFS-20 AC-7: the bottom bar opens a dialog with the text box, the names box unticked,
- * the "Ver el informe" preview and both actions, every label in the catalog. */
+/** VFS-20 AC-7, VFS-48 AC-4: the bottom bar opens a dialog with the text box, the "Ver el
+ * informe" preview and both actions, every label in the catalog, and no names box. */
 test('feedback dialog markup and copy', () => {
   assert.match(html, /<footer class="bottom">[\s\S]*id="open-feedback"[\s\S]*<\/footer>/);
-  for (const id of ['feedback', 'feedback-text', 'feedback-names', 'feedback-details', 'feedback-report',
+  for (const id of ['feedback', 'feedback-text', 'feedback-details', 'feedback-report',
     'feedback-github', 'feedback-export', 'feedback-msg']) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
-  assert.doesNotMatch(html, /id="feedback-names"[^>]*checked/);
+  assert.doesNotMatch(html, /feedback-names/);
   for (const [, key] of html.matchAll(/data-s(?:-label)?="(feedback\w+)"/g)) assert.ok(S[key], key);
   assert.equal(S.feedbackButton, 'Enviar comentarios');
   assert.equal(S.feedbackPreview, 'Ver el informe');
@@ -35,11 +35,14 @@ test('the preview says the .zip holds the whole log', () => {
   assert.match(EN.feedbackPreviewNote, /\.zip/);
 });
 
-/** VFS-20 R6: the dialog says the GitHub issue is public, in both catalogs. */
+/** VFS-20 R6, VFS-48 AC-4: the dialog says the report is anonymous and the GitHub issue is
+ * public, in both catalogs. */
 test('feedback dialog warns that the GitHub page is public', () => {
   assert.match(html, /data-s="feedbackPublic"/);
-  assert.match(S.feedbackPublic, /pública/);
-  assert.match(EN.feedbackPublic, /public/);
+  assert.match(S.feedbackPublic, /anónimo[\s\S]*pública/);
+  assert.match(EN.feedbackPublic, /anonymous[\s\S]*public/);
+  assert.equal(S.feedbackNames, undefined);
+  assert.equal(EN.feedbackNames, undefined);
 });
 
 /** VFS-20 AC-4, AC-5: after saving, the message names the folder and the file, and says what
@@ -78,41 +81,35 @@ function fakeDom() {
   return $;
 }
 
-/** VFS-20 AC-7: the dialog opens with the names box unticked; opening "Ver el informe" asks
- * for the report, and ticking the box asks again with names; saving reports where it went.
- * VFS-30 AC-5: typing asks for no report. */
-test('dialog asks for the report and refreshes it when the names box changes', async () => {
+/** VFS-20 AC-7, VFS-48 AC-4: opening "Ver el informe" asks for the report with the user's text
+ * only (no names choice); saving reports where it went. VFS-30 AC-5: typing asks for no report. */
+test('dialog asks for the report when the preview opens', async () => {
   const $ = fakeDom();
   const calls = [];
   const api = {
-    feedbackReport: async (text, names) => { calls.push(['report', text, names]); return `informe ${names}`; },
-    feedbackSave: async (text, names, github) => {
-      calls.push(['save', text, names, github]);
+    feedbackReport: async (...args) => { calls.push(['report', ...args]); return 'informe'; },
+    feedbackSave: async (...args) => {
+      calls.push(['save', ...args]);
       return { folder: 'C:\\Descargas', file: 'vfs-informe-x.zip' };
     },
   };
   setupFeedback({ api, S, $, errorText: () => 'error' });
-  $('feedback-names').checked = true;
   await $('open-feedback').fire('click');
   assert.equal($('feedback').open, true);
-  assert.equal($('feedback-names').checked, false);
 
   $('feedback-text').value = 'Va lento';
   $('feedback-details').open = true;
   await $('feedback-details').fire('toggle');
-  assert.equal($('feedback-report').value, 'informe false');
-  $('feedback-names').checked = true;
-  await $('feedback-names').fire('change');
-  assert.equal($('feedback-report').value, 'informe true');
-  assert.deepEqual(calls, [['report', 'Va lento', false], ['report', 'Va lento', true]]);
+  assert.equal($('feedback-report').value, 'informe');
+  assert.deepEqual(calls, [['report', 'Va lento']]);
   // Editing the text never rebuilds the report (it reads the whole log on a slow PC).
   $('feedback-text').value = 'Va muy lento';
   await $('feedback-text').fire('input');
   await $('feedback-text').fire('change');
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
 
   await $('feedback-github').fire('click');
-  assert.deepEqual(calls.at(-1), ['save', 'Va muy lento', true, true]);
+  assert.deepEqual(calls.at(-1), ['save', 'Va muy lento', true]);
   assert.equal($('feedback-msg').hidden, false);
   assert.ok($('feedback-msg-text').textContent.includes('vfs-informe-x.zip'));
   assert.equal($('feedback-github').disabled, false);
