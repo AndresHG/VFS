@@ -519,6 +519,38 @@ test('all chats are deleted from Ajustes', async () => {
   }
 });
 
+/** VFS-49 R10: asked again before the cancelled prompt's close event arrives, the new ask
+ *  still gets its own answer (the race behind a flaky CI run). */
+test('a prompt reopened at once answers for itself', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await openChat(b);
+    await b.until(`document.querySelector('.chat-open')`, 'the saved chat');
+    await b.evaluate(`document.getElementById('open-settings').click()`);
+    await b.until(`document.getElementById('settings').open`, 'Ajustes');
+    await b.evaluate(`document.getElementById('stab-ai').click()`);
+    await b.until(`document.getElementById('ai-chats-clear').offsetParent !== null`, '«Borrar todos los chats»');
+    await b.evaluate(`document.getElementById('ai-chats-clear').click()`);
+    await b.until(`document.getElementById('confirm-chats-clear').open`, 'the prompt');
+    await b.evaluate(`(() => {
+      const cancel = () => document.querySelector('#confirm-chats-clear button[value=cancel]').click();
+      const ask = () => document.getElementById('ai-chats-clear').click();
+      cancel(); ask(); cancel(); ask();
+    })()`);
+    await b.evaluate(`new Promise((r) => setTimeout(r, 100))`);
+    assert.equal(await b.evaluate(`document.getElementById('confirm-chats-clear').open`), true, 'asked again');
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-open').length`), 1, 'the cancelled asks kept the chats');
+    await b.evaluate(`document.querySelector('#confirm-chats-clear button[value=ok]').click()`);
+    await b.until(`document.querySelector('.chat-none')`, 'the empty list');
+    await b.until(`document.getElementById('toast').textContent === ${JSON.stringify(S.chatClearedAll)}`, 'the toast');
+    await b.evaluate(`new Promise((r) => setTimeout(r, 100))`);
+    assert.equal(await b.evaluate(`globalThis.vfsFakeChatsCleared`), 1, 'cleared once');
+  } finally {
+    b.close();
+  }
+});
+
 /** VFS-49 R2: in a narrow window the chat list folds behind «Chats»; opening a chat folds it
  *  again. */
 test('the chat list folds in a narrow window', async () => {

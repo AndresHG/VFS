@@ -282,14 +282,28 @@ export function setupChat({
     field.addEventListener('blur', () => finish(true));
   }
 
+  // Each showModal ends in exactly one `close` event, dispatched a task after the dialog
+  // closes. A prompt reopened before that (a second click at once) must not take the old
+  // event as its answer: asks queue per dialog, each event settles the oldest, and an ask
+  // whose dialog was reopened keeps the answer it had at that moment.
+  const asks = new Map();
   function confirm(dialogId, text) {
     const d = $(dialogId);
+    let queue = asks.get(dialogId);
+    if (!queue) {
+      queue = [];
+      asks.set(dialogId, queue);
+      d.addEventListener('close', () => {
+        const ask = queue.shift();
+        if (ask) ask.resolve(ask.answer ?? d.returnValue === 'ok');
+      });
+    }
+    const last = queue[queue.length - 1];
+    if (last && last.answer === undefined) last.answer = d.returnValue === 'ok';
     if (text !== undefined) $(`${dialogId}-desc`).textContent = text;
     d.returnValue = '';
     d.showModal();
-    return new Promise((resolve) => {
-      d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
-    });
+    return new Promise((resolve) => queue.push({ resolve, answer: undefined }));
   }
 
   async function deleteChat(c) {
