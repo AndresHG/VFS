@@ -38,6 +38,18 @@ pub trait Corpus {
     /// Absolute paths of the indexed folders, under the user's folders, that `hint` names: a
     /// folder name or the end of a folder path, compared after the accent fold (R6.2).
     fn folders_named(&self, hint: &str) -> vfs_content::Result<Vec<String>>;
+
+    /// [`Corpus::retrieve`] inside document `file_id` only: no hit, or that one (VFS-49 R7).
+    fn retrieve_in_file(
+        &self,
+        query: &Query,
+        file_id: i64,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>>;
+
+    /// Document `file_id` as a hit whose passages are its first `n` chunks, for a question
+    /// that matches nothing in it (VFS-49 R7); `None` when the store does not hold it.
+    fn document(&self, file_id: i64, n: u32) -> vfs_content::Result<Option<ContentHit>>;
 }
 
 /// The filters a question retrieves under (R6.2): the screen's, narrowed by what the rewrite

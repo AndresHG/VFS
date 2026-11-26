@@ -77,6 +77,8 @@ pub struct FakeCorpus {
     /// What `folders_named` answers, per hint.
     pub folders: Vec<(String, Vec<String>)>,
     pub calls: RefCell<Vec<RetrieveCall>>,
+    /// The document of each `retrieve_in_file` call, in order.
+    pub file_calls: RefCell<Vec<i64>>,
 }
 
 impl FakeCorpus {
@@ -86,6 +88,7 @@ impl FakeCorpus {
             script: RefCell::new(VecDeque::new()),
             folders: Vec::new(),
             calls: RefCell::new(Vec::new()),
+            file_calls: RefCell::new(Vec::new()),
         }
     }
 
@@ -164,6 +167,38 @@ impl Corpus for FakeCorpus {
             end_char: text.chars().count(),
             text,
         }))
+    }
+
+    fn retrieve_in_file(
+        &self,
+        query: &Query,
+        file_id: i64,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>> {
+        self.file_calls.borrow_mut().push(file_id);
+        let hits = self.retrieve(query, &SearchFilters::default(), k)?;
+        Ok(hits.into_iter().filter(|h| h.id == file_id).collect())
+    }
+
+    fn document(&self, file_id: i64, n: u32) -> vfs_content::Result<Option<ContentHit>> {
+        let Some(d) = self.docs.iter().find(|d| d.id == file_id) else {
+            return Ok(None);
+        };
+        let mut hit = d.hit();
+        hit.score = 0.0;
+        hit.passages = (0..(d.chunks.len() as u32).min(n))
+            .map(|o| Passage {
+                file_id,
+                ordinal: o,
+                page: Some(o + 1),
+                start_char: 0,
+                end_char: 0,
+                score: 0.0,
+                snippet: String::new(),
+                highlights: Vec::new(),
+            })
+            .collect();
+        Ok(Some(hit))
     }
 
     fn folders_named(&self, hint: &str) -> vfs_content::Result<Vec<String>> {

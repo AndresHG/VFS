@@ -97,6 +97,14 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::ai::ai_cancel,
         crate::ai::ai_bibliography,
         crate::ai::ai_export_ris,
+        crate::chat::ai_chat_send,
+        crate::chat::ai_chats,
+        crate::chat::ai_chat,
+        crate::chat::ai_chat_rename,
+        crate::chat::ai_chat_delete,
+        crate::chat::ai_chats_clear,
+        crate::chat::ai_chat_bibliography,
+        crate::chat::ai_chat_export_ris,
     ]
 }
 

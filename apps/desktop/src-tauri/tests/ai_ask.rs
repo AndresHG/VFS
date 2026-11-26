@@ -105,6 +105,22 @@ impl Corpus for TwoDocs {
     fn folders_named(&self, _: &str) -> vfs_content::Result<Vec<String>> {
         Ok(Vec::new())
     }
+    fn retrieve_in_file(
+        &self,
+        q: &Query,
+        file_id: i64,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>> {
+        let hits = self.retrieve(q, &SearchFilters::default(), k)?;
+        Ok(hits.into_iter().filter(|h| h.id == file_id).collect())
+    }
+    fn document(&self, file_id: i64, _: u32) -> vfs_content::Result<Option<ContentHit>> {
+        Ok(match file_id {
+            1 => Some(hit(1, "Contrato.pdf", Some(4), true)),
+            2 => Some(hit(2, "Recibo.docx", None, false)),
+            _ => None,
+        })
+    }
 }
 
 fn state(mock: &MockServer) -> (tempfile::TempDir, AiState) {
@@ -299,4 +315,155 @@ fn cancel_stops_a_streaming_answer() {
         ai.status().unwrap().month_nano > 0,
         "the cancelled answer is priced"
     );
+}
+
+/// VFS-49 AC-3, AC-5 (R4, R10, R11): a new chat is saved with its first answer; a second
+/// message joins it; after a restart the chat opens from `ai.db` with both turns, markers and
+/// sources, without a request, and «Bibliografía» of a turn lists what it cited.
+#[test]
+fn chats_are_saved_and_reopen_without_a_call() {
+    use vfs_ai::ask::Scope;
+    let mock = MockServer::start(vec![
+        anthropic_rewrite(&rewrite()),
+        anthropic_answer(&[block("La fianza fue de 1.200 €.", &[(0, PDF_TEXT)])]),
+        anthropic_rewrite(&rewrite()),
+        anthropic_answer(&[block("Por transferencia.", &[(1, "por transferencia")])]),
+    ]);
+    let (dir, ai) = state(&mock);
+    let mut streamed = String::new();
+    let first = ai
+        .chat_send_over(
+            &TwoDocs,
+            1,
+            None,
+            &Scope::All,
+            "¿Cuánto pagué de fianza?",
+            false,
+            "es",
+            &mut |t| streamed.push_str(&t),
+        )
+        .unwrap();
+    assert_eq!(streamed, "La fianza fue de 1.200 €.");
+    assert_eq!(first.turn.blocks[0].citations[0].marker, 1);
+    assert_eq!(first.month_nano, first.turn.cost_nano);
+    let second = ai
+        .chat_send_over(
+            &TwoDocs,
+            2,
+            Some(first.chat_id),
+            &Scope::All,
+            "¿Cómo se pagó?",
+            false,
+            "es",
+            &mut |_| {},
+        )
+        .unwrap();
+    assert_eq!(second.chat_id, first.chat_id);
+    let rewrite_body = mock.requests()[2].json().to_string();
+    assert!(
+        rewrite_body.contains("¿Cuánto pagué de fianza?"),
+        "{rewrite_body}"
+    );
+
+    // A restart: a new state over the same folder, and a provider that must not be called.
+    let silent = MockServer::start(vec![]);
+    let keys = Keys::with_backend(Box::new(MemStore::default()), dir.path().join("ai-keys"));
+    let again = AiState::with(dir.path(), keys, Some(silent.url()));
+    let list = again.chats().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "¿Cuánto pagué de fianza?");
+    let chat = again.chat(first.chat_id).unwrap();
+    assert_eq!(chat.turns.len(), 2);
+    assert_eq!(chat.turns[0], first.turn);
+    assert_eq!(chat.turns[1].sources[1].name, "Recibo.docx");
+    assert!(silent.requests().is_empty());
+    let bib = again.chat_bibliography(first.chat_id, 0, false).unwrap();
+    assert_eq!(bib.len(), 1);
+    assert_eq!(bib[0].pages, [4]);
+    assert_eq!(
+        again
+            .chat_bibliography(first.chat_id, 1, true)
+            .unwrap()
+            .len(),
+        2
+    );
+
+    again.rename_chat(first.chat_id, "  Fianza  ").unwrap();
+    assert_eq!(again.chats().unwrap()[0].title, "Fianza");
+    again.delete_chat(first.chat_id).unwrap();
+    assert_eq!(again.chat(first.chat_id).unwrap_err().code, "no_chat");
+    let err = again
+        .chat_send_over(
+            &TwoDocs,
+            3,
+            Some(first.chat_id),
+            &Scope::All,
+            "q",
+            false,
+            "es",
+            &mut |_| {},
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "no_chat");
+    assert!(
+        silent.requests().is_empty(),
+        "nothing sent for a deleted chat"
+    );
+}
+
+/// VFS-49 AC-4 (R6, R7) at the app layer: a chat limited to one document keeps its scope and
+/// sends that document's passages only.
+#[test]
+fn a_document_chat_keeps_its_scope() {
+    use vfs_ai::ask::Scope;
+    let mock = MockServer::start(vec![
+        anthropic_rewrite(&rewrite()),
+        anthropic_answer(&[block("Por transferencia.", &[(0, "por transferencia")])]),
+    ]);
+    let (_d, ai) = state(&mock);
+    let scope = Scope::Document {
+        file_id: 2,
+        name: "Recibo.docx".into(),
+    };
+    let sent = ai
+        .chat_send_over(
+            &TwoDocs,
+            1,
+            None,
+            &scope,
+            "¿Cómo?",
+            false,
+            "es",
+            &mut |_| {},
+        )
+        .unwrap();
+    assert!(sent.turn.sources.iter().all(|s| s.file_id == 2));
+    assert_eq!(ai.chat(sent.chat_id).unwrap().scope, scope);
+    assert_eq!(ai.chats().unwrap()[0].scope, scope);
+}
+
+/// VFS-49 AC-6 (R10): «Borrar todos los chats» leaves «Qué se ha enviado».
+#[test]
+fn clearing_chats_keeps_the_record() {
+    use vfs_ai::ask::Scope;
+    let mock = MockServer::start(vec![
+        anthropic_rewrite(&rewrite()),
+        anthropic_answer(&[block("x", &[])]),
+    ]);
+    let (dir, ai) = state(&mock);
+    ai.chat_send_over(
+        &TwoDocs,
+        1,
+        None,
+        &Scope::All,
+        "q",
+        false,
+        "es",
+        &mut |_| {},
+    )
+    .unwrap();
+    ai.clear_chats().unwrap();
+    assert!(ai.chats().unwrap().is_empty());
+    let db = vfs_ai::AiDb::open(&dir.path().join(DB_FILE)).unwrap();
+    assert_eq!(db.records().unwrap().len(), 1);
 }

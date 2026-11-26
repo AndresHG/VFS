@@ -497,6 +497,7 @@ export const es = {
     [AiErrorCode.CAP_REACHED]: 'Este mes ha llegado a su límite de gasto.',
     [AiErrorCode.NO_STORE]: 'Para preguntar, active antes «Buscar también dentro de los documentos» en Ajustes.',
     [AiErrorCode.NO_THREAD]: 'Esa conversación ya no está abierta. Haga una pregunta nueva.',
+    [AiErrorCode.NO_CHAT]: 'Ese chat se ha borrado. Empiece uno nuevo.',
   },
   // ApiError.code -> text, per action. Unknown codes fall back to `generic`.
   errors: {

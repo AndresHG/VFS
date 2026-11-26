@@ -490,6 +490,7 @@ export const en = {
     [AiErrorCode.CAP_REACHED]: 'This month has reached your spending limit.',
     [AiErrorCode.NO_STORE]: 'To ask, first turn on "Also search inside documents" in Settings.',
     [AiErrorCode.NO_THREAD]: 'That conversation is no longer open. Ask a new question.',
+    [AiErrorCode.NO_CHAT]: 'That chat was deleted. Start a new one.',
   },
   errors: {
     generic: 'Something went wrong. Please try again.',
