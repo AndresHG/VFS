@@ -88,7 +88,7 @@ Tests cite these ids (`VFS-50 AC-<m>`) in their doc comments.
 - Telling the content service which names were documents: R3's wait already bounds how often
   a signature or queue rebuild runs; a follow-up may add it if R7's numbers ask for it.
 - Feeding the queue with only the changed files: with R1 and R2 a rebuild reads the files
-  table and an index of a few bytes per document.
+  table and an index of about 40 bytes per document (D3).
 - The interface's re-run of the visible search on `index-changed`.
 - Index compaction not starting on the owner's Mac (1.9 GB for 236 k files): its own fix.
 
@@ -100,4 +100,12 @@ Tests cite these ids (`VFS-50 AC-<m>`) in their doc comments.
 - D2. 20 documents for a silent run: about 10 s of reading on the target PC (VFS-27 D3), shorter
   than anyone would watch for.
 - D3. An index instead of moving the text to its own table: same effect on the rebuild, no store
-  version change, so no re-reading of anyone's documents.
+  version change, so no re-reading of anyone's documents. Measured on the owner's store
+  (29,619 documents, 494 MB): `docs_meta` is 1.17 MB, about 40 bytes per document, so about
+  20 MB at 0.5 M documents **[estimate]**. Building it on the first open of that store took
+  1.4 s (M-series SSD; one pass over `docs`); on the target PC it is one read of the docs table,
+  minutes on an HDD at 0.5 M documents **[estimate]**, once. The stale-row check read 1,133
+  pages (4.4 MB, 0.13 s) instead of 17,584 (70 MB, 1.18 s).
+- D4. R6's tally lives in memory: an incremental pass cut short by quitting after some commits
+  leaves the file count off by those folders' changes until the next full walk (at most 7 days,
+  or the catch-up walk at start after lost events). Counts are shown, never used for search.

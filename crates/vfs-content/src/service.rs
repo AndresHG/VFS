@@ -919,12 +919,6 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             st.running = false;
             st.status.done = done;
             st.status.total = total;
-            // A silent run sent nothing: its new counts go out once (VFS-50 R4).
-            if silent {
-                let status = st.status.clone();
-                drop(st);
-                shared.events.status(&status);
-            }
         }
         let store_bytes = indexer::stats(&cfg.index_db)
             .map(|s| s.store_bytes)
@@ -948,6 +942,17 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                 } else if sum.remaining == 0 && !shared.stop_run.load(Ordering::SeqCst) {
                     finished_at = signature.clone().map(|sig| (sig, Instant::now()));
                     set_phase(&shared, Phase::Finished);
+                    // A silent run sent nothing, and its phase was already `finished`: its new
+                    // counts go out once (VFS-50 R4).
+                    if silent {
+                        let status = shared
+                            .state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .status
+                            .clone();
+                        shared.events.status(&status);
+                    }
                     if wait(&shared, Some(IDLE_RECHECK)) {
                         break;
                     }
