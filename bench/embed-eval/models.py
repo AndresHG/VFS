@@ -13,41 +13,45 @@ import numpy as np
 # one VFS chunk (2,000 characters) for the others; longer contexts cost more CPU per chunk.
 MAX_TOKENS = 512
 
+# Model kinds and pooling modes (closed sets).
+TRANSFORMER, STATIC_ONNX, MODEL2VEC = "transformer", "static-onnx", "model2vec"
+CLS, MEAN = "cls", "mean"
+
 MODELS = {
     "bekko-static-512": {
         "repo": "hotchpotch/bekko-static-embedding-v1",
         "files": ["onnx/model_int8_dim512.onnx", "tokenizer.json"],
-        "kind": "static-onnx",
+        "kind": STATIC_ONNX,
         "dim": 512,
         "licence": "MIT",
     },
     "bekko-static-1024": {
         "repo": "hotchpotch/bekko-static-embedding-v1",
         "files": ["onnx/model_int8_dim1024.onnx", "tokenizer.json"],
-        "kind": "static-onnx",
+        "kind": STATIC_ONNX,
         "dim": 1024,
         "licence": "MIT",
     },
     "potion-multilingual-128M": {
         "repo": "minishlab/potion-multilingual-128M",
         "files": ["model.safetensors", "tokenizer.json", "config.json"],
-        "kind": "model2vec",
+        "kind": MODEL2VEC,
         "dim": 256,
         "licence": "MIT",
     },
     "granite-97m-r2-int8": {
         "repo": "ibm-granite/granite-embedding-97m-multilingual-r2",
         "files": ["onnx/model_quint8_avx2.onnx", "tokenizer.json"],
-        "kind": "transformer",
-        "pooling": "cls",
+        "kind": TRANSFORMER,
+        "pooling": CLS,
         "dim": 384,
         "licence": "Apache-2.0",
     },
     "e5-small-int8": {
         "repo": "intfloat/multilingual-e5-small",
         "files": ["onnx/model_qint8_avx512_vnni.onnx", "tokenizer.json"],
-        "kind": "transformer",
-        "pooling": "mean",
+        "kind": TRANSFORMER,
+        "pooling": MEAN,
         "prefix": ("query: ", "passage: "),
         "token_type_ids": True,
         "dim": 384,
@@ -56,8 +60,8 @@ MODELS = {
     "bekko-a8m": {
         "repo": "hotchpotch/bekko-embedding-v1-a8m",
         "files": ["onnx/model.onnx", "tokenizer.json"],
-        "kind": "transformer",
-        "pooling": "mean",
+        "kind": TRANSFORMER,
+        "pooling": MEAN,
         "dim": 384,
         "licence": "MIT",
     },
@@ -86,7 +90,7 @@ class Encoder:
         self.name = name
         self.spec = spec = MODELS[name]
         paths, self.download_bytes = fetch(name)
-        if spec["kind"] == "model2vec":
+        if spec["kind"] == MODEL2VEC:
             from model2vec import StaticModel
 
             self.m2v = StaticModel.from_pretrained(os.path.dirname(paths[0]))
@@ -97,14 +101,14 @@ class Encoder:
         self.session = ort.InferenceSession(paths[0], opts, providers=["CPUExecutionProvider"])
         self.tok = Tokenizer.from_file(paths[1])
         self.tok.no_padding()
-        if spec["kind"] == "transformer":
+        if spec["kind"] == TRANSFORMER:
             self.tok.enable_truncation(MAX_TOKENS)
         else:
             self.tok.no_truncation()
 
     def tokens(self, text, query=False):
         """Token count of one text as the model sees it (after any truncation)."""
-        if self.spec["kind"] == "model2vec":
+        if self.spec["kind"] == MODEL2VEC:
             return len(self.m2v.tokenizer.encode(text, add_special_tokens=False).ids)
         return len(self._encode([text], query)[0])
 
@@ -112,11 +116,11 @@ class Encoder:
         prefix = self.spec.get("prefix")
         if prefix:
             texts = [(prefix[0] if query else prefix[1]) + t for t in texts]
-        special = self.spec["kind"] == "transformer"
+        special = self.spec["kind"] == TRANSFORMER
         return [e.ids for e in self.tok.encode_batch(texts, add_special_tokens=special)]
 
     def embed(self, texts, query=False, batch=1):
-        if self.spec["kind"] == "model2vec":
+        if self.spec["kind"] == MODEL2VEC:
             return _normalise(self.m2v.encode(texts, batch_size=max(batch, 1024)))
         out = []
         for i in range(0, len(texts), batch):
@@ -131,9 +135,9 @@ class Encoder:
             if self.spec.get("token_type_ids"):
                 feed["token_type_ids"] = np.zeros_like(input_ids)
             y = self.session.run(None, feed)[0]
-            if self.spec["kind"] == "static-onnx":
+            if self.spec["kind"] == STATIC_ONNX:
                 out.append(y)
-            elif self.spec["pooling"] == "cls":
+            elif self.spec["pooling"] == CLS:
                 out.append(y[:, 0])
             else:
                 m = mask[:, :, None].astype(np.float32)

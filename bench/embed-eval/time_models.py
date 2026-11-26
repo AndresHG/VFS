@@ -54,14 +54,14 @@ def child(model, threads, n):
     import numpy  # noqa: F401  (imported before the baseline, like onnxruntime below)
     import onnxruntime  # noqa: F401
     base = rss_bytes()
-    from models import Encoder
+    from models import TRANSFORMER, Encoder
 
     texts = sample_chunks(n)
     t0 = time.perf_counter()
     enc = Encoder(model, threads)
     load_s = time.perf_counter() - t0
     after_load = rss_bytes()
-    static = enc.spec["kind"] != "transformer"
+    static = enc.spec["kind"] != TRANSFORMER
     enc.embed(texts[:WARMUP], batch=64 if static else 1)
     c0, t0 = time.process_time(), time.perf_counter()
     enc.embed(texts, batch=64 if static else 1)

@@ -7,7 +7,7 @@ Two parts:
 
 - **Quality** (`bench.py`): the VFS-29 gate. BM25 from the real engine against hybrid search
   (1-bit scan, int8 rescore of the top 4×k, best chunk per document, RRF with k = 60) on the
-  content golden set plus ~2,500 distractor documents.
+  content golden set plus 3,097 Wikipedia distractors and 64 synthetic documents.
 - **Cost** (`time_models.py`): time per chunk on 1 and 2 threads, peak RAM and download size,
   each model in a fresh process. Meant to be repeated on the slow Windows target PC.
 

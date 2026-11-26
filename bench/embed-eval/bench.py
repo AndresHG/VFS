@@ -31,7 +31,8 @@ from pathlib import Path
 
 import numpy as np
 
-from synthetic import MEANING, NEGATIVES, TARGETS
+from models import TRANSFORMER
+from synthetic import EN, ES, MEANING, NEGATIVES, TARGETS
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -45,6 +46,9 @@ K = 20           # documents each list contributes to the fusion (retrieve's k)
 RESCORE = 4 * K  # chunks rescored with int8 after the 1-bit scan (R11: 4 × k)
 RRF_K = 60       # reciprocal rank fusion constant (R11, D7)
 
+# Query subsets (closed set).
+KEYWORD, MEANING_SET = "keyword", "meaning"
+
 
 def keyword_cases():
     """The keyword subset: every case of the content golden set, read from golden.rs."""
@@ -54,9 +58,9 @@ def keyword_cases():
 
 
 def queries():
-    out = [{"id": f"kw{i:02d}", "set": "keyword", "lang": "es", "q": q, "want": f}
+    out = [{"id": f"kw{i:02d}", "set": KEYWORD, "lang": ES, "q": q, "want": f}
            for i, (q, f) in enumerate(keyword_cases())]
-    out += [{"id": f"mo{i:02d}", "set": "meaning", "lang": lang, "q": q, "want": f}
+    out += [{"id": f"mo{i:02d}", "set": MEANING_SET, "lang": lang, "q": q, "want": f}
             for i, (q, f, lang) in enumerate(MEANING)]
     return out
 
@@ -70,7 +74,7 @@ def cmd_build(a):
         for f in WORK.glob("*.db*"):
             f.unlink()
     CORPUS.mkdir(parents=True, exist_ok=True)
-    n = {"golden": 0, "synthetic": 0, "es": 0, "en": 0}
+    n = {"golden": 0, "synthetic": 0, ES: 0, EN: 0}
     for f in GOLDEN.iterdir():
         if f.name != "NOTICE.md":
             shutil.copy(f, CORPUS / f.name)
@@ -133,7 +137,7 @@ def cmd_embed(a):
     chunks = load_chunks()
     enc = Encoder(a.model, a.threads)
     t = time.time()
-    batch = 64 if enc.spec["kind"] != "transformer" else 1
+    batch = 64 if enc.spec["kind"] != TRANSFORMER else 1
     vecs = enc.embed([c[2] for c in chunks], batch=batch)
     secs = time.time() - t
     qs = queries()
@@ -206,13 +210,13 @@ def cmd_eval(a):
         return sum(hit(ranks[q["id"]], q["want"]) for q in qs if sel(q))
 
     def es(q):
-        return q["set"] == "meaning" and q["lang"] == "es"
+        return q["set"] == MEANING_SET and q["lang"] == ES
 
     def en(q):
-        return q["set"] == "meaning" and q["lang"] == "en"
+        return q["set"] == MEANING_SET and q["lang"] == EN
 
     def kw(q):
-        return q["set"] == "keyword"
+        return q["set"] == KEYWORD
 
     res["bm25"] = {"meaning_es": count(es, bm25), "meaning_en": count(en, bm25),
                    "keyword": count(kw, bm25),

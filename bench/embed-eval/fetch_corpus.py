@@ -23,6 +23,7 @@ import urllib.request
 
 EXCERPT_CHARS = 3000
 MIN_CHARS = 400
+ES, EN = "es", "en"  # Wikipedia language editions
 UA = "vfs-embed-eval/0.1 (offline search research benchmark)"
 
 TOPICS_ES = """
@@ -130,7 +131,8 @@ def main():
     ap.add_argument("--es", type=int, default=2100, help="minimum Spanish excerpts")
     ap.add_argument("--en", type=int, default=400, help="minimum English excerpts")
     a = ap.parse_args()
-    rows = collect("es", topics(TOPICS_ES), 500, a.es) + collect("en", topics(TOPICS_EN), 100, a.en)
+    rows = (collect(ES, topics(TOPICS_ES), 500, a.es)
+            + collect(EN, topics(TOPICS_EN), 100, a.en))
     random.Random(29).shuffle(rows)
     with gzip.open(a.out, "wt", encoding="utf-8") as f:
         for r in rows:

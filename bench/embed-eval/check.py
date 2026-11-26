@@ -15,7 +15,7 @@ import unicodedata
 
 import snowballstemmer
 
-from synthetic import MEANING, TARGETS
+from synthetic import EN as LANG_EN, ES as LANG_ES, MEANING, TARGETS
 
 STOP = set("""
 a al ante bajo con contra de del desde durante en entre hacia hasta mediante para por segun
@@ -55,7 +55,7 @@ def content_words(query):
 
 def shared(query, doc, lang):
     found = []
-    for stemmer in [ES] + ([EN] if lang == "en" else []):
+    for stemmer in [ES] + ([EN] if lang == LANG_EN else []):
         dk = keys(doc, stemmer)
         for w in content_words(query):
             k = fold(stemmer.stemWord(w.lower()))
@@ -71,7 +71,7 @@ def main():
         if s:
             bad += 1
             print(f"SHARED «{q}» / {target}: {', '.join(s)}")
-    n_es = sum(1 for m in MEANING if m[2] == "es")
+    n_es = sum(1 for m in MEANING if m[2] == LANG_ES)
     n_en = len(MEANING) - n_es
     print(f"{len(MEANING)} meaning-only queries ({n_es} es, {n_en} en); {bad} share a keyword")
     sys.exit(1 if bad or n_es < 20 or n_en < 8 else 0)

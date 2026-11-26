@@ -70,7 +70,7 @@ How to read it:
   «del». RRF ranks that noise level with the dense list, and about a third of the dense hits
   drop out of the top 5 (e5-small: 13 dense, 9 hybrid).
 - **Statics fail on meaning, not on keywords.** Dense alone, bekko-a8m finds 43 of the 45
-  keyword targets and the statics 42, against e5-small's 24. e5-small is weak on names and
+  keyword targets and the bekko statics 42 (potion 29), against e5-small's 24. e5-small is weak on names and
   numbers and strong on paraphrase; BM25 covers the first, so in the fusion that is the right
   trade.
 - **On the published scores**, bekko-a8m is ahead of e5-small on multilingual Nano retrieval
@@ -103,16 +103,16 @@ mean 420–440 tokens; 150 Spanish, 50 English), each model in its own process. 
 5.3 before and 8.1 after, from other work on the machine; the 2-thread granite run saw 65 % system
 CPU, so its figure is the least reliable **[measured]**.
 
-| [measured] | Dims | ms/chunk, 1 thread | ms/chunk, 2 threads | Peak RSS (process) | Download | Licence |
+| [measured] | Dims | ms/chunk, 1 thread | ms/chunk, 2 threads | Peak RSS, process (MiB) | Download | Licence |
 |---|---|---|---|---|---|---|
-| multilingual-e5-small int8 (`onnx/model_qint8_avx512_vnni.onnx`) | 384 | 145 | 77 | 0.66 GB | 129 MiB | MIT |
-| bekko-embedding-v1-a8m (`onnx/model.onnx`) | 384 | 97 | 51 | 0.67 GB | 157 MiB | MIT |
-| granite-97m-multilingual-r2 int8 (`onnx/model_quint8_avx2.onnx`) | 384 | 145 | 117 | 0.64 GB | 118 MiB | Apache-2.0 |
-| bekko-static-embedding-v1 int8, 512 d | 512 | 0.99 | 0.60 | 0.79 GB | 103 MiB | MIT |
-| bekko-static-embedding-v1 int8, 1024 d | 1024 | 3.5 | 1.4 | 1.47 GB | 201 MiB | MIT |
-| potion-multilingual-128M (float32) | 256 | 0.73 | 0.49 | 1.60 GB | 506 MiB | MIT |
+| multilingual-e5-small int8 (`onnx/model_qint8_avx512_vnni.onnx`) | 384 | 145 | 77 | 656 | 129 MiB | MIT |
+| bekko-embedding-v1-a8m (`onnx/model.onnx`) | 384 | 97 | 51 | 666 | 157 MiB | MIT |
+| granite-97m-multilingual-r2 int8 (`onnx/model_quint8_avx2.onnx`) | 384 | 145 | 117 | 637 | 118 MiB | Apache-2.0 |
+| bekko-static-embedding-v1 int8, 512 d | 512 | 0.99 | 0.60 | 808 | 103 MiB | MIT |
+| bekko-static-embedding-v1 int8, 1024 d | 1024 | 3.5 | 1.4 | 1,468 | 201 MiB | MIT |
+| potion-multilingual-128M (float32) | 256 | 0.73 | 0.49 | 1,602 | 506 MiB | MIT |
 
-Licences are as stated on each model card (checked 2026-11-26). Peak RSS is the whole Python
+Licences are as stated on each model card (checked 2026-11-26). Peak RSS is the higher of the two runs, for the whole Python
 process (about 57 MB before the model loads) at batch 1 for transformers and 64 for statics. For
 the statics it reflects ONNX Runtime and model2vec rather than the model: bekko-static-512 sits
 at 238 MB after loading and peaks during the batch. A Rust lookup of an int8 table would need
