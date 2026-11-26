@@ -14,6 +14,12 @@ use crate::Result;
 /// version is deleted and rebuilt: it holds nothing that cannot be re-extracted.
 pub const STORE_VERSION: i64 = 2;
 
+/// The columns the queue rebuild compares, so it reads a few bytes per document instead of
+/// every row with its text (VFS-50 R2). Added to existing stores on open: an index changes
+/// no row, so the version stays.
+const DOCS_META: &str =
+    "CREATE INDEX IF NOT EXISTS docs_meta ON docs(dir_id, name, size, mtime, state, reason, attempts);";
+
 const SCHEMA: &str = r#"
 -- One row per document the content indexer has processed. file_id = files.id in index.db;
 -- dir_id, name, size and mtime are the index's values when the file was processed: when any
@@ -128,6 +134,7 @@ pub fn open_or_create(index_db: &Path) -> Result<Connection> {
         } else if v != STORE_VERSION {
             return Err(crate::Error::StoreVersion(v));
         }
+        conn.execute_batch(DOCS_META)?;
         Ok(conn)
     };
     // Rebuild only a store that is unreadable or of another version: its text can be
@@ -241,5 +248,37 @@ mod tests {
         assert!(!needs_rebuild(&sqlite(rusqlite::ffi::SQLITE_BUSY)));
         assert!(!needs_rebuild(&sqlite(rusqlite::ffi::SQLITE_LOCKED)));
         assert!(!needs_rebuild(&sqlite(rusqlite::ffi::SQLITE_IOERR)));
+    }
+
+    /// VFS-50 AC-2 (R2): a version-2 store from before `docs_meta` gets the index on open,
+    /// keeps its version and its rows, and is not rebuilt.
+    #[test]
+    fn old_store_gains_docs_meta_without_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index.db");
+        {
+            let conn = open_or_create(&index).unwrap();
+            conn.execute_batch(
+                "DROP INDEX docs_meta;
+                 INSERT INTO docs(file_id, dir_id, name, size, mtime, state, bytes_read, extract_ms)
+                 VALUES (5, 1, 'carta.txt', 10, 20, 2, 10, 1);",
+            )
+            .unwrap();
+        }
+        let conn = open_or_create(&index).unwrap();
+        let has: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'docs_meta'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM docs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!((has, version, rows), (1, STORE_VERSION, 1));
     }
 }

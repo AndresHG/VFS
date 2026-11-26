@@ -30,6 +30,13 @@ pub struct PaceConfig {
     /// A run stopped because `index.db` could not be written starts again after this long
     /// (VFS-27 R15).
     pub index_write_retry: Duration,
+    /// After the name indexer reports changed names, a run waits for this long without a
+    /// further report... (VFS-50 R3)
+    pub names_quiet: Duration,
+    /// ...but never longer than this after the first report not yet acted on.
+    pub names_max_wait: Duration,
+    /// A run with at most this many documents queued leaves the shown status alone (VFS-50 R4).
+    pub silent_max: u64,
 }
 
 impl Default for PaceConfig {
@@ -43,6 +50,9 @@ impl Default for PaceConfig {
             low_space_resume: 2 << 30,
             low_space_wait: Duration::from_secs(30),
             index_write_retry: Duration::from_secs(300),
+            names_quiet: Duration::from_secs(120),
+            names_max_wait: Duration::from_secs(30 * 60),
+            silent_max: 20,
         }
     }
 }
