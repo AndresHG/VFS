@@ -376,6 +376,7 @@ export function setupChat({
       return item.li;
     }));
     $('chat').classList.remove('side-open');
+    $('chat-side-toggle').setAttribute('aria-expanded', 'false');
     drawScope();
     drawEmpty();
     drawList();

@@ -424,6 +424,79 @@ test('a new chat stops the answer still streaming', async () => {
   }
 });
 
+/** VFS-49 R5: Intro sends the message; Mayús+Intro starts a new line and sends nothing. */
+test('Intro sends, Mayús+Intro does not', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await openChat(b);
+    const press = (shift) => b.evaluate(`(() => { const i = document.getElementById('chat-input');
+      i.value = 'hola'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: ${shift}, bubbles: true, cancelable: true })); })()`);
+    await press(true);
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-turn').length`), 0);
+    assert.equal(await b.evaluate(`document.getElementById('ai-notice').open`), false, 'nothing was sent');
+    await press(false);
+    await acceptNotice(b);
+    await b.until(`document.querySelector('.chat-question')?.textContent === 'hola'`, 'the message sent');
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-49 R10: «Borrar todos los chats» in Ajustes asks first; cancelled it keeps the chats,
+ *  confirmed it empties the list and closes the open chat. */
+test('all chats are deleted from Ajustes', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await openChat(b);
+    await b.until(`document.querySelector('.chat-open')`, 'the saved chat');
+    await b.evaluate(`document.querySelector('.chat-open').click()`);
+    await b.until(`document.querySelectorAll('.chat-turn').length === 2`, 'the open chat');
+    await b.evaluate(`document.getElementById('open-settings').click()`);
+    await b.until(`document.getElementById('settings').open`, 'Ajustes');
+    await b.evaluate(`document.getElementById('stab-ai').click()`);
+    await b.until(`document.getElementById('ai-chats-clear').offsetParent !== null`, '«Borrar todos los chats»');
+    await b.evaluate(`document.getElementById('ai-chats-clear').click()`);
+    await b.until(`document.getElementById('confirm-chats-clear').open`, 'the prompt');
+    await b.evaluate(`document.querySelector('#confirm-chats-clear button[value=cancel]').click()`);
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-open').length`), 1, 'cancelled: kept');
+    await b.evaluate(`document.getElementById('ai-chats-clear').click()`);
+    await b.until(`document.getElementById('confirm-chats-clear').open`, 'the prompt again');
+    await b.evaluate(`document.querySelector('#confirm-chats-clear button[value=ok]').click()`);
+    await b.until(`document.querySelector('.chat-none')`, 'the empty list');
+    assert.equal(await b.evaluate(`document.querySelector('.chat-none').textContent`), S.chatNone);
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-turn').length`), 0, 'the open chat closed');
+    await b.until(`document.getElementById('toast').textContent === ${JSON.stringify(S.chatClearedAll)}`, 'the toast');
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-49 R2: in a narrow window the chat list folds behind «Chats»; opening a chat folds it
+ *  again. */
+test('the chat list folds in a narrow window', async () => {
+  const b = await startBrowser();
+  try {
+    await b.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 700, deviceScaleFactor: 1, mobile: false });
+    await b.load('&ai=ok');
+    await openChat(b);
+    const side = `getComputedStyle(document.getElementById('chat-side')).display`;
+    await b.until(`getComputedStyle(document.getElementById('chat-side-toggle')).display !== 'none'`, 'the «Chats» button');
+    assert.equal(await b.evaluate(side), 'none');
+    await b.evaluate(`document.getElementById('chat-side-toggle').click()`);
+    assert.equal(await b.evaluate(side), 'flex');
+    assert.equal(await b.evaluate(`document.getElementById('chat-side-toggle').getAttribute('aria-expanded')`), 'true');
+    await b.until(`document.querySelector('.chat-open')`, 'the saved chat');
+    await b.evaluate(`document.querySelector('.chat-open').click()`);
+    await b.until(`document.querySelectorAll('.chat-turn').length === 2`, 'the chat');
+    assert.equal(await b.evaluate(side), 'none');
+    assert.equal(await b.evaluate(`document.getElementById('chat-side-toggle').getAttribute('aria-expanded')`), 'false');
+  } finally {
+    b.close();
+  }
+});
+
 /** VFS-49 AC-8 (R13, D4): a selected document offers «Preguntar sobre este documento», which
  *  opens a new chat limited to it in the Chat tab; the line under the search box starts a chat
  *  with the query; the search filters never reach the chat (D2). */
