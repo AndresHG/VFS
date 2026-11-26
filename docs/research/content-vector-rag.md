@@ -181,6 +181,9 @@ the M1 Pro, so ≈ 0.5–0.6 s per chunk, and with two threads (the rest of the 
 | bekko-a8m (7.7 M active parameters, ~1.6× e5-small's speed [published]) | ≈ 25–55 h | ≈ 1.5–3 weeks |
 | Static model (model2vec potion-multilingual) | minutes | < 1–2 h |
 
+The 29b benchmark later measured this class at about 20–35 h per 60,000 documents on the
+target PC **[estimate from Mac timings]**; see [embed-eval-29b.md](embed-eval-29b.md).
+
 Spread over the hours the app is open, that is weeks of background work for a mid-size
 archive. A local model is therefore an option for capable PCs, not the default.
 

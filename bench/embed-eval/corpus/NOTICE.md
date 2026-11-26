@@ -25,3 +25,10 @@ Each line of the file is one excerpt and carries its own attribution: `title`, `
 The meaning-only targets, the hard negatives and the meaning-only queries were written for
 this benchmark; names, figures, addresses and reference numbers are invented. Companies and
 public bodies are named only as the issuers such documents usually have.
+
+## Timing sample: `../timing_sample.jsonl.gz`
+
+200 chunks cut from the documents above, as the VFS content index stored them: Wikipedia
+excerpts (CC BY-SA 4.0) and golden-corpus documents. Each row's `doc` names its source file in
+the assembled corpus; a `dz_<lang>_<n>.txt` file is the n-th row of that language in
+`distractors.jsonl.gz`, which carries its title, revision and URL.
