@@ -52,6 +52,12 @@ executable (a CI step checks the app's dependency graph). Its background content
 live in the app data folder) and fed by the app with `vfs_core::probes` and the name
 indexer's state (`src-tauri/src/content.rs`); with content search off it creates nothing and
 starts no worker.
+Search by meaning (VFS-29) is the crate `crates/vfs-semantic`: `vectors.db` next to
+`content.db`, which a content rebuild never deletes, and an embedding worker process
+(`vfs-embed`) that alone links ONNX Runtime and the tokenizer (feature `embedder`; the CI
+dependency check covers them too). It reads chunks through `vfs_content::ChunkReader`. The
+worker is not in the installer: it downloads with the model when meaning search is turned on
+(D18).
 Before the update's installer starts, on both platforms, the app stops the content run (its
 worker gets 5 s, then is killed); the indexer is stopped as VFS-21 R8 says.
 

@@ -178,9 +178,10 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 
 - Slow PC and HDD: embedding reads chunks from `content.db`, already compressed text, not
   user files; the pace follows VFS-27 R7, and the upload is the bottleneck, not the disk.
-- Long paths, NFC/NFD: n/a because vectors key on chunk ids, not paths.
+- Long paths, NFC/NFD: n/a because vectors key on the hash of the chunk text, not paths.
+- A root offline or paused during a content rebuild: its documents are neither stored nor queued, so their vectors are dropped and embedded again when the root returns; the cost is CPU, not lost search, and a rebuild is rare.
 - Antivirus: `vectors.db` is one more SQLite file in the app data folder, like `content.db`.
-- Crash mid-write: each batch commits in one transaction with its chunk ids; resume reads
+- Crash mid-write: each batch commits in one transaction with its text hashes; resume reads
   what is stored (AC-6).
 - A million matches: the scan is bounded by chunk count (7 ms per million on the Mac,
   ~20–35 ms on the target PC **[estimate]**); the fused list is capped at k.
@@ -211,6 +212,7 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D14 | Languages | A model good in Spanish and English; the gate weighs Spanish most (the owner's and family's documents), English still checked for open-source users | owner | 2026-11-25 |
 | D16 | Which local model | multilingual-e5-small int8 (MIT, 129 MB): the only clear pass of the 29b gate (9/26 Spanish, 4/10 English vs BM25 0/0, no keyword loss). bekko-a8m is the fallback; static models failed. First pass ≈ 20–35 h of paced background CPU per 60,000 documents on the target PC [estimate], to confirm there | owner | 2026-11-26 |
 | D17 | Fusion details for 29c | Leave BM25's list out of RRF when it has no document with all the query terms (29b: e5 9→13 ES, 4→8 EN, no keyword loss); measure an int8 scan or a wider rescore, since 1-bit cost e5 five hits | agent | 2026-11-26 (29b) |
+| D18 | Local runtime (29c) | ONNX Runtime through `ort` 2.0, linked statically into the `vfs-embed` worker, CPU only (its automatic device choice used Core ML on macOS: 2× slower, 2× memory). Measured on the Mac with e5-small int8: 145 ms/chunk on 1 thread, 90 ms on 2, 0.7 GB peak; tract (pure Rust) took 636 ms/chunk on 1 thread. The worker is 22 MB (5.4 MB compressed), so it is not in the installer (14.6 MB of a 16 MB budget, VFS-27 AC-1): it downloads with the model when meaning search is turned on | agent | 2026-11-26 (29c) |
 | D15 | Questions with vectors | Questions (VFS-28) retrieve with vectors as soon as 29c ships, through the fused `retrieve` (R11); no change of their own | owner | 2026-11-25 |
 
 ## Expected PRs

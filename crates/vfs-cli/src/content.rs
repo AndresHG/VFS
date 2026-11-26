@@ -242,6 +242,79 @@ pub fn search(db: &Path, q: &SearchQuery, layout: Layout, runs: u32, json: bool)
     Ok(())
 }
 
+/// `vfs embed-index`: the VFS-29 embedding run with the local worker, with its cost (CPU and
+/// the worker's peak memory) for R11 of the review rubric.
+pub fn embed_index(
+    db: &Path,
+    model_dir: &Path,
+    worker: Option<std::path::PathBuf>,
+    threads: usize,
+    json: bool,
+) -> AnyResult<()> {
+    let program = match worker {
+        Some(p) => p,
+        None => {
+            let exe = std::env::current_exe()?;
+            exe.with_file_name(format!("vfs-embed{}", std::env::consts::EXE_SUFFIX))
+        }
+    };
+    let cfg = vfs_semantic::client::WorkerConfig {
+        program,
+        args: Vec::new(),
+        model_dir: model_dir.to_path_buf(),
+        model: vfs_semantic::LOCAL_MODEL,
+        threads,
+        foreground: false,
+        mem_cap: vfs_semantic::client::DEFAULT_MEM_CAP,
+        timeout: Duration::from_secs(300),
+    };
+    let mut embedder = vfs_semantic::client::WorkerEmbedder::new(cfg);
+    let stop = AtomicBool::new(false);
+    let mut last = Instant::now();
+    let sum = vfs_semantic::run(
+        db,
+        &mut embedder,
+        &vfs_semantic::RunOptions::default(),
+        &stop,
+        &mut |p| {
+            if !json && last.elapsed() > Duration::from_secs(10) {
+                eprintln!("{} of {} texts", p.done, p.total);
+                last = Instant::now();
+            }
+        },
+    )?;
+    drop(embedder);
+    let child = peak_child_rss_bytes().unwrap_or(0);
+    let (_, cpu_worker) = cpu_seconds();
+    if json {
+        let v = serde_json::json!({
+            "run": sum,
+            "workerPeakRssBytes": child,
+            "workerCpuSeconds": cpu_worker,
+        });
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        let secs = sum.elapsed_ms as f64 / 1000.0;
+        println!(
+            "{} distinct texts, {} to embed: {} embedded, {} dropped in {secs:.1} s ({:.0} ms/text); complete: {}",
+            sum.texts,
+            sum.pending,
+            sum.embedded,
+            sum.dropped,
+            secs * 1000.0 / sum.embedded.max(1) as f64,
+            sum.complete
+        );
+        println!(
+            "worker peak RSS {}, worker CPU {cpu_worker:.1} s",
+            human_size(child)
+        );
+    }
+    match (sum.error, sum.stopped) {
+        (Some(e), _) => Err(format!("embedding stopped: {e}").into()),
+        _ => Ok(()),
+    }
+}
+
 pub fn off(db: &Path) -> AnyResult<()> {
     vfs_content::switch_off(db)?;
     println!("content search switched off; content store deleted");

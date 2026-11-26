@@ -18,17 +18,22 @@ pub mod extract;
 pub mod indexer;
 pub mod pace;
 pub mod paths;
+pub mod process;
 pub mod protocol;
+pub mod reader;
 pub mod search;
 pub mod service;
 pub mod store;
 pub mod supervisor;
+#[cfg(feature = "test-support")]
+pub mod testing;
 #[cfg(feature = "extractor")]
 pub mod worker;
 
 pub use indexer::{
     run as index, run_with as index_with, Admit, Gate, IndexOptions, RunSummary, StoreStats,
 };
+pub use reader::ChunkReader;
 pub use search::{
     retrieve, search, ContentHit, ContentResponse, Passage, PassageText, Query, Searcher,
     StructuredQuery, UnreadReason,

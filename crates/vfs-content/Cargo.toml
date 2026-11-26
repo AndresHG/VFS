@@ -16,6 +16,8 @@ required-features = ["extractor"]
 default = ["extractor"]
 # Xberg and the worker: the `vfs-extract` binary and the CLI's worker mode (VFS-2 D3).
 extractor = ["dep:xberg", "dep:tokio"]
+# `testing`: write documents into the content store from other crates' tests (VFS-29).
+test-support = []
 
 [dependencies]
 vfs-core.workspace = true

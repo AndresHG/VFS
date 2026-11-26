@@ -105,7 +105,7 @@ struct Running {
     /// Windows Job Object holding the worker; held only to be dropped with it, which kills
     /// the worker (VFS-2 R18).
     #[cfg(windows)]
-    _job: job::Job,
+    _job: crate::process::job::Job,
 }
 
 /// One worker process, started on first use and replaced after any failure.
@@ -166,7 +166,10 @@ impl Supervisor {
             .spawn()?;
         self.spawned += 1;
         #[cfg(windows)]
-        let job = match job::Job::hold(&child, self.config.mem_cap.saturating_add(JOB_SLACK)) {
+        let job = match crate::process::job::Job::hold(
+            &child,
+            self.config.mem_cap.saturating_add(JOB_SLACK),
+        ) {
             Ok(j) => j,
             Err(e) => {
                 let _ = child.kill();
@@ -361,67 +364,6 @@ impl Supervisor {
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.kill();
-    }
-}
-
-/// Windows Job Object for one worker (VFS-2 R18): kill-on-close, so the worker dies with the
-/// parent's last handle, and a committed-memory limit just above the allocator cap.
-#[cfg(windows)]
-mod job {
-    use std::os::windows::io::AsRawHandle;
-    use std::process::Child;
-
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
-    };
-
-    pub struct Job(HANDLE);
-
-    // SAFETY: a job handle may be used and closed from any thread.
-    unsafe impl Send for Job {}
-
-    impl Job {
-        /// Creates a job with the limits and puts `child` in it.
-        pub fn hold(child: &Child, memory_limit: usize) -> std::io::Result<Job> {
-            // SAFETY: plain Win32 calls on handles owned here or by `child`; every pointer
-            // refers to a live local of the right type and size.
-            unsafe {
-                let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-                if h.is_null() {
-                    return Err(std::io::Error::last_os_error());
-                }
-                let job = Job(h);
-                let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-                info.BasicLimitInformation.LimitFlags =
-                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-                info.ProcessMemoryLimit = memory_limit;
-                if SetInformationJobObject(
-                    h,
-                    JobObjectExtendedLimitInformation,
-                    &info as *const _ as *const _,
-                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                ) == 0
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if AssignProcessToJobObject(h, child.as_raw_handle() as HANDLE) == 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(job)
-            }
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            // SAFETY: the handle was created by `hold` and is closed exactly once.
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
     }
 }
 

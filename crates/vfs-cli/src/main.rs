@@ -133,6 +133,23 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Embed the content chunks with the local model (VFS-29), into `vectors.db` next to the
+    /// index. Resumes where the last run stopped.
+    #[cfg(feature = "content")]
+    EmbedIndex {
+        #[arg(long)]
+        db: PathBuf,
+        /// Folder holding the model's `model.onnx` and `tokenizer.json`.
+        #[arg(long)]
+        model_dir: PathBuf,
+        /// The `vfs-embed` worker (default: next to this executable).
+        #[arg(long)]
+        worker: Option<PathBuf>,
+        #[arg(long, default_value_t = 2)]
+        threads: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Search inside documents (VFS-2 prototype), with the same filters as `search`.
     #[cfg(feature = "content")]
     ContentSearch {
@@ -524,6 +541,14 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             max_files,
             json,
         } => content::index(&db, timeout, max_files, json)?,
+        #[cfg(feature = "content")]
+        Cmd::EmbedIndex {
+            db,
+            model_dir,
+            worker,
+            threads,
+            json,
+        } => content::embed_index(&db, &model_dir, worker, threads, json)?,
         #[cfg(feature = "content")]
         Cmd::ContentSearch {
             db,

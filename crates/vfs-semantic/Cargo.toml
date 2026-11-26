@@ -1,0 +1,39 @@
+[package]
+name = "vfs-semantic"
+description = "Search by meaning for VFS (VFS-29): vectors.db, the local embedding worker, dense ranking"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "vfs-embed"
+path = "src/bin/vfs-embed.rs"
+
+[features]
+default = []
+# ONNX Runtime and the tokenizer: the `vfs-embed` worker binary only (VFS-29 R16). Without it
+# the worker runs only its test hooks. The app and the CLI talk to the worker over
+# stdin/stdout and never link either.
+embedder = ["dep:ort", "dep:tokenizers"]
+
+[dependencies]
+vfs-content = { path = "../vfs-content", default-features = false }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+blake3 = { version = "1", default-features = false, features = ["std"] }
+# ONNX Runtime linked statically (prebuilt by pyke, checksums pinned in ort-sys), CPU only.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-native", "api-22"], optional = true }
+tokenizers = { version = "=0.22.2", default-features = false, features = ["fancy-regex"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+
+[dev-dependencies]
+vfs-content = { path = "../vfs-content", default-features = false, features = ["test-support"] }
+tempfile.workspace = true
+vfs-core.workspace = true

@@ -69,13 +69,20 @@ jobs:
         run: cargo clippy -p vfs-desktop --lib --no-default-features --locked -- -D warnings
       - name: UI tests
         run: node --test apps/desktop/ui-dev/status.test.mjs apps/desktop/ui-dev/screen.test.mjs apps/desktop/ui-dev/sources.test.mjs apps/desktop/ui-dev/strings.test.mjs apps/desktop/ui-dev/fonts.test.mjs apps/desktop/ui-dev/updates.test.mjs apps/desktop/ui-dev/suggest.test.mjs apps/desktop/ui-dev/feedback.test.mjs apps/desktop/ui-dev/folders.test.mjs apps/desktop/ui-dev/layout.test.mjs apps/desktop/ui-dev/kinds.test.mjs apps/desktop/ui-dev/filefilter.test.mjs apps/desktop/ui-dev/content.test.mjs apps/desktop/ui-dev/filters.test.mjs apps/desktop/ui-dev/prefs.test.mjs apps/desktop/ui-dev/ai.test.mjs apps/desktop/ui-dev/chat.test.mjs apps/desktop/ui-dev/coregate.test.mjs apps/desktop/ui-dev/panels.test.mjs apps/desktop/ui-dev/tabs.test.mjs apps/desktop/ui-dev/settings.test.mjs
-      - name: Xberg stays out of the app (VFS-2 D3, VFS-27 D1)
+      - name: Xberg and ONNX Runtime stay out of the app (VFS-2 D3, VFS-27 D1, VFS-29 R16)
         shell: bash
         run: |
           # The tree goes to a file first, so a failing `cargo tree` fails the step.
           cargo tree -p vfs-desktop -e normal --locked > "$RUNNER_TEMP/app-tree.txt"
           if grep -q ' xberg ' "$RUNNER_TEMP/app-tree.txt"; then
             echo "xberg is in the app's dependency graph"; exit 1; fi
+          # VFS-29 R16: ONNX Runtime and the tokenizer live in the `vfs-embed` worker only.
+          if grep -Eq ' (ort|tokenizers) ' "$RUNNER_TEMP/app-tree.txt"; then
+            echo "the embedding runtime is in the app's dependency graph"; exit 1; fi
+      - name: Embedding worker with ONNX Runtime (VFS-29 R16, feature off by default)
+        run: |
+          cargo clippy -p vfs-semantic --all-targets --features embedder --locked -- -D warnings
+          cargo build -p vfs-semantic --features embedder --bin vfs-embed --locked
       - name: Test content-search engine (VFS-2, feature off by default)
         run: |
           cargo clippy -p vfs-cli --all-targets --features content -- -D warnings
