@@ -1,6 +1,6 @@
 # VFS-49 — The Chat tab: chats beside the search, kept on this PC
 
-- **Status**: implemented (PRs #232, 49b) — owner decisions D1–D5, 2026-11-26
+- **Status**: implemented (PR #235, 49a and 49b together) — owner decisions D1–D5, 2026-11-26
 - **Size**: L (a new table set in `ai.db`, a retrieval change in `vfs-ai` and `vfs-content`,
   and the app's main layout; two PRs)
 - **Links**: [VFS-28](../vfs-28-ask-archive/spec.md) (ask your archive, whose R5, R8 layout,
