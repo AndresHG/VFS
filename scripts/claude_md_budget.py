@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The CLAUDE.md budget policy: per-file caps and the growth rule (ported from Calligence).
+"""The CLAUDE.md budget policy: per-file caps and the growth rule (ported from an earlier project).
 
 Standard library only, so a bare python3 can run it. `python3 scripts/claude_md_budget.py`
 checks every CLAUDE.md in the checkout and exits 1 on a breach (for CI and local runs);

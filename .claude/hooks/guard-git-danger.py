@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook — boundary enforcement for dangerous git / gh commands.
 
-Ported from the Calligence harness, where each rule was an instruction until it
+Ported from an earlier project's harness, where each rule was an instruction until it
 failed:
   - never push directly to main (protected; work lands through a squash-merged
     PR from a feat/<title> branch),

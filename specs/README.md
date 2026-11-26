@@ -7,7 +7,7 @@ and tests can cite its acceptance criteria. Work items are GitHub Issues in
 Búsqueda por nombre y ruta, Fase 2 Validación en el PC real, Fase 3 Contenido
 de documentos, Fase 4 Pulido y distribución); an issue tracks the work, while
 the spec folder and the PR body are the durable record of what a change must
-do. (Calligence kept specs in a gitignored state folder, which is deleted with
+do. (The earlier project kept specs in a gitignored state folder, which is deleted with
 its worktree, and lost specs that committed code still referenced.)
 
 ## When a spec lives here

@@ -6,7 +6,7 @@ PR for something this list misses, add the check here in the same PR — one lin
 with the spec or PR that earned it. A blocker keeps its `R<n>` id for life; a removed id
 is never reused, because the verdict log counts blocks by id.
 
-The seed lines below were earned in the Calligence repository this harness was ported
+The seed lines below were earned in an earlier repository this harness was ported
 from; they are stack-agnostic.
 
 ## Blockers — the PR does not open until each is fixed or rebutted
@@ -30,7 +30,9 @@ from; they are stack-agnostic.
 - **R6. Committed text is fit for a public repo.** No details about the authors,
   their relatives or their private life in code, docs, specs, fixtures, mockups, commit
   messages or the PR body; users are "the user" / "they", and sample data is invented.
-  `scripts/personal_refs.py` catches the obvious phrases in CI; judge the rest (#121).
+  `scripts/personal_refs.py` catches the obvious phrases and `scripts/denylist_scan.py` the
+  owner's private denylist (kept outside the repo) and non-noreply commit emails; judge the
+  rest (#121).
 - **R7. A change to how much a search reads** (read caps, extra tiers or queries per search)
   carries `vfs bench` numbers on 2 M synthetic files for every affected order
   (`--sort`), before and after, in the spec or PR body (VFS-12).
