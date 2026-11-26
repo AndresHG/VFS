@@ -1,0 +1,38 @@
+# Public-repo hygiene (rubric R6): no string from the owner's private denylist and no
+# non-noreply commit email reaches the repo. The denylist is the VFS_DENYLIST secret, so the
+# list itself stays private; scripts/denylist_scan.py reports hits by entry number only,
+# because these logs are public. `edited` re-checks a PR whose title or body changed.
+name: privacy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: privacy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  denylist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR head, not the merge commit GitHub makes, so only the PR's own commits count.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Commits and diff
+        env:
+          VFS_DENYLIST: ${{ secrets.VFS_DENYLIST }}
+        run: python3 scripts/denylist_scan.py range "${{ github.event.pull_request.base.sha }}"
+      - name: PR title and body
+        env:
+          VFS_DENYLIST: ${{ secrets.VFS_DENYLIST }}
+          PR_TEXT: |
+            ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_TEXT" | python3 scripts/denylist_scan.py text
