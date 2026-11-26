@@ -1,6 +1,6 @@
-# VFS-29 — Search by meaning: embeddings by API (and later a local model), fused with BM25
+# VFS-29 — Search by meaning: a local model by default (API optional), fused with BM25
 
-- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with 29a.
+- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with the 29b measurement (D12); the local light model is the default (D13).
 - **Size**: L. It sends whole document text to an outside service for the first time (with
   consent, per folder), adds a store beside `content.db`, and is multi-PR (29a, 29b, 29c).
 - **Links**:
@@ -38,10 +38,14 @@ Turning it on
 - R1. THE Ajustes panel SHALL offer a third search level, «Búsqueda por significado», below
   the content switch (VFS-27 R5), available only while content search is on. It SHALL be off
   by default.
-- R2. THE app SHALL take the embedding key as a separate key from the answer key (D2):
+- R1a. WHEN the user turns meaning search on, THE app SHALL use the local light model chosen
+  in 29b (D13): show its download size, the estimated time for this archive and the RAM it
+  needs, then download it and embed every folder whose content is read. Nothing SHALL leave
+  the PC, and no key SHALL be asked for.
+- R2. AS AN optional alternative to the local model, THE app SHALL take the embedding key as a separate key from the answer key (D2):
   OpenAI or Voyage, stored and shown exactly as VFS-28 R1–R2 store answer keys. An OpenAI
   key already saved for answers MAY be reused after the user confirms it.
-- R3. WHEN the user turns meaning search on, THE app SHALL list the indexed folders with,
+- R3. WHEN the user chooses an API provider instead of the local model, THE app SHALL list the indexed folders with,
   for each, its number of documents read, the estimated number of chunks, the text volume
   in MB, the estimated cost at the provider's dated price, and the estimated time. Each
   folder SHALL be off until the user ticks it and confirms with «Enviar texto de estas
@@ -104,18 +108,24 @@ Local model (29b, 29c)
   request after showing its size, the estimated time for this archive and the RAM needed,
   runs in a child process with its own memory cap, and sends nothing off the PC.
 
-## Gate before building 29a's interface
+## Gate before building any interface
 
 Fixed now, before any run:
-- **Meaning-only subset.** The content golden set (VFS-2 AC-17) gains at least 15 labelled
-  meaning-only queries where the document shares no keyword with the query. Hybrid search
-  must put the expected document in the top 5 for at least 3 more of them than BM25 does.
+- **Meaning-only subset.** The content golden set (VFS-2 AC-17) gains at least 20 labelled
+  Spanish and 8 English meaning-only queries where the document shares no keyword with the
+  query, over Spanish and English documents of the kind a family archive holds (invoices,
+  letters, school and medical papers, manuals). Hybrid search must put the expected document
+  in the top 5 for at least 4 more Spanish queries and 1 more English query than BM25 does,
+  and Spanish results decide between candidates (D14).
 - **Keyword subset.** On the existing keyword queries, hybrid search must not lose any query
   that BM25 has in its top 5.
-- **Which models.** The gate runs first with at least one API model; the chosen local model
-  must pass it before 29c ships.
+- **Which models.** One run, before any interface: at least one API model (Voyage-4-lite or
+  OpenAI 3-small) and the light local candidates of 29b, bekko-static-embedding-v1 first. The
+  first to ship is the one that passes; if both pass, the local model ships first, since it
+  is free and sends nothing off the PC (D12).
 
-If no API model passes the gate, meaning search is not built.
+If neither the local model nor an API model passes the gate, meaning search is not built. If
+only an API model passes, the owner decides whether to ship it.
 
 ## Acceptance scenarios
 
@@ -189,21 +199,25 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D2 | Embedding key when the user has only an Anthropic key | A separate optional key, OpenAI or Voyage | owner | 2026-11-21 (E2) |
 | D3 | May document text go to an embedding API? | Yes, per folder, with permission and the cost and volume shown first | owner | 2026-11-25 |
 | D4 | Order | After 0.4 and before new sources (VFS-44) | owner | 2026-11-25 |
-| D5 | Local model in this spec | 29a API first; the local model after the 29b measurement | owner | 2026-11-25 |
+| D5 | Local model in this spec | ~~29a API first; the local model after the 29b measurement~~ replaced by D12 | owner | 2026-11-25 |
 | D6 | Providers in 29a | OpenAI and Voyage | owner | 2026-11-25 |
 | D7 | Fusion | RRF, k = 60, no tuning; a weighted sum only if the golden set shows a gain | agent | 2026-11-25 |
 | D8 | Where vectors live | `vectors.db`, so a content rebuild never wipes paid vectors | agent | 2026-11-22 |
 | D9 | Dimension | API models cut to 512 dimensions (OpenAI `dimensions`, Voyage 512) | agent | 2026-11-25 |
 | D10 | Duplicates | Vectors keyed by chunk-text hash: each distinct text is embedded and paid once | agent | 2026-11-25 (cost review) |
 | D11 | First pass | OpenAI Batch API (−50 %); Voyage standard while its 200 M free tokens last | agent | 2026-11-25 (cost review) |
+| D12 | Order after the cost review | 29b's measurement and the gate run first, local light model beside the API; whichever passes ships first, local preferred | owner | 2026-11-25 |
+| D13 | Default embedder | The local light model; the API is an optional alternative, not paid by default | owner | 2026-11-25 |
+| D14 | Languages | A model good in Spanish and English; the gate weighs Spanish most (the owner's and family's documents), English still checked for open-source users | owner | 2026-11-25 |
+| D15 | Questions with vectors | Questions (VFS-28) retrieve with vectors as soon as 29c ships, through the fused `retrieve` (R11); no change of their own | owner | 2026-11-25 |
 
 ## Expected PRs
 
 | PR | Scope | ACs | Effort |
 |---|---|---|---|
-| 29a | `vectors.db`, the API `Embedder` (OpenAI, Voyage), per-folder consent and cost, RRF in `retrieve`, fallback, «relacionado por tema», golden-set gate | AC-1–AC-15 | 6–8 days **[estimate]** |
-| 29b | Local model spike on the Mac and the target PC; pick model and runtime | R16 | 3–4 days **[estimate]** |
-| 29c | Local model download, check and child-process `Embedder` | R16, AC-12 | 4–6 days **[estimate]** |
+| 29b (first) | Local model spike on the Mac and the target PC, and the gate run with an API model beside it; pick the local model | R16, AC-12 | 3–4 days **[estimate]** |
+| 29c | `vectors.db`, the local light-model `Embedder` (default, D13), RRF in `retrieve`, fallback, «relacionado por tema» | R1, R1a, R4–R7, R10–R16; AC-1, AC-4–AC-6, AC-9–AC-14 | 5–7 days **[estimate]** |
+| 29a (optional, later) | The API `Embedder` (OpenAI, Voyage), its key, per-folder consent and cost, batch first pass | R2, R3, R7a, R8, R9; AC-2, AC-3, AC-7, AC-8, AC-15 | 3–4 days **[estimate]** |
 
 ## Open questions
 
