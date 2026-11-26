@@ -42,3 +42,50 @@ fn migration_leaves_counts_unknown() {
         .unwrap();
     assert_eq!((version, index, queued), (db::SCHEMA_VERSION, 1, 0));
 }
+
+/// VFS-50 AC-8 (R6): an incremental pass moves a ready root's file count by the files it
+/// added and removed, without recounting (a count set off on purpose stays off by the same
+/// amount), and the next full walk's recount sets it right.
+#[test]
+fn incremental_pass_shifts_the_counts() {
+    use std::sync::atomic::AtomicBool;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Fotos");
+    std::fs::create_dir_all(root.join("viaje")).unwrap();
+    for i in 0..4 {
+        std::fs::write(root.join(format!("viaje/f{i}.jpg")), b"x").unwrap();
+    }
+    let vfs = Vfs::open(&dir.path().join("index.db")).unwrap();
+    vfs.add_root(&root).unwrap();
+    vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    let r = vfs.list_roots().unwrap().remove(0);
+    assert_eq!((r.files, r.dirs), (4, 2));
+    // Off by 100 on purpose: a recount would put it back to the truth.
+    db::open_rw(&dir.path().join("index.db"))
+        .unwrap()
+        .execute("UPDATE roots SET files_count = files_count + 100", [])
+        .unwrap();
+    for i in 4..7 {
+        std::fs::write(root.join(format!("viaje/f{i}.jpg")), b"x").unwrap();
+    }
+    std::fs::remove_file(root.join("viaje/f0.jpg")).unwrap();
+    std::fs::create_dir(root.join("nueva")).unwrap();
+    let canonical = std::path::PathBuf::from(&r.path);
+    vfs.mark_dirty(&[canonical.join("viaje"), canonical.clone()])
+        .unwrap();
+    vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    let r = vfs.list_roots().unwrap().remove(0);
+    assert_eq!((r.files, r.dirs), (106, 3));
+    // A full walk, queued as the indexer queues one (status scanning, root folder deep).
+    db::open_rw(&dir.path().join("index.db"))
+        .unwrap()
+        .execute_batch(&format!(
+            "UPDATE roots SET status = {}; UPDATE dirs SET scan_state = {} WHERE rel_path = '';",
+            vfs_core::RootStatus::Scanning.code(),
+            ingest::ScanState::PendingDeep as i64
+        ))
+        .unwrap();
+    vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    let r = vfs.list_roots().unwrap().remove(0);
+    assert_eq!((r.files, r.dirs), (6, 3));
+}

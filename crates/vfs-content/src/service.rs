@@ -176,6 +176,9 @@ struct State {
     /// deletes it and leaves the outcome in `deleted`.
     delete: bool,
     deleted: Option<Result<(), String>>,
+    /// The first and the last report of changed names not yet acted on (VFS-50 R3).
+    names_first: Option<Instant>,
+    names_last: Option<Instant>,
 }
 
 /// The app's background content indexer.
@@ -225,6 +228,8 @@ impl ContentService {
                 running: false,
                 delete: false,
                 deleted: None,
+                names_first: None,
+                names_last: None,
             }),
             wake: Condvar::new(),
             stop_run: Arc::new(AtomicBool::new(false)),
@@ -345,8 +350,15 @@ impl ContentService {
 
     /// The name indexer added or changed documents: read them under the same pace (R10).
     pub fn notify_names_changed(&self) {
-        // Only wakes the thread: no settings write, no status event (R2).
-        self.lock().poked = true;
+        // Only wakes the thread: no settings write, no status event (R2). The run waits for
+        // calm (VFS-50 R3).
+        {
+            let mut st = self.lock();
+            let now = Instant::now();
+            st.names_first.get_or_insert(now);
+            st.names_last = Some(now);
+            st.poked = true;
+        }
         self.shared.wake.notify_all();
     }
 
@@ -554,7 +566,31 @@ fn store_version_differs(index_db: &Path) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 struct Signature {
     documents: (i64, i64, f64, i64),
+    roots: Roots,
+}
+
+/// The roots and those passed over (offline or paused), both sorted: cheap to read, so they
+/// are looked at even when no change was reported. A removed root reports no name change
+/// (VFS-50 R5).
+#[derive(Debug, Clone, PartialEq)]
+struct Roots {
+    all: Vec<i64>,
     passed_over: Vec<i64>,
+}
+
+fn roots_now(index_db: &Path) -> Option<Roots> {
+    let conn = Connection::open_with_flags(index_db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let all = conn
+        .prepare("SELECT id FROM roots ORDER BY id")
+        .ok()?
+        .query_map([], |r| r.get::<_, i64>(0))
+        .ok()?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .ok()?;
+    Some(Roots {
+        all,
+        passed_over: indexer::passed_over_roots(index_db).ok()?,
+    })
 }
 
 fn documents_signature(index_db: &Path) -> Option<Signature> {
@@ -578,11 +614,8 @@ fn documents_signature(index_db: &Path) -> Option<Signature> {
             },
         )
         .ok()?;
-    let passed_over = indexer::passed_over_roots(index_db).ok()?;
-    Some(Signature {
-        documents,
-        passed_over,
-    })
+    let roots = roots_now(index_db)?;
+    Some(Signature { documents, roots })
 }
 
 /// Documents in the index, and those the store has processed.
@@ -784,6 +817,51 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             }
             continue;
         }
+        // After a finished run, changed names start a run only once they calm down; a command
+        // (switch-on, resume, retry, rebuild) does not wait (VFS-50 R3). With no change
+        // reported, only the folders passed over and the one retry of a timed-out document can
+        // bring work: the documents signature, a scan of every file row, is not computed
+        // (VFS-50 R5).
+        if let Some((sig, at)) = finished_at
+            .as_ref()
+            .filter(|_| !(retry || rebuild || resumed))
+        {
+            let (first, last) = {
+                let st = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+                (st.names_first, st.names_last)
+            };
+            match first {
+                Some(first) => {
+                    let due = (last.unwrap_or(first) + cfg.pace.names_quiet)
+                        .min(first + cfg.pace.names_max_wait);
+                    let now = Instant::now();
+                    if now < due {
+                        if wait(&shared, Some(due - now)) {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                None => {
+                    let same_roots = roots_now(&cfg.index_db).as_ref() == Some(&sig.roots);
+                    if same_roots
+                        && (at.elapsed() < IDLE_RECHECK
+                            || !indexer::has_timeout_retries(&cfg.index_db))
+                    {
+                        set_phase(&shared, Phase::Finished);
+                        if wait(&shared, Some(IDLE_RECHECK)) {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        {
+            let mut st = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            st.names_first = None;
+            st.names_last = None;
+        }
         // After a finished run, a look with no document added, removed or changed reads
         // nothing: no queue rebuild, no writes, no log records. The periodic look runs only for
         // the one retry of a timed-out document (VFS-2 R3).
@@ -810,17 +888,15 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             st.running = true;
         }
         let _ = std::fs::write(&marker, b"");
-        let (done, total) = progress_counts(&cfg.index_db);
-        {
-            let mut st = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-            st.status.done = done;
-            st.status.total = total;
-        }
-        set_phase(&shared, Phase::Reading);
-        shared
-            .events
-            .diag(&format!("content run start: {done} of {total} documents"));
+        // The status changes only once the run knows how much it reads (VFS-50 R4).
+        let counts = progress_counts(&cfg.index_db);
+        shared.events.diag(&format!(
+            "content run start: {} of {} documents",
+            counts.0, counts.1
+        ));
         let mut gate = AppGate {
+            counts,
+            silent: false,
             shared: &shared,
             probes: probes.as_mut(),
             pace: &mut pace,
@@ -832,7 +908,7 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
             admitted: None,
         };
         let result = indexer::run_with(&cfg.index_db, &cfg.index, &shared.stop_run, &mut gate);
-        let (rate, failures) = (gate.per_hour(), gate.failures.clone());
+        let (rate, failures, silent) = (gate.per_hour(), gate.failures.clone(), gate.silent);
         drop(gate);
         // A run that returns, finished or stopped, ended cleanly (R11).
         let _ = std::fs::remove_file(&marker);
@@ -866,6 +942,17 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                 } else if sum.remaining == 0 && !shared.stop_run.load(Ordering::SeqCst) {
                     finished_at = signature.clone().map(|sig| (sig, Instant::now()));
                     set_phase(&shared, Phase::Finished);
+                    // A silent run sent nothing, and its phase was already `finished`: its new
+                    // counts go out once (VFS-50 R4).
+                    if silent {
+                        let status = shared
+                            .state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .status
+                            .clone();
+                        shared.events.status(&status);
+                    }
                     if wait(&shared, Some(IDLE_RECHECK)) {
                         break;
                     }
@@ -908,18 +995,23 @@ fn diag_stop(
         .unwrap_or_else(|| "-".into());
     let fails: Vec<String> = failures.iter().map(|(k, n)| format!("{k}={n}")).collect();
     shared.events.diag(&format!(
-        "content run stop ({reason}): {} indexed, {} skipped, {} failed, {} left; {rate} documents/hour; failures [{}]; store {store_bytes} bytes",
+        "content run stop ({reason}): {} indexed, {} skipped, {} failed, {} left; {rate} documents/hour; failures [{}]; store {store_bytes} bytes; prep_ms={}",
         sum.indexed,
         sum.skipped,
         sum.failed,
         sum.remaining,
-        fails.join(", ")
+        fails.join(", "),
+        sum.prep_ms
     ));
 }
 
 /// The gate the service runs the engine with: pace (R6, R7), progress (R8), diagnostics.
 struct AppGate<'a> {
     shared: &'a Shared,
+    /// Documents processed and in the index when the run began, shown once it reads.
+    counts: (u64, u64),
+    /// A small run: the shown status is left alone until it ends (VFS-50 R4).
+    silent: bool,
     probes: &'a mut dyn Probes,
     pace: &'a mut Pace,
     /// Worker time spent on documents in this run, for the rate over working time.
@@ -976,7 +1068,7 @@ impl Gate for AppGate<'_> {
         match decision {
             Decision::Read => {
                 self.admitted = Some(Instant::now());
-                if self.waiting.take().is_some() {
+                if self.waiting.take().is_some() && !self.silent {
                     set_phase(self.shared, Phase::Reading);
                 }
                 Admit::Read
@@ -987,7 +1079,9 @@ impl Gate for AppGate<'_> {
                 let kind = WaitKind::from(reason);
                 if self.waiting != Some(kind) {
                     self.waiting = Some(kind);
-                    set_phase(self.shared, Phase::Waiting { reason: kind });
+                    if !self.silent {
+                        set_phase(self.shared, Phase::Waiting { reason: kind });
+                    }
                     self.shared
                         .events
                         .diag(&format!("content run waits: {kind:?}"));
@@ -995,6 +1089,28 @@ impl Gate for AppGate<'_> {
                 Admit::Wait(d)
             }
         }
+    }
+
+    fn run_started(&mut self, queued: u64) {
+        // Silent only over a calm status: a stop or a wait on screen gives way to «Leyendo».
+        let calm = matches!(
+            self.shared
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .status
+                .phase,
+            Phase::Finished
+        );
+        self.silent = calm && queued <= self.shared.cfg.pace.silent_max;
+        if self.silent {
+            return;
+        }
+        {
+            let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            (st.status.done, st.status.total) = self.counts;
+        }
+        set_phase(self.shared, Phase::Reading);
     }
 
     fn after_document(&mut self, outcome: OutcomeKind, worker_ms: u64) {
@@ -1014,6 +1130,9 @@ impl Gate for AppGate<'_> {
         }
         if !matches!(outcome, OutcomeKind::Indexed) {
             *self.failures.entry(outcome.to_string()).or_default() += 1;
+        }
+        if self.silent {
+            return;
         }
         let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         st.status.done = (st.status.done + 1).min(st.status.total);

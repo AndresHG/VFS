@@ -617,10 +617,12 @@ fn finalize_root(conn: &Connection, root: &ActiveRoot, pass: &mut Pass) -> Resul
         return Ok(());
     }
     let tx = begin(conn)?;
-    refresh_counts(&tx, Some(root.id))?;
     if root.status == RootStatus::Ready {
+        // An incremental pass: the pass's own tally, not a recount of every file (VFS-50 R6).
+        shift_counts(&tx, root.id, tally.files_delta)?;
         set_root_status(&tx, root.id, RootStatus::Ready)?;
     } else {
+        refresh_counts(&tx, Some(root.id))?;
         tx.execute(
             "UPDATE roots SET status = ?2, last_full_scan_at = ?3 WHERE id = ?1",
             params![root.id, RootStatus::Ready.code(), now_secs()],
@@ -658,6 +660,19 @@ fn refresh_counts(conn: &Connection, root_id: Option<i64>) -> Result<()> {
            dirs_count = (SELECT COUNT(*) FROM dirs WHERE dirs.root_id = roots.id) \
          WHERE (?1 IS NULL AND status <> ?2) OR id = ?1",
         params![root_id, RootStatus::Ready.code()],
+    )?;
+    Ok(())
+}
+
+/// Moves a ready root's file count by `files_delta` (added minus removed in an incremental
+/// pass) and recounts its folders on the `(root_id, rel_path)` index, which reads a few pages;
+/// the files recount reads every file of the root (VFS-50 R6). A full walk still recounts.
+fn shift_counts(conn: &Connection, root_id: i64, files_delta: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE roots SET files_count = max(files_count + ?2, 0), \
+           dirs_count = (SELECT COUNT(*) FROM dirs WHERE dirs.root_id = ?1) \
+         WHERE id = ?1",
+        params![root_id, files_delta],
     )?;
     Ok(())
 }

@@ -99,7 +99,7 @@ impl Setup {
             index_db: self.db.clone(),
             data_dir: self.data.clone(),
             index: IndexOptions::new(env!("CARGO_BIN_EXE_vfs-extract"), worker_args),
-            pace: PaceConfig::default(),
+            pace: immediate(),
         }
     }
 
@@ -115,6 +115,17 @@ impl Setup {
 
     fn openlog(&self) -> PathBuf {
         self.tmp.path().join("opens.log")
+    }
+}
+
+/// The pace with VFS-50's calm wait and silent runs off, so a change notice starts a run at
+/// once and every run shows its progress, as the tests written before VFS-50 expect.
+fn immediate() -> PaceConfig {
+    PaceConfig {
+        names_quiet: Duration::ZERO,
+        names_max_wait: Duration::ZERO,
+        silent_max: 0,
+        ..PaceConfig::default()
     }
 }
 
@@ -671,4 +682,193 @@ fn switch_off_and_on_resumes_a_paused_run() {
     assert!(st.settings.enabled && !st.settings.paused, "{st:?}");
     let fin = wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
     assert_eq!((fin.done, fin.total), (8, 8), "{fin:?}");
+}
+
+/// Adds `n` new letters to the first root and records them in the index, as a name pass
+/// would.
+fn add_letters(s: &Setup, tag: &str, n: usize) {
+    for i in 0..n {
+        std::fs::write(
+            s.root.join(format!("cartas/{tag}{i:03}.txt")),
+            format!("Carta {tag} {i} sobre el molino del río."),
+        )
+        .unwrap();
+    }
+    let root = PathBuf::from(&s.vfs.list_roots().unwrap()[0].path);
+    s.vfs.mark_dirty(&[root.join("cartas")]).unwrap();
+    s.vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+}
+
+fn run_starts(rec: &Recorder) -> usize {
+    rec.diag
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.starts_with("content run start"))
+        .count()
+}
+
+/// VFS-50 AC-3 (R3): after a finished run, changed names start a run only once no further
+/// change has been reported for the calm time, and then exactly one.
+#[test]
+fn changed_names_wait_for_calm() {
+    let s = setup(2);
+    let mut cfg = s.config(Vec::new());
+    cfg.pace.names_quiet = Duration::from_millis(1500);
+    cfg.pace.names_max_wait = Duration::from_secs(60);
+    let (svc, rec) = s.start(cfg, IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    assert_eq!(run_starts(&rec), 1);
+    add_letters(&s, "a", 1);
+    svc.notify_names_changed();
+    std::thread::sleep(Duration::from_millis(800));
+    add_letters(&s, "b", 1);
+    let second = Instant::now();
+    svc.notify_names_changed();
+    std::thread::sleep(Duration::from_millis(1000));
+    assert_eq!(
+        run_starts(&rec),
+        1,
+        "a run started before the names calmed down"
+    );
+    wait_for(&svc, "both read", |st| {
+        st.done == 4 && st.phase == Phase::Finished
+    });
+    assert!(second.elapsed() >= Duration::from_millis(1500));
+    assert_eq!(run_starts(&rec), 2);
+}
+
+/// VFS-50 AC-4 (R3): names that never calm down still start a run once the longest wait
+/// has passed since the first change.
+#[test]
+fn changed_names_never_wait_past_the_limit() {
+    let s = setup(2);
+    let mut cfg = s.config(Vec::new());
+    cfg.pace.names_quiet = Duration::from_secs(60);
+    cfg.pace.names_max_wait = Duration::from_millis(1500);
+    let (svc, rec) = s.start(cfg, IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    add_letters(&s, "a", 1);
+    let first = Instant::now();
+    while run_starts(&rec) < 2 {
+        assert!(
+            first.elapsed() < Duration::from_secs(20),
+            "no run while names kept changing"
+        );
+        svc.notify_names_changed();
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(first.elapsed() >= Duration::from_millis(1500));
+}
+
+/// VFS-50 AC-5 (R4): a run for a few new documents sends no reading or waiting status, and
+/// one finished status with the new counts at its end.
+#[test]
+fn small_run_leaves_the_status_alone() {
+    let s = setup(2);
+    let mut cfg = s.config(Vec::new());
+    cfg.pace.silent_max = 20;
+    let (svc, rec) = s.start(cfg, IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    let before = rec.statuses.lock().unwrap().len();
+    add_letters(&s, "n", 3);
+    svc.notify_names_changed();
+    wait_for(&svc, "read the new ones", |st| {
+        st.done == 5 && st.phase == Phase::Finished
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let after: Vec<Status> = rec.statuses.lock().unwrap()[before..].to_vec();
+    assert!(
+        after.iter().all(|st| matches!(st.phase, Phase::Finished)),
+        "{after:?}"
+    );
+    assert!(
+        after.iter().any(|st| st.done == 5 && st.total == 5),
+        "{after:?}"
+    );
+}
+
+/// VFS-50 AC-6 (R4): a run with more documents than the silent limit shows «Leyendo».
+#[test]
+fn larger_run_shows_reading() {
+    let s = setup(2);
+    let mut cfg = s.config(Vec::new());
+    cfg.pace.silent_max = 2;
+    let (svc, rec) = s.start(cfg, IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    let before = rec.statuses.lock().unwrap().len();
+    add_letters(&s, "m", 5);
+    svc.notify_names_changed();
+    wait_for(&svc, "read the new ones", |st| {
+        st.done == 7 && st.phase == Phase::Finished
+    });
+    let after: Vec<Status> = rec.statuses.lock().unwrap()[before..].to_vec();
+    assert!(
+        after.iter().any(|st| st.phase == Phase::Reading),
+        "{after:?}"
+    );
+}
+
+/// VFS-50 AC-7 (R5): after a finished run with no timed-out document, waking with no change
+/// reported does not compute the documents signature: a change made behind the indexer's back
+/// (never reported) starts no run.
+#[test]
+fn no_signature_without_a_reported_change() {
+    let s = setup(2);
+    let (svc, rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    add_letters(&s, "x", 2);
+    // A command that is not a resume or a retry wakes the loop without a change report.
+    svc.mark_offered();
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(run_starts(&rec), 1, "an unreported change started a run");
+    svc.notify_names_changed();
+    wait_for(&svc, "read once reported", |st| {
+        st.done == 4 && st.phase == Phase::Finished
+    });
+}
+
+/// VFS-50 AC-9 (R7): the run's stop record carries the time spent before the first document.
+#[test]
+fn stop_record_carries_prep_time() {
+    let s = setup(2);
+    let (svc, rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |st| st.phase == Phase::Finished);
+    let all = rec.diag.lock().unwrap().join("\n");
+    let stop = all
+        .lines()
+        .find(|l| l.starts_with("content run stop"))
+        .unwrap_or_default();
+    assert!(
+        stop.split("prep_ms=")
+            .nth(1)
+            .is_some_and(|n| n.trim().parse::<u64>().is_ok()),
+        "{all}"
+    );
+}
+
+/// VFS-50 AC-7 (R5): a removed root reports no name change, yet the service sees the roots
+/// change and starts a run that forgets its documents.
+#[test]
+fn removed_root_starts_a_run_without_a_report() {
+    let s = setup(2);
+    let (_, root_id) = s.second_root();
+    let (svc, rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished with both", |st| {
+        st.phase == Phase::Finished && st.done == 4
+    });
+    s.vfs.remove_root(root_id).unwrap();
+    s.vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    svc.mark_offered();
+    wait_for(&svc, "forgot the removed root", |st| {
+        st.phase == Phase::Finished && st.total == 2
+    });
+    assert_eq!(run_starts(&rec), 2);
 }

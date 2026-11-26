@@ -98,6 +98,9 @@ pub struct RunSummary {
     pub worker_ms: u64,
     pub worker_starts: u64,
     pub elapsed_ms: u64,
+    /// Time spent rebuilding the queue and mirroring the states before the first document
+    /// (VFS-50 R7).
+    pub prep_ms: u64,
     /// Outcome counts by kind, unread skips included (serialized as `indexed`,
     /// `skipped:password`, `failed:timeout`, ...).
     #[serde(serialize_with = "reasons_as_strings")]
@@ -262,6 +265,37 @@ fn forget(conn: &Connection, file_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Store rows whose file left the index, changed, or whose skip no longer holds. It reads
+/// `c.docs` through `docs_meta`, never the rows with their text (VFS-50 R2).
+const STALE_SQL: &str = "SELECT d.file_id FROM c.docs d LEFT JOIN files f ON f.id = d.file_id
+     WHERE f.id IS NULL OR f.dir_id <> d.dir_id OR f.name <> d.name
+        OR f.size <> d.size OR f.mtime <> d.mtime
+        OR (d.state = ?1 AND d.reason = ?2 AND f.size <= ?3)
+        OR (d.state = ?1 AND d.reason = ?4 AND f.flags & ?5 = 0)";
+
+/// The mirror's statements for the window of file ids `(?lo, ?hi]`. Every subquery on the
+/// store is bounded to the window too: unbounded, SQLite plans each one as a pass over the
+/// whole store, once per window (VFS-50 R1).
+const MIRROR_PROCESSED_SQL: &str =
+    "UPDATE files SET content_state = (SELECT state FROM c.docs d WHERE d.file_id = files.id)
+     WHERE id > ?1 AND id <= ?2
+       AND id IN (SELECT file_id FROM c.docs WHERE file_id > ?1 AND file_id <= ?2)
+       AND content_state <> (SELECT state FROM c.docs d WHERE d.file_id = files.id)";
+const MIRROR_QUEUED_SQL: &str = "UPDATE files SET content_state = ?1
+     WHERE id > ?2 AND id <= ?3
+       AND id IN (SELECT file_id FROM c.queue WHERE file_id > ?2 AND file_id <= ?3)
+       AND content_state <> ?1";
+
+fn mirror_none_sql(root_ok: &str) -> String {
+    format!(
+        "UPDATE files SET content_state = ?1
+         WHERE id > ?3 AND id <= ?4 AND kind = ?2 AND content_state <> ?1
+           AND id NOT IN (SELECT file_id FROM c.docs WHERE file_id > ?3 AND file_id <= ?4)
+           AND id NOT IN (SELECT file_id FROM c.queue WHERE file_id > ?3 AND file_id <= ?4)
+           AND {root_ok}"
+    )
+}
+
 /// Rebuilds the queue in `content.db` from `files` and `c.docs`. Documents of offline or
 /// paused roots (`offline`) are left out and keep their state. Returns the files queued and the counts of documents
 /// skipped without reading, by reason.
@@ -281,13 +315,7 @@ fn enqueue(
     // found. So are skips that no longer hold: a `too_large` file now within the budget,
     // and a `cloud` file whose index flag is clear (the pre-open check decides again).
     let stale: Vec<i64> = {
-        let mut st = tx.prepare(
-            "SELECT d.file_id FROM c.docs d LEFT JOIN files f ON f.id = d.file_id
-             WHERE f.id IS NULL OR f.dir_id <> d.dir_id OR f.name <> d.name
-                OR f.size <> d.size OR f.mtime <> d.mtime
-                OR (d.state = ?1 AND d.reason = ?2 AND f.size <= ?3)
-                OR (d.state = ?1 AND d.reason = ?4 AND f.flags & ?5 = 0)",
-        )?;
+        let mut st = tx.prepare(STALE_SQL)?;
         let rows = st.query_map(
             params![
                 skipped,
@@ -380,30 +408,17 @@ fn mirror(conn: &mut Connection, offline: &HashSet<i64>) -> Result<()> {
     while lo < max_id {
         let hi = lo + MIRROR_WINDOW;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "UPDATE files SET content_state = (SELECT state FROM c.docs d WHERE d.file_id = files.id)
-             WHERE id > ?1 AND id <= ?2 AND id IN (SELECT file_id FROM c.docs)
-               AND content_state <> (SELECT state FROM c.docs d WHERE d.file_id = files.id)",
-            params![lo, hi],
-        )?;
+        tx.execute(MIRROR_PROCESSED_SQL, params![lo, hi])?;
         // After the processed states: a timeout waiting for its retry is in both and shows
         // as queued.
         tx.execute(
-            "UPDATE files SET content_state = ?1
-             WHERE id > ?2 AND id <= ?3 AND id IN (SELECT file_id FROM c.queue)
-               AND content_state <> ?1",
+            MIRROR_QUEUED_SQL,
             params![ContentState::Queued as i64, lo, hi],
         )?;
         // Documents the store has no word on go back to `none`, except on offline or paused
         // roots, whose documents keep their state (R17; VFS-27 R8).
         tx.execute(
-            &format!(
-                "UPDATE files SET content_state = ?1
-                 WHERE id > ?3 AND id <= ?4 AND kind = ?2 AND content_state <> ?1
-                   AND id NOT IN (SELECT file_id FROM c.docs)
-                   AND id NOT IN (SELECT file_id FROM c.queue)
-                   AND {root_ok}"
-            ),
+            &mirror_none_sql(&root_ok),
             params![ContentState::None as i64, doc, lo, hi],
         )?;
         tx.commit()?;
@@ -614,6 +629,9 @@ pub trait Gate {
     fn before_document(&mut self, path: &Path) -> Admit;
     /// After a document was processed, with its outcome and the worker's time on it.
     fn after_document(&mut self, outcome: OutcomeKind, worker_ms: u64);
+    /// Once the queue is rebuilt and the states mirrored, before the first document, with
+    /// the number of documents queued (VFS-50 R4).
+    fn run_started(&mut self, _queued: u64) {}
 }
 
 /// The gate of [`run`]: reads every document as soon as the last one is done.
@@ -679,6 +697,8 @@ pub fn run_with(
         sum.stop(StopReason::IndexWrite, e.to_string());
         return Ok(finish(sum, &conn, &sup, started));
     }
+    sum.prep_ms = started.elapsed().as_millis() as u64;
+    gate.run_started(queued);
     let analyzer = Analyzer::default();
     let mut batch: Vec<Done> = Vec::new();
     let mut last_commit = Instant::now();
@@ -925,4 +945,67 @@ pub fn stats(index_db: &Path) -> Result<StoreStats> {
         queued: conn.query_row("SELECT count(*) FROM queue", [], |r| r.get::<_, i64>(0))? as u64,
         store_bytes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The query plan of `sql`, one detail line per step.
+    fn plan(conn: &Connection, sql: &str) -> Vec<String> {
+        let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let n = st.parameter_count();
+        let args: Vec<i64> = vec![0; n];
+        st.query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    fn index_with_store() -> (tempfile::TempDir, Connection) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join("index.db");
+        drop(vfs_core::Vfs::open(&db).unwrap());
+        drop(store::open_or_create(&db).unwrap());
+        let conn = store::open_index_rw(&db).unwrap();
+        (tmp, conn)
+    }
+
+    /// VFS-50 AC-1 (R1): each mirror statement reaches the store only by rowid, inside the
+    /// window; no step walks all of `c.docs` or `c.queue` (which unbounded `IN` subqueries
+    /// did once per window).
+    #[test]
+    fn mirror_reads_the_store_only_inside_the_window() {
+        let (_tmp, conn) = index_with_store();
+        let offline: HashSet<i64> = [7].into_iter().collect();
+        for sql in [
+            MIRROR_PROCESSED_SQL.to_string(),
+            MIRROR_QUEUED_SQL.to_string(),
+            mirror_none_sql(&root_ok_sql(&offline, "files")),
+        ] {
+            let steps = plan(&conn, &sql);
+            for step in steps
+                .iter()
+                .filter(|s| s.contains("docs") || s.contains("queue"))
+            {
+                assert!(
+                    step.contains("rowid>? AND rowid<?") || step.contains("rowid=?"),
+                    "{step}\n{steps:#?}\n{sql}"
+                );
+            }
+        }
+    }
+
+    /// VFS-50 AC-2 (R2): the stale-row check reads `c.docs` through `docs_meta`.
+    #[test]
+    fn stale_check_reads_the_covering_index() {
+        let (_tmp, conn) = index_with_store();
+        let steps = plan(&conn, STALE_SQL);
+        assert!(
+            steps
+                .iter()
+                .any(|s| s.contains("SCAN d USING COVERING INDEX docs_meta")),
+            "{steps:#?}"
+        );
+    }
 }
