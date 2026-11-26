@@ -27,7 +27,7 @@ impl log::Log for Capture {
     fn flush(&self) {}
 }
 
-/// VFS-28 AC-11: the R14 line of a question and of a follow-up.
+/// VFS-28 AC-11: the R14 line of a question and of a chat message (VFS-49 R4).
 #[test]
 fn question_log_has_counts_and_no_content() {
     let captured = Arc::new(Mutex::new(String::new()));
@@ -60,6 +60,7 @@ fn question_log_has_counts_and_no_content() {
     let mock = MockServer::start(vec![
         anthropic_rewrite(&rewrite),
         anthropic_answer(std::slice::from_ref(&answer)),
+        anthropic_rewrite(&rewrite),
         anthropic_answer(std::slice::from_ref(&answer)),
     ]);
     let model = model_at(Provider::Anthropic, &mock);
@@ -75,7 +76,7 @@ fn question_log_has_counts_and_no_content() {
     };
     let question = "¿Qué glucosa tenía en el análisis de Ramírez?";
     let cancel = CancelToken::new();
-    let mut asked = ask::ask(
+    let asked = ask::ask(
         model.as_ref(),
         &corpus,
         &mut db,
@@ -86,11 +87,13 @@ fn question_log_has_counts_and_no_content() {
         &mut |_| {},
     )
     .unwrap();
-    ask::follow_up(
+    ask::chat_turn(
         model.as_ref(),
+        &corpus,
         &mut db,
-        &mut asked.thread,
         "¿Y la de Ramírez del año anterior?",
+        &asked.thread.turns,
+        &ask::Scope::All,
         &opts,
         &cancel,
         &mut |_| {},
@@ -114,7 +117,7 @@ fn question_log_has_counts_and_no_content() {
     ] {
         assert!(line.contains(field), "{field} missing in {line}");
     }
-    assert!(log.contains("vfs-ai: follow_up "), "{log}");
+    assert!(log.contains("vfs-ai: chat "), "{log}");
     for secret in [
         "Ramírez",
         "glucosa",

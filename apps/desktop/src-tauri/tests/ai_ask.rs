@@ -1,6 +1,6 @@
-//! VFS-28 28d-2: asking at the app layer, over a two-document corpus and the mock provider: the
-//! reply the screen draws, the cap prompt, follow-ups in the thread, the bibliography and the
-//! cancel. No test needs a real key or the network.
+//! VFS-28 28d-2, VFS-49: asking in a chat at the app layer, over a two-document corpus and the
+//! mock provider: the turn the screen draws, the cap prompt, saved chats, the bibliography and
+//! the cancel. No test needs a real key or the network.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -155,83 +155,11 @@ fn rewrite() -> Rewrite {
     }
 }
 
-/// VFS-28 AC-6 (UI part, R8), AC-8 (UI part, R10), AC-7 (R9), AC-10 (R12): the reply carries
-/// numbered markers, the passages and the documents, its cost and the month's; a follow-up in
-/// the thread is priced and counted; «Bibliografía» lists the cited documents, or all found,
-/// with the pages cited.
-#[test]
-fn ask_follow_up_and_bibliography() {
-    let mock = MockServer::start(vec![
-        anthropic_rewrite(&rewrite()),
-        anthropic_answer(&[block(
-            "La fianza fue de 1.200 €.",
-            &[(0, PDF_TEXT), (5, "x")],
-        )]),
-        anthropic_answer(&[block("Por transferencia.", &[(1, "por transferencia")])]),
-    ]);
-    let (_d, ai) = state(&mock);
-    let mut streamed = String::new();
-    let view = ai
-        .ask_over(
-            &TwoDocs,
-            1,
-            "¿Cuánto pagué de fianza?",
-            &SearchFilters::default(),
-            false,
-            "es",
-            &mut |t| streamed.push_str(&t),
-        )
-        .unwrap();
-    assert_eq!(streamed, "La fianza fue de 1.200 €.");
-    let v = serde_json::to_value(&view).unwrap();
-    assert_eq!(
-        v["reply"]["blocks"][0]["citations"],
-        serde_json::json!([{"passage": 0, "marker": 1}]),
-        "the citation to an unsent passage is dropped"
-    );
-    assert_eq!(v["reply"]["notFound"], false);
-    assert_eq!(v["sources"][0]["pages"], serde_json::json!([4]));
-    assert_eq!(v["documents"][1]["name"], "Recibo.docx");
-    let first_cost = v["reply"]["costNano"].as_i64().unwrap();
-    assert!(first_cost > 0);
-    assert_eq!(v["reply"]["monthNano"].as_i64().unwrap(), first_cost);
-    assert!(
-        v.to_string().find("/Archivo").is_none(),
-        "no folder reaches the view"
-    );
-
-    let cited = ai.bibliography(view.thread_id, false).unwrap();
-    assert_eq!(cited.len(), 1);
-    assert_eq!(cited[0].authors, ["Ana Ruiz"]);
-    assert_eq!((cited[0].year, cited[0].year_from_file), (2021, false));
-    assert_eq!(cited[0].pages, [4]);
-
-    let follow = ai
-        .follow_up_in(
-            view.thread_id,
-            2,
-            "¿Cómo se pagó?",
-            false,
-            "es",
-            &mut |_| {},
-        )
-        .unwrap();
-    assert_eq!(follow.blocks[0].citations[0].marker, 1);
-    assert_eq!(follow.month_nano, first_cost + follow.cost_nano);
-    let cited = ai.bibliography(view.thread_id, false).unwrap();
-    assert_eq!(
-        cited.len(),
-        2,
-        "the follow-up's citation joins the bibliography"
-    );
-    assert!(cited[1].authors.is_empty() && cited[1].year_from_file);
-    assert_eq!(ai.bibliography(view.thread_id, true).unwrap().len(), 2);
-}
-
-/// VFS-28 AC-8 (UI part, R10): with the cap reached, asking rejects with `cap_reached` and sends
-/// nothing; confirmed, it asks.
+/// VFS-28 AC-8 (UI part, R10): with the cap reached, a chat message rejects with
+/// `cap_reached` and sends nothing; confirmed, it asks, and no chat is kept for the refusal.
 #[test]
 fn cap_reached_then_confirmed() {
+    use vfs_ai::ask::Scope;
     let mock = MockServer::start(vec![
         anthropic_rewrite(&rewrite()),
         anthropic_answer(&[block("x", &[])]),
@@ -243,11 +171,12 @@ fn cap_reached_then_confirmed() {
         .set_cap(0)
         .unwrap();
     let err = ai
-        .ask_over(
+        .chat_send_over(
             &TwoDocs,
             1,
+            None,
+            &Scope::All,
             "q",
-            &SearchFilters::default(),
             false,
             "es",
             &mut no_text,
@@ -258,30 +187,20 @@ fn cap_reached_then_confirmed() {
         mock.requests().is_empty(),
         "nothing is sent before confirmation"
     );
-    let view = ai
-        .ask_over(
+    assert!(ai.chats().unwrap().is_empty());
+    let sent = ai
+        .chat_send_over(
             &TwoDocs,
             2,
+            None,
+            &Scope::All,
             "q",
-            &SearchFilters::default(),
             true,
             "es",
             &mut no_text,
         )
         .unwrap();
-    assert!(view.reply.not_found);
-}
-
-/// VFS-28 R9, D3: a follow-up in an unknown thread says so; nothing is kept between runs.
-#[test]
-fn unknown_thread_is_reported() {
-    let mock = MockServer::start(vec![]);
-    let (_d, ai) = state(&mock);
-    let err = ai
-        .follow_up_in(42, 1, "q", false, "es", &mut |_| {})
-        .unwrap_err();
-    assert_eq!(err.code, "no_thread");
-    assert_eq!(ai.bibliography(42, true).unwrap_err().code, "no_thread");
+    assert!(sent.turn.not_found);
 }
 
 /// VFS-28 R13 «Cancelar»: cancelling a streaming answer stops it with `cancelled`, the question
@@ -296,11 +215,12 @@ fn cancel_stops_a_streaming_answer() {
     assert!(!ai.cancel(7), "nothing is running yet");
     let mut cancelled = false;
     let err = ai
-        .ask_over(
+        .chat_send_over(
             &TwoDocs,
             7,
+            None,
+            &vfs_ai::ask::Scope::All,
             "q",
-            &SearchFilters::default(),
             false,
             "es",
             &mut |_| {
@@ -311,6 +231,10 @@ fn cancel_stops_a_streaming_answer() {
     assert!(cancelled);
     assert_eq!(err.code, "cancelled");
     assert!(!ai.cancel(7), "the finished question is forgotten");
+    assert!(
+        ai.chats().unwrap().is_empty(),
+        "no chat is kept for a cancelled message"
+    );
     assert!(
         ai.status().unwrap().month_nano > 0,
         "the cancelled answer is priced"

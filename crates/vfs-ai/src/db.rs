@@ -366,7 +366,7 @@ impl AiDb {
         at: &DateTime<Local>,
     ) -> rusqlite::Result<i64> {
         let tx = self.conn.transaction()?;
-        let now = at.to_rfc3339();
+        let now = utc(at);
         tx.execute(
             "INSERT INTO chats (title, created_at, updated_at, scope) VALUES (?1, ?2, ?2, ?3)",
             params![title, now, scope],
@@ -378,21 +378,22 @@ impl AiDb {
     }
 
     /// Appends an answered message to chat `id` and saves the chat's sources choice with it,
-    /// in one transaction (VFS-49 R6, R10). Returns the message's position.
+    /// in one transaction (VFS-49 R6, R10). Returns the message's position, or `None` when the
+    /// chat was deleted.
     pub fn add_turn(
         &mut self,
         id: i64,
         scope: &str,
         turn: &ChatTurnRow,
         at: &DateTime<Local>,
-    ) -> rusqlite::Result<i64> {
+    ) -> rusqlite::Result<Option<i64>> {
         let tx = self.conn.transaction()?;
         let changed = tx.execute(
             "UPDATE chats SET updated_at = ?2, scope = ?3 WHERE id = ?1",
-            params![id, at.to_rfc3339(), scope],
+            params![id, utc(at), scope],
         )?;
         if changed == 0 {
-            return Err(rusqlite::Error::QueryReturnedNoRows);
+            return Ok(None);
         }
         let ord: i64 = tx.query_row(
             "SELECT coalesce(max(ord) + 1, 0) FROM chat_turns WHERE chat_id = ?1",
@@ -401,7 +402,7 @@ impl AiDb {
         )?;
         insert_turn(&tx, id, ord, turn)?;
         tx.commit()?;
-        Ok(ord)
+        Ok(Some(ord))
     }
 
     /// Every chat, latest activity first (VFS-49 R2).
@@ -466,10 +467,12 @@ impl AiDb {
         Ok(())
     }
 
-    /// «Borrar» on one chat (VFS-49 R10). The record and the month's spend stay.
+    /// «Borrar» on one chat (VFS-49 R10). The record and the month's spend stay; the space
+    /// of its text is reclaimed, so what it quoted does not linger in free pages.
     pub fn delete_chat(&self, id: i64) -> rusqlite::Result<()> {
         self.conn.execute("DELETE FROM chats WHERE id = ?1", [id])?;
-        Ok(())
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
     }
 
     /// «Borrar todos los chats» (VFS-49 R10). The record and the month's spend stay.
@@ -480,6 +483,12 @@ impl AiDb {
         self.conn
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
     }
+}
+
+/// A chat's time as RFC 3339 in UTC, so the text order is the time order across a daylight
+/// saving change (VFS-49 R2).
+fn utc(at: &DateTime<Local>) -> String {
+    at.with_timezone(&chrono::Utc).to_rfc3339()
 }
 
 fn insert_turn(

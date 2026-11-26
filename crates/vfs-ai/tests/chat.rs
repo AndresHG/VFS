@@ -276,7 +276,7 @@ fn chats_are_kept_in_ai_db() {
         assert_eq!(
             db.add_turn(new, "{\"kind\":\"all\"}", &row("c"), &at(21))
                 .unwrap(),
-            1
+            Some(1)
         );
         (old, new)
     };
@@ -308,7 +308,7 @@ fn chats_are_kept_in_ai_db() {
         db.chat_turns(old).unwrap().is_empty(),
         "turns go with the chat"
     );
-    assert!(db.add_turn(old, folder, &row("e"), &at(26)).is_err());
+    assert_eq!(db.add_turn(old, folder, &row("e"), &at(26)).unwrap(), None);
 }
 
 /// VFS-49 AC-6 (R10): «Borrar todos los chats» leaves the record and the month's spend;

@@ -1,6 +1,6 @@
 # VFS-49 — The Chat tab: chats beside the search, kept on this PC
 
-- **Status**: approved (owner decisions D1–D5, 2026-11-26)
+- **Status**: implemented (PRs #232, 49b) — owner decisions D1–D5, 2026-11-26
 - **Size**: L (a new table set in `ai.db`, a retrieval change in `vfs-ai` and `vfs-content`,
   and the app's main layout; two PRs)
 - **Links**: [VFS-28](../vfs-28-ask-archive/spec.md) (ask your archive, whose R5, R8 layout,
@@ -39,7 +39,9 @@ not tagged until this ships.
 
 Layout
 
-- R1. THE window SHALL show two tabs at the top, «Buscador» and «Chat». Buscador is today's
+- R1. THE window SHALL show two tabs at the top, «Buscador» and «Chat», beside the search box
+  in Buscador (so the results keep the height VFS-35 promises) and heading the conversation in
+  Chat. Buscador is today's
   screen unchanged but for R13; Chat is R2–R12. Switching tabs SHALL keep each tab's state
   (query, results, scroll, open chat, unsent text), and THE app SHALL reopen on the tab it
   closed on. The «Preguntar» button, the ask drawer and «Repreguntar» SHALL be gone.
@@ -72,9 +74,9 @@ Asking
   IF the document has no readable text, THEN the reply SHALL be the not-found answer.
 - R8. THE conversation SHALL show each question on the right and each answer below it as plain
   text with numbered markers (VFS-28 R7a, R8). Under each answer: one chip per cited source
-  (file name and page) that opens the passage with «Mostrar en carpeta» and «Abrir»; then the
-  model and the cost, «Copiar», «Bibliografía» and «Qué se ha enviado». A not-found answer
-  lists the closest documents as VFS-28 R8 says.
+  (file name and page) that opens the passage with «Mostrar en carpeta»; then the model and the
+  cost, «Copiar» and «Bibliografía». The month's spend shows under the composer. A not-found
+  answer lists the closest documents as VFS-28 R8 says.
 - R9. WHEN the first message of the app's life is sent, THE first-use notice of VFS-28 R6
   SHALL show first, as today.
 
@@ -99,11 +101,11 @@ Without AI
 
 From the search
 
-- R13. A selected search result that is a document SHALL offer «Preguntar sobre este
-  documento» beside «Mostrar en carpeta», and in its context menu. It SHALL switch to the Chat
-  tab with a new chat limited to that document (R6, R7) and its examples («Resúmelo», «¿Qué
-  fechas importantes tiene?», «¿Qué me obliga a hacer?»); nothing opens in the Buscador tab
-  (D4, D5). Under the search box, while AI can answer, a quiet line «Preguntar en el chat:
+- R13. WHILE a document of the name index is the selected result, THE line under the results
+  that shows its location SHALL offer «Preguntar sobre este documento». It SHALL switch to the
+  Chat tab with a new chat limited to that document (R6, R7) and its examples («Resúmelo»,
+  «¿Qué fechas importantes tiene?», «¿Qué me obliga a hacer?»); nothing opens in the Buscador
+  tab (D4, D5). Under the search box, while AI can answer, a quiet line «Preguntar en el chat:
   «<query>»» SHALL start a new chat with the query as its first message.
 
 ## Acceptance scenarios
@@ -179,6 +181,8 @@ Tests cite these ids (`VFS-49 AC-<m>`) in their doc comments.
 | D5 | Layout | Tabs Buscador / Chat; chats on the left; no drawer, no «Repreguntar». | owner | 2026-11-26 |
 | D6 | Follow-ups | Every message retrieves anew; the rewrite sees the earlier questions, the answer the earlier turns. | agent | 2026-11-26 |
 | D7 | Search-to-chat shortcut | A clickable line under the search box, no keyboard hijack: Tab must keep moving focus. | agent | 2026-11-26 |
+| D8 | Where «Preguntar sobre este documento» lives | On the selected result's location line, a real button in the tab order. Mayús+Intro already opens a link's target or a file's copies (VFS-18, VFS-19), so it is not reused. | agent | 2026-11-26 |
+| D9 | The tabs' place | Beside the search box, not on a strip above it: a strip took the height of one result row and broke VFS-35's rows at small windows. | agent | 2026-11-26 |
 
 ## Open questions
 

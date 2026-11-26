@@ -1,8 +1,7 @@
 //! The ask flow (VFS-28 R6–R10, R14), PR 28c: rewrite the question, retrieve under the checked
 //! filters, pick and merge passages, answer from them, check the citations, then record what
 //! was sent and what it cost. A chat message ([`chat_turn`], VFS-49 R4) runs the whole flow
-//! again with the chat's earlier turns as context; the older follow-up reuses the thread's
-//! passages and retrieves nothing.
+//! again with the chat's earlier turns as context.
 //!
 //! Every call blocks; run it off the UI thread.
 
@@ -144,7 +143,7 @@ impl Reply {
     }
 }
 
-/// A question and its follow-ups over the same passages (R9). Kept in memory only (D3).
+/// A question's passages and documents, and the chat's turns so far with this one (VFS-49 R4).
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub provider: Provider,
@@ -537,64 +536,6 @@ impl Corpus for InFile<'_> {
     fn document(&self, file_id: i64, n: u32) -> vfs_content::Result<Option<ContentHit>> {
         self.corpus.document(file_id, n)
     }
-}
-
-/// Asks a follow-up in `thread` (R9): the same passages and the thread so far, nothing
-/// retrieved. Priced, recorded and counted like a question, and stopped by the cap the same
-/// way.
-pub fn follow_up(
-    model: &dyn ChatModel,
-    db: &mut AiDb,
-    thread: &mut Thread,
-    question: &str,
-    opts: &AskOptions,
-    cancel: &CancelToken,
-    on_event: &mut dyn FnMut(AnswerEvent),
-) -> Result<Reply, AskError> {
-    let started = Instant::now();
-    let mut diag = Diag {
-        passages: thread.sources.len(),
-        ..Diag::default()
-    };
-    let result = (|| {
-        check_cap(db, opts)?;
-        let request = AnswerRequest {
-            system_prompt: answer_prompt(opts.lang),
-            passages: thread.passages(),
-            earlier: thread.turns.clone(),
-            question: question.to_owned(),
-            cheap: opts.cheap,
-            model: opts.answer_model,
-        };
-        let (answer, call) = answer_call(model, &request, CallKind::FollowUp, cancel, on_event);
-        let calls: Vec<CallRecord> = call.into_iter().collect();
-        for c in &calls {
-            add(&mut diag, c);
-        }
-        db.record(&SentRecord {
-            asked_at: opts.now,
-            provider: thread.provider,
-            question: question.to_owned(),
-            rewrite: None,
-            passages: thread.sent(),
-            calls: calls.clone(),
-        })?;
-        let answer = answer?;
-        let reply = reply_of(&answer, &thread.sources, &calls);
-        diag.dropped = reply.dropped;
-        thread.turns.push(Turn {
-            question: question.to_owned(),
-            answer: reply.text(),
-        });
-        Ok(reply)
-    })();
-    log_diag(
-        "follow_up",
-        started,
-        &diag,
-        result.as_ref().err().map(AskError::kind),
-    );
-    result
 }
 
 /// The app's [`Corpus`]: content search's [`Searcher`] and the name index's [`Vfs`].

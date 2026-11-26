@@ -46,7 +46,7 @@ pub struct TurnView {
 pub struct ChatSummary {
     pub id: i64,
     pub title: String,
-    /// RFC 3339, local offset: when the chat last got a message.
+    /// RFC 3339 in UTC: when the chat last got a message.
     pub updated_at: String,
     pub scope: Scope,
 }
@@ -219,7 +219,8 @@ impl AiState {
                 .map_err(storage_error)?,
             Some(id) => {
                 db.add_turn(id, &scope_json(scope), &row, &now)
-                    .map_err(|_| api_error(AiErrorCode::NoChat, "chat not found"))?;
+                    .map_err(storage_error)?
+                    .ok_or_else(|| api_error(AiErrorCode::NoChat, "chat not found"))?;
                 id
             }
         };

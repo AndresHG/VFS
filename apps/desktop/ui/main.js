@@ -11,7 +11,7 @@ import { AboutAction, aboutUpdateView, createUpdates } from './updates.js';
 import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js';
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
-import { setupAsk } from './ask.js';
+import { chatReady, setupChat } from './chat.js';
 import { lightDismiss } from './dismiss.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
@@ -36,6 +36,8 @@ import {
 const $ = (id) => document.getElementById(id);
 const PAGE = 100;
 const DEBOUNCE_MS = 60;
+/** The two tabs of the window (VFS-49 R1), remembered across restarts. */
+const WindowTab = Object.freeze({ SEARCH: 'search', CHAT: 'chat' });
 /** The type chips, in display order. */
 const KIND_CHIPS = [
   FileKind.DOCUMENT, FileKind.PHOTO, FileKind.VIDEO, FileKind.AUDIO, FileKind.FOLDER, FileKind.OTHER,
@@ -99,6 +101,9 @@ function main(L) {
   const { S, N } = L;
   document.documentElement.lang = L.lang;
   const store = webStorage();
+  /** The shell answered ai_status (a build with the `ai` feature), and its latest answer. */
+  let chatOn = false;
+  let aiNow = null;
   const state = {
     coreReady: false, // VFS-39 R2: false until wait_core resolves; searches wait for it
     text: '',
@@ -136,6 +141,7 @@ function main(L) {
 
   for (const el of document.querySelectorAll('[data-s]')) el.textContent = S[el.dataset.s];
   for (const el of document.querySelectorAll('[data-s-label]')) el.setAttribute('aria-label', S[el.dataset.sLabel]);
+  for (const el of document.querySelectorAll('[data-s-placeholder]')) el.placeholder = S[el.dataset.sPlaceholder];
   $('q').placeholder = S.searchPlaceholder;
   if (api.isFake) $('dev-badge').hidden = false;
 
@@ -533,6 +539,7 @@ function main(L) {
   q.addEventListener('input', () => {
     state.text = q.value;
     $('q-clear').hidden = !q.value;
+    renderAskLine();
     // VFS-13 R5, R6: a suggestion belongs to its text; it leaves the screen with the keystroke,
     // not with the debounced search, so a click meanwhile never runs the old text. Answers
     // still on their way for the old text are dropped too (their sequence no longer matches).
@@ -551,6 +558,7 @@ function main(L) {
     q.value = '';
     state.text = '';
     $('q-clear').hidden = true;
+    renderAskLine();
     clearTimeout(debounce);
     typedPending = false;
     runSearch();
@@ -1184,6 +1192,9 @@ function main(L) {
   function renderDetails() {
     const d = $('details');
     const hit = state.active >= 0 ? hitAt(state.active) : null;
+    // VFS-49 R13: a document of the name index can open a chat about itself.
+    $('ask-doc').hidden = !(chatOn && hit && hit.source !== Source.BOOKMARKS && !hit.link
+      && !hit.isDir && hit.kind === FileKind.DOCUMENT);
     if (!hit) { d.replaceChildren(); return; }
     if (hit.source === Source.BOOKMARKS) {
       const where = bookmarkPathParts(hit, S.bookmarkRoots).join(PATH_SEPARATOR);
@@ -1390,12 +1401,73 @@ function main(L) {
 
   /* ---------------------------------------------------------------- AI (VFS-28) */
 
-  const ask = setupAsk({
-    api, S, lang: L.lang, $, el, filters, revealFile, toast,
+  const chat = setupChat({
+    api, S, lang: L.lang, $, el, revealFile, toast,
     aiStatus: () => ai.status(), updateAi: (st) => ai.update(st), refreshAi: () => ai.refresh(),
     setCheap: (cheap) => ai.setCheap(cheap),
+    folders: () => state.roots.map((r) => r.path),
+    showChat: () => showView(WindowTab.CHAT),
+    openAiSettings: () => {
+      $('language').value = choiceFor(savedLanguage());
+      refreshContentStore();
+      ai.refresh();
+      setSettingsTab('stab-ai');
+      settingsDialog.showModal();
+    },
   });
-  const ai = setupAiSettings({ api, S, lang: L.lang, $, el, toast, onStatus: (st) => ask.setStatus(st) });
+  const ai = setupAiSettings({
+    api, S, lang: L.lang, $, el, toast,
+    onStatus: (st) => {
+      aiNow = st;
+      chat.setStatus(st);
+      // VFS-49 R1, R12: the tabs show once the shell answers ai_status, key or not.
+      if (!chatOn) {
+        chatOn = true;
+        $('views').hidden = false;
+        showView(readPref(webStorage(), PrefKey.VIEW, Object.values(WindowTab), WindowTab.SEARCH));
+      }
+      renderAskLine();
+      renderDetails();
+    },
+  });
+
+  /* ---------------------------------------------------------------- Buscador / Chat (VFS-49) */
+
+  function showView(view) {
+    const isChat = view === WindowTab.CHAT;
+    // One tablist for both tabs: it sits in the shown tab's header.
+    if (isChat) $('chat-head').prepend($('views'));
+    else document.querySelector('#app > .top').prepend($('views'));
+    $('app').hidden = isChat;
+    $('chat').hidden = !isChat;
+    for (const [id, on] of [['view-search', !isChat], ['view-chat', isChat]]) {
+      $(id).setAttribute('aria-selected', String(on));
+      $(id).tabIndex = on ? 0 : -1;
+    }
+    writePref(webStorage(), PrefKey.VIEW, view);
+    if (isChat) chat.refreshScopes();
+  }
+  $('view-search').addEventListener('click', () => { showView(WindowTab.SEARCH); q.focus(); });
+  $('view-chat').addEventListener('click', () => { showView(WindowTab.CHAT); chat.focus(); });
+  $('views').addEventListener('keydown', (e) => {
+    const next = { ArrowLeft: WindowTab.SEARCH, Home: WindowTab.SEARCH, ArrowRight: WindowTab.CHAT, End: WindowTab.CHAT }[e.key];
+    if (!next) return;
+    e.preventDefault();
+    showView(next);
+    $(next === WindowTab.CHAT ? 'view-chat' : 'view-search').focus();
+  });
+
+  /** VFS-49 R13: «Preguntar en el chat: «…»» under the search box while the chat can answer. */
+  function renderAskLine() {
+    const text = q.value.trim();
+    $('ask-line').hidden = !(text && chatReady(aiNow));
+    if (text) $('ask-line-text').textContent = S.askLine(text);
+  }
+  $('ask-line').addEventListener('click', () => chat.askNew(q.value.trim()));
+  $('ask-doc').addEventListener('click', () => {
+    const hit = state.active >= 0 ? hitAt(state.active) : null;
+    if (hit) chat.askAboutDocument(hit.id, hit.name);
+  });
 
   /* ---------------------------------------------------------------- folder panel */
 

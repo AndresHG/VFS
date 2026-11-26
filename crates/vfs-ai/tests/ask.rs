@@ -448,81 +448,7 @@ fn answer_without_valid_citations_is_not_found() {
     assert_eq!(asked.thread.documents[0].name, "D1.pdf");
 }
 
-/// VFS-28 AC-7 (R9): a follow-up carries the same passages and the earlier question and
-/// answer, retrieves nothing, and is recorded and counted in the month total.
-#[test]
-fn follow_up_reuses_the_passages_and_is_recorded() {
-    let corpus = quoted_docs();
-    let (_d, mut db) = db();
-    let first = block(
-        "La fianza fue de 1.200 €.",
-        &[(0, "La fianza asciende a 1.200 euros.")],
-    );
-    let mock = MockServer::start(vec![
-        anthropic_rewrite(&rewrite(&["fianza"], &[])),
-        anthropic_answer(std::slice::from_ref(&first)),
-        anthropic_answer(&[block(
-            "Se pagó con el recibo.",
-            &[(2, "Recibí 1.200 euros")],
-        )]),
-    ]);
-    let model = model_at(Provider::Anthropic, &mock);
-    let o = opts(Provider::Anthropic);
-    let cancel = CancelToken::new();
-    let mut asked = ask::ask(
-        model.as_ref(),
-        &corpus,
-        &mut db,
-        "¿Cuánto pagué de fianza?",
-        &SearchFilters::default(),
-        &o,
-        &cancel,
-        &mut |_| {},
-    )
-    .unwrap();
-    let retrieves = corpus.calls.borrow().len();
-    let reply = ask::follow_up(
-        model.as_ref(),
-        &mut db,
-        &mut asked.thread,
-        "¿Y cómo se pagó?",
-        &o,
-        &cancel,
-        &mut |_| {},
-    )
-    .unwrap();
-    assert_eq!(
-        corpus.calls.borrow().len(),
-        retrieves,
-        "a follow-up retrieves nothing"
-    );
-    assert_eq!(reply.blocks[0].citations[0].marker, 1);
-
-    let reqs: Vec<serde_json::Value> = mock
-        .requests()
-        .iter()
-        .map(|r| r.json())
-        .filter(|b| b["stream"] == true)
-        .collect();
-    assert_eq!(sent(&reqs[0]), sent(&reqs[1]), "same passages");
-    let msgs = reqs[1]["messages"].as_array().unwrap();
-    assert_eq!(msgs.len(), 3);
-    assert_eq!(msgs[1]["content"], "La fianza fue de 1.200 €.");
-    assert_eq!(msgs[2]["content"], "¿Y cómo se pagó?");
-
-    let records = db.records().unwrap();
-    assert_eq!(records.len(), 2);
-    assert_eq!(records[1].question, "¿Y cómo se pagó?");
-    assert_eq!(records[1].rewrite, None);
-    assert_eq!(records[1].calls[0].kind, CallKind::FollowUp);
-    assert_eq!(records[1].passages, records[0].passages);
-    let total: i64 = records.iter().map(|r| r.cost_nano).sum();
-    assert_eq!(db.month_total(&o.now).unwrap(), total);
-    assert_eq!(asked.thread.turns.len(), 2);
-}
-
-/// VFS-28 R9, R10: with the month's cap reached, a question and a follow-up stop until the
-/// user confirms.
+/// VFS-28 R10: with the month's cap reached, a question stops until the user confirms.
 #[test]
 fn cap_reached_asks_for_confirmation() {
     let corpus = quoted_docs();
@@ -542,29 +468,17 @@ fn cap_reached_asks_for_confirmation() {
     let model = model_at(Provider::Anthropic, &mock);
     let mut o = opts(Provider::Anthropic);
     o.over_cap_confirmed = true;
-    let cancel = CancelToken::new();
-    let mut asked = ask::ask(
+    ask::ask(
         model.as_ref(),
         &corpus,
         &mut db,
         "q",
         &SearchFilters::default(),
         &o,
-        &cancel,
+        &CancelToken::new(),
         &mut |_| {},
     )
     .unwrap();
-    o.over_cap_confirmed = false;
-    let r = ask::follow_up(
-        model.as_ref(),
-        &mut db,
-        &mut asked.thread,
-        "q2",
-        &o,
-        &cancel,
-        &mut |_| {},
-    );
-    assert!(matches!(r, Err(AskError::CapReached(_))));
 }
 
 /// VFS-28 R10: an answer cancelled mid-stream is recorded, priced at the tokens reported.
