@@ -129,7 +129,7 @@ fn copies_send_each_text_once() {
 /// text is sent twice across the two runs.
 #[test]
 fn a_killed_run_resumes_without_resending() {
-    let docs: Vec<String> = (0..5).map(|i| long_text(&format!("Doc {i}"), 2)).collect();
+    let docs: Vec<String> = (0..50).map(|i| long_text(&format!("Doc {i}"), 4)).collect();
     let refs: Vec<(i64, &str)> = docs
         .iter()
         .enumerate()
@@ -242,8 +242,9 @@ fn a_new_set_is_not_complete_while_documents_wait() {
     assert_eq!(s.count(set_a).unwrap(), 0);
 }
 
-/// VFS-29 R6, R11: stored vectors read back as written: the sign bits, the int8 row and its
-/// scale, which rescore close to the float dot product; a read-only open sees them.
+/// VFS-29 R6, R11: stored vectors read back as written: the sign bits around the set's mean,
+/// the int8 row and its scale, which rescore close to the float dot product; a read-only open
+/// sees them.
 #[test]
 fn stored_rows_read_back_for_the_rescore() {
     let dir = tempfile::tempdir().unwrap();
@@ -257,17 +258,62 @@ fn stored_rows_read_back_for_the_rescore() {
         .map(|t| (store::text_hash(t), fake_vector(t, DIM)))
         .collect();
     s.insert(set, &batch).unwrap();
-    let rows = Store::open_ro(&db).unwrap().unwrap().rows(set).unwrap();
+    let ro = Store::open_ro(&db).unwrap().unwrap();
+    let rows = ro.rows(set).unwrap();
     assert_eq!(rows.len(), 2);
+    // The first batch fixes the set's mean: the mean of its vectors.
+    let mean = ro.mean(set).unwrap().unwrap();
+    for (d, m) in mean.iter().enumerate() {
+        let want = batch.iter().map(|(_, v)| v[d]).sum::<f32>() / 2.0;
+        assert!((m - want).abs() < 1e-6);
+    }
     let q = fake_vector("factura del dentista", DIM);
     for (hash, v) in &batch {
         let row = rows.iter().find(|r| &r.hash == hash).unwrap();
         let (q8, scale) = vfs_semantic::quant::int8(v);
-        assert_eq!(row.bits, vfs_semantic::quant::bits(v));
+        assert_eq!(row.bits, vfs_semantic::quant::centred_bits(v, &mean));
         assert_eq!(row.q8, q8);
         assert!((row.scale - scale).abs() < 1e-7);
         let exact: f32 = q.iter().zip(v).map(|(a, b)| a * b).sum();
         let approx = vfs_semantic::quant::dot_int8(&q, &row.q8, row.scale);
         assert!((approx - exact).abs() < 0.02, "{approx} vs {exact}");
     }
+}
+
+/// VFS-29 R11: every run records where each text occurs, copies included, so a search maps a
+/// vector to all its chunks.
+#[test]
+fn runs_record_where_each_text_occurs() {
+    let text = long_text("Factura del dentista", 2);
+    let a = Archive::new(&[(1, &text), (2, &text), (3, "Recibo del agua.")]);
+    embed(&a.db, &mut Fake::new(model("m")));
+    let s = Store::open(&a.db).unwrap();
+    let loc = s.locations().unwrap();
+    assert!(loc.windows(2).all(|w| w[0] <= w[1]), "sorted by hash");
+    let c = vfs_content::ChunkReader::open(&a.db).unwrap();
+    for (ordinal, t) in c.chunk_texts(1).unwrap() {
+        let h = store::text_hash(&t);
+        let at: Vec<(i64, u32)> = loc
+            .iter()
+            .filter(|l| l.0 == h)
+            .map(|l| (l.1, l.2))
+            .collect();
+        assert_eq!(at, vec![(1, ordinal), (2, ordinal)]);
+    }
+    assert_eq!(loc.len(), chunk_count(&a.db));
+}
+
+/// VFS-29 D20: a complete set keeps serving searches while new documents are embedded.
+#[test]
+fn a_complete_set_keeps_serving_while_new_texts_wait() {
+    let a = Archive::new(&[(1, "Primer documento."), (2, "Segundo documento.")]);
+    embed(&a.db, &mut Fake::new(model("m")));
+    vfs_content::testing::write_doc(&a.db, 3, "Tercer documento.").unwrap();
+    let mut stopped = Fake::new(model("m"));
+    stopped.fail_after = Some(0);
+    let sum = embed(&a.db, &mut stopped);
+    assert!(sum.stopped && sum.pending == 1);
+    let s = Store::open(&a.db).unwrap();
+    let set = s.set_id(&model("m")).unwrap();
+    assert_eq!(s.search_set().unwrap(), Some((set, DIM)));
 }

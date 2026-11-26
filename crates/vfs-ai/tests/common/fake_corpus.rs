@@ -58,6 +58,7 @@ impl FakeDoc {
             title: None,
             authors: Vec::new(),
             created: None,
+            by_meaning: false,
         }
     }
 }

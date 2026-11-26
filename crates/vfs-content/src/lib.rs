@@ -16,6 +16,7 @@ pub mod cloud;
 #[cfg(feature = "extractor")]
 pub mod extract;
 pub mod indexer;
+pub mod meaning;
 pub mod pace;
 pub mod paths;
 pub mod process;
@@ -33,6 +34,7 @@ pub mod worker;
 pub use indexer::{
     run as index, run_with as index_with, Admit, Gate, IndexOptions, RunSummary, StoreStats,
 };
+pub use meaning::{Meaning, MeaningHit, MeaningUnavailable, MeaningUse};
 pub use reader::ChunkReader;
 pub use search::{
     retrieve, search, ContentHit, ContentResponse, Passage, PassageText, Query, Searcher,

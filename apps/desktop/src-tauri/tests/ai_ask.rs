@@ -70,6 +70,7 @@ fn hit(id: i64, name: &str, page: Option<u32>, meta: bool) -> ContentHit {
             Vec::new()
         },
         created: meta.then(|| "D:20210304".to_owned()),
+        by_meaning: false,
     }
 }
 

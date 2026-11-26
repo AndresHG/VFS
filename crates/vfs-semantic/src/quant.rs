@@ -21,6 +21,12 @@ pub fn bits(v: &[f32]) -> Vec<u8> {
     out
 }
 
+/// The sign bits of `v - mean` (see [`crate::store::Store::insert`]).
+pub fn centred_bits(v: &[f32], mean: &[f32]) -> Vec<u8> {
+    let d: Vec<f32> = v.iter().zip(mean).map(|(a, m)| a - m).collect();
+    bits(&d)
+}
+
 /// `v` as int8 values and the scale that maps them back (`value ≈ q × scale`).
 pub fn int8(v: &[f32]) -> (Vec<i8>, f32) {
     let max = v.iter().fold(0f32, |m, x| m.max(x.abs()));
