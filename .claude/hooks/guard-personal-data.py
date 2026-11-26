@@ -61,11 +61,7 @@ def problems(command, cwd, scan, patterns):
         # `commit -a` also commits unstaged changes to tracked files.
         what = "HEAD" if re.search(r"\scommit\b.*\s(-[a-zA-Z]*a[a-zA-Z]*|--all)\b", command) else "--cached"
         try:
-            diff = subprocess.run(
-                ["git", "diff", what, "--no-color", "-U0"], cwd=cwd or None,
-                capture_output=True, check=True, text=True, encoding="utf-8", errors="replace",
-            ).stdout
-            msgs += scan.scan_diff(patterns, diff)
+            msgs += scan.scan_git(patterns, what, cwd=cwd or None)
         except (OSError, subprocess.CalledProcessError):
             pass
     return msgs

@@ -51,10 +51,10 @@ class DiffTest(unittest.TestCase):
     )
 
     def test_added_lines_and_paths_are_flagged_by_location_and_entry_only(self):
-        msgs = scan.scan_diff(scan.parse(LIST), self.DIFF)
+        msgs = scan.scan_changes(scan.parse(LIST), self.DIFF, ["docs/a.md", "zorblat ltd.txt"])
         self.assertEqual(
             msgs,
-            ["docs/a.md:5: matches denylist entry #1", "changed file #2: file path matches denylist entry #1"],
+            ["changed file #2: file path matches denylist entry #1", "docs/a.md:5: matches denylist entry #1"],
         )
         # Removing a denylisted line is never a hit, and the matched text never appears,
         # not even as a file path.
@@ -79,8 +79,9 @@ class RangeTest(unittest.TestCase):
         ).stdout
 
     def commit(self, name, text, msg, email):
-        pathlib.Path(self.repo, name).write_text(text, encoding="utf-8")
-        self.git("add", name)
+        data = text if isinstance(text, bytes) else text.encode("utf-8")
+        pathlib.Path(self.repo, name).write_bytes(data)
+        self.git("add", "-A")
         who = {"GIT_AUTHOR_NAME": "u", "GIT_AUTHOR_EMAIL": email,
                "GIT_COMMITTER_NAME": "u", "GIT_COMMITTER_EMAIL": email}
         self.git("commit", "-q", "-m", msg, env=who)
@@ -110,6 +111,31 @@ class RangeTest(unittest.TestCase):
         self.assertEqual(len(msgs), 2)
         self.assertIn("message line 1: matches denylist entry #1", msgs[0])
         self.assertEqual(msgs[1], "a.txt:1: matches denylist entry #2")
+
+
+class RealGitPathsTest(RangeTest):
+    """Paths git quotes, pads or leaves out of '+++' lines (accents, spaces, empty, binary)."""
+
+    NOREPLY = "noreply@anthropic.com"
+
+    def test_content_in_accented_and_spaced_file_names_is_caught(self):
+        for name in ("café ñandú.md", "a b.md"):
+            with self.subTest(name=name):
+                self.commit(name, "ok\nZorblat Ltd\n", "docs: x", self.NOREPLY)
+                msgs = self.run_range(scan.parse(LIST))
+                self.assertIn(f"{name}:2: matches denylist entry #1", msgs)
+
+    def test_denylisted_names_of_empty_binary_and_renamed_files_are_caught_unprinted(self):
+        self.commit("zorblat ltd.txt", "", "chore: empty", self.NOREPLY)
+        self.commit("Zorblat Ltd.bin", b"\x00\x01\x02", "chore: binary", self.NOREPLY)
+        os.rename(os.path.join(self.repo, "base.txt"), os.path.join(self.repo, "zorblat ltd é.txt"))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "chore: rename",
+                 env={"GIT_AUTHOR_NAME": "u", "GIT_AUTHOR_EMAIL": self.NOREPLY,
+                      "GIT_COMMITTER_NAME": "u", "GIT_COMMITTER_EMAIL": self.NOREPLY})
+        msgs = self.run_range(scan.parse(LIST))
+        self.assertEqual(sum("file path matches denylist entry #1" in m for m in msgs), 3)
+        self.assertFalse(any("zorblat" in m.lower() for m in msgs))
 
 
 class MainTest(unittest.TestCase):

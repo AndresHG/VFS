@@ -71,12 +71,24 @@ def find(patterns, text):
     return hits
 
 
+def _header_path(row):
+    """The new-side path of a '+++ ' diff header, or None for /dev/null.
+
+    Git appends a tab to paths holding spaces and C-quotes paths holding unusual bytes.
+    """
+    s = row[4:].rstrip("\t")
+    if s.startswith('"') and s.endswith('"'):
+        raw = s[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape")
+        s = raw.encode("latin-1", "replace").decode("utf-8", "replace")
+    return s[2:] if s.startswith("b/") else None
+
+
 def added_lines(diff):
     """{path: [(new_line_number, text)]} for the '+' lines of a unified diff."""
     out, path, line = {}, None, 0
     for row in diff.splitlines():
         if row.startswith("+++ "):
-            path = row[6:] if row.startswith("+++ b/") else None
+            path = _header_path(row)
         elif row.startswith("@@"):
             m = re.search(r"\+(\d+)", row)
             line = int(m.group(1)) if m else 0
@@ -88,27 +100,38 @@ def added_lines(diff):
     return out
 
 
-def scan_diff(patterns, diff):
-    """Messages for denylisted text on added lines; the paths themselves are checked too.
+def scan_changes(patterns, diff, names):
+    """Messages for denylisted changed paths (`names`) and added lines (`diff`).
 
-    A path that matches is never printed: the file is named by its position in the diff.
+    A path that matches is never printed: the file is named by its position in `names`.
+    Paths come from `names`, not the diff, because empty, binary and renamed files have no
+    '+++' line.
     """
-    msgs = []
-    for k, (path, rows) in enumerate(added_lines(diff).items(), 1):
-        label = path
-        for _, i in find(patterns, path):
-            label = f"changed file #{k}"
-            msgs.append(f"{label}: file path matches denylist entry #{i}")
+    msgs, hidden = [], {}
+    for k, name in enumerate(names, 1):
+        for _, i in find(patterns, name):
+            hidden[name] = f"changed file #{k}"
+            msgs.append(f"{hidden[name]}: file path matches denylist entry #{i}")
+    for path, rows in added_lines(diff).items():
+        label = hidden.get(path) or ("a changed file" if find(patterns, path) else path)
         for n, text in rows:
             for _, i in find(patterns, text):
                 msgs.append(f"{label}:{n}: matches denylist entry #{i}")
     return msgs
 
 
-def git(*args):
+def git(*args, cwd=None):
     return subprocess.run(
-        ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8", errors="replace"
+        ["git", "-c", "core.quotePath=false", *args], cwd=cwd, capture_output=True, check=True,
+        text=True, encoding="utf-8", errors="replace",
     ).stdout
+
+
+def scan_git(patterns, *spec, cwd=None):
+    """scan_changes over `git diff <spec>`: e.g. ("--cached",), ("HEAD",), ("BASE...HEAD",)."""
+    diff = git("diff", "--no-color", "-U0", *spec, cwd=cwd)
+    names = [n for n in git("diff", "--name-only", "-z", *spec, cwd=cwd).split("\0") if n]
+    return scan_changes(patterns, diff, names)
 
 
 def scan_range(patterns, base):
@@ -123,7 +146,7 @@ def scan_range(patterns, base):
         for n, i in find(patterns, body):
             msgs.append(f"commit {short} message line {n}: matches denylist entry #{i}")
     if patterns:
-        msgs += scan_diff(patterns, git("diff", "--no-color", "-U0", f"{base}...HEAD"))
+        msgs += scan_git(patterns, f"{base}...HEAD")
     return msgs
 
 
@@ -136,14 +159,17 @@ def main(argv):
     if not patterns:
         print("denylist_scan: no denylist configured; only commit emails are checked.")
     if mode == "staged":
-        msgs = scan_diff(patterns, git("diff", "--cached", "--no-color", "-U0")) if patterns else []
+        msgs = scan_git(patterns, "--cached") if patterns else []
     elif mode == "range":
         if len(argv) < 2:
             print("usage: denylist_scan.py range BASE")
             return 2
         msgs = scan_range(patterns, argv[1])
     else:
-        text = pathlib.Path(argv[1]).read_text(encoding="utf-8", errors="replace") if len(argv) > 1 else sys.stdin.read()
+        if len(argv) > 1:
+            text = pathlib.Path(argv[1]).read_text(encoding="utf-8", errors="replace")
+        else:
+            text = sys.stdin.read()
         msgs = [f"text line {n}: matches denylist entry #{i}" for n, i in find(patterns, text)]
     for m in msgs:
         print(m)
