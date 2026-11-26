@@ -1,6 +1,6 @@
 # VFS-29 — Search by meaning: a local model by default (API optional), fused with BM25
 
-- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with the 29b measurement (D12); the local light model is the default (D13).
+- **Status**: approved (owner, 2026-11-25). Code starts after 0.4 ships, with the 29b measurement (D12); the local model multilingual-e5-small int8 is the default (D13, D16; results in `docs/research/embed-eval-29b.md`).
 - **Size**: L. It sends whole document text to an outside service for the first time (with
   consent, per folder), adds a store beside `content.db`, and is multi-PR (29a, 29b, 29c).
 - **Links**:
@@ -209,6 +209,8 @@ Tests cite these ids (`VFS-29 AC-<m>`) in their doc comments.
 | D12 | Order after the cost review | 29b's measurement and the gate run first, local light model beside the API; whichever passes ships first, local preferred | owner | 2026-11-25 |
 | D13 | Default embedder | The local light model; the API is an optional alternative, not paid by default | owner | 2026-11-25 |
 | D14 | Languages | A model good in Spanish and English; the gate weighs Spanish most (the owner's and family's documents), English still checked for open-source users | owner | 2026-11-25 |
+| D16 | Which local model | multilingual-e5-small int8 (MIT, 129 MB): the only clear pass of the 29b gate (9/26 Spanish, 4/10 English vs BM25 0/0, no keyword loss). bekko-a8m is the fallback; static models failed. First pass ≈ 20–35 h of paced background CPU per 60,000 documents on the target PC [estimate], to confirm there | owner | 2026-11-26 |
+| D17 | Fusion details for 29c | Leave BM25's list out of RRF when it has no document with all the query terms (29b: e5 9→13 ES, 4→8 EN, no keyword loss); measure an int8 scan or a wider rescore, since 1-bit cost e5 five hits | agent | 2026-11-26 (29b) |
 | D15 | Questions with vectors | Questions (VFS-28) retrieve with vectors as soon as 29c ships, through the fused `retrieve` (R11); no change of their own | owner | 2026-11-25 |
 
 ## Expected PRs
