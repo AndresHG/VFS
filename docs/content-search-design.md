@@ -118,8 +118,10 @@ search: name/path pass as today, plus a content pass; results merged
   their state; time asleep does not count against a document's limit.
 - The app's background indexer (VFS-27 27b): `vfs_content::service` keeps the switch and the
   pause in `content.json`, runs the engine on one thread while content search is on, waits
-  for the name indexer before starting a run, shows documents done of all, the rate over
-  working time and the time left, writes a run-open marker and checks the store with
+  for the name indexer before starting a run, starts a run for changed names only after 2
+  minutes of calm (at most 30), shows documents done of all, the rate over working time and
+  the time left, except for runs of 20 documents or fewer, which leave the status alone
+  (VFS-50), writes a run-open marker and checks the store with
   `quick_check` after an unclean stop (deleting it only on the user's choice), turns
   run-level stops into a «Reintentar» state, and writes diagnostic records without names.
 - Worker lifetime (VFS-2 R17, R18): the worker says hello with its version and whether the
