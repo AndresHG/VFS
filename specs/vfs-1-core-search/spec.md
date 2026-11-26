@@ -27,7 +27,7 @@ working on the owner's Mac plus a Windows installer built by CI.
 - Reuse existing work where possible (Everything, Kensaku (MIT), etc.), respecting licences.
 - Private GitHub repository `VFS`; GitHub Actions with a Windows + macOS matrix; unsigned
   installer (a small, known audience; the SmartScreen warning is accepted).
-- Engineering system inherited from Calligence and adapted: spec-first, tests cite `AC-n`,
+- Engineering system inherited from an earlier project and adapted: spec-first, tests cite `AC-n`,
   fresh-context review (pr-critic + rubric), git guard hooks, CLAUDE.md budget.
 
 ## Requirements (EARS)

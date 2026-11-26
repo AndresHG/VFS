@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The pr-critic's verdict for a commit, kept per worktree, and its history (ported from Calligence).
+"""The pr-critic's verdict for a commit, kept per worktree, and its history (ported from an earlier project).
 
 The pr-critic agent reviews a branch's diff in a fresh context and records
 its verdict for the exact HEAD it reviewed:

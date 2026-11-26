@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""PostToolUse hook — auto-memory index budget sensor (ported from Calligence).
+"""PostToolUse hook — auto-memory index budget sensor (ported from an earlier project).
 
 Claude Code loads a project's auto-memory index (`MEMORY.md`) into every
 session, relevant or not, so each line costs context forever. The CLAUDE.md
-files have a budget (scripts/claude_md_budget.py); without one, Calligence's
+files have a budget (scripts/claude_md_budget.py); without one, the earlier project's
 index reached ~15 KB.
 
 After any Edit/Write to a file in a `~/.claude/projects/<project>/memory/`

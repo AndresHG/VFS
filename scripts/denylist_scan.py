@@ -89,14 +89,19 @@ def added_lines(diff):
 
 
 def scan_diff(patterns, diff):
-    """Messages for denylisted text on added lines; the paths themselves are checked too."""
+    """Messages for denylisted text on added lines; the paths themselves are checked too.
+
+    A path that matches is never printed: the file is named by its position in the diff.
+    """
     msgs = []
-    for path, rows in added_lines(diff).items():
+    for k, (path, rows) in enumerate(added_lines(diff).items(), 1):
+        label = path
         for _, i in find(patterns, path):
-            msgs.append(f"{path}: file path matches denylist entry #{i}")
+            label = f"changed file #{k}"
+            msgs.append(f"{label}: file path matches denylist entry #{i}")
         for n, text in rows:
             for _, i in find(patterns, text):
-                msgs.append(f"{path}:{n}: matches denylist entry #{i}")
+                msgs.append(f"{label}:{n}: matches denylist entry #{i}")
     return msgs
 
 

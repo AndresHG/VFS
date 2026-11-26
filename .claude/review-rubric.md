@@ -6,7 +6,7 @@ PR for something this list misses, add the check here in the same PR — one lin
 with the spec or PR that earned it. A blocker keeps its `R<n>` id for life; a removed id
 is never reused, because the verdict log counts blocks by id.
 
-The seed lines below were earned in the Calligence repository this harness was ported
+The seed lines below were earned in an earlier repository this harness was ported
 from; they are stack-agnostic.
 
 ## Blockers — the PR does not open until each is fixed or rebutted

@@ -4,7 +4,7 @@
 After every Edit/Write/MultiEdit of a *.rs file inside the project, run the
 formatter `cargo fmt` uses (rustfmt --check) on that one file and inject what
 it would change back into the loop as context. Silent on success: a sensor
-reports failures only (ported from Calligence's ruff sensor).
+reports failures only (ported from an earlier ruff sensor).
 
 The edition comes from the nearest Cargo.toml that states one, else 2021.
 rustfmt also checks out-of-line modules the file declares (`mod x;`).

@@ -55,6 +55,17 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("a.md:1", out["permissionDecisionReason"])
 
+    def test_commit_all_checks_unstaged_changes_to_tracked_files(self):
+        f = pathlib.Path(self.dir, "a.md")
+        f.write_text("clean\n", encoding="utf-8")
+        subprocess.run(["git", "add", "a.md"], cwd=self.dir, check=True)
+        subprocess.run(["git", "-c", "user.name=u", "-c", "user.email=u@users.noreply.github.com",
+                        "commit", "-q", "-m", "init"], cwd=self.dir, check=True)
+        f.write_text("clean\nZorblat Ltd\n", encoding="utf-8")
+        self.assertIsNone(run_hook('git commit -m "docs: notes"', self.dir))
+        out = run_hook('git commit -am "docs: notes"', self.dir)
+        self.assertEqual(out["permissionDecision"], "deny")
+
     def test_allows_clean_and_unrelated_commands(self):
         for cmd in ('gh pr create --title t --body "clean"', "echo Zorblat Ltd", "ls"):
             with self.subTest(cmd=cmd):

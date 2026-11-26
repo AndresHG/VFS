@@ -5,7 +5,7 @@ Root CLAUDE.md gives standing authorization: code changed on a feature branch
 → commit, run the pr-critic, push, open a PR into main. Claude Code's default
 ("commit or push only when the user asks") leaves sessions stopping at "want
 me to commit?", and the PR never happens. This hook turns the rule into a
-check at the moment the session tries to end its turn (ported from Calligence).
+check at the moment the session tries to end its turn (ported from an earlier project).
 
 Blocks the stop ONCE (`decision: block`) when the branch differs from
 origin/main and any of these hold:

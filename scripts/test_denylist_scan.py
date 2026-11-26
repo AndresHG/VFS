@@ -54,10 +54,11 @@ class DiffTest(unittest.TestCase):
         msgs = scan.scan_diff(scan.parse(LIST), self.DIFF)
         self.assertEqual(
             msgs,
-            ["docs/a.md:5: matches denylist entry #1", "zorblat ltd.txt: file path matches denylist entry #1"],
+            ["docs/a.md:5: matches denylist entry #1", "changed file #2: file path matches denylist entry #1"],
         )
-        # Removing a denylisted line is never a hit, and the matched text never appears.
-        self.assertFalse(any("work at" in m for m in msgs))
+        # Removing a denylisted line is never a hit, and the matched text never appears,
+        # not even as a file path.
+        self.assertFalse(any("zorblat" in m.lower() or "work at" in m for m in msgs))
 
 
 class RangeTest(unittest.TestCase):

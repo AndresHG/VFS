@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PostToolUse hook — CLAUDE.md budget sensor (ported from Calligence).
+"""PostToolUse hook — CLAUDE.md budget sensor (ported from an earlier project).
 
 After every Edit/Write/MultiEdit of a CLAUDE.md inside the project, check it
 against its budget and the growth rule — the policy in
