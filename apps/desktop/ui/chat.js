@@ -282,13 +282,27 @@ export function setupChat({
     field.addEventListener('blur', () => finish(true));
   }
 
+  // A dialog's `close` event comes a task after it closes. Reopened before that (a second
+  // click at once), the new ask would take the old close as its own answer and miss its own:
+  // the old ask is settled here and the new one skips the stale event.
+  const asking = new Map();
   function confirm(dialogId, text) {
     const d = $(dialogId);
+    const stale = asking.get(dialogId);
+    if (stale) stale(d.returnValue === 'ok');
+    let skip = stale ? 1 : 0;
     if (text !== undefined) $(`${dialogId}-desc`).textContent = text;
     d.returnValue = '';
     d.showModal();
     return new Promise((resolve) => {
-      d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
+      asking.set(dialogId, resolve);
+      const onClose = () => {
+        if (skip) { skip -= 1; return; }
+        d.removeEventListener('close', onClose);
+        if (asking.get(dialogId) === resolve) asking.delete(dialogId);
+        resolve(d.returnValue === 'ok');
+      };
+      d.addEventListener('close', onClose);
     });
   }
 
