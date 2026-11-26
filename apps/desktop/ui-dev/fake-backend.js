@@ -458,7 +458,7 @@ function fakeAi(mode) {
     },
     async aiChatRename(chatId, title) { const c = chats.get(chatId); if (c && title.trim()) c.title = title.trim(); },
     async aiChatDelete(chatId) { chats.delete(chatId); },
-    async aiChatsClear() { chats.clear(); },
+    async aiChatsClear() { chats.clear(); globalThis.vfsFakeChatsCleared = (globalThis.vfsFakeChatsCleared ?? 0) + 1; },
     async aiCancel(askId) { cancelled.add(askId); globalThis.vfsFakeCancelled = askId; },
     async aiChatBibliography(chatId, ord, all) {
       const c = chats.get(chatId);

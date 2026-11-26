@@ -534,12 +534,18 @@ test('a prompt reopened at once answers for itself', async () => {
     await b.evaluate(`document.getElementById('ai-chats-clear').click()`);
     await b.until(`document.getElementById('confirm-chats-clear').open`, 'the prompt');
     await b.evaluate(`(() => {
-      document.querySelector('#confirm-chats-clear button[value=cancel]').click();
-      document.getElementById('ai-chats-clear').click();
+      const cancel = () => document.querySelector('#confirm-chats-clear button[value=cancel]').click();
+      const ask = () => document.getElementById('ai-chats-clear').click();
+      cancel(); ask(); cancel(); ask();
     })()`);
+    await b.evaluate(`new Promise((r) => setTimeout(r, 100))`);
     assert.equal(await b.evaluate(`document.getElementById('confirm-chats-clear').open`), true, 'asked again');
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-open').length`), 1, 'the cancelled asks kept the chats');
     await b.evaluate(`document.querySelector('#confirm-chats-clear button[value=ok]').click()`);
     await b.until(`document.querySelector('.chat-none')`, 'the empty list');
+    await b.until(`document.getElementById('toast').textContent === ${JSON.stringify(S.chatClearedAll)}`, 'the toast');
+    await b.evaluate(`new Promise((r) => setTimeout(r, 100))`);
+    assert.equal(await b.evaluate(`globalThis.vfsFakeChatsCleared`), 1, 'cleared once');
   } finally {
     b.close();
   }
