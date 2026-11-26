@@ -82,7 +82,7 @@ test('a record lists what was sent and what it cost', () => {
  *  «Borrar todo» behind a confirmation. */
 test('the Ajustes section and the record are in the page', () => {
   for (const id of ['ai-on', 'ai-providers', 'ai-key-form', 'ai-test', 'ai-replace', 'ai-delete', 'ai-cap',
-    'ai-cheap', 'ai-open-record', 'ai-record', 'ai-record-clear', 'confirm-ai-clear', 'confirm-ai-delete', 'ai-fallback']) {
+    'ai-open-record', 'ai-record', 'ai-record-clear', 'confirm-ai-clear', 'confirm-ai-delete', 'ai-fallback']) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.match(html, /<div id="ai-body" class="ai-body" hidden>/, 'off by default');

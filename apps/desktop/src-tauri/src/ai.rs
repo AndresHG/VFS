@@ -34,7 +34,7 @@ pub const KEYS_DIR: &str = "ai-keys";
 pub struct AiSettings {
     pub enabled: bool,
     pub provider: Provider,
-    /// «Respuestas más baratas» (D7).
+    /// The answer tier: the cheap model when true (D7), picked beside the question (VFS-47 R2).
     pub cheap: bool,
     /// The one-time notice before the first question was accepted (R6).
     pub notice_seen: bool,
@@ -429,7 +429,8 @@ pub fn ai_status(ai: State<'_, AiState>) -> Result<AiStatus, ApiError> {
     ai.status()
 }
 
-/// The switch, the provider and «Respuestas más baratas» (R1).
+/// The switch, the provider and the answer tier (R1; the tier is picked beside the question,
+/// VFS-47).
 #[tauri::command(async)]
 pub fn ai_set_settings(
     ai: State<'_, AiState>,

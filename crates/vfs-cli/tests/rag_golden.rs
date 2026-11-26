@@ -363,7 +363,7 @@ fn dump(out: &Path, db: &Path) {
 ///
 /// Needs `VFS_LIVE_PROVIDER` (`anthropic` or `openai`) and `VFS_AI_KEY` (that provider's key).
 /// `VFS_GRADER_KEY` is the other provider's key; without it the same provider grades, and the
-/// report says so. Both calls use the cheap tier («Respuestas más baratas», D7) unless
+/// report says so. Both calls use the cheap tier (D7) unless
 /// `VFS_LIVE_MID=1` asks for the mid-tier answer model; `VFS_LIVE_ANSWER_MODEL=claude-opus-5-5`
 /// answers with Opus for the reference run (VFS-46). Keys are read from the environment only and
 /// never printed or written. Without `VFS_LIVE_PROVIDER` it does nothing, so CI, which has no

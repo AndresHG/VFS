@@ -1254,6 +1254,8 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
   border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink);
 }
 .ai-ask-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+/* VFS-47: the model selector beside «Preguntar», plain weight, aligned with the buttons. */
+.ai-ask-form .ai-model { display: inline-flex; align-items: center; gap: var(--s1); font-weight: 400; }
 .ai-ask-actions [hidden], .ai-after[hidden], #ai-bib-empty[hidden] { display: none; }
 .ai-after { display: grid; gap: var(--s3); }
 .ai-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s4); }

@@ -310,8 +310,6 @@
               <input id="ai-cap" type="number" min="0" step="0.5" inputmode="decimal">
             </div>
             <p id="ai-month" class="bookmarks-status"></p>
-            <label class="toggle"><input type="checkbox" id="ai-cheap"> <span data-s="aiCheap"></span></label>
-            <p class="bookmarks-intro" data-s="aiCheapHint"></p>
             <button id="ai-open-record" class="btn btn-quiet" type="button" data-s="aiRecordOpen"></button>
           </div>
         </section>
@@ -512,6 +510,8 @@
         <label for="ai-question" data-s="aiAskLabel"></label>
         <textarea id="ai-question" rows="2" maxlength="2000" spellcheck="true"></textarea>
         <div class="ai-ask-actions">
+          <label class="ai-model"><span data-s="aiModelLabel"></span>
+            <select id="ai-model"></select></label>
           <button class="btn btn-primary" type="submit" data-s="aiAskSubmit"></button>
           <button id="ai-cancel" class="btn" type="button" hidden data-s="cancel"></button>
         </div>
