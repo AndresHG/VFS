@@ -667,18 +667,99 @@ impl Searcher {
         k: u32,
         offset: u32,
     ) -> Result<ContentResponse> {
-        let docs = {
-            let mut cached = self.doc_count.lock().unwrap_or_else(|e| e.into_inner());
-            match reuse_count(*cached, Instant::now()) {
-                Some(n) => n,
-                None => {
-                    let n = count_indexed(&self.conn)?;
-                    *cached = Some((Instant::now(), n));
-                    n
-                }
-            }
+        let docs = self.doc_count()?;
+        retrieve_conn(&self.conn, docs, query, filters, None, k, offset)
+    }
+
+    fn doc_count(&self) -> Result<u64> {
+        let mut cached = self.doc_count.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = reuse_count(*cached, Instant::now()) {
+            return Ok(n);
+        }
+        let n = count_indexed(&self.conn)?;
+        *cached = Some((Instant::now(), n));
+        Ok(n)
+    }
+
+    /// [`Searcher::retrieve`] inside one document, `file_id`: at most one hit, with its
+    /// best-matching passages (VFS-49 R7).
+    pub fn retrieve_file(&self, query: &Query, file_id: i64, k: u32) -> Result<ContentResponse> {
+        let docs = self.doc_count()?;
+        retrieve_conn(
+            &self.conn,
+            docs,
+            query,
+            &SearchFilters::default(),
+            Some(file_id),
+            k,
+            0,
+        )
+    }
+
+    /// Document `file_id` as a hit with no score, whose passages are its first `n` chunks in
+    /// order: what a chat limited to that document sends when its question matches none of
+    /// it (VFS-49 R7). `None` when the store does not hold the document.
+    pub fn document(&self, file_id: i64, n: u32) -> Result<Option<ContentHit>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT f.id, f.name, f.kind, f.size, f.mtime, f.dir_id,
+                        dc.title, dc.authors, dc.created
+                 FROM files f
+                 JOIN c.docs dc ON dc.file_id = f.id AND dc.dir_id = f.dir_id AND dc.name = f.name
+                 WHERE f.id = ?1",
+                [file_id],
+                |r| {
+                    Ok((
+                        ContentHit {
+                            id: r.get(0)?,
+                            name: r.get(1)?,
+                            dir: String::new(),
+                            kind: FileKind::from_code(r.get(2)?),
+                            size: r.get::<_, i64>(3)?.max(0) as u64,
+                            modified: r.get(4)?,
+                            score: 0.0,
+                            snippet: String::new(),
+                            highlights: Vec::new(),
+                            passages: Vec::new(),
+                            title: r.get(6)?,
+                            authors: Vec::new(),
+                            created: r.get(8)?,
+                        },
+                        r.get::<_, i64>(5)?,
+                        r.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((mut hit, dir_id, authors)) = row else {
+            return Ok(None);
         };
-        retrieve_conn(&self.conn, docs, query, filters, k, offset)
+        hit.authors = authors
+            .and_then(|a| serde_json::from_str(&a).ok())
+            .unwrap_or_default();
+        hit.dir = vfs_core::db::dir_abs_path(&self.conn, dir_id)?
+            .to_string_lossy()
+            .into_owned();
+        let mut st = self.conn.prepare_cached(
+            "SELECT ordinal, page, start_char, end_char FROM c.chunks
+             WHERE file_id = ?1 ORDER BY ordinal LIMIT ?2",
+        )?;
+        hit.passages = st
+            .query_map(rusqlite::params![file_id, n], |r| {
+                Ok(Passage {
+                    file_id,
+                    ordinal: r.get(0)?,
+                    page: r.get(1)?,
+                    start_char: r.get::<_, i64>(2)? as usize,
+                    end_char: r.get::<_, i64>(3)? as usize,
+                    score: 0.0,
+                    snippet: String::new(),
+                    highlights: Vec::new(),
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(Some(hit))
     }
 
     /// The user's text query, as the CLI and the app run it.
@@ -813,11 +894,13 @@ pub fn retrieve(
     Searcher::open(index_db)?.retrieve(query, filters, k, offset)
 }
 
+/// `file`, when set, limits the search to that one document (VFS-49 R7).
 fn retrieve_conn(
     conn: &Connection,
     docs: u64,
     query: &Query,
     filters: &SearchFilters,
+    file: Option<i64>,
     k: u32,
     offset: u32,
 ) -> Result<ContentResponse> {
@@ -837,12 +920,16 @@ fn retrieve_conn(
             ..empty
         });
     }
-    let Some(filter) = filter_clause(conn, filters)? else {
+    let Some(mut filter) = filter_clause(conn, filters)? else {
         return Ok(ContentResponse {
             elapsed_ms: started.elapsed().as_millis() as u64,
             ..empty
         });
     };
+    if let Some(id) = file {
+        filter.0.push_str(" AND f.id = ?");
+        filter.1.push(Value::Integer(id));
+    }
     let stats = Stats::load(conn, docs, &plan.keys())?;
     let mut resp = run_plan(conn, &plan, &stats, &filter, k, offset, &analyzer)?;
     // R13: two or more words that are not all in one document: any of them, marked partial.

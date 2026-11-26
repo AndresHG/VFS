@@ -1,8 +1,9 @@
 //! The ask flow (VFS-28 R6–R10, R14), PR 28c: rewrite the question, retrieve under the checked
 //! filters, pick and merge passages, answer from them, check the citations, then record what
-//! was sent and what it cost. Follow-ups reuse the thread's passages and retrieve nothing.
+//! was sent and what it cost. A chat message ([`chat_turn`], VFS-49 R4) runs the whole flow
+//! again with the chat's earlier turns as context.
 //!
-//! Every call blocks; run it off the UI thread. Threads live in memory only (D3).
+//! Every call blocks; run it off the UI thread.
 
 mod citations;
 mod prompts;
@@ -11,6 +12,7 @@ mod retrieval;
 use std::time::Instant;
 
 use chrono::{DateTime, Local};
+use serde::{Deserialize, Serialize};
 use vfs_content::{ContentHit, PassageText, Query, Searcher};
 use vfs_core::{FileKind, SearchFilters, SearchQuery, Vfs};
 
@@ -70,9 +72,31 @@ pub struct AskOptions {
     pub now: DateTime<Local>,
 }
 
+/// What a chat asks over (VFS-49 R6): every document, one of the user's folders, or one
+/// document. The search screen's filters never apply to a chat (D2).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Scope {
+    #[default]
+    All,
+    Folder {
+        path: String,
+    },
+    Document {
+        #[serde(rename = "fileId")]
+        file_id: i64,
+        name: String,
+    },
+}
+
+/// Chunks sent from the start of a document when a chat limited to it asks something that
+/// matches none of it, such as «Resúmelo» (VFS-49 R7): about the passage budget of a question.
+pub const FIRST_CHUNKS: u32 = MAX_PASSAGES as u32;
+
 /// A document retrieved for a question: the closest documents of a not-found answer (R8) and
-/// «todos los encontrados» of the bibliography (R12).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// «todos los encontrados» of the bibliography (R12). Kept with a saved chat (VFS-49 R10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Document {
     pub file_id: i64,
     pub name: String,
@@ -119,7 +143,7 @@ impl Reply {
     }
 }
 
-/// A question and its follow-ups over the same passages (R9). Kept in memory only (D3).
+/// A question's passages and documents, and the chat's turns so far with this one (VFS-49 R4).
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub provider: Provider,
@@ -156,7 +180,7 @@ impl Thread {
     }
 }
 
-/// A first question's result: its thread, for follow-ups, and its reply.
+/// A question's result: its passages and documents with the chat's turns, and its reply.
 #[derive(Debug, Clone)]
 pub struct Asked {
     pub thread: Thread,
@@ -267,7 +291,17 @@ pub fn ask(
     let started = Instant::now();
     let mut diag = Diag::default();
     let result = ask_inner(
-        model, corpus, db, question, screen, opts, cancel, on_event, &mut diag,
+        model,
+        corpus,
+        db,
+        question,
+        &[],
+        screen,
+        None,
+        opts,
+        cancel,
+        on_event,
+        &mut diag,
     );
     log_diag(
         "ask",
@@ -278,13 +312,73 @@ pub fn ask(
     result
 }
 
+/// Asks one message of a chat (VFS-49 R4, R7): the whole flow of [`ask`] again, over `scope`,
+/// with the chat's `earlier` turns. The rewrite sees the earlier questions, so a message such
+/// as «¿Y me la devolvieron?» searches for what the chat is about; the answer sees the earlier
+/// questions and answers as text and only this message's passages. Priced, recorded and
+/// capped like a question. The returned thread holds `earlier` plus this turn.
+#[allow(clippy::too_many_arguments)]
+pub fn chat_turn(
+    model: &dyn ChatModel,
+    corpus: &dyn Corpus,
+    db: &mut AiDb,
+    question: &str,
+    earlier: &[Turn],
+    scope: &Scope,
+    opts: &AskOptions,
+    cancel: &CancelToken,
+    on_event: &mut dyn FnMut(AnswerEvent),
+) -> Result<Asked, AskError> {
+    let started = Instant::now();
+    let mut diag = Diag::default();
+    let (filters, file) = match scope {
+        Scope::All => (SearchFilters::default(), None),
+        Scope::Folder { path } => (
+            SearchFilters {
+                folder: Some(path.clone()),
+                ..SearchFilters::default()
+            },
+            None,
+        ),
+        Scope::Document { file_id, .. } => (SearchFilters::default(), Some(*file_id)),
+    };
+    let result = ask_inner(
+        model, corpus, db, question, earlier, &filters, file, opts, cancel, on_event, &mut diag,
+    );
+    log_diag(
+        "chat",
+        started,
+        &diag,
+        result.as_ref().err().map(AskError::kind),
+    );
+    result
+}
+
+/// The rewrite call's input (VFS-49 R4): the question alone, or after a chat's earlier
+/// questions, which tell the model what a short follow-up refers to.
+fn rewrite_input(question: &str, earlier: &[Turn]) -> String {
+    if earlier.is_empty() {
+        return question.to_owned();
+    }
+    let before: Vec<String> = earlier
+        .iter()
+        .map(|t| format!("- {}", t.question))
+        .collect();
+    format!(
+        "Earlier questions in this conversation, for context only:\n{}\n\nQuestion: {question}",
+        before.join("\n")
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn ask_inner(
     model: &dyn ChatModel,
     corpus: &dyn Corpus,
     db: &mut AiDb,
     question: &str,
+    earlier: &[Turn],
     screen: &SearchFilters,
+    file: Option<i64>,
     opts: &AskOptions,
     cancel: &CancelToken,
     on_event: &mut dyn FnMut(AnswerEvent),
@@ -294,7 +388,7 @@ fn ask_inner(
     let models = models_for(opts.provider);
     let rq = RewriteRequest {
         system_prompt: rewrite_prompt(opts.now.date_naive()),
-        question: question.to_owned(),
+        question: rewrite_input(question, earlier),
     };
     let (rewrite, raw, usage) = model.rewrite(&rq, cancel)?;
     let mut calls = vec![priced(CallKind::Rewrite, models.rewrite, usage)];
@@ -308,7 +402,7 @@ fn ask_inner(
         calls: Vec::new(),
     };
 
-    let thread = match gather(corpus, &rewrite, screen, opts.provider, cancel, diag) {
+    let thread = match gather(corpus, &rewrite, screen, file, opts.provider, cancel, diag) {
         Ok(t) => t,
         Err(e) => {
             record.calls = calls;
@@ -321,7 +415,7 @@ fn ask_inner(
     let request = AnswerRequest {
         system_prompt: answer_prompt(opts.lang),
         passages: thread.passages(),
-        earlier: Vec::new(),
+        earlier: earlier.to_vec(),
         question: question.to_owned(),
         cheap: opts.cheap,
         model: opts.answer_model,
@@ -337,6 +431,7 @@ fn ask_inner(
     let reply = reply_of(&answer, &thread.sources, &calls);
     diag.dropped = reply.dropped;
     let mut thread = thread;
+    thread.turns = earlier.to_vec();
     thread.turns.push(Turn {
         question: question.to_owned(),
         answer: reply.text(),
@@ -348,11 +443,13 @@ fn ask_inner(
     })
 }
 
-/// Retrieval and passage choice for a rewritten question (R6.2–R6.4).
+/// Retrieval and passage choice for a rewritten question (R6.2–R6.4). With `file`, only that
+/// document is searched, and its first chunks stand in when nothing in it matches (VFS-49 R7).
 fn gather(
     corpus: &dyn Corpus,
     rewrite: &Rewrite,
     screen: &SearchFilters,
+    file: Option<i64>,
     provider: Provider,
     cancel: &CancelToken,
     diag: &mut Diag,
@@ -361,10 +458,29 @@ fn gather(
     if cancel.is_cancelled() {
         return Err(cancelled());
     }
-    let (filters, narrowed) = question_filters(rewrite, screen, corpus)?;
-    let found = retrieve_rounds(corpus, rewrite, screen, &filters, narrowed)?;
-    diag.rounds = found.rounds.clone();
-    let sources = pick_passages(corpus, &found.hits)?;
+    let hits = match file {
+        None => {
+            let (filters, narrowed) = question_filters(rewrite, screen, corpus)?;
+            let found = retrieve_rounds(corpus, rewrite, screen, &filters, narrowed)?;
+            diag.rounds = found.rounds;
+            found.hits
+        }
+        Some(file_id) => {
+            let in_file = InFile { corpus, file_id };
+            let none = SearchFilters::default();
+            let found = retrieve_rounds(&in_file, rewrite, &none, &none, false)?;
+            diag.rounds = found.rounds;
+            if found.hits.is_empty() {
+                corpus
+                    .document(file_id, FIRST_CHUNKS)?
+                    .into_iter()
+                    .collect()
+            } else {
+                found.hits
+            }
+        }
+    };
+    let sources = pick_passages(corpus, &hits)?;
     diag.passages = sources.len();
     if cancel.is_cancelled() {
         return Err(cancelled());
@@ -372,67 +488,54 @@ fn gather(
     Ok(Thread {
         provider,
         sources,
-        documents: found.hits.iter().map(Document::from).collect(),
+        documents: hits.iter().map(Document::from).collect(),
         turns: Vec::new(),
     })
 }
 
-/// Asks a follow-up in `thread` (R9): the same passages and the thread so far, nothing
-/// retrieved. Priced, recorded and counted like a question, and stopped by the cap the same
-/// way.
-pub fn follow_up(
-    model: &dyn ChatModel,
-    db: &mut AiDb,
-    thread: &mut Thread,
-    question: &str,
-    opts: &AskOptions,
-    cancel: &CancelToken,
-    on_event: &mut dyn FnMut(AnswerEvent),
-) -> Result<Reply, AskError> {
-    let started = Instant::now();
-    let mut diag = Diag {
-        passages: thread.sources.len(),
-        ..Diag::default()
-    };
-    let result = (|| {
-        check_cap(db, opts)?;
-        let request = AnswerRequest {
-            system_prompt: answer_prompt(opts.lang),
-            passages: thread.passages(),
-            earlier: thread.turns.clone(),
-            question: question.to_owned(),
-            cheap: opts.cheap,
-            model: opts.answer_model,
-        };
-        let (answer, call) = answer_call(model, &request, CallKind::FollowUp, cancel, on_event);
-        let calls: Vec<CallRecord> = call.into_iter().collect();
-        for c in &calls {
-            add(&mut diag, c);
-        }
-        db.record(&SentRecord {
-            asked_at: opts.now,
-            provider: thread.provider,
-            question: question.to_owned(),
-            rewrite: None,
-            passages: thread.sent(),
-            calls: calls.clone(),
-        })?;
-        let answer = answer?;
-        let reply = reply_of(&answer, &thread.sources, &calls);
-        diag.dropped = reply.dropped;
-        thread.turns.push(Turn {
-            question: question.to_owned(),
-            answer: reply.text(),
-        });
-        Ok(reply)
-    })();
-    log_diag(
-        "follow_up",
-        started,
-        &diag,
-        result.as_ref().err().map(AskError::kind),
-    );
-    result
+/// A [`Corpus`] whose retrieval searches one document only (VFS-49 R7). It names no folder,
+/// so a rewrite's folder hint never narrows it.
+struct InFile<'a> {
+    corpus: &'a dyn Corpus,
+    file_id: i64,
+}
+
+impl Corpus for InFile<'_> {
+    fn retrieve(
+        &self,
+        query: &Query,
+        _filters: &SearchFilters,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>> {
+        self.corpus.retrieve_in_file(query, self.file_id, k)
+    }
+
+    fn passage_text(
+        &self,
+        file_id: i64,
+        ordinal: u32,
+        before: u32,
+        after: u32,
+    ) -> vfs_content::Result<Option<PassageText>> {
+        self.corpus.passage_text(file_id, ordinal, before, after)
+    }
+
+    fn folders_named(&self, _hint: &str) -> vfs_content::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    fn retrieve_in_file(
+        &self,
+        query: &Query,
+        file_id: i64,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>> {
+        self.corpus.retrieve_in_file(query, file_id, k)
+    }
+
+    fn document(&self, file_id: i64, n: u32) -> vfs_content::Result<Option<ContentHit>> {
+        self.corpus.document(file_id, n)
+    }
 }
 
 /// The app's [`Corpus`]: content search's [`Searcher`] and the name index's [`Vfs`].
@@ -459,6 +562,19 @@ impl Corpus for LocalCorpus<'_> {
         after: u32,
     ) -> vfs_content::Result<Option<PassageText>> {
         self.searcher.passage_text(file_id, ordinal, before, after)
+    }
+
+    fn retrieve_in_file(
+        &self,
+        query: &Query,
+        file_id: i64,
+        k: u32,
+    ) -> vfs_content::Result<Vec<ContentHit>> {
+        Ok(self.searcher.retrieve_file(query, file_id, k)?.hits)
+    }
+
+    fn document(&self, file_id: i64, n: u32) -> vfs_content::Result<Option<ContentHit>> {
+        self.searcher.document(file_id, n)
     }
 
     fn folders_named(&self, hint: &str) -> vfs_content::Result<Vec<String>> {

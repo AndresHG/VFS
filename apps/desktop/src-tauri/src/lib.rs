@@ -5,6 +5,7 @@
 pub mod ai;
 pub mod bibliography;
 pub mod bookmarks;
+pub mod chat;
 pub mod commands;
 pub mod content;
 pub mod feedback;

@@ -98,7 +98,11 @@ test('the tabs are a tablist with one tab stop, moved with the arrow keys', asyn
   await key('ArrowLeft', 'ArrowLeft', 37);
   assert.equal(await evaluate(chosenTab), ResultsTab.DOCUMENTS);
 
-  const { nodes } = await page.send('Accessibility.getFullAXTree');
+  // VFS-49 R1: the window's own tabs, «Buscador» and «Chat», are a second tablist; these
+  // checks are about the results tabs.
+  const { nodes: all } = await page.send('Accessibility.getFullAXTree');
+  const windowTabs = [S.viewsLabel, S.viewSearch, S.viewChat];
+  const nodes = all.filter((n) => !windowTabs.includes(n.name?.value));
   const lists = nodes.filter((n) => n.role?.value === 'tablist');
   assert.equal(lists.length, 1);
   assert.equal(lists[0].name?.value, S.tabsLabel);

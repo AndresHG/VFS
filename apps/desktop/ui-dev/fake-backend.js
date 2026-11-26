@@ -316,14 +316,15 @@ function fakeAi(mode) {
   };
   const textCbs = new Set();
   const cancelled = new Set();
-  const threads = new Map();
-  let nextThread = 1;
-  const reply = (blocks) => {
+  // VFS-49: chats in memory, as ai.db keeps them; one saved chat from yesterday to list.
+  const chats = new Map();
+  let nextChat = 1;
+  const turn = (question, a, model) => {
     const cost = 34_800_000;
-    st.records.push({ ...st.records[0], id: st.records.length + 1, costNano: cost });
+    st.records.push({ ...st.records[0], id: st.records.length + 1, question, costNano: cost });
     return {
-      blocks, notFound: blocks.every((b) => !b.citations.length), costNano: cost,
-      monthNano: st.records.reduce((n, r) => n + r.costNano, 0), capNano: st.capNano,
+      question, blocks: a.blocks, notFound: a.blocks.every((b) => !b.citations.length), model,
+      costNano: cost, sources: a.sources, documents: a.documents,
     };
   };
   const streamOut = async (askId, blocks) => {
@@ -364,6 +365,20 @@ function fakeAi(mode) {
     },
   };
   answers.cap = answers.ok;
+  if (mode) {
+    const yesterday = new Date(Date.now() - 26 * 3600e3).toISOString();
+    chats.set(nextChat, {
+      id: nextChat, title: 'Garantía de la lavadora', updatedAt: yesterday, scope: { kind: 'all' },
+      turns: [
+        turn('¿Hasta cuándo dura la garantía de la lavadora?', answers.ok, 'claude-haiku-5-5'),
+        turn('¿Y quién la vendió?', {
+          ...answers.ok, blocks: [{ text: 'La vendió Electro Sol.', citations: [{ passage: 1, marker: 1 }] }],
+        }, 'claude-sonnet-5-5'),
+      ],
+    });
+    nextChat += 1;
+    st.records.splice(-2);
+  }
   const status = () => {
     const k = st.keys[st.settings.provider];
     return clone({
@@ -402,32 +417,56 @@ function fakeAi(mode) {
     async aiRecords() { await sleep(30); return clone(st.records); },
     async aiClearRecords() { st.records = []; },
     async onAnswerText(cb) { textCbs.add(cb); return () => textCbs.delete(cb); },
-    async aiAsk(askId, question, filters, confirmed) {
+    async aiChatSend(askId, chatId, scope, question, confirmed) {
       // VFS-47 AC-2: the answer model the shell would pick from the saved settings, for tests.
       const [cheapModel, midModel] = st.settings.provider === Provider.OPENAI
         ? ['gpt-6-luna', 'gpt-6.2-sol'] : ['claude-haiku-5-5', 'claude-sonnet-5-5'];
-      globalThis.vfsFakeAnswerModel = st.settings.cheap ? cheapModel : midModel;
+      const model = st.settings.cheap ? cheapModel : midModel;
+      globalThis.vfsFakeAnswerModel = model;
+      globalThis.vfsFakeLastScope = scope;
+      if (chatId != null && !chats.has(chatId)) throw { code: AiErrorCode.NO_CHAT, message: 'chat not found' };
       if (mode === 'cap' && !confirmed) throw { code: AiErrorCode.CAP_REACHED, message: 'spent 5000000000 of 5000000000' };
       const a = answers[mode] || answers.ok;
-      await streamOut(askId, a.blocks);
-      const id = nextThread++;
-      threads.set(id, a);
-      return { threadId: id, reply: reply(a.blocks), sources: a.sources, documents: a.documents };
+      const follow = chatId != null && chats.get(chatId).turns.length > 0;
+      const shown = follow
+        ? { ...a, blocks: [{ text: 'La fianza se pagó por transferencia.', citations: [{ passage: 1, marker: 1 }] }] }
+        : a;
+      await streamOut(askId, shown.blocks);
+      const t = turn(question, shown, model);
+      const now = new Date().toISOString();
+      let id = chatId;
+      if (id == null) {
+        id = nextChat++;
+        chats.set(id, { id, title: question.slice(0, 60), updatedAt: now, scope, turns: [] });
+      }
+      const c = chats.get(id);
+      Object.assign(c, { updatedAt: now, scope });
+      c.turns.push(t);
+      return clone({
+        chatId: id, turn: t, monthNano: st.records.reduce((n, r) => n + r.costNano, 0), capNano: st.capNano,
+      });
     },
-    async aiFollowUp(threadId, askId) {
-      const a = threads.get(threadId);
-      if (!a) throw { code: AiErrorCode.NO_THREAD, message: 'thread not found' };
-      const blocks = [{ text: 'La fianza se pagó por transferencia.', citations: [{ passage: 1, marker: 1 }] }];
-      await streamOut(askId, blocks);
-      return reply(blocks);
+    async aiChats() {
+      await sleep(20);
+      return clone([...chats.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map(({ id, title, updatedAt, scope }) => ({ id, title, updatedAt, scope })));
     },
-    async aiCancel(askId) { cancelled.add(askId); },
-    async aiBibliography(threadId, all) {
-      const a = threads.get(threadId);
-      if (!a) throw { code: AiErrorCode.NO_THREAD, message: 'thread not found' };
+    async aiChat(chatId) {
+      const c = chats.get(chatId);
+      if (!c) throw { code: AiErrorCode.NO_CHAT, message: 'chat not found' };
+      return clone(c);
+    },
+    async aiChatRename(chatId, title) { const c = chats.get(chatId); if (c && title.trim()) c.title = title.trim(); },
+    async aiChatDelete(chatId) { chats.delete(chatId); },
+    async aiChatsClear() { chats.clear(); },
+    async aiCancel(askId) { cancelled.add(askId); globalThis.vfsFakeCancelled = askId; },
+    async aiChatBibliography(chatId, ord, all) {
+      const c = chats.get(chatId);
+      if (!c?.turns[ord]) throw { code: AiErrorCode.NO_CHAT, message: 'chat not found' };
+      const a = answers[mode] || answers.ok;
       return a.bibliography.filter((e) => all || e.pages.length);
     },
-    async aiExportRis() { await sleep(200); return 'C:\\Users\\Ana\\Documents\\bibliografia.ris'; },
+    async aiChatExportRis() { await sleep(200); return 'C:\\Users\\Ana\\Documents\\bibliografia.ris'; },
   };
 }
 

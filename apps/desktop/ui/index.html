@@ -23,6 +23,10 @@
     <symbol id="i-open" viewBox="0 0 24 24"><path d="M13.5 4.75h5.75v5.75M19 5l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.25 13.5v5a1.75 1.75 0 0 1-1.75 1.75h-10A1.75 1.75 0 0 1 3.75 18.5v-10A1.75 1.75 0 0 1 5.5 6.75h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4A1.5 1.5 0 0 1 4 14.5Z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.25h5V6.5M6.5 6.5l1 13.25h9l1-13.25" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M2.75 6.5A1.75 1.75 0 0 1 4.5 4.75h4.4l2 2.25h8.6a1.75 1.75 0 0 1 1.75 1.75v9.75a1.75 1.75 0 0 1-1.75 1.75h-15a1.75 1.75 0 0 1-1.75-1.75Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 13.5h5.5m-2.25-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-target" viewBox="0 0 24 24"><rect x="3.75" y="3.75" width="16.5" height="16.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 16.5v-2.25a4 4 0 0 1 4-4h4m-2.5-2.5 2.5 2.5-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -31,8 +35,20 @@
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
-  <div class="app" id="app" data-view="start">
+  <div class="app" id="app" data-view="start" role="tabpanel" aria-labelledby="view-search">
     <header class="top">
+      <!-- VFS-49 R1: «Buscador» and «Chat», one tab stop; the arrow keys, Home and End choose.
+           Beside the search box, so the results keep their height (VFS-35); the Chat tab
+           takes it into its own header. Hidden until the shell answers ai_status: a build
+           without the `ai` feature has no Chat. -->
+      <nav class="views" id="views" hidden>
+        <div class="views-tabs" role="tablist" data-s-label="viewsLabel">
+          <button id="view-search" class="view-tab" type="button" role="tab" aria-controls="app" aria-selected="true">
+            <svg aria-hidden="true"><use href="#i-search"/></svg><span data-s="viewSearch"></span></button>
+          <button id="view-chat" class="view-tab" type="button" role="tab" aria-controls="chat" aria-selected="false" tabindex="-1">
+            <svg aria-hidden="true"><use href="#i-chat"/></svg><span data-s="viewChat"></span></button>
+        </div>
+      </nav>
       <h1 class="visually-hidden" data-s="appName"></h1>
       <div class="search">
         <label class="search-label" for="q" data-s="searchLabel"></label>
@@ -48,8 +64,9 @@
         </div>
         <p id="q-hint" class="visually-hidden" data-s="searchHint"></p>
       </div>
-      <!-- VFS-28 R5: only while AI is on, a key is saved and content search has a store. -->
-      <button id="ask-open" class="btn" type="button" hidden data-s="askOpen"></button>
+      <!-- VFS-49 R13: while the chat can answer, the query can start a new chat. -->
+      <button id="ask-line" class="ask-line" type="button" hidden>
+        <svg aria-hidden="true"><use href="#i-chat"/></svg><span id="ask-line-text"></span></button>
       <span id="dev-badge" class="dev-badge" hidden data-s="devBadge"></span>
     </header>
 
@@ -183,7 +200,12 @@
           </div>
           <div id="empty" class="empty" hidden></div>
         </div>
-        <p class="details" id="details" aria-live="off"></p>
+        <div class="details-line">
+          <p class="details" id="details" aria-live="off"></p>
+          <!-- VFS-49 R13: a new chat limited to the selected document, in the Chat tab. -->
+          <button id="ask-doc" class="btn btn-quiet ask-doc" type="button" hidden>
+            <svg aria-hidden="true"><use href="#i-chat"/></svg><span data-s="askDocButton"></span></button>
+        </div>
       </div>
     </main>
 
@@ -202,6 +224,56 @@
       <button id="open-settings" class="btn btn-quiet" type="button" data-s="settingsButton"></button>
     </footer>
   </div>
+
+  <!-- VFS-49: the Chat tab. The chats on the left (R2), the conversation (R8) and the composer
+       (R5, R6); the setup page while AI cannot answer (R12). -->
+  <section class="chat" id="chat" role="tabpanel" aria-labelledby="view-chat" hidden>
+    <aside class="chat-side" id="chat-side" aria-labelledby="chat-side-title">
+      <h2 id="chat-side-title" class="visually-hidden" data-s="chatListTitle"></h2>
+      <button id="chat-new" class="btn btn-primary chat-new" type="button">
+        <svg aria-hidden="true"><use href="#i-plus"/></svg><span data-s="chatNew"></span></button>
+      <label for="chat-filter" class="visually-hidden" data-s="chatFilter"></label>
+      <input id="chat-filter" class="chat-filter" type="text" autocomplete="off" spellcheck="false" data-s-placeholder="chatFilter">
+      <div id="chat-list" class="chat-list"></div>
+      <p class="chat-side-note" data-s="chatSideNote"></p>
+    </aside>
+    <div class="chat-main">
+      <div class="chat-head" id="chat-head">
+        <button id="chat-side-toggle" class="btn btn-quiet chat-side-toggle" type="button" aria-controls="chat-side" aria-expanded="false" data-s="chatListTitle"></button>
+      </div>
+      <div id="chat-setup" class="chat-setup" hidden>
+        <h2 data-s="chatSetupTitle"></h2>
+        <p data-s="chatSetupBody"></p>
+        <p id="chat-setup-store" class="chat-setup-note" data-s="chatSetupStore" hidden></p>
+        <button id="chat-setup-open" class="btn btn-primary" type="button" data-s="chatSetupButton"></button>
+      </div>
+      <div id="chat-body" class="chat-body">
+        <div class="chat-scroll" id="chat-scroll">
+          <div id="chat-empty" class="chat-empty">
+            <h2 id="chat-empty-title"></h2>
+            <p id="chat-empty-body"></p>
+            <div id="chat-examples" class="chat-examples"></div>
+          </div>
+          <ol id="chat-turns" class="chat-turns" aria-live="polite"></ol>
+        </div>
+        <form id="chat-form" class="chat-composer">
+          <label for="chat-input" class="visually-hidden" data-s="chatInputLabel"></label>
+          <textarea id="chat-input" rows="2" maxlength="2000" spellcheck="true" data-s-placeholder="chatPlaceholder"></textarea>
+          <div class="chat-composer-bar">
+            <label class="chat-select"><span class="visually-hidden" data-s="chatScopeLabel"></span>
+              <select id="chat-scope"></select></label>
+            <span class="chat-composer-gap"></span>
+            <label class="chat-select chat-model"><span class="visually-hidden" data-s="aiModelLabel"></span>
+              <select id="ai-model"></select></label>
+            <button id="chat-send" class="btn btn-primary chat-send" type="submit">
+              <svg aria-hidden="true"><use href="#i-send"/></svg><span class="visually-hidden" data-s="chatSend"></span></button>
+            <button id="chat-cancel" class="btn" type="button" hidden data-s="cancel"></button>
+          </div>
+        </form>
+        <p id="chat-meta" class="chat-meta" aria-live="off"></p>
+      </div>
+    </div>
+  </section>
 
   <p id="announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
   <div id="toast" class="toast" role="status" hidden></div>
@@ -311,6 +383,8 @@
             </div>
             <p id="ai-month" class="bookmarks-status"></p>
             <button id="ai-open-record" class="btn btn-quiet" type="button" data-s="aiRecordOpen"></button>
+            <!-- VFS-49 R10: the chats kept on this PC. -->
+            <button id="ai-chats-clear" class="btn btn-quiet" type="button" data-s="chatClearAll"></button>
           </div>
         </section>
       </div>
@@ -466,6 +540,25 @@
     <button id="ai-record-clear" class="btn btn-quiet" type="button" data-s="aiRecordClear"></button>
   </dialog>
 
+  <!-- VFS-49 R2, R10: deleting one chat, or all of them. -->
+  <dialog id="confirm-chat-delete" class="confirm" aria-labelledby="confirm-chat-delete-title" aria-describedby="confirm-chat-delete-desc">
+    <h2 id="confirm-chat-delete-title" data-s="chatDeleteTitle"></h2>
+    <p id="confirm-chat-delete-desc"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-danger" value="ok" data-s="chatDelete"></button>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-chats-clear" class="confirm" aria-labelledby="confirm-chats-clear-title" aria-describedby="confirm-chats-clear-desc">
+    <h2 id="confirm-chats-clear-title" data-s="chatClearTitle"></h2>
+    <p id="confirm-chats-clear-desc" data-s="chatClearBody"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-danger" value="ok" data-s="chatClearAll"></button>
+    </form>
+  </dialog>
+
   <dialog id="confirm-ai-clear" class="confirm" aria-labelledby="confirm-ai-clear-title" aria-describedby="confirm-ai-clear-desc">
     <h2 id="confirm-ai-clear-title" data-s="aiRecordClearTitle"></h2>
     <p id="confirm-ai-clear-desc" data-s="aiRecordClearBody"></p>
@@ -494,43 +587,6 @@
       <button class="btn btn-primary" value="protected_file" data-s="aiFallbackFile"></button>
     </form>
   </dialog>
-  <!-- VFS-28 R6–R9: a question, its answer as plain text with markers, and follow-ups. -->
-  <dialog id="ai-ask" class="drawer ai-ask" aria-labelledby="ai-ask-title" closedby="closerequest" data-light-dismiss>
-    <div class="drawer-head">
-      <h2 id="ai-ask-title" data-s="aiAskTitle"></h2>
-      <form method="dialog"><button class="icon-btn" value="close">
-        <svg aria-hidden="true"><use href="#i-close"/></svg>
-        <span class="visually-hidden" data-s="close"></span>
-      </button></form>
-    </div>
-    <div class="ai-ask-body">
-      <form id="ai-ask-form" class="ai-ask-form">
-        <label for="ai-question" data-s="aiAskLabel"></label>
-        <textarea id="ai-question" rows="2" maxlength="2000" spellcheck="true"></textarea>
-        <div class="ai-ask-actions">
-          <label class="ai-model"><span data-s="aiModelLabel"></span>
-            <select id="ai-model"></select></label>
-          <button class="btn btn-primary" type="submit" data-s="aiAskSubmit"></button>
-          <button id="ai-cancel" class="btn" type="button" hidden data-s="cancel"></button>
-        </div>
-      </form>
-      <ol id="ai-turns" class="ai-turns" aria-live="polite"></ol>
-      <div id="ai-after" class="ai-after" hidden>
-        <div class="ai-ask-actions">
-          <button id="ai-copy" class="btn btn-quiet" type="button" data-s="aiCopy"></button>
-          <button id="ai-bib-open" class="btn btn-quiet" type="button" data-s="aiBibOpen"></button>
-        </div>
-        <form id="ai-follow-form" class="ai-ask-form">
-          <label for="ai-follow" data-s="aiFollowLabel"></label>
-          <textarea id="ai-follow" rows="2" maxlength="2000" spellcheck="true"></textarea>
-          <div class="ai-ask-actions">
-            <button id="ai-follow-submit" class="btn" type="submit" data-s="aiFollowSubmit"></button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </dialog>
-
   <!-- VFS-28 R12: «Bibliografía». -->
   <dialog id="ai-bib" class="drawer" aria-labelledby="ai-bib-title" closedby="closerequest" data-light-dismiss>
     <div class="drawer-head">

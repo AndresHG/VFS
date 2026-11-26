@@ -95,6 +95,10 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body { margin: 0; height: 100%; }
+/* VFS-49 R1: the tabs Buscador / Chat on top, then the tab shown; each fills the rest. */
+body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+body > .app, body > .chat { flex: 1; min-height: 0; }
+body > [hidden] { display: none !important; }
 
 body {
   background: var(--paper);
@@ -134,7 +138,7 @@ svg { width: 1.25em; height: 1.25em; flex: none; }
    middle of an empty page; the list view gives the results the rest of the window. */
 
 .app {
-  height: 100dvh;
+  height: auto;
   overflow: auto;
   /* VFS-35 D3: height thresholds below follow the text size (rem), unlike media queries. */
   container: app / size;
@@ -559,13 +563,13 @@ input[type="date"] {
 .fuzzy-note { grid-row: 1; margin: 0 0 var(--s2); color: var(--ink); font-size: var(--t-meta); }
 .results-panel > .content-hits { grid-row: 2; }
 .results-panel > .list-wrap { grid-row: 3; }
-.results-panel > .details { grid-row: 4; }
+.results-panel > .details-line { grid-row: 4; }
 /* VFS-42 R3: «Documentos» has no name list; while no message shows in its place, the content
    hits take its room. A message (no match, while documents are still being read) sits below
    the reading note. */
 .results-panel[data-tab="documents"]:has(> .list-wrap > .empty[hidden]) { grid-template-rows: auto minmax(0, 1fr) 0 auto; }
 .results-panel[data-tab="documents"]:has(> .list-wrap > .empty[hidden]) > .list-wrap { display: none; }
-.results-panel[data-tab="documents"] > .details { display: none; }
+.results-panel[data-tab="documents"] > .details-line { display: none; }
 .content-hits:not([hidden]) + .list-wrap { border-block-start: 0; }
 
 .list-wrap {
@@ -586,7 +590,7 @@ input[type="date"] {
 .app[data-view="start"] .list-wrap { border: 0; }
 /* Kept laid out (the row height is measured from it) but out of sight and out of the way. */
 .app[data-view="start"] .list { visibility: hidden; }
-.app[data-view="start"] .details { display: none; }
+.app[data-view="start"] .details-line { display: none; }
 
 .row {
   position: absolute;
@@ -732,7 +736,12 @@ input[type="date"] {
   .reveal { padding-inline: var(--s3); }
 }
 
-/* Full location of the selected item, right under the list; selectable to copy. */
+/* Full location of the selected item, right under the list; selectable to copy. VFS-49 R13:
+   a document can open a chat about itself from the same line. */
+.details-line { display: flex; align-items: flex-start; gap: var(--s3); min-width: 0; }
+.details-line > .details { flex: 1; min-width: 0; }
+.ask-doc { flex: none; margin-block-start: var(--s1); min-block-size: 2.25rem; font-size: var(--t-meta); }
+.ask-doc[hidden] { display: none; }
 .details {
   margin: 0;
   padding-block: var(--s2) 0;
@@ -1244,24 +1253,9 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 #ai-record-empty[hidden], #ai-record-clear[hidden] { display: none; }
 #ai-open-record, #ai-record-clear { justify-self: start; }
 
-/* VFS-28: «Preguntar», the answer and «Bibliografía». */
-#ask-open[hidden] { display: none; }
-.ai-ask-body { display: grid; gap: var(--s3); padding: 0 var(--s5) var(--s4); overflow-y: auto; flex: 1; align-content: start; }
-.ai-ask-form { display: grid; gap: var(--s1); }
-.ai-ask-form label { font-weight: 700; }
-.ai-ask-form textarea {
-  font: inherit; inline-size: 100%; padding: var(--s2); resize: vertical;
-  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink);
-}
-.ai-ask-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
-/* VFS-47: the model selector beside «Preguntar», plain weight, aligned with the buttons. */
-.ai-ask-form .ai-model { display: inline-flex; align-items: center; gap: var(--s1); font-weight: 400; }
-.ai-ask-actions [hidden], .ai-after[hidden], #ai-bib-empty[hidden] { display: none; }
-.ai-after { display: grid; gap: var(--s3); }
-.ai-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s4); }
-.ai-turn { display: grid; gap: var(--s2); border-block-end: 1px solid var(--line); padding-block-end: var(--s3); }
-.ai-turn-question { font-weight: 700; margin: 0; }
-.ai-status, .ai-cost, .ai-closest { color: var(--ink-2); font-size: var(--t-meta); margin: 0; }
+/* VFS-28: the answer and «Bibliografía», drawn in the Chat tab (VFS-49). */
+#ai-bib-empty[hidden] { display: none; }
+.ai-status, .ai-closest { color: var(--ink-2); font-size: var(--t-meta); margin: 0; }
 .ai-stream, .ai-answer-text, .ai-not-found, .ai-error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai-error { color: var(--danger); }
 .ai-marker {
@@ -1276,3 +1270,135 @@ dialog h2 { margin: 0; font-size: var(--t-title); }
 .ai-closest-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .ai-bib-entry { overflow-wrap: anywhere; }
 #ai-section[hidden] { display: none; }
+
+/* ---------- The tabs Buscador / Chat (VFS-49 R1): a quiet segmented control beside the
+   search box, so the results keep their height (VFS-35); in Chat it heads the conversation. */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; column-gap: var(--s3); }
+.top > .search { flex: 1 1 16rem; min-width: 0; }
+.views { flex: none; display: flex; }
+.views[hidden] { display: none; }
+.views-tabs { display: flex; gap: var(--s1); padding: var(--s1); border-radius: calc(var(--radius) + 2px); background: var(--sunk); }
+.view-tab {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-block-size: 2.5rem; padding: 0 var(--s3);
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: var(--ink-2); cursor: pointer;
+}
+.view-tab:hover { color: var(--ink); }
+.view-tab[aria-selected="true"] { background: var(--surface); border-color: var(--line); color: var(--ink); font-weight: 700; }
+
+/* VFS-49 R13: under the search box, the query can start a chat. */
+.ask-line {
+  display: flex; align-items: center; gap: var(--s2);
+  flex: 1 0 100%; margin-block-start: var(--s2); padding: var(--s2) var(--s3);
+  border: 0; border-radius: var(--radius); background: var(--accent-soft); color: var(--ink);
+  text-align: start; cursor: pointer; font-size: var(--t-meta);
+}
+.ask-line:hover { background: var(--sunk-2); }
+.ask-line svg { color: var(--accent); }
+.ask-line span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-line[hidden] { display: none; }
+
+/* ---------- The Chat tab (VFS-49): chats on the left, the conversation and composer. */
+.chat { container: chat / inline-size; display: flex; min-height: 0; position: relative; }
+.chat-side {
+  flex: none; inline-size: 17.5rem; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: var(--s3);
+  padding: var(--s4); border-inline-end: 1px solid var(--line); background: var(--sunk);
+  overflow-y: auto;
+}
+.chat-new { justify-content: flex-start; }
+.chat-filter {
+  min-block-size: 2.5rem; padding: 0 var(--s3);
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+}
+.chat-list { flex: 1; display: grid; align-content: start; gap: var(--s1); }
+.chat-group { margin: var(--s3) 0 0; font-size: var(--t-small); color: var(--ink-2); }
+.chat-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.chat-item { display: flex; align-items: center; gap: 2px; border-radius: var(--radius); }
+.chat-item:hover, .chat-item.is-current { background: var(--surface); }
+.chat-item.is-current { box-shadow: inset 3px 0 0 var(--accent); }
+.chat-open {
+  flex: 1; min-width: 0; min-block-size: 2.5rem; padding: 0 var(--s3);
+  border: 0; background: transparent; color: var(--ink); text-align: start; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-item.is-current .chat-open { font-weight: 700; }
+.chat-act { inline-size: 2rem; block-size: 2rem; opacity: 0; }
+.chat-item:hover .chat-act, .chat-item:focus-within .chat-act, .chat-item.is-current .chat-act { opacity: 1; }
+.chat-rename {
+  flex: 1; min-block-size: 2.5rem; padding: 0 var(--s3);
+  border: 1px solid var(--focus); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+}
+.chat-none, .chat-side-note { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
+
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-head { flex: none; display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--gutter); }
+.chat-side-toggle { display: none; }
+.chat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--gutter) var(--s3); }
+.chat-body[hidden], .chat-setup[hidden], .chat-empty[hidden] { display: none; }
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.chat-scroll > * { max-inline-size: 48rem; margin-inline: auto; }
+.chat-empty { min-block-size: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--s3); text-align: center; padding-block: var(--s5); }
+.chat-empty h2 { margin: 0; font-size: var(--t-title); text-wrap: balance; }
+.chat-empty p { margin: 0; color: var(--ink-2); text-wrap: pretty; }
+.chat-examples { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-block-start: var(--s2); }
+.chat-example {
+  min-block-size: var(--target); padding: 0 var(--s4);
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.chat-example:hover { border-color: var(--line-strong); }
+.chat-turns { list-style: none; padding: var(--s4) 0; display: grid; gap: var(--s5); }
+.chat-turn { display: grid; gap: var(--s3); }
+.chat-question {
+  justify-self: end; max-inline-size: 80%; margin: 0; padding: var(--s2) var(--s4);
+  border-radius: calc(var(--radius) * 1.4); background: var(--sunk);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chat-answer { display: grid; gap: var(--s2); line-height: 1.6; }
+.chat-answer .ai-marker { color: var(--accent); background: var(--accent-soft); border-color: transparent; font-weight: 700; }
+.chat-chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chat-chip {
+  display: inline-flex; align-items: center; gap: var(--s2); max-inline-size: 100%;
+  min-block-size: 2.25rem; padding: 0 var(--s3);
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+  font-size: var(--t-meta); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-chip b { color: var(--accent); }
+.chat-chip:hover { border-color: var(--line-strong); }
+.chat-turn-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s4); color: var(--ink-2); font-size: var(--t-meta); }
+
+.chat-composer {
+  flex: none; inline-size: 100%; max-inline-size: 48rem; margin: 0 auto; box-sizing: border-box;
+  display: grid; gap: var(--s2); padding: var(--s3) var(--s3) var(--s2) var(--s4);
+  border: 1px solid var(--line-strong); border-radius: calc(var(--radius) * 1.4); background: var(--surface);
+}
+.chat-composer:focus-within { border-color: var(--focus); }
+.chat-composer textarea {
+  font: inherit; font-size: var(--t-search); line-height: 1.4; resize: none;
+  border: 0; outline: 0; background: transparent; color: var(--ink); max-block-size: 12rem;
+}
+.chat-composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.chat-composer-gap { flex: 1; }
+.chat-select select {
+  min-block-size: 2.25rem; max-inline-size: 16rem; padding: 0 var(--s3);
+  border: 1px solid var(--line); border-radius: 999px; background: var(--sunk); color: var(--ink); font-size: var(--t-meta);
+}
+.chat-model select { background: transparent; border-color: transparent; color: var(--ink-2); }
+.chat-send { inline-size: var(--target); padding: 0; border-radius: 999px; justify-content: center; }
+.chat-send[hidden], #chat-cancel[hidden] { display: none; }
+.chat-meta { margin: var(--s1) auto 0; max-inline-size: 48rem; color: var(--ink-2); font-size: var(--t-small); font-weight: 400; text-align: center; }
+.chat-meta:empty { display: none; }
+
+.chat-setup { margin: auto; max-inline-size: 36rem; padding: var(--s5) var(--gutter); display: grid; gap: var(--s3); }
+.chat-setup h2 { margin: 0; font-size: var(--t-title); }
+.chat-setup p { margin: 0; color: var(--ink-2); text-wrap: pretty; }
+.chat-setup .btn { justify-self: start; }
+.chat-setup-note[hidden] { display: none; }
+
+/* Narrow windows: the chat list folds behind «Chats» (VFS-49 R2). */
+@container chat (width < 44rem) {
+  .chat-side { position: absolute; inset-block: 0; inset-inline-start: 0; z-index: 2; display: none; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .15); }
+  .chat.side-open .chat-side { display: flex; }
+  .chat-side-toggle { display: inline-flex; }
+}

@@ -100,7 +100,7 @@ in [`docs/vision.md`](docs/vision.md).
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
 | `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
-| `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`, and the ask flow (retrieval rounds, passages, citation checks, follow-ups). In the app behind the desktop crate's `ai` feature, on by default from 0.4. |
+| `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`, and the ask flow (retrieval rounds, passages, citation checks, chat messages with their earlier turns; chats kept in `ai.db`, VFS-49). In the app behind the desktop crate's `ai` feature, on by default from 0.4. |
 | `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app is VFS-27. |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`, `--names-only`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off` and `ask` (a real provider, key in `VFS_AI_KEY`). |
 | `bench/` | Standalone evaluation and measurement tools for content search (extractors, engines, corpus); outside the workspace. |

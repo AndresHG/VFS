@@ -164,7 +164,7 @@ export const AiErrorCode = Object.freeze({
   STORAGE: 'storage',
   CAP_REACHED: 'cap_reached', // VFS-28 R10: ask again with confirmed
   NO_STORE: 'no_store',
-  NO_THREAD: 'no_thread',
+  NO_CHAT: 'no_chat', // VFS-49 R10: the chat was deleted
 });
 
 /** `AiStatus.key.state` (VFS-28 R1, R3). */
