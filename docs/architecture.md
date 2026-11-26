@@ -55,7 +55,7 @@ starts no worker.
 Search by meaning (VFS-29) is the crate `crates/vfs-semantic`: `vectors.db` next to
 `content.db`, which a content rebuild never deletes, and an embedding worker process
 (`vfs-embed`) that alone links ONNX Runtime and the tokenizer (feature `embedder`; the CI
-dependency check covers them too). It reads chunks through `vfs_content::ChunkReader`. The
+dependency check covers them too). It reads chunks through `vfs_content::ChunkReader`, and `vfs_content::Searcher::with_meaning` takes its ranker (`MeaningIndex`, behind the `vfs_content::Meaning` trait), so `retrieve` fuses meaning hits with BM25 for every caller, questions included, without `vfs-content` depending on it. The
 worker is not in the installer: it downloads with the model when meaning search is turned on
 (D18).
 Before the update's installer starts, on both platforms, the app stops the content run (its

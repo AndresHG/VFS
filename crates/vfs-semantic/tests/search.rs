@@ -119,8 +119,9 @@ fn both_copies_are_found() {
     assert_eq!(first, vec![d[3].0, 40]);
 }
 
-/// VFS-29 R13: before the query worker is ready the ranker says so at once instead of
-/// making the search wait; with no complete vector set it is not ready either.
+/// VFS-29 R13: before the rows are loaded and the query worker is ready, the ranker says so
+/// at once instead of making the search wait; with no complete vector set it never starts a
+/// worker and creates no file.
 #[test]
 fn not_ready_answers_at_once() {
     let d = docs();
@@ -139,7 +140,17 @@ fn not_ready_answers_at_once() {
     assert!(m.rank("hola", 5).is_ok());
 
     let empty = tempfile::tempdir().unwrap();
-    let none = ready(&empty.path().join("index.db"));
+    let none = ranker(
+        &empty.path().join("index.db"),
+        &["fake:32"],
+        Duration::from_secs(5),
+        Duration::from_secs(600),
+    );
+    assert_eq!(none.rank("hola", 5), Err(MeaningUnavailable::NotReady));
+    assert!(
+        !none.wait_ready(Duration::from_secs(10)),
+        "no set, no worker"
+    );
     assert_eq!(none.rank("hola", 5), Err(MeaningUnavailable::NotReady));
     assert!(!vfs_semantic::store::exists(&empty.path().join("index.db")));
 }

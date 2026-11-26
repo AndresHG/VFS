@@ -92,39 +92,62 @@ impl MeaningIndex {
         self.inner.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Starts the query worker in the background, so the first search does not wait for the
-    /// model to load (the «Documentos» tab calls this when it opens).
+    /// Loads the rows and starts the query worker in the background, so no search waits for
+    /// either (the «Documentos» tab calls this when it opens; a search that finds them missing
+    /// calls it too). With no complete vector set, nothing is started.
     pub fn warm(&self) {
         let mut st = self.lock();
         st.last_used = Instant::now();
         self.ensure_reaper(&mut st);
-        if !matches!(st.worker, Worker::None) {
+        let worker_ready = matches!(st.worker, Worker::Ready(_));
+        if matches!(st.worker, Worker::Starting) || (worker_ready && st.rows.is_some()) {
             return;
         }
-        st.worker = Worker::Starting;
+        st.worker = match std::mem::replace(&mut st.worker, Worker::Starting) {
+            Worker::Ready(w) => Worker::Ready(w),
+            _ => Worker::Starting,
+        };
+        let need_rows = st.rows.is_none();
+        let need_worker = !worker_ready;
         drop(st);
         let me = self.clone();
         std::thread::spawn(move || {
-            let mut w = WorkerEmbedder::new(me.inner.cfg.worker.clone());
-            let ok = w.start_now(&AtomicBool::new(false)).is_ok();
-            let mut st = me.lock();
-            st.worker = if ok {
-                Worker::Ready(Box::new(w))
+            let rows = if need_rows {
+                me.load_rows().ok().flatten()
             } else {
-                Worker::None
+                None
             };
+            let have_rows = !need_rows || rows.is_some();
+            let worker = if need_worker && have_rows {
+                let mut w = WorkerEmbedder::new(me.inner.cfg.worker.clone());
+                w.start_now(&AtomicBool::new(false))
+                    .is_ok()
+                    .then(|| Box::new(w))
+            } else {
+                None
+            };
+            let mut st = me.lock();
+            if rows.is_some() {
+                st.rows = rows;
+            }
+            if need_worker {
+                st.worker = match worker {
+                    Some(w) => Worker::Ready(w),
+                    None => Worker::None,
+                };
+            }
             me.inner.ready.notify_all();
         });
     }
 
-    /// Waits up to `timeout` for the query worker after [`MeaningIndex::warm`]; true when it
-    /// is ready.
+    /// Waits up to `timeout` for [`MeaningIndex::warm`] to finish; true when the rows are
+    /// loaded and the worker is ready.
     pub fn wait_ready(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let mut st = self.lock();
         loop {
             match st.worker {
-                Worker::Ready(_) => return true,
+                Worker::Ready(_) => return st.rows.is_some(),
                 Worker::None => return false,
                 Worker::Starting => {}
             }
@@ -200,22 +223,16 @@ impl Meaning for MeaningIndex {
         let mut st = self.lock();
         st.last_used = Instant::now();
         self.ensure_reaper(&mut st);
-        if st.rows.is_none() {
-            st.rows = self.load_rows().map_err(MeaningUnavailable::Failed)?;
-        }
-        if st.rows.is_none() {
-            return Err(MeaningUnavailable::NotReady);
-        }
-        let q = match &mut st.worker {
-            Worker::Ready(w) => w.embed(&[query.to_string()], true, &AtomicBool::new(false)),
-            Worker::Starting => return Err(MeaningUnavailable::NotReady),
-            Worker::None => Err(EmbedError::Stopped),
-        };
-        if matches!(st.worker, Worker::None) {
+        // Loading the rows reads the whole set; it happens in `warm`, never inside a search.
+        if st.rows.is_none() || !matches!(st.worker, Worker::Ready(_)) {
             drop(st);
             self.warm();
             return Err(MeaningUnavailable::NotReady);
         }
+        let Worker::Ready(w) = &mut st.worker else {
+            return Err(MeaningUnavailable::NotReady);
+        };
+        let q = w.embed(&[query.to_string()], true, &AtomicBool::new(false));
         let q = match q {
             Ok(mut v) if v.len() == 1 => v.remove(0),
             Ok(_) => return Err(MeaningUnavailable::Failed("no query vector".into())),

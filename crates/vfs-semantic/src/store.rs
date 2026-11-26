@@ -39,7 +39,7 @@ CREATE TABLE vectors(
   PRIMARY KEY(set_id, hash)
 ) WITHOUT ROWID;
 -- Where each chunk text occurs (copies share a hash), rewritten by every embedding run, so a
--- search maps a vector to its chunks without reading content.db's text.
+-- search maps a vector to its chunks without reading the content store's text.
 CREATE TABLE locations(
   file_id  INTEGER NOT NULL,
   ordinal  INTEGER NOT NULL,

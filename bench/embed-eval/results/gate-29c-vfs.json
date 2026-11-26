@@ -1,0 +1,57 @@
+{
+ "bm25": {
+  "meaning_es": 0,
+  "meaning_en": 0,
+  "keyword": 45
+ },
+ "hybrid": {
+  "meaning_es": 16,
+  "meaning_en": 6,
+  "keyword": 45,
+  "keyword_losses": []
+ },
+ "n": {
+  "meaning_es": 26,
+  "meaning_en": 10,
+  "keyword": 45
+ },
+ "meaning_hits": {
+  "gastos médicos": true,
+  "multa por ir demasiado rápido": true,
+  "notas escolares de la niña": true,
+  "vacunas del bebé": true,
+  "arreglo de la nevera": false,
+  "cuánto pagamos de calefacción en invierno": true,
+  "baja del trabajo por dolor de espalda": true,
+  "alojamiento para las vacaciones de verano": false,
+  "herencia del abuelo": false,
+  "cambio de compañía de la luz": true,
+  "lo que costó el entierro de la abuela": true,
+  "problemas de vista del niño": true,
+  "subida del alquiler": false,
+  "ayuda para pagar la universidad": false,
+  "nos robaron la bicicleta": true,
+  "humedad en la pared del baño": true,
+  "colesterol alto": true,
+  "pensión de viudedad": false,
+  "contrato del móvil": false,
+  "guardería del pequeño": false,
+  "compra de un coche de segunda mano": true,
+  "dieta para adelgazar": true,
+  "instrucciones del lavavajillas": true,
+  "seguro del coche": false,
+  "gastos de la comunidad de vecinos": false,
+  "cita con el especialista del corazón": true,
+  "medical expenses": false,
+  "speeding ticket": false,
+  "kid's school grades": true,
+  "broken refrigerator repair": true,
+  "high cholesterol": true,
+  "rent increase": false,
+  "baby vaccinations": true,
+  "car insurance renewal": false,
+  "funeral costs for grandma": true,
+  "dishwasher instructions": true
+ },
+ "passes": true
+}
