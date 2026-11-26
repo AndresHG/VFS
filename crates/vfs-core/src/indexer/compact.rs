@@ -88,6 +88,29 @@ fn seed(used_bytes: u64, files: u64, floor: u64) -> u64 {
     }
 }
 
+/// Once per indexer start, before any walk: an index that uses more than R4's bound is owed a
+/// compaction even when its counter exists but is below the threshold. The first deletion of
+/// an index from 0.3.0 or earlier created the counter before R4 could seed it, so such an
+/// index was never compacted (VFS-51 R1). Never lowers the counter.
+pub(crate) fn reseed(conn: &Connection, floor: u64) -> Result<()> {
+    let files = indexed_files(conn)?;
+    let (size, count, free) = pages(conn)?;
+    let used = size * count.saturating_sub(free);
+    if let Some(n) = reseeded(deleted(conn)?, used, files, floor) {
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?1, ?2)",
+            rusqlite::params![DELETED_KEY, n as i64],
+        )?;
+    }
+    Ok(())
+}
+
+/// The counter `reseed` writes, if any: R4's seed when it is above the current counter.
+fn reseeded(current: Option<u64>, used_bytes: u64, files: u64, floor: u64) -> Option<u64> {
+    let owed = seed(used_bytes, files, floor);
+    (current.is_none() || current.unwrap_or(0) < owed).then_some(owed.max(current.unwrap_or(0)))
+}
+
 /// Whether compaction is due: the counter, seeded first when missing, has reached the
 /// threshold. Returns the counter when it is due.
 pub(crate) fn due(conn: &Connection, floor: u64) -> Result<Option<u64>> {
@@ -268,6 +291,33 @@ mod tests {
         .unwrap();
         tx.commit().unwrap();
         root_id
+    }
+
+    /// VFS-51 AC-1 (R1): an index from 0.3.0 or earlier whose counter a first deletion
+    /// created small (the owner's Mac: 1.9 GB for 236 k files, counter 8,320) is owed a
+    /// compaction; a compact index, or a counter already at or above the seed, is left alone.
+    #[test]
+    fn reseed_owes_compaction_to_a_bloated_index_with_a_small_counter() {
+        assert_eq!(
+            reseeded(Some(8_320), 1910 * MIB, 236_000, FLOOR),
+            Some(FLOOR)
+        );
+        assert_eq!(reseeded(Some(8_320), 62 * MIB, 236_000, FLOOR), None);
+        assert_eq!(reseeded(Some(80_000), 1910 * MIB, 236_000, FLOOR), None);
+        assert_eq!(reseeded(None, 62 * MIB, 236_000, FLOOR), Some(0));
+    }
+
+    /// VFS-51 AC-2 (R1): `reseed` runs at indexer start and writes the counter.
+    #[test]
+    fn reseed_writes_the_counter() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = db::open_rw(&dir.path().join("index.db")).unwrap();
+        add_root(&mut conn, "/raíz", 200);
+        reseed(&conn, FLOOR).unwrap();
+        assert_eq!(deleted(&conn).unwrap(), Some(0));
+        record_deleted(&conn, 30).unwrap();
+        reseed(&conn, FLOOR).unwrap();
+        assert_eq!(deleted(&conn).unwrap(), Some(30), "never lowered");
     }
 
     /// Bytes of the index's pages. On Windows the file itself grows and shrinks in 32 MB

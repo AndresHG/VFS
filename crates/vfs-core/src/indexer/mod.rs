@@ -1563,6 +1563,10 @@ impl Worker {
         patterns::init(&tx)?;
         tx.commit()?;
         refresh_counts(&self.conn, None)?;
+        // Before any walk can add to the counter (VFS-51 R1).
+        if let Err(e) = compact::reseed(&self.conn, self.timing.compact_floor) {
+            log::warn!("compaction: {e}");
+        }
         self.filter
             .set_include_all(exclude::include_all(&self.conn)?);
         self.watcher = start_watcher(self.watch_tx.clone(), self.filter.clone());
