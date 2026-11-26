@@ -1,0 +1,8 @@
+# VFS-29b embedding benchmark (Python 3.13). Pinned; installed into .venv.
+huggingface_hub==2.4.0
+model2vec==0.10.0
+numpy==2.5.5
+onnxruntime==1.32.0
+psutil==7.2.2
+snowballstemmer==3.1.1
+tokenizers==0.23.3
