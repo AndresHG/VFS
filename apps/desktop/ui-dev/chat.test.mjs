@@ -404,6 +404,26 @@ test('the model pick is saved and locked while answering', async () => {
   }
 });
 
+/** VFS-49 R5: «Nuevo chat» while an answer streams stops that answer first, so its cost stops
+ *  growing, and opens an empty chat with the controls back. */
+test('a new chat stops the answer still streaming', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await openChat(b);
+    await send(b, '¿fianza?');
+    await acceptNotice(b);
+    await b.until(`document.querySelector('.chat-turn .ai-stream')?.textContent`, 'streaming');
+    await b.evaluate(`document.getElementById('chat-new').click()`);
+    await b.until(`globalThis.vfsFakeCancelled`, 'the cancel');
+    await b.until(`!document.getElementById('chat-send').hidden && !document.getElementById('ai-model').disabled`, 'the controls back');
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-turn').length`), 0);
+    assert.equal(await b.evaluate(`document.getElementById('chat-empty').hidden`), false);
+  } finally {
+    b.close();
+  }
+});
+
 /** VFS-49 AC-8 (R13, D4): a selected document offers «Preguntar sobre este documento», which
  *  opens a new chat limited to it in the Chat tab; the line under the search box starts a chat
  *  with the query; the search filters never reach the chat (D2). */

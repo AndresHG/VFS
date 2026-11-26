@@ -459,7 +459,7 @@ function fakeAi(mode) {
     async aiChatRename(chatId, title) { const c = chats.get(chatId); if (c && title.trim()) c.title = title.trim(); },
     async aiChatDelete(chatId) { chats.delete(chatId); },
     async aiChatsClear() { chats.clear(); },
-    async aiCancel(askId) { cancelled.add(askId); },
+    async aiCancel(askId) { cancelled.add(askId); globalThis.vfsFakeCancelled = askId; },
     async aiChatBibliography(chatId, ord, all) {
       const c = chats.get(chatId);
       if (!c?.turns[ord]) throw { code: AiErrorCode.NO_CHAT, message: 'chat not found' };

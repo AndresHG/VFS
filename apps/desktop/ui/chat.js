@@ -16,14 +16,14 @@ export function chatReady(status) {
  *  `AiSettings.cheap`), so it lives here, not in contract.js, which mirrors Rust enums. */
 export const ModelTier = Object.freeze({ CHEAP: 'cheap', MID: 'mid' });
 
-/** The answer models the selector offers (VFS-47 R1, D2), cheap first, each with its tier.
- *  Names are the providers' own; the hints come from the catalog. */
 /** Each provider's answer models by tier, as the providers name them (VFS-47 D2). */
 export const MODEL_NAMES = Object.freeze({
   [Provider.ANTHROPIC]: Object.freeze(['Haiku', 'Sonnet']),
   [Provider.OPENAI]: Object.freeze(['Luna', 'Sol']),
 });
 
+/** The answer models the selector offers (VFS-47 R1, D2), cheap first, each with its tier.
+ *  Names are the providers' own; the hints come from the catalog. */
 export function modelChoices(S, provider) {
   const [cheap, mid] = MODEL_NAMES[provider === Provider.OPENAI ? Provider.OPENAI : Provider.ANTHROPIC];
   return [
