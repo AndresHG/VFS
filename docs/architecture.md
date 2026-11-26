@@ -271,9 +271,11 @@ are exhausted, and cleared by the next successful listing (`ingest::mark_listed`
 folders panel lists them per root (VFS-10). If it is gone, its subtree is deleted — unless the root itself is unreachable, in
 which case the root becomes `unavailable` and nothing is deleted.
 
-When no directory of a root is pending, `finalize_root` recounts files and folders, marks
-the root `ready`, and after a full scan stamps `last_full_scan_at` and asks the FTS tables
-for a segment merge.
+When no directory of a root is pending, `finalize_root` marks the root `ready`. After an
+incremental pass of a ready root it moves the file count by the pass's added minus removed
+files and recounts folders on the `(root_id, rel_path)` index; after a full scan it recounts
+files and folders, stamps `last_full_scan_at` and asks the FTS tables for a segment merge
+(VFS-50 R6).
 
 ### Resume after interruption
 

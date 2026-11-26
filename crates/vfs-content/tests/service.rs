@@ -852,3 +852,23 @@ fn stop_record_carries_prep_time() {
         "{all}"
     );
 }
+
+/// VFS-50 AC-7 (R5): a removed root reports no name change, yet the service sees the roots
+/// change and starts a run that forgets its documents.
+#[test]
+fn removed_root_starts_a_run_without_a_report() {
+    let s = setup(2);
+    let (_, root_id) = s.second_root();
+    let (svc, rec) = s.start(s.config(Vec::new()), IDLE);
+    svc.set_enabled(true);
+    wait_for(&svc, "finished with both", |st| {
+        st.phase == Phase::Finished && st.done == 4
+    });
+    s.vfs.remove_root(root_id).unwrap();
+    s.vfs.scan_to_completion(&AtomicBool::new(false)).unwrap();
+    svc.mark_offered();
+    wait_for(&svc, "forgot the removed root", |st| {
+        st.phase == Phase::Finished && st.total == 2
+    });
+    assert_eq!(run_starts(&rec), 2);
+}

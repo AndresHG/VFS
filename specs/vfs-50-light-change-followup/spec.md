@@ -43,12 +43,13 @@ read changed documents in calm moments, and show no «processing» for small upd
   after 2 minutes with no further report, and at most 30 minutes after the first report it
   has not yet acted on. A switch-on, resume, «Reintentar», «Volver a leer» or app start SHALL
   start at once, as before.
-- R4. WHEN a run starts with at most 20 documents to read, THE service SHALL leave the shown
-  status as it was (phase and counts) until the run ends, then publish the finished status
+- R4. WHEN a run starts over a finished status with at most 20 documents to read, THE
+  service SHALL leave the shown status as it was (phase and counts) until the run ends, then publish the finished status
   once. A run with more documents shows «Leyendo documentos» as before (VFS-27 R8).
 - R5. WHILE the last run finished and no name change has been reported, THE service SHALL
-  not recompute the documents signature, except every 10 minutes while a timed-out document
-  waits for its one more try (VFS-2 R3).
+  not recompute the documents signature, except when the set of roots or of roots passed
+  over changed (a removed root reports no name change), and every 10 minutes while a
+  timed-out document waits for its one more try (VFS-2 R3).
 - R6. WHEN an incremental pass ends on a root that is ready, THE indexer SHALL update the
   root's file count by the pass's added minus removed files and its folder count from the
   folder index, instead of recounting its files; the end of a full walk still recounts.
@@ -73,8 +74,9 @@ Tests cite these ids (`VFS-50 AC-<m>`) in their doc comments.
   event with phase `reading` or `waiting` is sent, and one event with phase `finished` and
   the new counts is sent at the end.
 - AC-6 (R4) Given 50 new documents, When the run starts, Then the status shows `reading`.
-- AC-7 (R5) Given a finished run and no timed-out document, When 25 minutes pass with no name
-  change, Then the signature is not computed.
+- AC-7 (R5) Given a finished run and no timed-out document, When the service wakes with no
+  name change reported, Then the signature is not computed; When a root is removed, Then a
+  run starts.
 - AC-8 (R6) Given a ready root, When an incremental pass adds 3 files and removes 1, Then its
   file count grows by 2 without a recount, and a later full walk's recount agrees.
 - AC-9 (R7) The `content run stop` record has `prep_ms=<n>`.

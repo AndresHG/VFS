@@ -566,7 +566,31 @@ fn store_version_differs(index_db: &Path) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 struct Signature {
     documents: (i64, i64, f64, i64),
+    roots: Roots,
+}
+
+/// The roots and those passed over (offline or paused), both sorted: cheap to read, so they
+/// are looked at even when no change was reported. A removed root reports no name change
+/// (VFS-50 R5).
+#[derive(Debug, Clone, PartialEq)]
+struct Roots {
+    all: Vec<i64>,
     passed_over: Vec<i64>,
+}
+
+fn roots_now(index_db: &Path) -> Option<Roots> {
+    let conn = Connection::open_with_flags(index_db, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let all = conn
+        .prepare("SELECT id FROM roots ORDER BY id")
+        .ok()?
+        .query_map([], |r| r.get::<_, i64>(0))
+        .ok()?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .ok()?;
+    Some(Roots {
+        all,
+        passed_over: indexer::passed_over_roots(index_db).ok()?,
+    })
 }
 
 fn documents_signature(index_db: &Path) -> Option<Signature> {
@@ -590,11 +614,8 @@ fn documents_signature(index_db: &Path) -> Option<Signature> {
             },
         )
         .ok()?;
-    let passed_over = indexer::passed_over_roots(index_db).ok()?;
-    Some(Signature {
-        documents,
-        passed_over,
-    })
+    let roots = roots_now(index_db)?;
+    Some(Signature { documents, roots })
 }
 
 /// Documents in the index, and those the store has processed.
@@ -822,8 +843,7 @@ fn run_loop(shared: Arc<Shared>, mut probes: Box<dyn Probes>) -> Box<dyn Probes>
                     }
                 }
                 None => {
-                    let same_roots = indexer::passed_over_roots(&cfg.index_db)
-                        .is_ok_and(|ids| ids == sig.passed_over);
+                    let same_roots = roots_now(&cfg.index_db).as_ref() == Some(&sig.roots);
                     if same_roots
                         && (at.elapsed() < IDLE_RECHECK
                             || !indexer::has_timeout_retries(&cfg.index_db))
@@ -1075,7 +1095,7 @@ impl Gate for AppGate<'_> {
                 .unwrap_or_else(|e| e.into_inner())
                 .status
                 .phase,
-            Phase::Finished | Phase::Off
+            Phase::Finished
         );
         self.silent = calm && queued <= self.shared.cfg.pace.silent_max;
         if self.silent {
