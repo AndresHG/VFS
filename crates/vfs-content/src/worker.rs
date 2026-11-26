@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::extract::{extract_bytes, Extracted};
 use crate::paths::long_path;
+pub use crate::process::{background_priority, enter_background_priority};
 use crate::protocol::{FailReason, Hello, Outcome, Request, Response, SkipReason, WORKER_VERSION};
 
 /// Global allocator for the worker binary that refuses allocations beyond a cap. Refusal
@@ -97,63 +98,6 @@ unsafe impl GlobalAlloc for CappedAlloc {
             self.used.fetch_sub(old - new_size, Ordering::Relaxed);
         }
         p
-    }
-}
-
-/// Lowest CPU and I/O priority available without administrator rights, for the whole
-/// worker process (VFS-2 R5).
-pub fn enter_background_priority() {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        // Darwin background band: throttled CPU and disk I/O for every thread.
-        libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    unsafe {
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
-    }
-    #[cfg(windows)]
-    unsafe {
-        use windows_sys::Win32::System::Threading::{
-            GetCurrentProcess, SetPriorityClass, IDLE_PRIORITY_CLASS, PROCESS_MODE_BACKGROUND_BEGIN,
-        };
-        // Background mode for I/O and memory priority, then the idle class for CPU.
-        SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
-        SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
-    }
-}
-
-/// The OS's own report of this process's priority (VFS-2 AC-23): whether it is in the
-/// background band, and the raw value read (macOS `getpriority(PRIO_DARWIN_PROCESS)`, Linux
-/// nice, Windows priority class), for diagnosis. On Windows the band means the idle class
-/// with background mode on; background mode is read back by asking for it again, which the
-/// OS refuses with `ERROR_PROCESS_MODE_ALREADY_BACKGROUND` while it is on.
-pub fn background_priority() -> (bool, i64) {
-    #[cfg(target_os = "macos")]
-    // SAFETY: plain query of this process's own priority.
-    unsafe {
-        let p = libc::getpriority(libc::PRIO_DARWIN_PROCESS, 0);
-        (p != 0, p as i64)
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    // SAFETY: plain query of this process's own priority.
-    unsafe {
-        let p = libc::getpriority(libc::PRIO_PROCESS, 0);
-        (p == 19, p as i64)
-    }
-    #[cfg(windows)]
-    // SAFETY: plain queries of this process's own priority; the second call changes nothing
-    // when background mode is already on, which is what it detects.
-    unsafe {
-        use windows_sys::Win32::Foundation::{GetLastError, ERROR_PROCESS_MODE_ALREADY_BACKGROUND};
-        use windows_sys::Win32::System::Threading::{
-            GetCurrentProcess, GetPriorityClass, SetPriorityClass, IDLE_PRIORITY_CLASS,
-            PROCESS_MODE_BACKGROUND_BEGIN,
-        };
-        let class = GetPriorityClass(GetCurrentProcess());
-        let mode_on = SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN) == 0
-            && GetLastError() == ERROR_PROCESS_MODE_ALREADY_BACKGROUND;
-        (class == IDLE_PRIORITY_CLASS && mode_on, class as i64)
     }
 }
 

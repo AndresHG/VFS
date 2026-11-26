@@ -39,7 +39,7 @@ pub struct Hello {
     /// itself.
     #[serde(default)]
     pub background: bool,
-    /// The raw priority the OS reported, for diagnosis (see `worker::background_priority`).
+    /// The raw priority the OS reported, for diagnosis (see `process::background_priority`).
     #[serde(default)]
     pub priority: i64,
 }

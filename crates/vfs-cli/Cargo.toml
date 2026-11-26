@@ -13,15 +13,16 @@ path = "src/main.rs"
 
 [features]
 default = []
-# VFS-2 prototype: `content-index`, `content-search`, `content-off`; and VFS-28 `ask`. Off by
-# default.
-content = ["dep:vfs-content", "dep:vfs-ai", "dep:chrono"]
+# VFS-2 prototype: `content-index`, `content-search`, `content-off`; VFS-28 `ask`; VFS-29
+# `embed-index`. Off by default.
+content = ["dep:vfs-content", "dep:vfs-ai", "dep:vfs-semantic", "dep:chrono"]
 
 [dependencies]
 vfs-core.workspace = true
 vfs-bookmarks.workspace = true
 vfs-content = { path = "../vfs-content", optional = true }
 vfs-ai = { path = "../vfs-ai", optional = true }
+vfs-semantic = { path = "../vfs-semantic", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"], optional = true }
 # Only for `Transaction`/`Connection` around `vfs_core::db::ingest` in `gen-db`.
 rusqlite.workspace = true
