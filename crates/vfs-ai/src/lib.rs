@@ -28,7 +28,8 @@ mod secret;
 
 pub use cost::{cost_nano, models_for, Models, Usage};
 pub use db::{
-    AiDb, CallKind, CallRecord, CapStatus, SentPassage, SentRecord, StoredRecord, DEFAULT_CAP_NANO,
+    AiDb, CallKind, CallRecord, CapStatus, ChatRow, ChatTurnRow, SentPassage, SentRecord,
+    StoredRecord, DEFAULT_CAP_NANO,
 };
 pub use error::AiError;
 pub use http::{RetryPolicy, RetryWait, SleepWait, ANTHROPIC_VERSION};

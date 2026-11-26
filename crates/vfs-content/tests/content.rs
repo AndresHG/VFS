@@ -698,6 +698,42 @@ fn ac8_a_long_document_gives_six_passages() {
     assert_eq!(r.hits[0].passages.len(), 6);
 }
 
+/// VFS-49 AC-4 (R7): retrieval limited to one document returns that document alone, and
+/// `document` gives its first chunks in order with its folder, for a question that matches
+/// nothing in it.
+#[test]
+fn vfs49_retrieval_inside_one_document() {
+    let s = setup();
+    let filler = "Párrafo de relleno sobre la comunidad de propietarios y la derrama. ".repeat(30);
+    s.write(
+        "a/uno.txt",
+        format!("{filler}\n\nEl pingüino de Peñalara.\n"),
+    );
+    s.write("a/dos.txt", "Otro pingüino, en Gredos.\n");
+    s.scan();
+    s.run(&s.opts());
+
+    let searcher = vfs_content::Searcher::open(&s.db).unwrap();
+    let all = s.search("pingüino");
+    assert_eq!(all.hits.len(), 2);
+    let uno = all.hits.iter().find(|h| h.name == "uno.txt").unwrap().id;
+    let q = vfs_content::Query::Text("pingüino".into());
+    let r = searcher.retrieve_file(&q, uno, 20).unwrap();
+    assert_eq!(r.hits.len(), 1);
+    assert_eq!(r.hits[0].id, uno);
+    let none = searcher
+        .retrieve_file(&vfs_content::Query::Text("Gredos".into()), uno, 20)
+        .unwrap();
+    assert!(none.hits.is_empty());
+
+    let doc = searcher.document(uno, 2).unwrap().unwrap();
+    assert_eq!(doc.name, "uno.txt");
+    assert!(doc.dir.ends_with('a'), "{}", doc.dir);
+    let ords: Vec<u32> = doc.passages.iter().map(|p| p.ordinal).collect();
+    assert_eq!(ords, [0, 1]);
+    assert!(searcher.document(i64::MAX, 2).unwrap().is_none());
+}
+
 // ---- PR 2a: cloud-only files, run-level stops, worker lifetime, store version, budget ----
 
 impl Setup {

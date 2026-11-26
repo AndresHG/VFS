@@ -47,6 +47,23 @@ CREATE INDEX IF NOT EXISTS calls_by_question ON calls(question_id);
 CREATE INDEX IF NOT EXISTS passages_by_question ON passages(question_id);
 -- Kept apart from the record so «Borrar todo» does not reset the month's spend (R10).
 CREATE TABLE IF NOT EXISTS month_totals (month TEXT PRIMARY KEY, cost_nano INTEGER NOT NULL);
+-- Saved chats (VFS-49 R10). `scope` and `view` are the shell's JSON; `answer` is the plain
+-- answer text a later message sends back as an earlier turn (R4).
+CREATE TABLE IF NOT EXISTS chats (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    scope TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_turns (
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    ord INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    view TEXT NOT NULL,
+    PRIMARY KEY (chat_id, ord)
+);
 ";
 
 /// Which call of a question a cost belongs to.
@@ -135,6 +152,25 @@ impl CapStatus {
 /// The calendar month of `at` in local time, `YYYY-MM` (R10).
 fn month_of(at: &DateTime<Local>) -> String {
     at.format("%Y-%m").to_string()
+}
+
+/// A saved chat, as the chat list shows it (VFS-49 R2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRow {
+    pub id: i64,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub scope: String,
+}
+
+/// One saved message of a chat and its answer (VFS-49 R10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatTurnRow {
+    pub ord: i64,
+    pub question: String,
+    pub answer: String,
+    pub view: String,
 }
 
 pub struct AiDb {
@@ -319,4 +355,142 @@ impl AiDb {
             cap_nano: self.cap()?,
         })
     }
+
+    /// Saves a chat's first answered message as a new chat (VFS-49 R10): no chat is kept for a
+    /// message that failed. Returns the chat's id.
+    pub fn create_chat(
+        &mut self,
+        title: &str,
+        scope: &str,
+        turn: &ChatTurnRow,
+        at: &DateTime<Local>,
+    ) -> rusqlite::Result<i64> {
+        let tx = self.conn.transaction()?;
+        let now = at.to_rfc3339();
+        tx.execute(
+            "INSERT INTO chats (title, created_at, updated_at, scope) VALUES (?1, ?2, ?2, ?3)",
+            params![title, now, scope],
+        )?;
+        let id = tx.last_insert_rowid();
+        insert_turn(&tx, id, 0, turn)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Appends an answered message to chat `id` and saves the chat's sources choice with it,
+    /// in one transaction (VFS-49 R6, R10). Returns the message's position.
+    pub fn add_turn(
+        &mut self,
+        id: i64,
+        scope: &str,
+        turn: &ChatTurnRow,
+        at: &DateTime<Local>,
+    ) -> rusqlite::Result<i64> {
+        let tx = self.conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE chats SET updated_at = ?2, scope = ?3 WHERE id = ?1",
+            params![id, at.to_rfc3339(), scope],
+        )?;
+        if changed == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        let ord: i64 = tx.query_row(
+            "SELECT coalesce(max(ord) + 1, 0) FROM chat_turns WHERE chat_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        insert_turn(&tx, id, ord, turn)?;
+        tx.commit()?;
+        Ok(ord)
+    }
+
+    /// Every chat, latest activity first (VFS-49 R2).
+    pub fn chats(&self) -> rusqlite::Result<Vec<ChatRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, title, created_at, updated_at, scope FROM chats
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(ChatRow {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                created_at: r.get(2)?,
+                updated_at: r.get(3)?,
+                scope: r.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Chat `id`, or `None` when it was deleted.
+    pub fn chat(&self, id: i64) -> rusqlite::Result<Option<ChatRow>> {
+        self.conn
+            .query_row(
+                "SELECT id, title, created_at, updated_at, scope FROM chats WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok(ChatRow {
+                        id: r.get(0)?,
+                        title: r.get(1)?,
+                        created_at: r.get(2)?,
+                        updated_at: r.get(3)?,
+                        scope: r.get(4)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// The messages of chat `id`, oldest first.
+    pub fn chat_turns(&self, id: i64) -> rusqlite::Result<Vec<ChatTurnRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT ord, question, answer, view FROM chat_turns WHERE chat_id = ?1 ORDER BY ord",
+        )?;
+        let rows = st.query_map([id], |r| {
+            Ok(ChatTurnRow {
+                ord: r.get(0)?,
+                question: r.get(1)?,
+                answer: r.get(2)?,
+                view: r.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// «Renombrar» (VFS-49 R2).
+    pub fn rename_chat(&self, id: i64, title: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE chats SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
+        Ok(())
+    }
+
+    /// «Borrar» on one chat (VFS-49 R10). The record and the month's spend stay.
+    pub fn delete_chat(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM chats WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// «Borrar todos los chats» (VFS-49 R10). The record and the month's spend stay.
+    pub fn clear_chats(&mut self) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute_batch("DELETE FROM chat_turns; DELETE FROM chats;")?;
+        tx.commit()?;
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
+    }
+}
+
+fn insert_turn(
+    tx: &rusqlite::Transaction<'_>,
+    chat_id: i64,
+    ord: i64,
+    turn: &ChatTurnRow,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT INTO chat_turns (chat_id, ord, question, answer, view) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![chat_id, ord, turn.question, turn.answer, turn.view],
+    )?;
+    Ok(())
 }

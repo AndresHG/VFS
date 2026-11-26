@@ -103,6 +103,8 @@ pub enum AiErrorCode {
     NoStore,
     /// The thread is gone (the window was reloaded, D3).
     NoThread,
+    /// The chat was deleted (VFS-49 R10).
+    NoChat,
 }
 
 impl AiErrorCode {
@@ -126,6 +128,7 @@ impl AiErrorCode {
             CapReached,
             NoStore,
             NoThread,
+            NoChat,
         ]
     }
 
@@ -137,7 +140,7 @@ impl AiErrorCode {
     }
 }
 
-fn api_error(code: AiErrorCode, message: impl Into<String>) -> ApiError {
+pub(crate) fn api_error(code: AiErrorCode, message: impl Into<String>) -> ApiError {
     ApiError {
         code: code.id(),
         message: message.into(),
@@ -178,7 +181,7 @@ fn key_error(e: KeyError) -> ApiError {
     api_error(code, e.to_string())
 }
 
-fn storage_error(e: impl std::fmt::Display) -> ApiError {
+pub(crate) fn storage_error(e: impl std::fmt::Display) -> ApiError {
     api_error(AiErrorCode::Storage, e.to_string())
 }
 
@@ -294,7 +297,7 @@ pub struct RecordView {
 pub struct AiState {
     settings_path: PathBuf,
     db_path: PathBuf,
-    index_db: PathBuf,
+    pub(crate) index_db: PathBuf,
     keys: Keys,
     /// A provider base URL for tests; `None` is the provider's public API.
     endpoint: Option<String>,
@@ -575,13 +578,13 @@ pub const EVENT_ANSWER_TEXT: &str = "ai-answer-text";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TextEvent {
-    ask_id: u64,
-    text: String,
+pub(crate) struct TextEvent {
+    pub(crate) ask_id: u64,
+    pub(crate) text: String,
 }
 
 /// A passage sent, for the markers (R8): what hovering shows and where the file is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceView {
     pub file_id: i64,
@@ -590,7 +593,7 @@ pub struct SourceView {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CitationView {
     /// Index into the thread's sources.
@@ -599,7 +602,7 @@ pub struct CitationView {
 }
 
 /// A run of answer text with its markers (R8). Text only: the UI draws it as plain text (R7a).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockView {
     pub text: String,
@@ -637,7 +640,7 @@ pub struct AskView {
     pub documents: Vec<DocumentView>,
 }
 
-fn lang_of(code: &str) -> Lang {
+pub(crate) fn lang_of(code: &str) -> Lang {
     if code == "en" {
         Lang::En
     } else {
@@ -645,7 +648,7 @@ fn lang_of(code: &str) -> Lang {
     }
 }
 
-fn ask_error(e: AskError) -> ApiError {
+pub(crate) fn ask_error(e: AskError) -> ApiError {
     match e {
         AskError::CapReached(s) => api_error(
             AiErrorCode::CapReached,
@@ -661,7 +664,7 @@ fn ask_error(e: AskError) -> ApiError {
 }
 
 impl AiState {
-    fn start(&self, ask_id: u64) -> CancelToken {
+    pub(crate) fn start(&self, ask_id: u64) -> CancelToken {
         let token = CancelToken::new();
         self.running
             .lock()
@@ -670,14 +673,14 @@ impl AiState {
         token
     }
 
-    fn finish(&self, ask_id: u64) {
+    pub(crate) fn finish(&self, ask_id: u64) {
         self.running
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&ask_id);
     }
 
-    fn reply_view(&self, reply: &Reply) -> Result<ReplyView, ApiError> {
+    pub(crate) fn reply_view(&self, reply: &Reply) -> Result<ReplyView, ApiError> {
         let cap = self
             .db()?
             .get()
@@ -719,7 +722,7 @@ impl AiState {
         }
     }
 
-    fn options(&self, confirmed: bool, lang: &str) -> AskOptions {
+    pub(crate) fn options(&self, confirmed: bool, lang: &str) -> AskOptions {
         let s = self.settings();
         AskOptions {
             provider: s.provider,
