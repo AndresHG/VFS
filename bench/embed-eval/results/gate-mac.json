@@ -1,0 +1,1201 @@
+{
+ "top": 5,
+ "k": 20,
+ "rescore": 80,
+ "rrf_k": 60,
+ "queries": 81,
+ "bm25": {
+  "meaning_es": 0,
+  "meaning_en": 0,
+  "keyword": 45,
+  "n_meaning_es": 26,
+  "n_meaning_en": 10,
+  "n_keyword": 45
+ },
+ "models": {
+  "bekko-a8m": {
+   "dense_es": 11,
+   "dense_en": 7,
+   "hybrid_es": 4,
+   "hybrid_en": 1,
+   "dense_keyword": 43,
+   "hybrid_keyword": 45,
+   "exact_es": 12,
+   "exact_en": 7,
+   "strict_es": 10,
+   "strict_en": 6,
+   "strict_keyword": 45,
+   "keyword_losses": [],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     true,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     false,
+     false
+    ],
+    "vacunas del bebé": [
+     false,
+     true,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     true,
+     true
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     true,
+     false
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     false,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     true,
+     true
+    ],
+    "problemas de vista del niño": [
+     false,
+     true,
+     false
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     true,
+     true
+    ],
+    "colesterol alto": [
+     false,
+     true,
+     false
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     false,
+     false
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     true,
+     false
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     false,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     false,
+     false
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     false,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     true,
+     true
+    ],
+    "medical expenses": [
+     false,
+     false,
+     false
+    ],
+    "speeding ticket": [
+     false,
+     true,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     false,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     true,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     true
+    ],
+    "rent increase": [
+     false,
+     true,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     true,
+     false
+    ],
+    "car insurance renewal": [
+     false,
+     false,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     true,
+     false
+    ],
+    "dishwasher instructions": [
+     false,
+     true,
+     false
+    ]
+   },
+   "passes": true
+  },
+  "bekko-static-1024": {
+   "dense_es": 3,
+   "dense_en": 1,
+   "hybrid_es": 1,
+   "hybrid_en": 1,
+   "dense_keyword": 42,
+   "hybrid_keyword": 45,
+   "exact_es": 3,
+   "exact_en": 1,
+   "strict_es": 3,
+   "strict_en": 1,
+   "strict_keyword": 45,
+   "keyword_losses": [],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     false,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     true,
+     false
+    ],
+    "vacunas del bebé": [
+     false,
+     false,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     false,
+     false
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     false,
+     false
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     false,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     true,
+     true
+    ],
+    "problemas de vista del niño": [
+     false,
+     false,
+     false
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     false,
+     false
+    ],
+    "colesterol alto": [
+     false,
+     false,
+     false
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     false,
+     false
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     false,
+     false
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     false,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     false,
+     false
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     false,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     false,
+     false
+    ],
+    "medical expenses": [
+     false,
+     false,
+     false
+    ],
+    "speeding ticket": [
+     false,
+     false,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     false,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     false,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     true
+    ],
+    "rent increase": [
+     false,
+     false,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     false,
+     false
+    ],
+    "car insurance renewal": [
+     false,
+     false,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     false,
+     false
+    ],
+    "dishwasher instructions": [
+     false,
+     false,
+     false
+    ]
+   },
+   "passes": false
+  },
+  "bekko-static-512": {
+   "dense_es": 2,
+   "dense_en": 2,
+   "hybrid_es": 1,
+   "hybrid_en": 0,
+   "dense_keyword": 42,
+   "hybrid_keyword": 45,
+   "exact_es": 2,
+   "exact_en": 2,
+   "strict_es": 2,
+   "strict_en": 2,
+   "strict_keyword": 45,
+   "keyword_losses": [],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     false,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     false,
+     false
+    ],
+    "vacunas del bebé": [
+     false,
+     false,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     false,
+     false
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     false,
+     false
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     false,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     true,
+     true
+    ],
+    "problemas de vista del niño": [
+     false,
+     false,
+     false
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     false,
+     false
+    ],
+    "colesterol alto": [
+     false,
+     false,
+     false
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     false,
+     false
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     false,
+     false
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     false,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     false,
+     false
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     false,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     false,
+     false
+    ],
+    "medical expenses": [
+     false,
+     false,
+     false
+    ],
+    "speeding ticket": [
+     false,
+     false,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     false,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     true,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     false
+    ],
+    "rent increase": [
+     false,
+     false,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     false,
+     false
+    ],
+    "car insurance renewal": [
+     false,
+     false,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     false,
+     false
+    ],
+    "dishwasher instructions": [
+     false,
+     false,
+     false
+    ]
+   },
+   "passes": false
+  },
+  "e5-small-int8": {
+   "dense_es": 13,
+   "dense_en": 8,
+   "hybrid_es": 9,
+   "hybrid_en": 4,
+   "dense_keyword": 24,
+   "hybrid_keyword": 45,
+   "exact_es": 18,
+   "exact_en": 7,
+   "strict_es": 13,
+   "strict_en": 8,
+   "strict_keyword": 45,
+   "keyword_losses": [],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     false,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     true,
+     true
+    ],
+    "vacunas del bebé": [
+     false,
+     true,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     true,
+     true
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     true,
+     true
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     false,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     true,
+     true
+    ],
+    "problemas de vista del niño": [
+     false,
+     true,
+     true
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     true,
+     true
+    ],
+    "colesterol alto": [
+     false,
+     false,
+     false
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     true,
+     true
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     true,
+     true
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     false,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     true,
+     true
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     true,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     true,
+     false
+    ],
+    "medical expenses": [
+     false,
+     true,
+     true
+    ],
+    "speeding ticket": [
+     false,
+     true,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     true,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     true,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     true
+    ],
+    "rent increase": [
+     false,
+     false,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     true,
+     true
+    ],
+    "car insurance renewal": [
+     false,
+     false,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     true,
+     true
+    ],
+    "dishwasher instructions": [
+     false,
+     true,
+     false
+    ]
+   },
+   "passes": true
+  },
+  "granite-97m-r2-int8": {
+   "dense_es": 11,
+   "dense_en": 6,
+   "hybrid_es": 6,
+   "hybrid_en": 3,
+   "dense_keyword": 26,
+   "hybrid_keyword": 44,
+   "exact_es": 13,
+   "exact_en": 6,
+   "strict_es": 11,
+   "strict_en": 6,
+   "strict_keyword": 44,
+   "keyword_losses": [
+    "arroz Comunidad Valenciana"
+   ],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     false,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     false,
+     false
+    ],
+    "vacunas del bebé": [
+     false,
+     true,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     true,
+     true
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     true,
+     true
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     true,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     true,
+     true
+    ],
+    "problemas de vista del niño": [
+     false,
+     true,
+     false
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     false,
+     false
+    ],
+    "colesterol alto": [
+     false,
+     true,
+     true
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     false,
+     false
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     true,
+     true
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     true,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     false,
+     false
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     false,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     true,
+     true
+    ],
+    "medical expenses": [
+     false,
+     false,
+     false
+    ],
+    "speeding ticket": [
+     false,
+     false,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     false,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     true,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     true
+    ],
+    "rent increase": [
+     false,
+     false,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     true,
+     true
+    ],
+    "car insurance renewal": [
+     false,
+     true,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     true,
+     true
+    ],
+    "dishwasher instructions": [
+     false,
+     true,
+     false
+    ]
+   },
+   "passes": false
+  },
+  "potion-multilingual-128M": {
+   "dense_es": 2,
+   "dense_en": 2,
+   "hybrid_es": 1,
+   "hybrid_en": 1,
+   "dense_keyword": 29,
+   "hybrid_keyword": 45,
+   "exact_es": 2,
+   "exact_en": 2,
+   "strict_es": 2,
+   "strict_en": 2,
+   "strict_keyword": 45,
+   "keyword_losses": [],
+   "meaning_hits": {
+    "gastos médicos": [
+     false,
+     false,
+     false
+    ],
+    "multa por ir demasiado rápido": [
+     false,
+     false,
+     false
+    ],
+    "notas escolares de la niña": [
+     false,
+     false,
+     false
+    ],
+    "vacunas del bebé": [
+     false,
+     false,
+     false
+    ],
+    "arreglo de la nevera": [
+     false,
+     false,
+     false
+    ],
+    "cuánto pagamos de calefacción en invierno": [
+     false,
+     false,
+     false
+    ],
+    "baja del trabajo por dolor de espalda": [
+     false,
+     false,
+     false
+    ],
+    "alojamiento para las vacaciones de verano": [
+     false,
+     false,
+     false
+    ],
+    "herencia del abuelo": [
+     false,
+     false,
+     false
+    ],
+    "cambio de compañía de la luz": [
+     false,
+     false,
+     false
+    ],
+    "lo que costó el entierro de la abuela": [
+     false,
+     false,
+     false
+    ],
+    "problemas de vista del niño": [
+     false,
+     false,
+     false
+    ],
+    "subida del alquiler": [
+     false,
+     false,
+     false
+    ],
+    "ayuda para pagar la universidad": [
+     false,
+     false,
+     false
+    ],
+    "nos robaron la bicicleta": [
+     false,
+     false,
+     false
+    ],
+    "humedad en la pared del baño": [
+     false,
+     true,
+     true
+    ],
+    "colesterol alto": [
+     false,
+     false,
+     false
+    ],
+    "pensión de viudedad": [
+     false,
+     false,
+     false
+    ],
+    "contrato del móvil": [
+     false,
+     false,
+     false
+    ],
+    "guardería del pequeño": [
+     false,
+     false,
+     false
+    ],
+    "compra de un coche de segunda mano": [
+     false,
+     false,
+     false
+    ],
+    "dieta para adelgazar": [
+     false,
+     true,
+     false
+    ],
+    "instrucciones del lavavajillas": [
+     false,
+     false,
+     false
+    ],
+    "seguro del coche": [
+     false,
+     false,
+     false
+    ],
+    "gastos de la comunidad de vecinos": [
+     false,
+     false,
+     false
+    ],
+    "cita con el especialista del corazón": [
+     false,
+     false,
+     false
+    ],
+    "medical expenses": [
+     false,
+     false,
+     false
+    ],
+    "speeding ticket": [
+     false,
+     false,
+     false
+    ],
+    "kid's school grades": [
+     false,
+     false,
+     false
+    ],
+    "broken refrigerator repair": [
+     false,
+     false,
+     false
+    ],
+    "high cholesterol": [
+     false,
+     true,
+     false
+    ],
+    "rent increase": [
+     false,
+     false,
+     false
+    ],
+    "baby vaccinations": [
+     false,
+     false,
+     false
+    ],
+    "car insurance renewal": [
+     false,
+     false,
+     false
+    ],
+    "funeral costs for grandma": [
+     false,
+     true,
+     true
+    ],
+    "dishwasher instructions": [
+     false,
+     false,
+     false
+    ]
+   },
+   "passes": false
+  }
+ }
+}
