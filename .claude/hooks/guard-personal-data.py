@@ -34,19 +34,28 @@ def _scanner():
 
 
 def body_files(command, cwd):
-    """Paths given to --body-file / -F / --notes-file, resolved against cwd."""
+    """Files whose text the command publishes, resolved against cwd: --body-file, --notes-file,
+    -F/--file (gh issue/pr comment, git commit), and `gh api` fields given as key=@file."""
     try:
         words = shlex.split(command)
     except ValueError:
         words = command.split()
     out = []
     for i, w in enumerate(words):
-        for flag in ("--body-file", "--notes-file", "-F"):
+        value = None
+        for flag in ("--body-file", "--notes-file", "--file", "-F", "--field", "-f", "--raw-field"):
             if w == flag and i + 1 < len(words):
-                out.append(words[i + 1])
+                value = words[i + 1]
             elif w.startswith(flag + "="):
-                out.append(w.split("=", 1)[1])
-    return [pathlib.Path(cwd or ".", p.lstrip("@")) for p in out if p != "-"]
+                value = w.split("=", 1)[1]
+        if value is None:
+            continue
+        if "=" in value:  # gh api field: only key=@file names a file
+            value = value.split("=", 1)[1]
+            if not value.startswith("@"):
+                continue
+        out.append(value.lstrip("@"))
+    return [pathlib.Path(cwd or ".", p) for p in out if p and p != "-"]
 
 
 def problems(command, cwd, scan, patterns):

@@ -44,20 +44,20 @@ class ParseAndFindTest(unittest.TestCase):
 class DiffTest(unittest.TestCase):
     DIFF = (
         "diff --git a/docs/a.md b/docs/a.md\n--- a/docs/a.md\n+++ b/docs/a.md\n"
-        "@@ -3,0 +4,2 @@\n+fine line\n+I work at Zorblat Ltd\n"
-        "diff --git a/zorblat ltd.txt b/zorblat ltd.txt\n--- /dev/null\n+++ b/zorblat ltd.txt\n"
-        "@@ -0,0 +1 @@\n+x\n"
-        "diff --git a/old.md b/old.md\n--- a/old.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-Zorblat Ltd\n"
+        "@@ -3,0 +4,3 @@\n+fine line\n+I work at Zorblat Ltd\n+++ b/zorblat ltd too\n"
+        "@@ -9 +10,0 @@\n-Zorblat Ltd\n"
     )
 
     def test_added_lines_and_paths_are_flagged_by_location_and_entry_only(self):
-        msgs = scan.scan_changes(scan.parse(LIST), self.DIFF, ["docs/a.md", "zorblat ltd.txt"])
+        files = [("docs/a.md", self.DIFF), ("zorblat ltd.txt", "")]
+        msgs = scan.scan_changes(scan.parse(LIST), files)
         self.assertEqual(
             msgs,
-            ["changed file #2: file path matches denylist entry #1", "docs/a.md:5: matches denylist entry #1"],
+            ["docs/a.md:5: matches denylist entry #1", "docs/a.md:6: matches denylist entry #1",
+             "changed file #2: file path matches denylist entry #1"],
         )
-        # Removing a denylisted line is never a hit, and the matched text never appears,
-        # not even as a file path.
+        # A removed line is never a hit; an added line that looks like a header is content;
+        # the matched text never appears, not even as a file path.
         self.assertFalse(any("zorblat" in m.lower() or "work at" in m for m in msgs))
 
 
@@ -124,6 +124,19 @@ class RealGitPathsTest(RangeTest):
                 self.commit(name, "ok\nZorblat Ltd\n", "docs: x", self.NOREPLY)
                 msgs = self.run_range(scan.parse(LIST))
                 self.assertIn(f"{name}:2: matches denylist entry #1", msgs)
+
+    def test_added_lines_starting_with_plus_plus_are_scanned(self):
+        self.commit("notes.md", "intro\n++ Zorblat Ltd one\n++ b/zz\nZorblat Ltd two\n", "docs: n", self.NOREPLY)
+        msgs = self.run_range(scan.parse(LIST))
+        self.assertEqual(msgs, ["notes.md:2: matches denylist entry #1", "notes.md:4: matches denylist entry #1"])
+
+    def test_names_git_would_quote_are_exact_and_hidden_when_they_match(self):
+        # Quotes and tabs are not allowed in Windows file names.
+        name = "Zorblat Ltd é.md" if os.name == "nt" else 'Zorblat Ltd "q"\té.md'
+        self.commit(name, "Zorblat Ltd\n", "docs: q", self.NOREPLY)
+        msgs = self.run_range(scan.parse(LIST))
+        self.assertEqual(msgs, ["changed file #1: file path matches denylist entry #1",
+                                "changed file #1:1: matches denylist entry #1"])
 
     def test_denylisted_names_of_empty_binary_and_renamed_files_are_caught_unprinted(self):
         self.commit("zorblat ltd.txt", "", "chore: empty", self.NOREPLY)

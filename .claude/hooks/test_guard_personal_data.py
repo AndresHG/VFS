@@ -42,7 +42,9 @@ class GuardTest(unittest.TestCase):
         pathlib.Path(self.dir, "body.md").write_text("Built at Zorblat Ltd\n", encoding="utf-8")
         for cmd in ('gh pr create --title t --body "for zorblat ltd"',
                     "gh pr create --title t --body-file body.md",
-                    "gh issue comment 5 -F body.md"):
+                    "gh issue comment 5 -F body.md",
+                    "gh api repos/o/r/issues -F title=x -F body=@body.md",
+                    "git commit --file=body.md"):
             with self.subTest(cmd=cmd):
                 out = run_hook(cmd, self.dir)
                 self.assertEqual(out["permissionDecision"], "deny")
