@@ -18,8 +18,14 @@ export const ModelTier = Object.freeze({ CHEAP: 'cheap', MID: 'mid' });
 
 /** The answer models the selector offers (VFS-47 R1, D2), cheap first, each with its tier.
  *  Names are the providers' own; the hints come from the catalog. */
+/** Each provider's answer models by tier, as the providers name them (VFS-47 D2). */
+export const MODEL_NAMES = Object.freeze({
+  [Provider.ANTHROPIC]: Object.freeze(['Haiku', 'Sonnet']),
+  [Provider.OPENAI]: Object.freeze(['Luna', 'Sol']),
+});
+
 export function modelChoices(S, provider) {
-  const [cheap, mid] = provider === Provider.OPENAI ? ['Luna', 'Sol'] : ['Haiku', 'Sonnet'];
+  const [cheap, mid] = MODEL_NAMES[provider === Provider.OPENAI ? Provider.OPENAI : Provider.ANTHROPIC];
   return [
     { tier: ModelTier.CHEAP, label: S.aiModelCheap(cheap) },
     { tier: ModelTier.MID, label: S.aiModelMid(mid) },
@@ -29,6 +35,13 @@ export function modelChoices(S, provider) {
 /** `Scope.kind` of the shell's `vfs_ai::ask::Scope` (VFS-49 R6), a tagged object:
  *  `{kind: 'all'}`, `{kind: 'folder', path}` or `{kind: 'document', fileId, name}`. */
 export const ScopeKind = Object.freeze({ ALL: 'all', FOLDER: 'folder', DOCUMENT: 'document' });
+
+/** «claude-haiku-5-5» → «Haiku»: an answer's model as the selector names it; any other id as
+ *  it came (VFS-49 R8). */
+export function modelName(id) {
+  const known = Object.values(MODEL_NAMES).flat();
+  return known.find((n) => String(id).toLowerCase().includes(n.toLowerCase())) || id;
+}
 
 /** What the sources selector says for `scope` (VFS-49 R6). */
 export function scopeLabel(S, scope) {
@@ -287,7 +300,12 @@ export function setupChat({
   }
 
   $('chat-filter').addEventListener('input', drawList);
-  $('chat-new').addEventListener('click', () => { newChat(); input.focus(); });
+  // A message still streaming is stopped first: a new chat never runs an old one's answer.
+  $('chat-new').addEventListener('click', () => {
+    if (running) api.aiCancel(running).catch(() => {});
+    newChat();
+    input.focus();
+  });
   $('chat-side-toggle').addEventListener('click', () => {
     const open = $('chat').classList.toggle('side-open');
     $('chat-side-toggle').setAttribute('aria-expanded', String(open));
@@ -447,11 +465,6 @@ export function setupChat({
     target.replaceChildren(...parts);
   }
 
-  /** «claude-haiku-5-5» → «Haiku»: the provider's model name as the selector shows it. */
-  function modelName(id) {
-    const known = ['Haiku', 'Sonnet', 'Opus', 'Luna', 'Sol'];
-    return known.find((n) => String(id).toLowerCase().includes(n.toLowerCase())) || id;
-  }
 
   /* ------------------------------------------------------------ asking */
 

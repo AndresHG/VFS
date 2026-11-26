@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   answerRuns, bibLine, chatReady, ChatGroup, copyText, filterChats, groupChats, modelChoices,
-  ModelTier, scopeChoices, scopeLabel, ScopeKind, sourceTitle,
+  modelName, ModelTier, scopeChoices, scopeLabel, ScopeKind, sourceTitle,
 } from '../ui/chat.js';
 import { KeyPlace, KeyState, Provider } from '../ui/contract.js';
 import { Lang, localeFor } from '../ui/strings.js';
@@ -39,6 +39,10 @@ test('the selector names the provider\'s models, cheap first', () => {
   assert.deepEqual(modelChoices(S, Provider.ANTHROPIC).map((c) => c.label), ['Haiku · más barato', 'Sonnet · unas 20 veces más caro']);
   const { S: en } = localeFor(Lang.EN, 'en-US');
   assert.deepEqual(modelChoices(en, Provider.OPENAI).map((c) => c.label), ['Luna · cheapest', 'Sol · about 20 times dearer']);
+  // VFS-49 R8: an answer names its model as the selector does.
+  assert.equal(modelName('claude-haiku-5-5'), 'Haiku');
+  assert.equal(modelName('gpt-6.2-sol'), 'Sol');
+  assert.equal(modelName('otro-modelo'), 'otro-modelo');
 });
 
 /** VFS-28 AC-6 (UI part, R8): markers follow their block, each passage once per block; titles
@@ -203,8 +207,9 @@ test('a chat is asked, listed and continued', async () => {
   }
 });
 
-/** VFS-49 AC-5 (screen part, R11), AC-2: a saved chat opens with its answer; «Renombrar» and
- *  «Borrar» change the list. */
+/** VFS-49 AC-5 (screen part, R11), AC-2: a saved chat opens with both its answers, their
+ *  markers and source chips, and the «Bibliografía» of an answer lists what it cited;
+ *  «Renombrar» and «Borrar» change the list. */
 test('a saved chat opens, is renamed and deleted', async () => {
   const b = await startBrowser();
   try {
@@ -212,8 +217,26 @@ test('a saved chat opens, is renamed and deleted', async () => {
     await openChat(b);
     await b.until(`document.querySelector('.chat-open')`, 'the saved chat');
     await b.evaluate(`document.querySelector('.chat-open').click()`);
-    await b.until(`document.querySelector('.chat-question')?.textContent === '¿Hasta cuándo dura la garantía de la lavadora?'`, 'its question');
-    assert.equal(await b.evaluate(`document.querySelectorAll('.ai-marker').length`), 2);
+    await b.until(`document.querySelectorAll('.chat-turn').length === 2`, 'its two turns');
+    const r = await b.evaluate(`[...document.querySelectorAll('.chat-turn')].map((t) => ({
+      q: t.querySelector('.chat-question').textContent,
+      markers: [...t.querySelectorAll('.ai-marker')].map((m) => m.textContent),
+      chips: [...t.querySelectorAll('.chat-chip')].map((c) => c.textContent),
+      meta: t.querySelector('.chat-turn-meta span').textContent,
+    }))`);
+    assert.deepEqual(r.map((t) => t.q), ['¿Hasta cuándo dura la garantía de la lavadora?', '¿Y quién la vendió?']);
+    assert.deepEqual(r[0].markers, ['1', '2']);
+    assert.deepEqual(r[0].chips, ['1 Contrato alquiler.pdf · p. 2', '2 Recibo fianza.docx']);
+    assert.deepEqual(r[1].chips, ['1 Recibo fianza.docx']);
+    assert.match(r[1].meta, /^Sonnet · /);
+
+    await b.evaluate(`[...document.querySelectorAll('.chat-turn')][0].querySelectorAll('.chat-turn-meta .link-btn')[1].click()`);
+    await b.until(`document.getElementById('ai-bib').open && document.querySelectorAll('#ai-bib-list li').length`, 'the bibliography');
+    assert.deepEqual(await b.evaluate(`[...document.querySelectorAll('#ai-bib-list li')].map((l) => l.textContent)`),
+      ['Inmobiliaria Sol (2021). Contrato de arrendamiento. C:\\Archivo\\Casa\\Contrato alquiler.pdf']);
+    await b.evaluate(`(() => { const a = document.getElementById('ai-bib-all'); a.checked = true; a.dispatchEvent(new Event('change')); })()`);
+    await b.until(`document.querySelectorAll('#ai-bib-list li').length === 3`, '«Todos los encontrados»');
+    await b.evaluate(`document.getElementById('ai-bib').close()`);
 
     await b.evaluate(`document.querySelector('.chat-item .chat-act').click()`);
     await b.evaluate(`(() => { const f = document.querySelector('.chat-rename'); f.value = 'Lavadora';
@@ -350,7 +373,7 @@ test('a hostile answer stays text and loads nothing', async () => {
 
 /** VFS-47 AC-2, VFS-49 AC-9 (R5): the cheap model is selected by default; a pick is saved at
  *  once and reaches the next message; while an answer streams the selector is disabled and
- *  the send button gives way to «Cancelar». */
+ *  the send button gives way to «Cancelar», which stops it. */
 test('the model pick is saved and locked while answering', async () => {
   const b = await startBrowser();
   try {
@@ -367,6 +390,15 @@ test('the model pick is saved and locked while answering', async () => {
     await b.until(`document.querySelector('.chat-turn-meta')`, 'the answer');
     await b.until(`!document.getElementById('ai-model').disabled`, 'unlocked after');
     assert.equal(await b.evaluate(`globalThis.vfsFakeAnswerModel`), 'claude-sonnet-5-5', 'the saved pick reached the ask');
+
+    // «Cancelar» stops the stream: the turn says so and the controls come back.
+    await send(b, '¿y otra cosa?');
+    await b.until(`document.querySelectorAll('.chat-turn').length === 2
+      && document.querySelectorAll('.chat-turn')[1].querySelector('.ai-stream')?.textContent`, 'streaming');
+    await b.evaluate(`document.getElementById('chat-cancel').click()`);
+    await b.until(`document.querySelectorAll('.chat-turn')[1].querySelector('.ai-error')`, 'the cancelled turn');
+    assert.equal(await b.evaluate(`document.querySelectorAll('.chat-turn')[1].querySelector('.ai-error').textContent`), 'Pregunta cancelada.');
+    assert.equal(await b.evaluate(`document.getElementById('chat-send').hidden || document.getElementById('ai-model').disabled`), false);
   } finally {
     b.close();
   }

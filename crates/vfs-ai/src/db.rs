@@ -308,7 +308,7 @@ impl AiDb {
         tx.commit()?;
         // Reclaim the space of the deleted text on disk.
         self.conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
+            .execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     /// The total spent in the calendar month of `at`, local time (R10).
@@ -472,7 +472,7 @@ impl AiDb {
     pub fn delete_chat(&self, id: i64) -> rusqlite::Result<()> {
         self.conn.execute("DELETE FROM chats WHERE id = ?1", [id])?;
         self.conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
+            .execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     /// «Borrar todos los chats» (VFS-49 R10). The record and the month's spend stay.
@@ -481,7 +481,7 @@ impl AiDb {
         tx.execute_batch("DELETE FROM chat_turns; DELETE FROM chats;")?;
         tx.commit()?;
         self.conn
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
+            .execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")
     }
 }
 

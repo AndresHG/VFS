@@ -369,10 +369,15 @@ function fakeAi(mode) {
     const yesterday = new Date(Date.now() - 26 * 3600e3).toISOString();
     chats.set(nextChat, {
       id: nextChat, title: 'Garantía de la lavadora', updatedAt: yesterday, scope: { kind: 'all' },
-      turns: [turn('¿Hasta cuándo dura la garantía de la lavadora?', answers.ok, 'claude-haiku-5-5')],
+      turns: [
+        turn('¿Hasta cuándo dura la garantía de la lavadora?', answers.ok, 'claude-haiku-5-5'),
+        turn('¿Y quién la vendió?', {
+          ...answers.ok, blocks: [{ text: 'La vendió Electro Sol.', citations: [{ passage: 1, marker: 1 }] }],
+        }, 'claude-sonnet-5-5'),
+      ],
     });
     nextChat += 1;
-    st.records.pop();
+    st.records.splice(-2);
   }
   const status = () => {
     const k = st.keys[st.settings.provider];

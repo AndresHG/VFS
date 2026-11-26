@@ -352,3 +352,57 @@ fn chats_and_the_record_are_cleared_apart() {
     assert_eq!(db.records().unwrap().len(), 1);
     assert_eq!(db.month_total(&now).unwrap(), 1_000);
 }
+
+/// VFS-49 R2: chat times are kept in UTC, so the text order is the time order across a
+/// daylight saving change.
+#[test]
+fn chat_times_are_utc() {
+    let (_d, mut db) = db();
+    let at = Local.with_ymd_and_hms(2026, 3, 29, 12, 0, 0).unwrap();
+    db.create_chat("Fianza", "{\"kind\":\"all\"}", &row("a"), &at)
+        .unwrap();
+    let c = &db.chats().unwrap()[0];
+    assert!(c.updated_at.ends_with("+00:00"), "{}", c.updated_at);
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(&c.updated_at).unwrap(),
+        at
+    );
+}
+
+/// VFS-49 R10, VFS-28 R11: deleting a chat, or the record, reclaims its space, so the passages
+/// it quoted do not linger in `ai.db` or its WAL.
+#[test]
+fn a_deleted_chat_leaves_no_text_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ai.db");
+    let mut db = AiDb::open(&path).unwrap();
+    let secret = "Glucosa-de-Ramírez-126-mg".repeat(200);
+    let mut turn = row("q");
+    turn.view = format!("{{\"text\":\"{secret}\"}}");
+    let id = db
+        .create_chat("Análisis", "{\"kind\":\"all\"}", &turn, &opts().now)
+        .unwrap();
+    db.delete_chat(id).unwrap();
+    // «Borrar todo» of the record reclaims its passages' space the same way.
+    db.record(&SentRecord {
+        asked_at: opts().now,
+        provider: Provider::Anthropic,
+        question: "q".into(),
+        rewrite: None,
+        passages: vec![vfs_ai::SentPassage {
+            file_name: "Análisis.pdf".into(),
+            page: None,
+            text: secret.clone(),
+        }],
+        calls: Vec::new(),
+    })
+    .unwrap();
+    db.clear_records().unwrap();
+    for file in ["ai.db", "ai.db-wal"] {
+        let bytes = std::fs::read(dir.path().join(file)).unwrap_or_default();
+        let found = bytes
+            .windows(secret.len().min(64))
+            .any(|w| w == &secret.as_bytes()[..secret.len().min(64)]);
+        assert!(!found, "the deleted chat's text is still in {file}");
+    }
+}
