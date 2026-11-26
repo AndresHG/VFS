@@ -140,6 +140,13 @@ impl Searcher {
         by_doc.truncate(want);
 
         let dense: Vec<i64> = by_doc.iter().map(|d| d.0).collect();
+        if dense.is_empty() {
+            // Nothing found by meaning inside the filters: the word hits, partial or not.
+            let mut r = bm25;
+            r.hits = r.hits.into_iter().skip(offset as usize).collect();
+            r.meaning = MeaningUse::Used;
+            return Ok(r);
+        }
         let lexical: Vec<i64> = if bm25.partial {
             Vec::new()
         } else {

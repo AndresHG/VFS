@@ -16,9 +16,6 @@ use crate::engine::{EmbedError, Embedder};
 use crate::quant;
 use crate::store::{Store, TextHash};
 
-/// Candidates rescored with int8 per chunk asked (R11: the top 4× k).
-pub const RESCORE_FACTOR: usize = 4;
-
 /// How the ranker works.
 #[derive(Debug, Clone)]
 pub struct MeaningConfig {
@@ -264,7 +261,9 @@ fn rank_rows(rows: &Rows, q: &[f32], n: usize) -> Result<Vec<MeaningHit>, String
         .enumerate()
         .map(|(i, b)| (quant::hamming(b, &qbits), i))
         .collect();
-    let take = (n * RESCORE_FACTOR).min(by_distance.len());
+    // R11: the caller asks for 4× the documents it wants, and that many candidates are
+    // rescored (80 for 20 documents, as measured in D19).
+    let take = n.min(by_distance.len());
     if take < by_distance.len() {
         by_distance.select_nth_unstable(take);
         by_distance.truncate(take);

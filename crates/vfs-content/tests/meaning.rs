@@ -266,3 +266,27 @@ fn fused_pages_do_not_repeat() {
     seen.dedup();
     assert_eq!(seen.len(), 4);
 }
+
+/// VFS-29 D17, R11: when nothing found by meaning is inside the filters, the word hits stay,
+/// even a partial list: the fusion never empties a search BM25 answered.
+#[test]
+fn word_hits_stay_when_meaning_finds_nothing_inside_the_filters() {
+    let s = setup();
+    let filters = SearchFilters {
+        folder: Some(s.root.join("salud").to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let plain = Searcher::open(&s.db).unwrap();
+    let want = plain
+        .retrieve(&text("gastos dentales"), &filters, 5, 0)
+        .unwrap();
+    assert!(want.partial && !want.hits.is_empty());
+    let water = s.id("agua.txt");
+    let r = s
+        .searcher(Fake(Ok(vec![water])))
+        .retrieve(&text("gastos dentales"), &filters, 5, 0)
+        .unwrap();
+    let a: Vec<i64> = r.hits.iter().map(|h| h.id).collect();
+    let b: Vec<i64> = want.hits.iter().map(|h| h.id).collect();
+    assert_eq!(a, b);
+}
