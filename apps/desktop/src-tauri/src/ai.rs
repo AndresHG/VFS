@@ -577,7 +577,7 @@ pub struct SourceView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CitationView {
-    /// Index into the thread's sources.
+    /// Index into the turn's sources.
     pub passage: usize,
     pub marker: u32,
 }

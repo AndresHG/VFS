@@ -180,7 +180,7 @@ impl Thread {
     }
 }
 
-/// A first question's result: its thread, for follow-ups, and its reply.
+/// A question's result: its passages and documents with the chat's turns, and its reply.
 #[derive(Debug, Clone)]
 pub struct Asked {
     pub thread: Thread,

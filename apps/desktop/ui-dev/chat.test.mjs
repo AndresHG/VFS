@@ -113,8 +113,8 @@ test('the sources selector', () => {
   assert.equal(scopeLabel(S, { kind: ScopeKind.FOLDER, path: '/Users/ana/Documentos/' }), 'Carpeta: Documentos');
 });
 
-/** VFS-28 R7a: the chat never builds HTML from text. VFS-49 R1: the drawer and its button
- *  are gone. VFS-47 AC-3: the model selector lives in the composer, not in Ajustes. */
+/** VFS-28 R7a: the chat never builds HTML from text. VFS-49 AC-1 (R1): the drawer and its
+ *  button are gone. VFS-47 AC-3: the model selector lives in the composer, not in Ajustes. */
 test('text only, and no drawer', () => {
   assert.doesNotMatch(chatJs, /innerHTML|insertAdjacentHTML|outerHTML|DOMParser/);
   assert.doesNotMatch(html, /id="ask-open"|id="ai-ask"|id="ai-follow/);
@@ -162,6 +162,52 @@ test('the tabs keep their state and are remembered', async () => {
     await b.load('&ai=ok');
     await b.until(isChat, 'reopened on Chat');
     assert.equal(await b.evaluate(`document.getElementById('view-chat').getAttribute('aria-selected')`), 'true');
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-49 AC-1 (R1): «Buscador» and «Chat» are one tablist with one tab stop; the arrow
+ *  keys, Home and End choose, focus follows, and the chosen tab's panel shows. */
+test('the window tabs move with the keyboard', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await b.until(`!document.getElementById('views').hidden`, 'the tabs');
+    await b.evaluate(`document.getElementById('view-search').focus()`);
+    const state = () => b.evaluate(`({
+      selected: [...document.querySelectorAll('#views [role=tab]')].filter((t) => t.getAttribute('aria-selected') === 'true').map((t) => t.id),
+      stops: [...document.querySelectorAll('#views [role=tab]')].filter((t) => t.tabIndex === 0).map((t) => t.id),
+      focus: document.activeElement.id,
+      chat: !document.getElementById('chat').hidden,
+    })`);
+    const key = (k) => b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }))`);
+    for (const [k, id, chat] of [['ArrowRight', 'view-chat', true], ['ArrowLeft', 'view-search', false], ['End', 'view-chat', true], ['Home', 'view-search', false]]) {
+      await key(k);
+      assert.deepEqual(await state(), { selected: [id], stops: [id], focus: id, chat }, k);
+    }
+  } finally {
+    b.close();
+  }
+});
+
+/** VFS-49 AC-2 (R2): «Renombrar» keeps the old title on Escape and saves on leaving the field. */
+test('renaming keeps or saves the title', async () => {
+  const b = await startBrowser();
+  try {
+    await b.load('&ai=ok');
+    await openChat(b);
+    await b.until(`document.querySelector('.chat-open')`, 'the saved chat');
+    const rename = (value, how) => b.evaluate(`(() => {
+      document.querySelector('.chat-item .chat-act').click();
+      const f = document.querySelector('.chat-rename'); f.value = ${JSON.stringify(value)};
+      if (${JSON.stringify(how)} === 'escape') f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      else f.dispatchEvent(new FocusEvent('blur'));
+    })()`);
+    await rename('Otra cosa', 'escape');
+    await b.until(`document.querySelector('.chat-open')?.textContent === 'Garantía de la lavadora'`, 'the old title kept');
+    await rename('Lavadora nueva', 'blur');
+    await b.until(`document.querySelector('.chat-open')?.textContent === 'Lavadora nueva'`, 'the new title saved');
   } finally {
     b.close();
   }
