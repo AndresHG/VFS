@@ -32,8 +32,6 @@ tokenizers = { version = "=0.22.2", default-features = false, features = ["fancy
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_ProcessStatus"] }
 
 [dev-dependencies]
 vfs-content = { path = "../vfs-content", default-features = false, features = ["test-support"] }

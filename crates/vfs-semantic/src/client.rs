@@ -49,6 +49,8 @@ struct Running {
     stdin: ChildStdin,
     lines: Receiver<std::io::Result<String>>,
     stderr: Arc<Mutex<Vec<u8>>>,
+    /// The thread draining stderr; joined after the worker exits, so its last words are kept.
+    stderr_reader: Option<std::thread::JoinHandle<()>>,
     #[cfg(windows)]
     _job: vfs_content::process::job::Job,
 }
@@ -120,7 +122,7 @@ impl WorkerEmbedder {
         let mut err = child.stderr.take().expect("piped stderr");
         let stderr = Arc::new(Mutex::new(Vec::new()));
         let tail = stderr.clone();
-        std::thread::spawn(move || {
+        let stderr_reader = std::thread::spawn(move || {
             let mut buf = [0u8; 1024];
             while let Ok(n) = err.read(&mut buf) {
                 if n == 0 {
@@ -145,6 +147,7 @@ impl WorkerEmbedder {
             stdin,
             lines,
             stderr,
+            stderr_reader: Some(stderr_reader),
             #[cfg(windows)]
             _job: job,
         });
@@ -184,6 +187,9 @@ impl WorkerEmbedder {
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     let _ = r.child.wait();
+                    if let Some(h) = r.stderr_reader.take() {
+                        let _ = h.join();
+                    }
                     let msg = format!("the worker exited: {}", r.stderr_tail());
                     self.kill();
                     return Err(EmbedError::Failed(msg));
