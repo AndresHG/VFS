@@ -332,7 +332,7 @@ export const en = {
   meaningIntro: 'Finds documents by what they are about, even when they do not contain the words you type: “medical expenses” finds the dentist’s invoice. VFS downloads a language model that works on this computer; nothing leaves it.',
   meaningNeedsContent: 'First turn on searching inside documents.',
   meaningConfirmTitle: 'Turn on search by meaning?',
-  meaningConfirmBody: (size, time, ram) => `VFS will download the model (${size}) and prepare your documents in the background. For this archive it will take ${time} while the computer is idle, longer while you use it. While it works it needs about ${ram} of memory. Nothing leaves this computer.`,
+  meaningConfirmBody: (size, time, ram, searchRam, minutes) => `VFS will download the model (${size}) and prepare your documents in the background. For this archive it will take ${time} while the computer is idle, longer while you use it. While preparing it needs about ${ram} of memory; while you search, about ${searchRam}, released after ${minutes} minutes without a search. Nothing leaves this computer.`,
   meaningConfirmYes: 'Download and turn on',
   meaningDownloading: (done, total) => `Downloading the model: ${done} of ${total}`,
   meaningNoContent: 'Waiting for the text of the documents to be read.',

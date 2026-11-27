@@ -332,7 +332,7 @@ function fakeMeaning(mode) {
       async onMeaningStatus(cb) { cbs.add(cb); return () => cbs.delete(cb); },
       async meaningOffer() {
         await sleep(40);
-        return { downloadBytes: 158e6, chunks: total, secondsFast: Math.round(total * 0.09), secondsSlow: Math.round(total * 0.23), ramBytes: 700 * 2 ** 20 };
+        return { downloadBytes: 158e6, chunks: total, secondsFast: Math.round(total * 0.09), secondsSlow: Math.round(total * 0.23), ramBytes: 700 * 2 ** 20, searchRamBytes: 570 * 2 ** 20, idleMinutes: 5 };
       },
       async meaningSetEnabled(on) { st.settings.enabled = on; if (on) st.settings.paused = false; return status(); },
       async meaningSetPaused(p) { st.settings.paused = p; return status(); },
