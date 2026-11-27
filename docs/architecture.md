@@ -611,7 +611,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `get_content_max_mb` / `set_content_max_mb` | — / `mb` | `number`: the content size limit in MB, 0 for none (VFS-34 R6) |
 | `search_sources` | `query: SearchQuery`, `options: { sources: Source[] (empty = all), bookmarkFolder, sort: SortOrder }` (optional) | `SourcesResponse` (VFS-6) |
 | `get_bookmarks_status` | — | `BookmarkStatus` |
-| `set_bookmarks_enabled` | `enabled` | `BookmarkStatus`; off deletes every stored bookmark |
+| `set_bookmarks_enabled` | `enabled`, `browser?: Browser` (Firefox when left out) | `BookmarkStatus` (with `browsers: BrowserStatus[]`, VFS-44); off deletes that browser's stored bookmarks |
 | `open_bookmark` | `id` | `null`; `not_found` for an unknown id, `unavailable` for a non-web address |
 | `reveal_target` | `id` (a link's `files.id`) | `"revealed"` or `"opened_parent"`; `not_found` when the recorded target does not exist (VFS-18 "Mostrar el destino") |
 | `open_link_url` | `id` | `null`; `unavailable` unless the Internet Shortcut has an `http`/`https` address (VFS-18 "Abrir en Firefox") |
