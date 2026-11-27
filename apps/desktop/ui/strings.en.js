@@ -3,7 +3,7 @@
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
-  BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
+  BookmarkRoot, Browser, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason, Provider, AiErrorCode,
 } from './contract.js';
 
@@ -72,7 +72,7 @@ export const en = {
     [SortOrder.OLDEST]: 'Oldest first', [SortOrder.NAME]: 'By name (A-Z)',
     [SortOrder.SIZE]: 'Largest first', [SortOrder.SOURCE]: 'Files first, then bookmarks',
   },
-  folderGroupBookmarks: 'Firefox bookmarks',
+  folderGroupBookmarks: 'Bookmarks',
   folderAll: 'All folders',
   folderPick: 'Choose another folder…',
   folderInside: (name) => `In: ${name}`,
@@ -89,6 +89,8 @@ export const en = {
   revealKey: 'Enter',
   unavailableBadge: 'Unavailable',
   openButton: 'Open in Firefox',
+  // VFS-44 R6: a bookmark opens in the browser it came from.
+  openBookmarkButton: (browser) => `Open in ${browser}`,
   folderContentsButton: 'See what is inside',
   bookmarkKind: 'Bookmark',
   bookmarkFolderKind: 'Bookmark folder',
@@ -100,6 +102,7 @@ export const en = {
     [title, kind, `in ${path}`, site, date && `saved on ${date}`].filter(Boolean).join(', '),
   detailsBookmark: 'Address:',
   detailsBookmarkFolder: 'Saved in:',
+  detailsAlsoIn: 'Also in:',
   rowLabel: (name, kind, dir, date, size, unavailable, places = 1) =>
     [name, kind, `in ${dir}`, date && `modified on ${date}`, size, unavailable && 'unavailable',
       places > 1 && `in ${places} places, Shift plus Enter to see them`]
@@ -212,10 +215,12 @@ export const en = {
   rootAdded: (p) => `“${p}” was added. It is being checked; you can search in the meantime.`,
   rootTakesIn: (p, inner) => { const l = [].concat(inner); return `“${p}” was added. It includes ${l.map((x) => `“${x}”`).join(', ')}, which ${l.length > 1 ? 'were' : 'was'} already in the list; ${l.length > 1 ? 'their' : 'its'} files still appear in searches while it is checked.`; },
   remoteWarning: 'This folder is on a network or removable drive. If it is disconnected, its files will be marked “Unavailable”.',
-  bookmarksTitle: 'Firefox bookmarks',
-  bookmarksToggle: 'Include Firefox bookmarks',
+  bookmarksTitle: 'Browser bookmarks',
+  // VFS-44: one switch per browser; its name is the product's, the same in every language.
+  browserNames: { [Browser.FIREFOX]: 'Firefox', [Browser.CHROME]: 'Chrome', [Browser.BRAVE]: 'Brave' },
+  bookmarksToggle: (browser) => `Include ${browser} bookmarks`,
   bookmarksSummary: (on) => (on ? '· included' : '· not included'),
-  bookmarksIntro: 'Also searches the bookmarks saved in Firefox. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
+  bookmarksIntro: 'Also searches the bookmarks saved in your browsers. Only bookmarks are read, never history or passwords, and nothing leaves this computer.',
 
   // VFS-21: updates. What the check sends. It names no other connection: a build without the
   // AI shows nothing about it (VFS-28), and the AI section states its own.
@@ -259,11 +264,11 @@ export const en = {
   bookmarksCount: (n, when) => `${n} bookmarks · read ${when}`,
   bookmarksState: {
     [ReadState.NEVER]: 'The bookmarks have not been read yet.',
-    [ReadState.READING]: 'Reading Firefox bookmarks…',
+    [ReadState.READING]: (browser) => `Reading ${browser} bookmarks…`,
     [ReadState.OK]: '',
-    [ReadState.FROM_BACKUP]: 'Firefox did not allow reading its latest bookmarks; its last backup is used instead.',
-    [ReadState.NO_FIREFOX]: 'No Firefox bookmarks were found on this computer.',
-    [ReadState.FAILED]: 'The Firefox bookmarks could not be read. It will be tried again later.',
+    [ReadState.FROM_BACKUP]: (browser) => `The latest ${browser} bookmarks could not be read; their last backup is used instead.`,
+    [ReadState.NOT_FOUND]: (browser) => `No ${browser} bookmarks were found on this computer.`,
+    [ReadState.FAILED]: (browser) => `The ${browser} bookmarks could not be read. It will be tried again later.`,
   },
   // VFS-27: content search, the words inside documents.
   contentSetTitle: 'Inside documents',
@@ -570,7 +575,7 @@ export const en = {
       [ErrorCode.UNAVAILABLE]: 'This address is not a web page and cannot be opened.',
     },
     openBookmark: {
-      [ErrorCode.NOT_FOUND]: 'That bookmark no longer exists in Firefox.',
+      [ErrorCode.NOT_FOUND]: 'That bookmark no longer exists in the browser.',
       [ErrorCode.UNAVAILABLE]: 'This bookmark is not a web page and cannot be opened.',
     },
     addRoot: {

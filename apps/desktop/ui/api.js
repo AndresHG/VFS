@@ -21,9 +21,12 @@
 //   (VFS-6) search_sources(query, options: {sources: Source[], bookmarkFolder, sort: SortOrder})
 //     -> {hits: (SearchHit & {source: 'files'} | BookmarkHit & {source: 'bookmarks'})[], total,
 //     truncated, truncatedBy, elapsedMs, approximateOrder}
-//   BookmarkHit    {id, isFolder, title, url, root: BookmarkRoot, folder: string[], profile, added,
-//                   matched, openable}
-//   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead, roots: {id, root, profile}[]}
+//   BookmarkHit    {id, isFolder, title, url, root: BookmarkRoot, folder: string[], browser: Browser,
+//                   alsoIn: Browser[], profile, added, matched, openable}
+//   BookmarkStatus {enabled, state: ReadState, count, profiles, lastRead,
+//                   roots: {id, root, browser, profile}[], browsers: BrowserStatus[]}
+//   BrowserStatus  {browser: Browser, enabled, state: ReadState, count, profiles, lastRead}  (VFS-44)
+//   set_bookmarks_enabled(enabled, browser?: Browser) (Firefox when left out)
 //   (VFS-21) UpdateSettings {checkOnOpen}; check_for_update -> {version} | null (null when the
 //     setting is off); install_update emits 'update-progress' {downloaded, total|null}
 //   (VFS-45) open_project_page(page: ProjectPage) opens a fixed project address in the browser;
@@ -92,7 +95,7 @@ function tauriBackend(t) {
     setContentMaxMb: (mb) => invoke('set_content_max_mb', { mb }),
     searchSources: (query, options) => invoke('search_sources', { query, options }),
     getBookmarksStatus: () => invoke('get_bookmarks_status'),
-    setBookmarksEnabled: (enabled) => invoke('set_bookmarks_enabled', { enabled }),
+    setBookmarksEnabled: (enabled, browser) => invoke('set_bookmarks_enabled', { enabled, browser }),
     openBookmark: (id) => invoke('open_bookmark', { id }),
     // VFS-20: the report text, and saving it (-> {folder, file}); `github` also opens the issue.
     feedbackReport: (description) => invoke('feedback_report', { description }),

@@ -14,7 +14,7 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
 │        │  invoke(command) / listen(event)                   │
 │ apps/desktop/src-tauri commands.rs, reveal.rs, lib.rs,      │
 │        │               bookmarks.rs (VFS-6), splash.rs      │
-│ crates/vfs-bookmarks   Firefox reader, bookmarks.db, merge  │
+│ crates/vfs-bookmarks   browser readers, bookmarks.db, merge │
 │        │                                                    │
 │ crates/vfs-core        Vfs facade (core/lib.rs)             │
 │   ├─ roots.rs          add / remove / list folders          │
@@ -38,8 +38,8 @@ Requirement and decision ids (`AC-n`, `S2`, `I4`, …) are those of
               <local app data dir>/index.db
 ```
 
-`crates/vfs-cli` uses the same `Vfs` facade, with its own index file. Firefox bookmarks
-(VFS-6) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below. Document content
+`crates/vfs-cli` uses the same `Vfs` facade, with its own index file. Browser bookmarks
+(VFS-6, VFS-44) live in `bookmarks.db` next to `index.db`; see "Bookmarks" below. Document content
 search (VFS-2) is the crate `crates/vfs-content`, reached from the app (VFS-27; the interface
 is VFS-27 27c) and from the CLI's `content` feature: an extraction worker process (`vfs-extract`) and `content.db` next to
 `index.db` ([design](content-search-design.md)). Release builds bundle `vfs-extract` as a Tauri
@@ -611,7 +611,7 @@ and rejects with `ApiError { code, message }` (`core/api.rs`), where `code` is o
 | `get_content_max_mb` / `set_content_max_mb` | — / `mb` | `number`: the content size limit in MB, 0 for none (VFS-34 R6) |
 | `search_sources` | `query: SearchQuery`, `options: { sources: Source[] (empty = all), bookmarkFolder, sort: SortOrder }` (optional) | `SourcesResponse` (VFS-6) |
 | `get_bookmarks_status` | — | `BookmarkStatus` |
-| `set_bookmarks_enabled` | `enabled` | `BookmarkStatus`; off deletes every stored bookmark |
+| `set_bookmarks_enabled` | `enabled`, `browser?: Browser` (Firefox when left out) | `BookmarkStatus` (with `browsers: BrowserStatus[]`, VFS-44); off deletes that browser's stored bookmarks |
 | `open_bookmark` | `id` | `null`; `not_found` for an unknown id, `unavailable` for a non-web address |
 | `reveal_target` | `id` (a link's `files.id`) | `"revealed"` or `"opened_parent"`; `not_found` when the recorded target does not exist (VFS-18 "Mostrar el destino") |
 | `open_link_url` | `id` | `null`; `unavailable` unless the Internet Shortcut has an `http`/`https` address (VFS-18 "Abrir en Firefox") |
@@ -704,11 +704,22 @@ core IPC (`capabilities/default.json`) under a strict content security policy
 check, made in Rust by the updater plugin (VFS-21, [`updates.md`](updates.md)), and, only once
 the user turns on asking with their own key, each question's call to that provider (VFS-28).
 
-## Bookmarks (VFS-6)
+## Bookmarks (VFS-6, VFS-44)
 
-`crates/vfs-bookmarks` adds Firefox bookmarks as a second source, off until the user turns
-on "Incluir marcadores de Firefox" in the folder panel. Spec:
-[`specs/vfs-6-bookmarks/spec.md`](../specs/vfs-6-bookmarks/spec.md).
+`crates/vfs-bookmarks` adds browser bookmarks as a second source: Firefox, Chrome and Brave,
+each off until the user turns on its switch ("Incluir marcadores de Chrome") in the folder
+panel; the panel lists Firefox and each Chromium browser whose data folder exists. Specs:
+[`specs/vfs-6-bookmarks/spec.md`](../specs/vfs-6-bookmarks/spec.md),
+[`specs/vfs-44-sources/spec.md`](../specs/vfs-44-sources/spec.md).
+
+- **Chrome and Brave** (`chromium.rs`): the profiles `Local State` lists (`profile.info_cache`)
+  under `%LOCALAPPDATA%\Google\Chrome\User Data`, `…\BraveSoftware\Brave-Browser\User Data`,
+  or `~/Library/Application Support/Google/Chrome`, `…/BraveSoftware/Brave-Browser`. Each
+  profile's `Bookmarks` and `AccountBookmarks` JSON are read in place (the browser replaces
+  them by rename, never in place), retried 3 times 500 ms apart while they do not parse or
+  change during the read, then `Bookmarks.bak`. The roots map to the toolbar, unfiled and
+  mobile roots; the account file's items go under the local root of the same kind. Their
+  signature is the size/time of both files.
 
 - **Finding profiles** (`firefox/mod.rs`): `profiles.ini` in `%APPDATA%\Mozilla\Firefox`, the
   Microsoft Store build's redirected copy of it, or `~/Library/Application Support/Firefox`;
@@ -723,31 +734,35 @@ on "Incluir marcadores de Firefox" in the folder panel. Spec:
   readable `bookmarkbackups/*.jsonlz4` is used. Tags (folders under the tags root) belong to
   the address; `place:` and `javascript:` entries and identical rows are dropped.
 - **Storing** (`store.rs`): `bookmarks.db` (WAL, `secure_delete`): `settings`, `profiles` (one
-  row per profile folder with the size/time signature of its files) and `items`, the
-  bookmarks and folders (the four roots included) with their parent guid and Firefox
-  position, unique per profile and Firefox `guid`, so an item keeps its id across reads. A profile whose
-  signature is unchanged is not read again. Turning the setting off deletes every profile
-  and bookmark and vacuums the file.
+  row per profile folder with its browser and the size/time signature of its files) and
+  `items`, the bookmarks and folders (the roots included) with their parent guid and the
+  browser's position, unique per profile and `guid`, so an item keeps its id across reads. A
+  profile whose signature is unchanged is not read again. Turning a browser's switch off
+  deletes its profiles and bookmarks and vacuums the file.
 - **Refreshing**: thread `vfs-bookmarks`, in the indexer's walk profile (low CPU priority,
   normal I/O, VFS-5), reads at start, when the setting is turned on, on "Buscar cambios
-  ahora", and every 30 minutes.
+  ahora", and every 30 minutes; only switched-on browsers are read.
 - **Searching** (`search.rs`, `sources.rs`): every stored item is in memory with folded keys
   (title; for a bookmark the address without scheme and `www.`, folder path, tags and
   keyword; for a folder its whole path), its ancestors' ids and its tree key (profile, then
-  Firefox's position at every level), and is matched with `vfs_core::matching`, the file
+  the browser's position at every level), and is matched with `vfs_core::matching`, the file
   rules: substrings, and one typo for terms of 6–64 characters when the exact matches are
   fewer than 20. A folder also needs one term in its own name (VFS-1 D1). The title takes
   the file name's place in the tiers. `search_sources` reads the file list from the core in
   500-hit pages and merges both lists by (tier, folded name or title length, newer first),
   files first on a tie; any other order is applied by the core first and the bookmarks are
   merged into it (see "Sort orders (VFS-12)"), and `source` puts files first. A bookmark folder filter (`bookmarkFolder`) keeps the items with that folder among
-  their ancestors and no files; with no words they come in tree order, Firefox's own. Type
+  their ancestors and no files; with no words they come in tree order, the browser's own. One
+  address kept in several browsers is one hit, the best ranked, with `alsoIn` naming the
+  others; a hit and a «Carpeta» choice carry their browser, named on screen only while more
+  than one browser has bookmarks, and a profile name only when its browser has several. Type
   filters drop bookmarks but keep bookmark folders under "Carpetas"; size and file folder
   filters drop both; a date filter applies to the date an item was saved.
 - **Opening**: `open_bookmark` passes an `http`/`https` address without spaces, quotes or
-  control characters to Firefox: `open -a Firefox <url>` on macOS, `ShellExecuteW` of
-  `firefox.exe` on Windows (App Paths or the Store build's alias), and the default browser
-  if Firefox cannot be started. Nothing else is opened.
+  control characters to the browser it came from: `open -a Firefox|"Google Chrome"|"Brave
+  Browser" <url>` on macOS, `ShellExecuteW` of `firefox.exe`, `chrome.exe` or `brave.exe` on
+  Windows (App Paths or the Store build's alias), and the default browser if that one
+  cannot be started. Nothing else is opened.
 
 ## Not yet run
 
@@ -757,7 +772,9 @@ the watcher, the catch-up at start, the Explorer reveal (selection checked by
 `tests/windows_shell.rs`) and the splash window ran there; never on Windows 10/11, on an
 HDD, or on the reference machine. Window fitting has not run on a screen smaller than the window.
 Never run on Windows at all: for VFS-6, the copy of a `places.sqlite` that Firefox holds
-open, the Microsoft Store profile path and `ShellExecuteW` for "Abrir en Firefox". The move
+open, the Microsoft Store profile path and `ShellExecuteW` for "Abrir en Firefox"; for
+VFS-44, real Chrome and Brave profiles (only fixtures in CI) and opening in `chrome.exe` or
+`brave.exe`. The move
 of an index out of the roaming folder has run only in unit tests, where both folders are
 temporary ones. Performance at 2 million
 files is checked only by `vfs bench` on a synthetic database on the development Mac (Apple

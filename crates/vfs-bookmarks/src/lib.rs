@@ -1,11 +1,13 @@
-//! Browser bookmarks as a VFS search source (VFS-6). Reads Firefox bookmarks from a copy of
-//! each profile's database (never the original in place), keeps them in `bookmarks.db` next
-//! to the file index, and searches them in memory with the file rules. Off until the user
-//! turns "Incluir marcadores de Firefox" on; turning it off deletes what was stored.
+//! Browser bookmarks as a VFS search source: Firefox (VFS-6), Chrome and Brave (VFS-44).
+//! Reads Firefox bookmarks from a copy of each profile's database (never the original in
+//! place) and Chromium bookmarks from each profile's JSON file, keeps them in `bookmarks.db`
+//! next to the file index, and searches them in memory with the file rules. Each browser
+//! is off until the user turns its switch on; turning it off deletes what was stored.
 //!
-//! Privacy: only bookmark tables are read (`firefox::ALLOWED_COLUMNS`); nothing leaves the
-//! computer.
+//! Privacy: only bookmarks are read (`firefox::ALLOWED_COLUMNS`, the Chromium bookmark
+//! files); nothing leaves the computer.
 
+pub mod chromium;
 pub mod firefox;
 mod search;
 pub mod sources;
@@ -26,7 +28,7 @@ use std::time::{Duration, SystemTime};
 use vfs_core::matching::parse_query;
 use vfs_core::{Error, Result, SearchQuery};
 
-use firefox::{Locator, Origin};
+use firefox::{Origin, Profile};
 use search::{Entry, Ranked};
 use store::Store;
 
@@ -50,37 +52,97 @@ fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// Where every browser keeps its profiles.
+#[derive(Debug, Clone, Default)]
+pub struct Locators {
+    pub firefox: firefox::Locator,
+    pub chromium: Vec<chromium::Locator>,
+}
+
+impl Locators {
+    /// This system's Firefox, Chrome and Brave data folders.
+    pub fn system() -> Locators {
+        Locators {
+            firefox: firefox::Locator::system(),
+            chromium: chromium::Locator::system(),
+        }
+    }
+
+    fn chromium(&self, browser: Browser) -> Option<&chromium::Locator> {
+        self.chromium.iter().find(|l| l.browser == browser)
+    }
+}
+
+/// Firefox alone (tests and `vfs bookmarks --firefox-root`).
+impl From<firefox::Locator> for Locators {
+    fn from(firefox: firefox::Locator) -> Locators {
+        Locators {
+            firefox,
+            chromium: Vec::new(),
+        }
+    }
+}
+
 struct State {
     store: Store,
     entries: Vec<Entry>,
-    /// Profiles with at least one bookmark.
-    profiles: u32,
-    multi_profile: bool,
-    read_state: ReadState,
+    /// Each browser's state; a browser never read is `Never`.
+    read_state: HashMap<Browser, ReadState>,
     /// How the last read of each profile folder went (Ok, FromBackup or Failed).
-    outcomes: HashMap<String, ReadState>,
+    outcomes: HashMap<String, (Browser, ReadState)>,
 }
 
 impl State {
     fn reload(&mut self) -> Result<()> {
-        let rows = self.store.load()?;
-        let mut with_bookmarks: Vec<i64> = rows
-            .iter()
-            .filter(|r| !r.is_folder)
-            .map(|r| r.profile_id)
-            .collect();
-        with_bookmarks.sort_unstable();
-        with_bookmarks.dedup();
-        self.profiles = with_bookmarks.len() as u32;
-        self.multi_profile = self.profiles > 1;
-        self.entries = search::entries(rows);
+        self.entries = search::entries(self.store.load()?);
         Ok(())
+    }
+
+    fn state_of(&self, browser: Browser) -> ReadState {
+        self.read_state
+            .get(&browser)
+            .copied()
+            .unwrap_or(ReadState::Never)
+    }
+
+    fn enabled(&self, browser: Browser) -> bool {
+        self.store.enabled(browser).unwrap_or(false)
+    }
+
+    /// Bookmarks and profiles with bookmarks of `browser`, or of every browser.
+    fn counts(&self, browser: Option<Browser>) -> (u32, u32) {
+        let mut profiles: Vec<i64> = Vec::new();
+        let mut count = 0;
+        for e in &self.entries {
+            if e.is_folder || browser.is_some_and(|b| b != e.browser) {
+                continue;
+            }
+            count += 1;
+            if !profiles.contains(&e.profile_id) {
+                profiles.push(e.profile_id);
+            }
+        }
+        (count, profiles.len() as u32)
     }
 }
 
-/// The bookmark source: setting, stored bookmarks and their search. Share it with `Arc`.
+/// The switched-on browsers' states together (`BookmarkStatus::state`).
+fn overall(states: &[ReadState]) -> ReadState {
+    [
+        ReadState::Reading,
+        ReadState::Failed,
+        ReadState::FromBackup,
+        ReadState::Ok,
+        ReadState::NotFound,
+    ]
+    .into_iter()
+    .find(|s| states.contains(s))
+    .unwrap_or(ReadState::Never)
+}
+
+/// The bookmark source: settings, stored bookmarks and their search. Share it with `Arc`.
 pub struct Bookmarks {
-    locator: Locator,
+    locators: Locators,
     /// Where database copies are made and deleted (`<store>.snapshot`).
     work_dir: PathBuf,
     state: Mutex<State>,
@@ -90,7 +152,7 @@ pub struct Bookmarks {
 
 impl Bookmarks {
     /// Opens or creates the store at `db_path` and deletes copies a crash may have left.
-    pub fn open(db_path: &Path, locator: Locator) -> Result<Bookmarks> {
+    pub fn open(db_path: &Path, locators: impl Into<Locators>) -> Result<Bookmarks> {
         if let Some(dir) = db_path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -101,38 +163,43 @@ impl Bookmarks {
         let mut state = State {
             store: Store::open(db_path)?,
             entries: Vec::new(),
-            profiles: 0,
-            multi_profile: false,
-            read_state: ReadState::Never,
+            read_state: HashMap::new(),
             outcomes: HashMap::new(),
         };
         state.reload()?;
-        if !state.entries.is_empty() {
-            state.read_state = ReadState::Ok;
+        let stored: Vec<Browser> = state.entries.iter().map(|e| e.browser).collect();
+        for b in stored {
+            state.read_state.insert(b, ReadState::Ok);
         }
         Ok(Bookmarks {
-            locator,
+            locators: locators.into(),
             work_dir,
             state: Mutex::new(state),
             refreshing: Mutex::new(()),
         })
     }
 
+    /// At least one browser's switch is on.
     pub fn is_enabled(&self) -> bool {
-        lock(&self.state).store.enabled().unwrap_or(false)
+        let st = lock(&self.state);
+        Browser::ALL.iter().any(|b| st.enabled(*b))
     }
 
-    /// Turns the source on or off. Off deletes every stored bookmark (R8); on does not read
-    /// by itself: call [`Bookmarks::refresh`] (the app does it on a background thread).
+    /// Turns Firefox's switch on or off (VFS-6); see [`Bookmarks::set_browser_enabled`].
     pub fn set_enabled(&self, on: bool) -> Result<BookmarkStatus> {
+        self.set_browser_enabled(Browser::Firefox, on)
+    }
+
+    /// Turns one browser's switch on or off. Off deletes that browser's stored bookmarks
+    /// (VFS-6 R8, VFS-44 R9); on does not read by itself: call [`Bookmarks::refresh`] (the
+    /// app does it on a background thread).
+    pub fn set_browser_enabled(&self, browser: Browser, on: bool) -> Result<BookmarkStatus> {
         let mut st = lock(&self.state);
-        st.store.set_enabled(on)?;
+        st.store.set_enabled(browser, on)?;
         if !on {
-            st.entries.clear();
-            st.profiles = 0;
-            st.multi_profile = false;
-            st.outcomes.clear();
-            st.read_state = ReadState::Never;
+            st.outcomes.retain(|_, (b, _)| *b != browser);
+            st.read_state.remove(&browser);
+            st.reload()?;
         }
         drop(st);
         Ok(self.status())
@@ -140,91 +207,166 @@ impl Bookmarks {
 
     pub fn status(&self) -> BookmarkStatus {
         let st = lock(&self.state);
+        let browsers: Vec<BrowserStatus> = Browser::ALL
+            .into_iter()
+            .filter(|b| {
+                *b == Browser::Firefox
+                    || st.enabled(*b)
+                    || self.locators.chromium(*b).is_some_and(|l| l.installed())
+            })
+            .map(|b| {
+                let enabled = st.enabled(b);
+                let (count, profiles) = st.counts(Some(b));
+                BrowserStatus {
+                    browser: b,
+                    enabled,
+                    state: if enabled {
+                        st.state_of(b)
+                    } else {
+                        ReadState::Never
+                    },
+                    count,
+                    profiles,
+                    last_read: st.store.last_read(Some(b)).ok().flatten(),
+                }
+            })
+            .collect();
+        let on: Vec<ReadState> = browsers
+            .iter()
+            .filter(|b| b.enabled)
+            .map(|b| b.state)
+            .collect();
+        let (count, profiles) = st.counts(None);
         BookmarkStatus {
-            enabled: st.store.enabled().unwrap_or(false),
-            state: st.read_state,
-            count: st.entries.iter().filter(|e| !e.is_folder).count() as u32,
-            profiles: st.profiles,
-            last_read: st.store.last_read().ok().flatten(),
-            roots: search::places(&st.entries, st.multi_profile),
+            enabled: !on.is_empty(),
+            state: overall(&on),
+            count,
+            profiles,
+            last_read: st.store.last_read(None).ok().flatten(),
+            roots: search::places(&st.entries),
+            browsers,
         }
     }
 
-    /// Reads every Firefox profile whose database or backups changed since its last read
-    /// (R2, AC-9), from a copy (R3) or its backup (R4), and forgets profiles no longer found.
-    /// Does nothing while the setting is off or another refresh runs.
+    /// Reads every profile of every switched-on browser whose files changed since its last
+    /// read (VFS-6 R2, VFS-44 R4), and forgets profiles no longer found. Does nothing while
+    /// every switch is off or another refresh runs.
     pub fn refresh(&self) -> Result<BookmarkStatus> {
         let Ok(_running) = self.refreshing.try_lock() else {
             return Ok(self.status());
         };
-        if !self.is_enabled() {
+        let on: Vec<Browser> = {
+            let mut st = lock(&self.state);
+            let on: Vec<Browser> = Browser::ALL
+                .into_iter()
+                .filter(|b| st.enabled(*b))
+                .collect();
+            for b in &on {
+                st.read_state.insert(*b, ReadState::Reading);
+            }
+            on
+        };
+        if on.is_empty() {
             return Ok(self.status());
         }
-        lock(&self.state).read_state = ReadState::Reading;
-        let result = self.read_changed();
+        let result = self.read_changed(&on);
         let _ = std::fs::remove_dir_all(&self.work_dir);
-        // An error never leaves the status at "reading".
-        lock(&self.state).read_state = *result.as_ref().unwrap_or(&ReadState::Failed);
+        let mut st = lock(&self.state);
+        match &result {
+            Ok(states) => st.read_state.extend(states.iter().copied()),
+            // An error never leaves a browser at "reading".
+            Err(_) => {
+                for b in &on {
+                    st.read_state.insert(*b, ReadState::Failed);
+                }
+            }
+        }
+        drop(st);
         result.map(|_| self.status())
     }
 
-    /// The reading part of [`Bookmarks::refresh`]; returns the overall state. A profile
-    /// skipped as unchanged keeps the outcome of its last read.
-    fn read_changed(&self) -> Result<ReadState> {
-        let profiles = self.locator.profiles(&self.work_dir);
-        for p in &profiles {
-            let dir = p.dir.to_string_lossy().into_owned();
-            let sig = firefox::signature(&p.dir);
-            if lock(&self.state).store.signature(&dir)?.as_deref() == Some(sig.as_str()) {
-                continue;
-            }
-            let outcome = match firefox::read_profile(&p.dir, &self.work_dir.join("places")) {
-                Ok((tree, origin)) => {
-                    let mut st = lock(&self.state);
-                    if !st.store.enabled()? {
-                        break;
-                    }
-                    st.store.replace_profile(
-                        Browser::Firefox,
-                        &dir,
-                        &p.name,
-                        &sig,
-                        &tree,
-                        now(),
-                    )?;
-                    if origin == Origin::Backup {
-                        ReadState::FromBackup
-                    } else {
-                        ReadState::Ok
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Firefox profile {}: {e}", p.dir.display());
-                    ReadState::Failed
-                }
-            };
-            lock(&self.state).outcomes.insert(dir, outcome);
+    /// The profiles of a switched-on browser.
+    fn profiles_of(&self, browser: Browser) -> Vec<Profile> {
+        match browser {
+            Browser::Firefox => self.locators.firefox.profiles(&self.work_dir),
+            b => self
+                .locators
+                .chromium(b)
+                .map(chromium::Locator::profiles)
+                .unwrap_or_default(),
         }
-        let found: Vec<String> = profiles
-            .iter()
-            .map(|p| p.dir.to_string_lossy().into_owned())
-            .collect();
+    }
+
+    /// The reading part of [`Bookmarks::refresh`]; returns each browser's state. A profile
+    /// skipped as unchanged keeps the outcome of its last read.
+    fn read_changed(&self, browsers: &[Browser]) -> Result<Vec<(Browser, ReadState)>> {
+        let mut found: Vec<String> = Vec::new();
+        let mut states = Vec::new();
+        for &browser in browsers {
+            let profiles = self.profiles_of(browser);
+            for p in &profiles {
+                let dir = p.dir.to_string_lossy().into_owned();
+                found.push(dir.clone());
+                let sig = match browser {
+                    Browser::Firefox => firefox::signature(&p.dir),
+                    _ => chromium::signature(&p.dir),
+                };
+                if lock(&self.state).store.signature(&dir)?.as_deref() == Some(sig.as_str()) {
+                    continue;
+                }
+                let read = match browser {
+                    Browser::Firefox => {
+                        firefox::read_profile(&p.dir, &self.work_dir.join("places"))
+                    }
+                    _ => chromium::read_profile(&p.dir),
+                };
+                let outcome = match read {
+                    Ok((tree, origin)) => {
+                        let mut st = lock(&self.state);
+                        if !st.store.enabled(browser)? {
+                            break;
+                        }
+                        st.store
+                            .replace_profile(browser, &dir, &p.name, &sig, &tree, now())?;
+                        if origin == Origin::Backup {
+                            ReadState::FromBackup
+                        } else {
+                            ReadState::Ok
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("{browser:?} profile {}: {e}", p.dir.display());
+                        ReadState::Failed
+                    }
+                };
+                lock(&self.state).outcomes.insert(dir, (browser, outcome));
+            }
+            let st = lock(&self.state);
+            let has = |s: ReadState| {
+                st.outcomes
+                    .iter()
+                    .any(|(dir, (b, o))| *b == browser && *o == s && found.contains(dir))
+            };
+            states.push((
+                browser,
+                if profiles.is_empty() {
+                    ReadState::NotFound
+                } else if has(ReadState::Failed) {
+                    ReadState::Failed
+                } else if has(ReadState::FromBackup) {
+                    ReadState::FromBackup
+                } else {
+                    ReadState::Ok
+                },
+            ));
+        }
         let mut st = lock(&self.state);
-        if st.store.enabled()? {
+        if browsers.iter().any(|b| st.enabled(*b)) {
             st.store.keep_only_profiles(&found)?;
             st.reload()?;
         }
         st.outcomes.retain(|dir, _| found.contains(dir));
-        let has = |s: ReadState| st.outcomes.values().any(|o| *o == s);
-        Ok(if profiles.is_empty() {
-            ReadState::NoFirefox
-        } else if has(ReadState::Failed) {
-            ReadState::Failed
-        } else if has(ReadState::FromBackup) {
-            ReadState::FromBackup
-        } else {
-            ReadState::Ok
-        })
+        Ok(states)
     }
 
     /// Ranked bookmark and folder hits for `query`, only inside the folder `inside` when
@@ -237,14 +379,14 @@ impl Bookmarks {
             &parsed,
             &query.filters,
             inside,
-            st.multi_profile,
             query.scope == vfs_core::Scope::Names,
         )
     }
 
-    /// The address to open for a bookmark result: `not_found` for an unknown id,
-    /// `unavailable` for an address that is not `http`/`https` (R10, AC-12).
-    pub fn url_to_open(&self, id: i64) -> Result<String> {
+    /// The address to open for a bookmark result, with the browser it came from (VFS-44
+    /// R6): `not_found` for an unknown id, `unavailable` for an address that is not
+    /// `http`/`https` (VFS-6 R10, AC-12).
+    pub fn url_to_open(&self, id: i64) -> Result<(Browser, String)> {
         let st = lock(&self.state);
         let e = st
             .entries
@@ -252,7 +394,7 @@ impl Bookmarks {
             .find(|e| e.id == id)
             .ok_or_else(|| Error::NotFound(format!("bookmark {id}")))?;
         if !e.is_folder && is_openable(&e.url) {
-            Ok(e.url.clone())
+            Ok((e.browser, e.url.clone()))
         } else {
             Err(Error::Unavailable("not a web address".into()))
         }

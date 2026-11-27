@@ -26,7 +26,7 @@ every log line. This page says what is in it and how to analyse it in a session 
 | `## App` | Version, OS (`windows 10.0.<build> <release>`; a build ≥ 22000 is Windows 11), local time it was made. |
 | `## Folders` | One line per root: id, `drive` (local/network/removable), `disk` (ssd/hdd/unknown), status, files, folders, `cloud_only` and `links` (at the last full walk, `?` before one), `unreadable` and `unpopulated` folders (cloud placeholders that listed empty, Windows; VFS-37), time since the last full walk. Counts carry no name, so they go into the summary too. The path never appears (VFS-48). |
 | `## Index` | Files, folders, roots, index size, WAL size (MB), schema version. |
-| `## Settings` | Indexer state (idle/scanning/paused), Firefox bookmarks on/off with profiles and count. |
+| `## Settings` | Indexer state (idle/scanning/paused); `bookmarks: on (browsers=firefox,chrome profiles=… bookmarks=…)`, `off` or `unavailable` (VFS-44). |
 | `## Log` | Number of log files and lines; warnings, errors and panics in them. |
 | `## Log lines` | Every kept log file, oldest first, each under `--- <file name> ---`. |
 

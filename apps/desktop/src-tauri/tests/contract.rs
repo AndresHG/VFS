@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use vfs_bookmarks::{BookmarkRoot, ReadState, SortOrder, Source, SourceHit};
+use vfs_bookmarks::{BookmarkRoot, Browser, ReadState, SortOrder, Source, SourceHit};
 use vfs_content::indexer::StopReason as ContentStop;
 use vfs_content::service::{Phase, WaitKind};
 use vfs_content::UnreadReason;
@@ -201,12 +201,23 @@ fn all_bookmark_roots() -> Vec<BookmarkRoot> {
     all
 }
 
+fn all_browsers() -> Vec<Browser> {
+    use Browser::*;
+    let all = vec![Firefox, Chrome, Brave];
+    for b in &all {
+        match b {
+            Firefox | Chrome | Brave => {}
+        }
+    }
+    all
+}
+
 fn all_read_states() -> Vec<ReadState> {
     use ReadState::*;
-    let all = vec![Never, Reading, Ok, FromBackup, NoFirefox, Failed];
+    let all = vec![Never, Reading, Ok, FromBackup, NotFound, Failed];
     for r in &all {
         match r {
-            Never | Reading | Ok | FromBackup | NoFirefox | Failed => {}
+            Never | Reading | Ok | FromBackup | NotFound | Failed => {}
         }
     }
     all
@@ -438,6 +449,7 @@ fn contract_js_matches_the_rust_enums() {
         ("ErrorCode", all_error_codes()),
         ("Source", serde_names(&all_sources())),
         ("BookmarkRoot", serde_names(&all_bookmark_roots())),
+        ("Browser", serde_names(&all_browsers())),
         ("ReadState", serde_names(&all_read_states())),
         ("SuggestionKind", serde_names(&all_suggestion_kinds())),
         ("SortOrder", serde_names(&all_sort_orders())),
@@ -503,6 +515,8 @@ fn source_hit_tags_are_the_source_values() {
         url: "https://x.es/".into(),
         root: BookmarkRoot::Menu,
         folder: vec!["Recetas".into()],
+        browser: Browser::Chrome,
+        also_in: vec![Browser::Brave],
         profile: None,
         added: 3,
         matched: MatchKind::Path,

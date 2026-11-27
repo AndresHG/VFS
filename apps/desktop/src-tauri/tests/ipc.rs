@@ -251,6 +251,7 @@ fn add_root_search_progress_end_to_end() {
 /// VFS-6 AC-8, AC-11, AC-12 over IPC: with the setting off `search_sources` returns files only
 /// and the status says so; once on and read, `["bookmarks"]` returns bookmark results with
 /// the contract's shape; `open_bookmark` refuses an unknown id and a non-web address.
+/// VFS-44 AC-1: `set_bookmarks_enabled` takes the browser whose switch it turns.
 #[test]
 fn bookmark_commands_over_ipc() {
     use rusqlite::Connection;
@@ -319,12 +320,36 @@ fn bookmark_commands_over_ipc() {
     assert_eq!(web["source"], json!("bookmarks"));
     assert_eq!(web["root"], json!("menu"));
     assert_eq!(web["url"], json!("https://r.es/"));
+    assert_eq!(web["browser"], json!("firefox"));
+    assert_eq!(web["alsoIn"], json!([]));
     assert!(web["folder"].as_array().unwrap().is_empty());
     let local = hits.iter().find(|h| h["openable"] == json!(false)).unwrap();
     let err = invoke(&webview, "open_bookmark", json!({ "id": local["id"] })).unwrap_err();
     assert_eq!(err["code"], json!(Error::Unavailable(String::new()).code()));
     let err = invoke(&webview, "open_bookmark", json!({ "id": 987654 })).unwrap_err();
     assert_eq!(err["code"], json!(Error::NotFound(String::new()).code()));
+
+    let st = invoke(
+        &webview,
+        "set_bookmarks_enabled",
+        json!({ "enabled": true, "browser": "chrome" }),
+    )
+    .unwrap();
+    let chrome = st["browsers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["browser"] == json!("chrome"))
+        .unwrap()
+        .clone();
+    assert_eq!(chrome["enabled"], json!(true));
+    let st = invoke(
+        &webview,
+        "set_bookmarks_enabled",
+        json!({ "enabled": false, "browser": "chrome" }),
+    )
+    .unwrap();
+    assert_eq!(st["count"], json!(2));
 
     let st = invoke(
         &webview,

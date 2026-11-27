@@ -120,11 +120,13 @@ on any row. Hidden-until-hover is never the only path: keyboard selection shows 
   "index" or "scan"); numbers group with commas (`30,569`) and dates and times follow the
   system's English locale (`Nov 8, 2025`, `9:14 AM` in en-US).
 
-## Sources (VFS-6)
+## Sources (VFS-6, VFS-44)
 
-Search covers files and, when "Incluir marcadores de Firefox" is on in the "Carpetas" panel,
-Firefox bookmarks ([spec](../../specs/vfs-6-bookmarks/spec.md)). In that panel the setting is
-one folded line under the folder list, «Marcadores de Firefox · incluidos», and the folder list
+Search covers files and, when a browser's switch is on in the "Carpetas" panel, its
+bookmarks: Firefox, Chrome or Brave ([VFS-6](../../specs/vfs-6-bookmarks/spec.md),
+[VFS-44](../../specs/vfs-44-sources/spec.md)). In that panel the setting is one folded line
+under the folder list, «Marcadores de los navegadores · incluidos», holding one switch and
+status line per browser found («Incluir marcadores de Chrome»), and the folder list
 scrolls on its own, so every folder stays reachable on a short window. The layout keeps its shape:
 - **«Origen»** ("Archivos y marcadores", the default; "Archivos"; "Marcadores") sits in
   «Más filtros» beside size and folder and shows only while bookmarks are included; a choice
@@ -139,16 +141,19 @@ scrolls on its own, so every folder stays reachable on a short window. The layou
   bookmark folder path ("Menú de marcadores › Recetas › Postres") in the path line with the
   same middle truncation, because the folder path matters as much as for files. The date slot
   carries the date the bookmark was saved and the size slot its site (`cocina.es`). The details line shows the whole
-  path and the address.
-- The bookmark row's one action is **"Abrir en Firefox"**: it opens the bookmarked page in
-  Firefox, like "Mostrar en carpeta" for files, with the same Intro/double-click behaviour.
-  Firefox cannot be told from outside to select a bookmark in its bookmark manager, so the
+  path and the address, and «También en:» the other browsers that keep the same address,
+  folded into this one row. While more than one browser has bookmarks, the path starts with
+  the browser's name («Chrome › Barra de marcadores › Recetas»), in rows and in «Carpeta».
+- The bookmark row's one action is **«Abrir en Firefox»** (or «en Chrome», «en Brave»): it
+  opens the bookmarked page in the browser it came from, like "Mostrar en carpeta" for files,
+  with the same Intro/double-click behaviour. A browser cannot be told from outside to select
+  a bookmark in its bookmark manager, so the
   folder path on the row is what tells where the bookmark is saved (owner's decision).
 - **Bookmark folders** are results with their own icon, a folder with a bookmark ribbon in
   the accent colour (VFS-36), so they never pass for a disk folder; their action is **"Ver su
   contenido"**, which makes the folder the "Carpeta" filter ("Dentro de: Recetas") and lists
-  what it holds in Firefox's order. The "Carpeta" select also offers the bookmark roots under
-  "Marcadores de Firefox".
+  what it holds in the browser's order. The "Carpeta" select also offers the bookmark roots
+  under «Marcadores».
 
 ## Directions for the main screen
 

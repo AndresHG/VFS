@@ -80,10 +80,12 @@ impl DiskKind {
     }
 }
 
-/// Firefox bookmarks as the report shows them (VFS-6 settings).
+/// Browser bookmarks as the report shows them (VFS-6, VFS-44 settings).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookmarkInfo {
     pub enabled: bool,
+    /// The switched-on browsers, by their contract names.
+    pub browsers: Vec<String>,
     pub profiles: u32,
     pub count: u32,
 }
@@ -478,15 +480,17 @@ pub fn build_report(
         Some(b) if b.enabled => {
             let _ = writeln!(
                 s,
-                "firefox_bookmarks: on (profiles={} bookmarks={})",
-                b.profiles, b.count
+                "bookmarks: on (browsers={} profiles={} bookmarks={})",
+                b.browsers.join(","),
+                b.profiles,
+                b.count
             );
         }
         Some(_) => {
-            let _ = writeln!(s, "firefox_bookmarks: off");
+            let _ = writeln!(s, "bookmarks: off");
         }
         None => {
-            let _ = writeln!(s, "firefox_bookmarks: unavailable");
+            let _ = writeln!(s, "bookmarks: unavailable");
         }
     }
     let (lines, warnings, errors, panics) = log_counts(logs);
@@ -948,6 +952,12 @@ pub fn gather<R: Runtime>(app: &AppHandle<R>, vfs: &Vfs) -> Environment {
         let s = b.bookmarks.status();
         BookmarkInfo {
             enabled: s.enabled,
+            browsers: s
+                .browsers
+                .iter()
+                .filter(|b| b.enabled)
+                .map(|b| wire_name(b.browser))
+                .collect(),
             profiles: s.profiles,
             count: s.count,
         }
@@ -1092,6 +1102,7 @@ mod tests {
             indexer: IndexerState::Idle,
             bookmarks: Some(BookmarkInfo {
                 enabled: true,
+                browsers: vec!["firefox".into(), "chrome".into()],
                 profiles: 1,
                 count: 230,
             }),
@@ -1191,7 +1202,7 @@ mod tests {
              unreadable=0 unpopulated=0 last_full_scan=3 d ago",
             "files: 1200\nfolders: 80\nroots: 1\nsize_mb: 5.0\nwal_mb: 1.0\nschema: 4",
             "indexer: idle",
-            "firefox_bookmarks: on (profiles=1 bookmarks=230)",
+            "bookmarks: on (browsers=firefox,chrome profiles=1 bookmarks=230)",
             "files: 2\nlines: 21\nwarnings: 13\nerrors: 4\npanics: 3",
         ] {
             assert!(r.text.contains(want), "missing {want:?} in\n{}", r.text);

@@ -253,10 +253,10 @@ fn is_shown(url: &str) -> bool {
     !url.trim().is_empty() && !lower.starts_with("place:") && !lower.starts_with("javascript:")
 }
 
-/// Shared by both readers: drops what is not shown, gives an untitled bookmark its address
+/// Shared by every reader: drops what is not shown, gives an untitled bookmark its address
 /// as title, sorts tags, and keeps one of identical (address, folder, title) rows in one
 /// folder. Folders are kept as they are, empty ones included.
-pub(super) fn normalize(tree: Tree) -> Tree {
+pub(crate) fn normalize(tree: Tree) -> Tree {
     let mut seen = HashSet::new();
     let mut out = Vec::with_capacity(tree.bookmarks.len());
     for mut b in tree.bookmarks {

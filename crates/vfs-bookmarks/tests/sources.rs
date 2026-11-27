@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use rusqlite::Connection;
 use vfs_bookmarks::sources::search_sources;
 use vfs_bookmarks::testing::{FakeFirefox, Places, MENU, UNFILED};
-use vfs_bookmarks::{Bookmarks, ReadState, SortOrder, Source, SourceHit, SourceOptions};
+use vfs_bookmarks::{Bookmarks, Browser, ReadState, SortOrder, Source, SourceHit, SourceOptions};
 use vfs_core::{Error, FileKind, MatchKind, Scope, SearchFilters, SearchQuery, Vfs};
 
 struct World {
@@ -278,7 +278,10 @@ fn ac12_only_web_addresses_are_opened() {
         panic!("{:?}", r.hits)
     };
     assert!(banco.openable);
-    assert_eq!(w.bm.url_to_open(banco.id).unwrap(), "https://banco.es/");
+    assert_eq!(
+        w.bm.url_to_open(banco.id).unwrap(),
+        (Browser::Firefox, "https://banco.es/".to_string())
+    );
     let r = search_sources(
         &w.vfs,
         Some(&w.bm),

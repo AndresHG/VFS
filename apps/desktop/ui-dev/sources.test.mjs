@@ -1,4 +1,4 @@
-// The bookmark source on the screen (VFS-6 AC-11, AC-13): which sources each «Origen»
+// The bookmark source on the screen (VFS-6 AC-11, AC-13; VFS-44 AC-6): which sources each «Origen»
 // choice covers, bookmark folders in the "Carpeta" select, the folder path of a bookmark row,
 // and Spanish copy for every new closed-set value.
 // Run: node --test apps/desktop/ui-dev/sources.test.mjs
@@ -8,10 +8,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { CATALOGS, Lang } from '../ui/strings.js';
-import { BookmarkRoot, ReadState, SortOrder, Source } from '../ui/contract.js';
+import { BookmarkRoot, Browser, ReadState, SortOrder, Source } from '../ui/contract.js';
 import { SourceChoice } from '../ui/choices.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sortChoices, sortFor, sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, namesBrowsers, site, sizeFilterApplies, sortChoices, sortFor,
+  sourcesFor,
 } from '../ui/sources.js';
 
 const S = CATALOGS[Lang.ES];
@@ -46,9 +47,23 @@ test('bookmark row path', () => {
   assert.deepEqual(bookmarkPathParts(hit, S.bookmarkRoots), ['Menú de marcadores', 'Recetas', 'Postres']);
   assert.match(PATH_SEPARATOR, /›/);
   assert.deepEqual(bookmarkPathParts({ ...hit, profile: 'Casa' }, S.bookmarkRoots).slice(0, 2), ['Casa', 'Menú de marcadores']);
+  assert.deepEqual(bookmarkPathParts({ ...hit, profile: 'Casa' }, S.bookmarkRoots, 'Chrome').slice(0, 3), ['Chrome', 'Casa', 'Menú de marcadores']);
   const label = S.bookmarkRowLabel('Flan', S.bookmarkKind, 'Menú de marcadores', 'cocina.es', '1 mar 2020');
   assert.match(label, /cocina\.es/);
   assert.match(label, /guardado el 1 mar 2020/);
+});
+
+/** VFS-44 AC-6 (R7): browsers are named only while more than one has bookmarks stored. */
+test('browsers are named while several have bookmarks', () => {
+  const b = (browser, count) => ({ browser, enabled: true, state: ReadState.OK, count, profiles: 1, lastRead: 1 });
+  assert.equal(namesBrowsers(null), false);
+  assert.equal(namesBrowsers({ browsers: [b(Browser.FIREFOX, 3), b(Browser.CHROME, 0)] }), false);
+  assert.equal(namesBrowsers({ browsers: [b(Browser.FIREFOX, 3), b(Browser.CHROME, 2)] }), true);
+  for (const x of Object.values(Browser)) {
+    assert.ok(S.browserNames[x], x);
+    assert.match(S.bookmarksToggle(S.browserNames[x]), new RegExp(S.browserNames[x]));
+    assert.match(S.openBookmarkButton(S.browserNames[x]), new RegExp(S.browserNames[x]));
+  }
 });
 
 /** VFS-6 AC-11: a bookmark row shows the site of its address. */
@@ -69,8 +84,8 @@ test('copy and markup for the bookmark source', () => {
   assert.deepEqual(Object.keys(S.bookmarksState).sort(), Object.values(ReadState).sort());
   assert.match(html, /<div id="f-more-pop"[^>]*>[\s\S]*<div class="field" id="f-source-field" hidden>[\s\S]*?<\/div>\s*<\/div>/);
   assert.match(html, /<div class="results-head" id="results-head" hidden>[\s\S]*?<label class="filter filter-select" id="f-sort-pill">/);
-  assert.match(html, /id="bookmarks-on"/);
-  for (const key of ['bookmarksToggle', 'folderContentsButton', 'bookmarkKind', 'bookmarkFolderKind', 'fSource', 'fSort']) {
+  assert.match(html, /id="bookmarks-browsers"/);
+  for (const key of ['folderContentsButton', 'bookmarkKind', 'bookmarkFolderKind', 'fSource', 'fSort']) {
     assert.equal(typeof S[key], 'string', key);
   }
 });

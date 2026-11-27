@@ -1,12 +1,14 @@
-//! `vfs search --source` and `vfs bookmarks` (VFS-6): Firefox bookmarks as a second source,
-//! stored in `bookmarks.db` next to the index given with `--db`.
+//! `vfs search --source` and `vfs bookmarks` (VFS-6, VFS-44): browser bookmarks as a second
+//! source, stored in `bookmarks.db` next to the index given with `--db`.
 
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
 use vfs_bookmarks::firefox::Locator;
 use vfs_bookmarks::sources::search_sources;
-use vfs_bookmarks::{bookmarks_db_path, Bookmarks, SortOrder, Source, SourceHit, SourceOptions};
+use vfs_bookmarks::{
+    bookmarks_db_path, Bookmarks, Browser, Locators, SortOrder, Source, SourceHit, SourceOptions,
+};
 use vfs_core::{SearchQuery, Vfs};
 
 use crate::gen::{civil_from_unix, AnyResult};
@@ -54,12 +56,30 @@ impl From<SortArg> for SortOrder {
     }
 }
 
+/// Whose switch `vfs bookmarks on|off` turns (VFS-44 R1).
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BrowserArg {
+    Firefox,
+    Chrome,
+    Brave,
+}
+
+impl From<BrowserArg> for Browser {
+    fn from(b: BrowserArg) -> Browser {
+        match b {
+            BrowserArg::Firefox => Browser::Firefox,
+            BrowserArg::Chrome => Browser::Chrome,
+            BrowserArg::Brave => Browser::Brave,
+        }
+    }
+}
+
 /// What `vfs bookmarks` does.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BookmarksAction {
-    /// Turn the source on and read the bookmarks.
+    /// Turn the browser on and read the bookmarks.
     On,
-    /// Turn it off; every stored bookmark is deleted.
+    /// Turn it off; its stored bookmarks are deleted.
     Off,
     /// Read changed profiles again.
     Refresh,
@@ -68,28 +88,29 @@ pub enum BookmarksAction {
 }
 
 fn open(db: &Path, firefox_roots: Vec<PathBuf>) -> AnyResult<Bookmarks> {
-    let locator = if firefox_roots.is_empty() {
-        Locator::system()
-    } else {
-        Locator {
+    let mut locators = Locators::system();
+    if !firefox_roots.is_empty() {
+        locators.firefox = Locator {
             roots: firefox_roots,
-        }
-    };
-    Ok(Bookmarks::open(&bookmarks_db_path(db), locator)?)
+        };
+    }
+    Ok(Bookmarks::open(&bookmarks_db_path(db), locators)?)
 }
 
 pub fn cmd_bookmarks(
     db: &Path,
     action: BookmarksAction,
+    browser: BrowserArg,
     firefox_roots: Vec<PathBuf>,
 ) -> AnyResult<()> {
     let bm = open(db, firefox_roots)?;
+    let browser = Browser::from(browser);
     let status = match action {
         BookmarksAction::On => {
-            bm.set_enabled(true)?;
+            bm.set_browser_enabled(browser, true)?;
             bm.refresh()?
         }
-        BookmarksAction::Off => bm.set_enabled(false)?,
+        BookmarksAction::Off => bm.set_browser_enabled(browser, false)?,
         BookmarksAction::Refresh => bm.refresh()?,
         BookmarksAction::Status => bm.status(),
     };
@@ -132,7 +153,8 @@ pub fn cmd_search(
                 let (y, m, d) = civil_from_unix(b.added);
                 let what = if b.is_folder { "carpeta " } else { "marcador" };
                 println!(
-                    "{what}  {y:04}-{m:02}-{d:02}  {:?}/{}  {}  <{}>",
+                    "{what}  {y:04}-{m:02}-{d:02}  {:?} {:?}/{}  {}  <{}>",
+                    b.browser,
                     b.root,
                     b.folder.join("/"),
                     b.title,

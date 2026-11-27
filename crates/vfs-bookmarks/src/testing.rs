@@ -1,6 +1,7 @@
-//! Fake Firefox data folders for tests (feature `test-support`, VFS-6): a `profiles.ini`,
-//! profiles whose `places.sqlite` has Firefox's real schema (`places-schema.sql`) in WAL
-//! mode, and `jsonlz4` backups.
+//! Fake browser data folders for tests (feature `test-support`). Firefox (VFS-6): a
+//! `profiles.ini`, profiles whose `places.sqlite` has Firefox's real schema
+//! (`places-schema.sql`) in WAL mode, and `jsonlz4` backups. Chrome and Brave (VFS-44): a
+//! `Local State` and profiles with `Bookmarks` JSON files.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection};
 
 use crate::firefox::Locator;
+use crate::{chromium, Browser};
 
 /// Firefox's schema (version 88), no data.
 pub const PLACES_SCHEMA: &str = include_str!("places-schema.sql");
@@ -234,4 +236,84 @@ pub fn write_jsonlz4(path: &Path, json: &str) {
     bytes.extend_from_slice(&(json.len() as u32).to_le_bytes());
     bytes.extend_from_slice(&lz4_flex::block::compress(json.as_bytes()));
     std::fs::write(path, bytes).unwrap();
+}
+
+/// A Chromium data folder (VFS-44): `Local State` listing its profiles.
+pub struct FakeChromium {
+    pub root: PathBuf,
+    pub browser: Browser,
+    profiles: Vec<(String, String)>,
+}
+
+impl FakeChromium {
+    pub fn new(root: &Path, browser: Browser) -> FakeChromium {
+        std::fs::create_dir_all(root).unwrap();
+        FakeChromium {
+            root: root.to_path_buf(),
+            browser,
+            profiles: Vec::new(),
+        }
+    }
+
+    pub fn locator(&self) -> chromium::Locator {
+        chromium::Locator {
+            browser: self.browser,
+            root: self.root.clone(),
+        }
+    }
+
+    /// Lists a profile in `Local State` and creates its folder; returns the folder. Write
+    /// its bookmarks with [`chromium_file`].
+    pub fn add_profile(&mut self, dir_name: &str, name: &str) -> PathBuf {
+        self.profiles.push((dir_name.into(), name.into()));
+        let cache: serde_json::Map<String, serde_json::Value> = self
+            .profiles
+            .iter()
+            .map(|(d, n)| (d.clone(), serde_json::json!({ "name": n })))
+            .collect();
+        let state = serde_json::json!({ "profile": { "info_cache": cache } });
+        std::fs::write(self.root.join("Local State"), state.to_string()).unwrap();
+        let dir = self.root.join(dir_name);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+}
+
+/// Chromium's `date_added` for `secs` since 1970.
+fn chromium_time(secs: i64) -> String {
+    ((secs + 11_644_473_600) * 1_000_000).to_string()
+}
+
+/// A Chromium bookmark node.
+pub fn chromium_url(name: &str, url: &str, added: i64) -> serde_json::Value {
+    serde_json::json!({
+        "type": "url", "name": name, "url": url,
+        "guid": format!("g-{name}-{url}"), "date_added": chromium_time(added),
+    })
+}
+
+/// A Chromium folder node.
+pub fn chromium_folder(name: &str, children: Vec<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!({
+        "type": "folder", "name": name, "guid": format!("f-{name}"),
+        "date_added": chromium_time(1_600_000_000), "children": children,
+    })
+}
+
+/// The body of a `Bookmarks` file with the bookmarks bar, other and mobile roots.
+pub fn chromium_file(
+    bar: Vec<serde_json::Value>,
+    other: Vec<serde_json::Value>,
+    synced: Vec<serde_json::Value>,
+) -> String {
+    let root = |name: &str, children| serde_json::json!({ "type": "folder", "name": name, "children": children });
+    serde_json::json!({
+        "checksum": "0", "version": 1,
+        "roots": {
+            "bookmark_bar": root("Barra de marcadores", bar),
+            "other": root("Otros marcadores", other),
+            "synced": root("Marcadores del móvil", synced),
+        },
+    })
+    .to_string()
 }

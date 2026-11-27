@@ -275,7 +275,7 @@ pub fn get_progress(state: State<'_, AppState>) -> CmdResult<IndexProgress> {
     Ok(state.vfs()?.progress())
 }
 
-/// "Buscar cambios ahora" also reads changed Firefox profiles (VFS-6 R2).
+/// "Buscar cambios ahora" also reads changed browser profiles (VFS-6 R2, VFS-44 R4).
 #[tauri::command(async)]
 pub fn rescan<R: Runtime>(
     app: AppHandle<R>,

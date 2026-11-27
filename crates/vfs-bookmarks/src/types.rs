@@ -13,23 +13,40 @@ pub enum Source {
     Bookmarks,
 }
 
-/// The browser a bookmark was read from. Only Firefox today (VFS-6 non-goals).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The browser a bookmark was read from (VFS-6, VFS-44).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Browser {
     Firefox,
+    Chrome,
+    Brave,
 }
 
 impl Browser {
+    /// Every browser, in the order the screen lists them.
+    pub const ALL: [Browser; 3] = [Browser::Firefox, Browser::Chrome, Browser::Brave];
+
     /// Value stored in `profiles.browser`.
     pub fn code(self) -> i64 {
         match self {
             Browser::Firefox => 0,
+            Browser::Chrome => 1,
+            Browser::Brave => 2,
+        }
+    }
+
+    /// Inverse of [`Browser::code`]; unknown values read as Firefox.
+    pub fn from_code(code: i64) -> Browser {
+        match code {
+            1 => Browser::Chrome,
+            2 => Browser::Brave,
+            _ => Browser::Firefox,
         }
     }
 }
 
-/// The top-level Firefox folder a bookmark is under; the UI names them in Spanish.
+/// The top-level folder a bookmark is under; the UI names them. Chromium's roots map to
+/// `Toolbar` (`bookmark_bar`), `Unfiled` (`other`) and `Mobile` (`synced`) (VFS-44 R5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BookmarkRoot {
@@ -68,7 +85,7 @@ impl BookmarkRoot {
 /// One bookmark as read from a browser profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bookmark {
-    /// The browser's own stable id of the bookmark (Firefox `guid`).
+    /// The browser's own stable id of the bookmark (`guid`).
     pub guid: String,
     /// The `guid` of the folder it is in (a root's own guid at the top).
     pub parent_guid: String,
@@ -159,7 +176,9 @@ pub struct SourceOptions {
 pub struct BookmarkPlace {
     pub id: i64,
     pub root: BookmarkRoot,
-    /// Only when more than one profile has bookmarks.
+    /// The screen names it only when more than one browser has bookmarks (VFS-44 R7).
+    pub browser: Browser,
+    /// Only when its browser has more than one profile with bookmarks.
     pub profile: Option<String>,
 }
 
@@ -175,17 +194,35 @@ pub enum ReadState {
     Ok,
     /// At least one profile was read from its daily backup (database unreadable).
     FromBackup,
-    /// No Firefox profile with bookmarks was found.
-    NoFirefox,
+    /// No profile of the browser with bookmarks was found.
+    NotFound,
     /// At least one profile could not be read at all; its earlier bookmarks are kept.
     Failed,
 }
 
-/// What the "Incluir marcadores de Firefox" setting shows.
+/// One browser's switch and last read («Incluir marcadores de Chrome», VFS-44 R1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserStatus {
+    pub browser: Browser,
+    pub enabled: bool,
+    pub state: ReadState,
+    /// Bookmarks stored from this browser.
+    pub count: u32,
+    /// Its profiles with at least one stored bookmark.
+    pub profiles: u32,
+    /// When its bookmarks were last read successfully.
+    pub last_read: Option<i64>,
+}
+
+/// What the bookmark settings show: every browser together, then each on its own.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkStatus {
+    /// At least one browser's switch is on.
     pub enabled: bool,
+    /// The switched-on browsers' states together: reading, else failed, else from backup,
+    /// else ok, else not found.
     pub state: ReadState,
     /// Bookmarks stored.
     pub count: u32,
@@ -193,8 +230,10 @@ pub struct BookmarkStatus {
     pub profiles: u32,
     /// When bookmarks were last read successfully.
     pub last_read: Option<i64>,
-    /// The roots that hold something, in Firefox's order.
+    /// The roots that hold something, by browser, then in the browser's order.
     pub roots: Vec<BookmarkPlace>,
+    /// Firefox, then each Chromium browser found on this computer or switched on.
+    pub browsers: Vec<BrowserStatus>,
 }
 
 /// A bookmark or bookmark folder search result.
@@ -210,11 +249,17 @@ pub struct BookmarkHit {
     pub url: String,
     pub root: BookmarkRoot,
     pub folder: Vec<String>,
-    /// The profile name, only when more than one profile has bookmarks (VFS-6 D8).
+    /// The browser it was read from; its action opens the address there (VFS-44 R6). The
+    /// screen names it only when more than one browser has bookmarks (R7).
+    pub browser: Browser,
+    /// Other browsers that keep the same address, folded into this result (VFS-44 R8).
+    pub also_in: Vec<Browser>,
+    /// The profile name, only when its browser has more than one profile with bookmarks
+    /// (VFS-6 D8, VFS-44 R7).
     pub profile: Option<String>,
     pub added: i64,
     pub matched: MatchKind,
-    /// The address can be opened in Firefox (`http` or `https`, VFS-6 R10).
+    /// The address can be opened (`http` or `https`, VFS-6 R10).
     pub openable: bool,
 }
 

@@ -2,7 +2,7 @@
 
 > VFS is an offline desktop app (its only network use is an optional update check on open) for Windows 10+ and macOS that finds any file in a huge personal archive (designed for 5 million files, 4–5 TB) by its name or by the folders it sits in, as you type. It ignores case and accents, tolerates one typo, filters by type, date, size and folder, and reveals the result in Explorer or Finder. Interface in Spanish. Built with Rust, SQLite FTS5 and Tauri 2. It never opens, moves or changes a user file and needs no administrator rights.
 
-VFS reads only names, sizes and dates from the directory listing. It does not search inside documents yet (planned for phase 3), does not index network drives, NAS or removable disks, and uses no LLM, OCR or cloud service. It can optionally include Firefox bookmarks as a second source, read-only.
+VFS reads only names, sizes and dates from the directory listing. It does not search inside documents yet (planned for phase 3), does not index network drives, NAS or removable disks, and uses no LLM, OCR or cloud service. It can optionally include Firefox, Chrome and Brave bookmarks as a second source, read-only.
 
 ## Docs
 
@@ -19,6 +19,7 @@ VFS reads only names, sizes and dates from the directory listing. It does not se
 ## Specs
 
 - [Firefox bookmarks VFS-6](https://github.com/AndresHG/VFS/blob/main/specs/vfs-6-bookmarks/spec.md)
+- [Chrome and Brave bookmarks VFS-44](https://github.com/AndresHG/VFS/blob/main/specs/vfs-44-sources/spec.md)
 - [Windows tuning VFS-5](https://github.com/AndresHG/VFS/blob/main/specs/vfs-5-windows-tuning/spec.md)
 - [All specs](https://github.com/AndresHG/VFS/tree/main/specs)
 
