@@ -46,7 +46,10 @@ export const RevealOutcome = Object.freeze({ REVEALED: 'revealed', OPENED_PARENT
 /** What a search covers, and the `source` of each result (VFS-6). */
 export const Source = Object.freeze({ FILES: 'files', BOOKMARKS: 'bookmarks' });
 
-/** The Firefox folder a bookmark is under (VFS-6). */
+/** The browser a bookmark was read from (VFS-6, VFS-44). */
+export const Browser = Object.freeze({ FIREFOX: 'firefox', CHROME: 'chrome', BRAVE: 'brave' });
+
+/** The browser folder a bookmark is under (VFS-6, VFS-44 R5). */
 export const BookmarkRoot = Object.freeze({
   MENU: 'menu',
   TOOLBAR: 'toolbar',
@@ -54,13 +57,13 @@ export const BookmarkRoot = Object.freeze({
   MOBILE: 'mobile',
 });
 
-/** `BookmarkStatus.state`: how the last read of Firefox bookmarks went (VFS-6). */
+/** `BookmarkStatus.state`, `BrowserStatus.state`: how the last read went (VFS-6, VFS-44). */
 export const ReadState = Object.freeze({
   NEVER: 'never',
   READING: 'reading',
   OK: 'ok',
   FROM_BACKUP: 'from_backup',
-  NO_FIREFOX: 'no_firefox',
+  NOT_FOUND: 'not_found',
   FAILED: 'failed',
 });
 

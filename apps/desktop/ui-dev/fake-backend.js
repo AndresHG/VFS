@@ -11,7 +11,7 @@
 //   scenario=first-scan  every folder still being scanned for the first time
 //   (default)            one ready folder, one scanning, one unavailable; 50.000 files
 //   slow                 add 0.4–1.2 s of latency to every search
-//   bookmarks            Firefox bookmarks already on and read at start
+//   bookmarks            Firefox bookmarks already on and read at start (Chrome found, off)
 // Query words that trigger states: "fallo" (search error), "tardar" (deadline, no hits),
 // any name containing "borrado" reveals as not_found; paths over 259 chars reveal as
 // opened_parent, standing in for the rare case the Shell cannot select a long path
@@ -30,7 +30,7 @@
 // and the project pages opened from «Acerca de» (VFS-45 AC-6, AC-7). The app version is 0.5.0.
 
 import {
-  BookmarkRoot, ContentPhase, ContentStop, DriveKind, MeaningPhase, MeaningUse, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
+  BookmarkRoot, Browser, ContentPhase, ContentStop, DriveKind, MeaningPhase, MeaningUse, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
   ReadState, RevealOutcome, RootStatus, Scope, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
   AiErrorCode, KeyFallback, KeyPlace, KeyState, Provider,
 } from '../ui/contract.js';
@@ -70,7 +70,7 @@ const BOOKMARKS = [
   ['Ruta por Galicia en coche', 'https://viajes.es/galicia', BookmarkRoot.MENU, ['Viajes'], 700],
   ['Documento guardado en el equipo', 'file:///C:/Users/Carmen/receta.pdf', BookmarkRoot.UNFILED, [], 90],
 ].map(([title, url, root, folder, days], i) => ({
-  id: i + 1, isFolder: !url, title, url, root, folder, profile: null, added: NOW - days * DAY,
+  id: i + 1, isFolder: !url, title, url, root, folder, browser: Browser.FIREFOX, alsoIn: [], profile: null, added: NOW - days * DAY,
   openable: url.startsWith('http'),
   // Folder ids: 1 is the "Recetas" folder (the first entry), 1001 the menu, 1003 "Otros marcadores".
   parent: folder[0] === 'Recetas' ? 1 : root === BookmarkRoot.UNFILED ? 1003 : 1001,
@@ -611,12 +611,27 @@ export function createFakeBackend(params) {
   const meaning = fakeMeaning(params.get('meaning'));
   const content = fakeContent(params.get('content'), corpus.files, fakeCalls, meaning.st);
   const bookmarkCbs = new Set();
-  const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
-  const readBookmarks = () => Object.assign(bookmarks, {
-    state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000),
-    roots: [{ id: 1001, root: BookmarkRoot.MENU, profile: null }, { id: 1003, root: BookmarkRoot.UNFILED, profile: null }],
-  });
-  if (params.has('bookmarks')) { bookmarks.enabled = true; readBookmarks(); }
+  // VFS-44: Firefox holds the sample bookmarks; Chrome is installed and holds none.
+  const browsers = [Browser.FIREFOX, Browser.CHROME].map((browser) => ({
+    browser, enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null,
+  }));
+  const firefox = browsers[0];
+  const readBrowser = (b) => Object.assign(b, b === firefox
+    ? { state: ReadState.OK, count: BOOKMARKS.length - 1, profiles: 1, lastRead: Math.floor(Date.now() / 1000) }
+    : { state: ReadState.NOT_FOUND });
+  const bookmarkStatus = () => {
+    const on = browsers.filter((b) => b.enabled);
+    return {
+      enabled: on.length > 0, state: on[0]?.state ?? ReadState.NEVER,
+      count: firefox.count, profiles: firefox.profiles, lastRead: firefox.lastRead,
+      roots: firefox.count ? [
+        { id: 1001, root: BookmarkRoot.MENU, browser: Browser.FIREFOX, profile: null },
+        { id: 1003, root: BookmarkRoot.UNFILED, browser: Browser.FIREFOX, profile: null },
+      ] : [],
+      browsers: browsers.map((b) => ({ ...b })),
+    };
+  };
+  if (params.has('bookmarks')) { firefox.enabled = true; readBrowser(firefox); }
   let lastChanged = 0;
   let picks = 0;
   let generation = 0;
@@ -848,7 +863,7 @@ export function createFakeBackend(params) {
       const sources = options.sources || [];
       const inside = options.bookmarkFolder ?? null;
       const files = inside == null && (sources.length === 0 || sources.includes(Source.FILES));
-      const marks = bookmarks.enabled && (sources.length === 0 || sources.includes(Source.BOOKMARKS));
+      const marks = firefox.enabled && (sources.length === 0 || sources.includes(Source.BOOKMARKS));
       const f = q.filters || {};
       const blocked = (f.kinds || []).length || f.sizeMin != null || f.sizeMax != null || f.folder;
       const ts = fold(q.text || '').split(/\s+/).filter(Boolean);
@@ -869,18 +884,17 @@ export function createFakeBackend(params) {
       const head = offset < found.length ? found.slice(offset) : [];
       return { ...r, hits: [...head, ...fileHits].slice(0, limit), total: r.total + found.length };
     },
-    async getBookmarksStatus() { await sleep(20); return { ...bookmarks }; },
-    async setBookmarksEnabled(on) {
-      bookmarks.enabled = on;
-      bookmarks.state = ReadState.NEVER;
-      bookmarks.count = 0;
+    async getBookmarksStatus() { await sleep(20); return bookmarkStatus(); },
+    async setBookmarksEnabled(on, browser = Browser.FIREFOX) {
+      const b = browsers.find((x) => x.browser === browser);
+      Object.assign(b, { enabled: on, state: ReadState.NEVER, count: 0, profiles: 0 });
       if (on) {
         setTimeout(() => {
-          readBookmarks();
-          for (const cb of bookmarkCbs) cb({ ...bookmarks });
+          readBrowser(b);
+          for (const cb of bookmarkCbs) cb(bookmarkStatus());
         }, 1000);
       }
-      return { ...bookmarks };
+      return bookmarkStatus();
     },
     async openBookmark(id) {
       const b = BOOKMARKS.find((x) => x.id === id);

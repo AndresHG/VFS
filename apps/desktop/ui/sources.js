@@ -41,12 +41,19 @@ export function bookmarkFolderOf(value) {
   return value?.startsWith(BOOKMARK_FOLDER) ? Number(value.slice(BOOKMARK_FOLDER.length)) : null;
 }
 
-/** Where a bookmark or bookmark folder is saved, outermost first: the profile name when
- *  there are several, the root's name in the active language, then the folders. */
-export function bookmarkPathParts(hit, rootLabels) {
+/** Where a bookmark or bookmark folder is saved, outermost first: the browser's name when
+ *  given (VFS-44 R7), the profile name when its browser has several, the root's name in the
+ *  active language, then the folders. */
+export function bookmarkPathParts(hit, rootLabels, browserName = null) {
   const parts = [rootLabels[hit.root] ?? hit.root, ...hit.folder];
   if (hit.profile) parts.unshift(hit.profile);
+  if (browserName) parts.unshift(browserName);
   return parts;
+}
+
+/** VFS-44 R7: browsers are named only while more than one has bookmarks stored. */
+export function namesBrowsers(status) {
+  return (status?.browsers || []).filter((b) => b.count > 0).length > 1;
 }
 
 /** The site of an address, without user, `www.` or port: "https://www.cocina.es/flan" ->

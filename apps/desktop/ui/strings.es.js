@@ -4,7 +4,7 @@
 
 import { DateChoice, LanguageChoice, SizeChoice, SourceChoice, TimeUnit } from './choices.js';
 import {
-  BookmarkRoot, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
+  BookmarkRoot, Browser, ErrorCode, FileKind, LinkKind, PatternReason, ReadState, RootStatus, SortOrder, UnreadableReason,
   ContentStop, ContentWait, UnreadReason, Provider, AiErrorCode,
 } from './contract.js';
 
@@ -75,7 +75,7 @@ export const es = {
     [SortOrder.OLDEST]: 'Lo más antiguo primero', [SortOrder.NAME]: 'Por nombre (A-Z)',
     [SortOrder.SIZE]: 'Lo más grande primero', [SortOrder.SOURCE]: 'Archivos primero, luego marcadores',
   },
-  folderGroupBookmarks: 'Marcadores de Firefox',
+  folderGroupBookmarks: 'Marcadores',
   folderAll: 'Todas las carpetas',
   folderPick: 'Elegir otra carpeta…',
   folderInside: (name) => `Dentro de: ${name}`,
@@ -92,6 +92,8 @@ export const es = {
   revealKey: 'Intro',
   unavailableBadge: 'No disponible',
   openButton: 'Abrir en Firefox',
+  // VFS-44 R6: a bookmark opens in the browser it came from.
+  openBookmarkButton: (browser) => `Abrir en ${browser}`,
   folderContentsButton: 'Ver su contenido',
   bookmarkKind: 'Marcador',
   bookmarkFolderKind: 'Carpeta de marcadores',
@@ -103,6 +105,7 @@ export const es = {
     [title, kind, `en ${path}`, site, date && `guardado el ${date}`].filter(Boolean).join(', '),
   detailsBookmark: 'Dirección:',
   detailsBookmarkFolder: 'Guardado en:',
+  detailsAlsoIn: 'También en:',
   rowLabel: (name, kind, dir, date, size, unavailable, places = 1) =>
     [name, kind, `en ${dir}`, date && `modificado el ${date}`, size, unavailable && 'no disponible',
       places > 1 && `está en ${places} sitios, Mayúsculas más Intro para verlos`]
@@ -218,10 +221,12 @@ export const es = {
   rootAdded: (p) => `Se añadió «${p}». Se está revisando; puede buscar mientras tanto.`,
   rootTakesIn: (p, inner) => { const l = [].concat(inner); return `Se añadió «${p}». Incluye ${l.map((x) => `«${x}»`).join(', ')}, que ya ${l.length > 1 ? 'estaban' : 'estaba'} en la lista; sus archivos siguen apareciendo en las búsquedas mientras se revisa.`; },
   remoteWarning: 'Esta carpeta está en un disco de red o extraíble. Si se desconecta, sus archivos se marcarán como «No disponible».',
-  bookmarksTitle: 'Marcadores de Firefox',
-  bookmarksToggle: 'Incluir marcadores de Firefox',
+  bookmarksTitle: 'Marcadores de los navegadores',
+  // VFS-44: one switch per browser; its name is the product's, the same in every language.
+  browserNames: { [Browser.FIREFOX]: 'Firefox', [Browser.CHROME]: 'Chrome', [Browser.BRAVE]: 'Brave' },
+  bookmarksToggle: (browser) => `Incluir marcadores de ${browser}`,
   bookmarksSummary: (on) => (on ? '· incluidos' : '· no incluidos'),
-  bookmarksIntro: 'Busca también entre los marcadores guardados en Firefox. Solo se leen los marcadores, nunca el historial ni las contraseñas, y nada sale de este equipo.',
+  bookmarksIntro: 'Busca también entre los marcadores guardados en tus navegadores. Solo se leen los marcadores, nunca el historial ni las contraseñas, y nada sale de este equipo.',
 
   // VFS-21: updates. What the check sends. It names no other connection: a build without the
   // AI shows nothing about it (VFS-28), and the AI section states its own.
@@ -265,11 +270,11 @@ export const es = {
   bookmarksCount: (n, when) => `${n} marcadores · leídos ${when}`,
   bookmarksState: {
     [ReadState.NEVER]: 'Todavía no se han leído los marcadores.',
-    [ReadState.READING]: 'Leyendo los marcadores de Firefox…',
+    [ReadState.READING]: (browser) => `Leyendo los marcadores de ${browser}…`,
     [ReadState.OK]: '',
-    [ReadState.FROM_BACKUP]: 'Firefox no dejó leer sus marcadores más recientes; se usa su última copia de seguridad.',
-    [ReadState.NO_FIREFOX]: 'No se han encontrado marcadores de Firefox en este equipo.',
-    [ReadState.FAILED]: 'No se pudieron leer los marcadores de Firefox. Se volverá a intentar más tarde.',
+    [ReadState.FROM_BACKUP]: (browser) => `No se pudieron leer los marcadores más recientes de ${browser}; se usa su última copia de seguridad.`,
+    [ReadState.NOT_FOUND]: (browser) => `No se han encontrado marcadores de ${browser} en este equipo.`,
+    [ReadState.FAILED]: (browser) => `No se pudieron leer los marcadores de ${browser}. Se volverá a intentar más tarde.`,
   },
   // VFS-27: content search, the words inside documents.
   contentSetTitle: 'Dentro de los documentos',
@@ -578,7 +583,7 @@ export const es = {
       [ErrorCode.UNAVAILABLE]: 'Esta dirección no es una página web y no se puede abrir.',
     },
     openBookmark: {
-      [ErrorCode.NOT_FOUND]: 'Ese marcador ya no existe en Firefox.',
+      [ErrorCode.NOT_FOUND]: 'Ese marcador ya no existe en el navegador.',
       [ErrorCode.UNAVAILABLE]: 'Este marcador no es una página web y no se puede abrir.',
     },
     addRoot: {

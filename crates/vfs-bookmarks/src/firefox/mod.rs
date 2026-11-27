@@ -9,15 +9,17 @@ mod snapshot;
 use std::path::{Path, PathBuf};
 
 pub use backup::read_backup;
+pub(crate) use places::normalize;
 pub use places::{open_guarded, read_places, ALLOWED_COLUMNS};
 pub use snapshot::{copy_consistent, signature};
 
 use crate::types::Tree;
 
-/// One Firefox profile folder.
+/// One browser profile folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
-    /// The name Firefox shows (`profiles.ini` `Name`, or the profile group's `name`).
+    /// The name the browser shows (Firefox: `profiles.ini` `Name` or the profile group's
+    /// `name`; Chromium: `Local State`).
     pub name: String,
     pub dir: PathBuf,
 }

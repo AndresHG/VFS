@@ -54,14 +54,16 @@ ordinary or fast machines. The product spec is
 - "Mostrar en carpeta" opens Finder or Explorer with the file or folder selected, on Windows
   also for paths over 259 characters; only if the Shell cannot address one does the nearest
   folder open.
-- Optionally includes Firefox bookmarks ("Incluir marcadores de Firefox" in the "Carpetas"
-  panel, off by default; spec [VFS-6](specs/vfs-6-bookmarks/spec.md)). Bookmarks are found by
+- Optionally includes browser bookmarks from Firefox, Chrome and Brave, one switch per browser
+  found ("Incluir marcadores de Chrome" in the "Carpetas" panel, off by default; specs
+  [VFS-6](specs/vfs-6-bookmarks/spec.md), [VFS-44](specs/vfs-44-sources/spec.md)). Bookmarks are found by
   title, address, folder path, tags and keyword with the same rules as files; bookmark
   folders are results and can be chosen as the "Carpeta" filter; "Origen" in "Más filtros"
-  picks files, bookmarks or both, and "Orden" adds files first, then bookmarks. "Abrir en Firefox"
-  opens a bookmarked page. Firefox's files are only ever copied and read: never opened in
-  place, never written, and only bookmark tables are read (no history, passwords or
-  cookies).
+  picks files, bookmarks or both, and "Orden" adds files first, then bookmarks. "Abrir en Chrome"
+  opens a bookmarked page in the browser it came from; one address kept in two browsers is
+  one result. Firefox's files are only ever copied and read: never opened in place, never
+  written, and only bookmark tables are read; Chrome's and Brave's `Bookmarks` files are
+  only read (no history, passwords or cookies).
 - Follows changes: a live watcher while the app runs; at each start, a replay of what
   changed while closed from the NTFS change journal (Windows) or FSEvents (macOS), or a
   catch-up re-walk (resumable, searchable meanwhile) when that history is gone; and a
@@ -74,8 +76,8 @@ ordinary or fast machines. The product spec is
 - Search inside documents unless you turn it on. It is offered once after the first scan
   and switched in "Ajustes" (spec [VFS-27](specs/vfs-27-content-in-app/spec.md)).
 - Understand photos, audio or video. They are found by name, folder and filters only.
-- Open files or show previews. (A bookmark's web page is opened in Firefox on request.)
-- Change anything in a source: no file, and nothing in Firefox (bookmarks are never edited,
+- Open files or show previews. (A bookmark's web page is opened in its browser on request.)
+- Change anything in a source: no file, and nothing in a browser (bookmarks are never edited,
   moved or reorganised).
 - Index network drives, a NAS or removable disks. The app warns when a chosen folder is on
   one.
@@ -99,13 +101,13 @@ principles and future lines of work are in [`docs/vision.md`](docs/vision.md).
 | Path | What it is |
 |---|---|
 | `crates/vfs-core` | Rust library: schema, folding, indexer, watcher, search. No UI dependency. |
-| `crates/vfs-bookmarks` | Firefox bookmarks as a second source: profile finder, read-only reader, `bookmarks.db`, merged search. |
+| `crates/vfs-bookmarks` | Browser bookmarks (Firefox, Chrome, Brave) as a second source: profile finders, read-only readers, `bookmarks.db`, merged search. |
 | `crates/vfs-ai` | Ask your archive (VFS-28): model providers, API keys, error mapping, cost, `ai.db`, and the ask flow (retrieval rounds, passages, citation checks, chat messages with their earlier turns; chats kept in `ai.db`, VFS-49). In the app behind the desktop crate's `ai` feature, on by default from 0.4. |
 | `crates/vfs-content` | Document content search engine (VFS-2): isolated extraction worker `vfs-extract`, `content.db`, Spanish BM25 search, and the app's background content indexer. Its interface in the app is VFS-27. |
 | `crates/vfs-semantic` | Search by meaning (VFS-29): `vectors.db` beside `content.db`, the resumable embedding run, the ranker `retrieve` fuses with BM25, and the embedding worker `vfs-embed` (ONNX Runtime and the tokenizer only with its `embedder` feature, never in the app). |
 | `crates/vfs-cli` | `vfs` command line: `index`, `run` (the app's indexer and watcher), `search` (`--source`, `--sort`, `--names-only`), `bookmarks`, `gen-db`, `bench`; with the `content` feature, `content-index`, `content-search`, `content-off`, `ask` (a real provider, key in `VFS_AI_KEY`) and `embed-index` (the local embedding model, VFS-29; `content-search --meaning-model-dir` then fuses meaning hits). |
 | `bench/` | Standalone evaluation and measurement tools for content search (extractors, engines, corpus); outside the workspace. |
-| `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox". |
+| `apps/desktop/src-tauri` | Tauri 2 shell: commands, events, "mostrar en carpeta", "Abrir en Firefox" / "en Chrome". |
 | `apps/desktop/ui` | The screen, in Spanish and English (`strings.es.js`, `strings.en.js`): static HTML, CSS and JavaScript, no npm build. |
 | `apps/desktop/ui-dev` | A fake backend for working on the UI in a browser; never bundled. |
 | `specs/` | Specs with acceptance criteria (`VFS-<n>`); tests cite them. |
@@ -153,12 +155,14 @@ cargo run -p vfs-cli -- search --db /tmp/vfs.db notaria         # search
 cargo run -p vfs-cli -- search --db /tmp/vfs.db --kind folder ano
 cargo run -p vfs-cli -- search --help                           # all filters
 cargo run -p vfs-cli -- bookmarks --db /tmp/vfs.db on           # read Firefox bookmarks
+cargo run -p vfs-cli -- bookmarks --db /tmp/vfs.db on --browser chrome   # and Chrome's
 cargo run -p vfs-cli -- search --db /tmp/vfs.db --source bookmarks recetas
 cargo run -p vfs-cli -- bookmarks --db /tmp/vfs.db off          # forget them again
 ```
 
 `vfs bookmarks on|off|refresh|status` keeps its store in `bookmarks.db` next to the `--db`
-file; `--firefox-root <dir>` points it at another folder holding `profiles.ini`.
+file; `--browser firefox|chrome|brave` picks the switch `on` and `off` turn (Firefox by
+default), and `--firefox-root <dir>` points it at another folder holding `profiles.ini`.
 
 `gen-db` writes a synthetic index shaped like a Spanish personal archive, and `bench` runs
 the fixed query set of acceptance criterion AC-9 (p95 under 150 ms and under 300 MB of
@@ -243,7 +247,7 @@ that marks an open session, `logs/vfs.log` (warnings, errors and the indexer's d
 records without file names, at most about 22 MB; "Enviar comentarios" packs it into a
 report, see `docs/diagnostic-report.md`),
 and, after a recovery, `index.db.bad` until the rebuild has finished (and `index.db.new` while a recovery runs).
-With Firefox bookmarks
+With browser bookmarks
 included, `bookmarks.db` (with its `-wal` and `-shm`) holds the setting and the bookmarks
 read, and `bookmarks.db.snapshot/` exists only for the moment a copy of Firefox's database
 is being read. Deleting the folder while the app is closed resets VFS: the folders have to
@@ -332,9 +336,10 @@ so it works the same way on Windows and macOS.
 Yes. Case and accents are ignored ("notaria" finds "Notaría"), and one typo is tolerated in
 longer words when the exact search finds few results.
 
-**Can it search Firefox bookmarks?**
-Yes, optionally. Turn on "Incluir marcadores de Firefox" in the "Carpetas" panel; bookmarks
-are found by title, address, folder, tags and keyword, and Firefox is only ever read.
+**Can it search browser bookmarks?**
+Yes, optionally, from Firefox, Chrome and Brave. Turn on "Incluir marcadores de Firefox" (or
+of Chrome, of Brave) in the "Carpetas" panel; bookmarks are found by title, address, folder,
+tags and keyword, and the browsers are only ever read.
 
 **Can it index a NAS or external disk?**
 No, only internal disks. The app warns when a chosen folder is on a network or removable

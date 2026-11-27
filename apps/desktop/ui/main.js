@@ -30,8 +30,8 @@ import {
 } from './choices.js';
 import { PrefKey, readPref, webStorage, writePref } from './prefs.js';
 import {
-  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, site, sizeFilterApplies, sortChoices, sortFor,
-  sourcesFor,
+  PATH_SEPARATOR, bookmarkFolderOf, bookmarkFolderValue, bookmarkPathParts, namesBrowsers, site, sizeFilterApplies, sortChoices,
+  sortFor, sourcesFor,
 } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
@@ -300,6 +300,13 @@ function main(L) {
   // The "Orden" options before the bookmark setting is known (VFS-12).
   renderSources();
 
+  /** Where a bookmark, folder or root place is saved, naming its browser while more than one
+   *  has bookmarks (VFS-44 R7). */
+  function bookmarkPath(x) {
+    const browser = namesBrowsers(state.bookmarks) ? S.browserNames[x.browser] : null;
+    return bookmarkPathParts({ folder: [], ...x }, S.bookmarkRoots, browser);
+  }
+
   function bookmarksOn() {
     return !!state.bookmarks?.enabled;
   }
@@ -366,7 +373,7 @@ function main(L) {
       const group = document.createElement('optgroup');
       group.label = S.folderGroupBookmarks;
       for (const r of state.bookmarks.roots || []) {
-        const label = bookmarkPathParts({ root: r.root, folder: [], profile: r.profile }, S.bookmarkRoots).join(PATH_SEPARATOR);
+        const label = bookmarkPath(r).join(PATH_SEPARATOR);
         group.append(new Option(label, bookmarkFolderValue(r.id)));
       }
       const b = state.pickedBookmarkFolder;
@@ -398,7 +405,7 @@ function main(L) {
     if (id == null) return F.baseName(state.folder);
     if (state.pickedBookmarkFolder?.id === id) return state.pickedBookmarkFolder.title;
     const root = state.bookmarks?.roots?.find((r) => r.id === id);
-    return root ? bookmarkPathParts({ root: root.root, folder: [], profile: root.profile }, S.bookmarkRoots).join(PATH_SEPARATOR) : '';
+    return root ? bookmarkPath(root).join(PATH_SEPARATOR) : '';
   }
 
   /** VFS-38 R7, R8: the active filters behind «Más filtros», each with its chip text and how
@@ -840,7 +847,7 @@ function main(L) {
     const nameText = el('span', 'name-text');
     F.appendHighlighted(nameText, hit.title, F.matchRanges(hit.title, state.terms));
     nameEl.replaceChildren(nameText);
-    const parts = bookmarkPathParts(hit, S.bookmarkRoots);
+    const parts = bookmarkPath(hit);
     const whole = parts.join(PATH_SEPARATOR);
     const cut = whole.length - parts[parts.length - 1].length;
     const ranges = F.matchRanges(whole, state.terms);
@@ -859,7 +866,7 @@ function main(L) {
     size.textContent = host;
     size.title = host;
     if (hit.isFolder) setAction(action, FileKind.FOLDER, S.folderContentsButton, true);
-    else setAction(action, OPEN_ICON, S.openButton, hit.openable);
+    else setAction(action, OPEN_ICON, S.openBookmarkButton(S.browserNames[hit.browser]), hit.openable);
     row.setAttribute('aria-label', S.bookmarkRowLabel(hit.title, kindLabel, whole, host, dateText));
   }
 
@@ -965,7 +972,7 @@ function main(L) {
     }
   }
 
-  /** "Abrir en Firefox" (VFS-6 R10). */
+  /** «Abrir en Chrome»: in the browser it came from (VFS-6 R10, VFS-44 R6). */
   async function openBookmark(hit) {
     if (!hit.openable) return;
     try {
@@ -976,7 +983,7 @@ function main(L) {
   }
 
   /** "Ver su contenido": the folder becomes the "Carpeta" filter and its contents are listed
-   *  in Firefox's order (VFS-6 R12). */
+   *  in the browser's order (VFS-6 R12). */
   function showBookmarkFolder(hit) {
     state.pickedBookmarkFolder = { id: hit.id, title: hit.title };
     state.folder = bookmarkFolderValue(hit.id);
@@ -1201,9 +1208,13 @@ function main(L) {
       && !hit.isDir && hit.kind === FileKind.DOCUMENT);
     if (!hit) { d.replaceChildren(); return; }
     if (hit.source === Source.BOOKMARKS) {
-      const where = bookmarkPathParts(hit, S.bookmarkRoots).join(PATH_SEPARATOR);
+      const where = bookmarkPath(hit).join(PATH_SEPARATOR);
       const parts = [el('strong', null, `${S.detailsBookmarkFolder} `), where];
       if (!hit.isFolder) parts.push(' · ', el('strong', null, `${S.detailsBookmark} `), hit.url);
+      // VFS-44 R8: the same address kept in other browsers is this one result.
+      if (hit.alsoIn?.length) {
+        parts.push(' · ', el('strong', null, `${S.detailsAlsoIn} `), hit.alsoIn.map((b) => S.browserNames[b]).join(', '));
+      }
       d.replaceChildren(...parts);
       return;
     }
@@ -1666,7 +1677,9 @@ function main(L) {
 
   /* ---------------------------------------------------------------- bookmarks setting (VFS-6) */
 
-  const bookmarksToggle = $('bookmarks-on');
+  /** VFS-44 R1: one switch and status line per browser the status lists, kept across
+   *  renders so a status event never takes the focus from a switch. */
+  const browserRows = new Map();
 
   function setBookmarks(status) {
     state.bookmarks = status;
@@ -1681,30 +1694,54 @@ function main(L) {
     renderClearButton();
   }
 
-  function renderBookmarks() {
-    const st = state.bookmarks;
-    bookmarksToggle.checked = !!st?.enabled;
-    $('bookmarks-summary').textContent = S.bookmarksSummary(!!st?.enabled);
-    const parts = [];
-    if (st?.enabled) {
-      parts.push(S.bookmarksState[st.state] || '');
-      if (st.count && st.state !== ReadState.READING) parts.push(S.bookmarksCount(N.count(st.count), N.date(st.lastRead)));
-    }
-    $('bookmarks-status').textContent = parts.filter(Boolean).join(' ');
+  function browserRow(browser) {
+    let row = browserRows.get(browser);
+    if (row) return row;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.browser = browser;
+    const label = el('label', 'toggle');
+    label.append(input, ' ', el('span', null, S.bookmarksToggle(S.browserNames[browser])));
+    const status = el('p', 'bookmarks-status');
+    status.setAttribute('aria-live', 'polite');
+    input.addEventListener('change', () => setBrowserEnabled(browser, input));
+    row = { input, nodes: [label, status], status };
+    browserRows.set(browser, row);
+    return row;
   }
 
-  bookmarksToggle.addEventListener('change', async () => {
+  function renderBookmarks() {
+    const st = state.bookmarks;
+    $('bookmarks-summary').textContent = S.bookmarksSummary(!!st?.enabled);
+    const nodes = [];
+    for (const b of st?.browsers || []) {
+      const row = browserRow(b.browser);
+      row.input.checked = b.enabled;
+      const parts = [];
+      if (b.enabled) {
+        const text = S.bookmarksState[b.state];
+        parts.push(typeof text === 'function' ? text(S.browserNames[b.browser]) : text);
+        if (b.count && b.state !== ReadState.READING) parts.push(S.bookmarksCount(N.count(b.count), N.date(b.lastRead)));
+      }
+      row.status.textContent = parts.filter(Boolean).join(' ');
+      nodes.push(...row.nodes);
+    }
+    const box = $('bookmarks-browsers');
+    if (nodes.length !== box.children.length || nodes.some((n, i) => box.children[i] !== n)) box.replaceChildren(...nodes);
+  }
+
+  async function setBrowserEnabled(browser, input) {
     try {
-      const status = await api.setBookmarksEnabled(bookmarksToggle.checked);
+      const status = await api.setBookmarksEnabled(input.checked, browser);
       // Turning it on starts a read in the background; say so until it reports.
-      if (status.enabled && status.state === ReadState.NEVER) status.state = ReadState.READING;
+      for (const b of status.browsers) if (b.enabled && b.state === ReadState.NEVER) b.state = ReadState.READING;
       setBookmarks(status);
       runSearch({ quiet: true });
     } catch (err) {
-      bookmarksToggle.checked = bookmarksOn();
+      input.checked = !input.checked;
       showError(errorText(err));
     }
-  });
+  }
 
   function onBookmarksChanged(status) {
     setBookmarks(status);

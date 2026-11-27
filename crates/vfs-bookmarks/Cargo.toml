@@ -1,6 +1,6 @@
 [package]
 name = "vfs-bookmarks"
-description = "Browser bookmarks as a VFS search source (VFS-6): Firefox reader, store, search"
+description = "Browser bookmarks as a VFS search source (VFS-6, VFS-44): Firefox and Chromium readers, store, search"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

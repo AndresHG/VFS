@@ -320,7 +320,7 @@ fn ac4_no_firefox_missing_profiles_and_several_profiles() {
     let bm = Bookmarks::open(&tmp.path().join("a/bookmarks.db"), nothing).unwrap();
     bm.set_enabled(true).unwrap();
     let st = bm.refresh().unwrap();
-    assert_eq!((st.state, st.count), (ReadState::NoFirefox, 0));
+    assert_eq!((st.state, st.count), (ReadState::NotFound, 0));
 
     let mut ff = FakeFirefox::new(&tmp.path().join("Firefox"));
     ff.list_profile("fantasma", "missing.default", None);

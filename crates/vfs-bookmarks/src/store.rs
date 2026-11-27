@@ -42,6 +42,7 @@ PRAGMA user_version = 1;
 
 /// Joins folder names and tags in one column; never part of a name Firefox shows.
 const SEP: char = '\u{1f}';
+/// Firefox's switch keeps the key it had before other browsers (VFS-6).
 const KEY_ENABLED: &str = "enabled";
 const ON: &str = "1";
 const OFF: &str = "0";
@@ -50,6 +51,7 @@ const OFF: &str = "0";
 pub(crate) struct Row {
     pub id: i64,
     pub profile_id: i64,
+    pub browser: Browser,
     pub profile: String,
     pub guid: String,
     pub is_folder: bool,
@@ -83,6 +85,15 @@ fn join(v: &[String]) -> String {
         .join(&SEP.to_string())
 }
 
+/// The `settings` key of a browser's switch.
+fn enabled_key(browser: Browser) -> &'static str {
+    match browser {
+        Browser::Firefox => KEY_ENABLED,
+        Browser::Chrome => "enabled.chrome",
+        Browser::Brave => "enabled.brave",
+    }
+}
+
 fn open_conn(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -110,29 +121,34 @@ impl Store {
         }
     }
 
-    pub fn enabled(&self) -> Result<bool> {
+    pub fn enabled(&self, browser: Browser) -> Result<bool> {
         let v: Option<String> = self
             .conn
             .query_row(
                 "SELECT value FROM settings WHERE key = ?1",
-                [KEY_ENABLED],
+                [enabled_key(browser)],
                 |r| r.get(0),
             )
             .optional()?;
         Ok(v.as_deref() == Some(ON))
     }
 
-    /// Turning it off deletes every stored profile, bookmark and folder (R8).
-    pub fn set_enabled(&mut self, on: bool) -> Result<()> {
+    /// Turning a browser off deletes its stored profiles, bookmarks and folders (VFS-6 R8,
+    /// VFS-44 R9).
+    pub fn set_enabled(&mut self, browser: Browser, on: bool) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT INTO settings(key, value) VALUES(?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![KEY_ENABLED, if on { ON } else { OFF }],
+            params![enabled_key(browser), if on { ON } else { OFF }],
         )?;
         if !on {
-            tx.execute("DELETE FROM items", [])?;
-            tx.execute("DELETE FROM profiles", [])?;
+            tx.execute(
+                "DELETE FROM items WHERE profile_id IN \
+                 (SELECT id FROM profiles WHERE browser = ?1)",
+                [browser.code()],
+            )?;
+            tx.execute("DELETE FROM profiles WHERE browser = ?1", [browser.code()])?;
         }
         tx.commit()?;
         if !on {
@@ -266,16 +282,18 @@ impl Store {
         Ok(())
     }
 
-    /// The newest successful read of any profile.
-    pub fn last_read(&self) -> Result<Option<i64>> {
-        Ok(self
-            .conn
-            .query_row("SELECT max(read_at) FROM profiles", [], |r| r.get(0))?)
+    /// The newest successful read of any profile, or of `browser`'s.
+    pub fn last_read(&self, browser: Option<Browser>) -> Result<Option<i64>> {
+        Ok(self.conn.query_row(
+            "SELECT max(read_at) FROM profiles WHERE ?1 IS NULL OR browser = ?1",
+            [browser.map(Browser::code)],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn load(&self) -> Result<Vec<Row>> {
         let mut stmt = self.conn.prepare(
-            "SELECT i.id, i.profile_id, p.name, i.guid, i.is_folder, i.parent_guid, i.position, \
+            "SELECT i.id, i.profile_id, p.browser, p.name, i.guid, i.is_folder, i.parent_guid, i.position, \
              i.root, i.folder, i.title, i.url, i.tags, i.keyword, i.added \
              FROM items i JOIN profiles p ON p.id = i.profile_id ORDER BY i.id",
         )?;
@@ -284,18 +302,19 @@ impl Store {
                 Ok(Row {
                     id: r.get(0)?,
                     profile_id: r.get(1)?,
-                    profile: r.get(2)?,
-                    guid: r.get(3)?,
-                    is_folder: r.get(4)?,
-                    parent_guid: r.get(5)?,
-                    position: r.get(6)?,
-                    root: BookmarkRoot::from_code(r.get(7)?),
-                    folder: split(&r.get::<_, String>(8)?),
-                    title: r.get(9)?,
-                    url: r.get(10)?,
-                    tags: split(&r.get::<_, String>(11)?),
-                    keyword: r.get(12)?,
-                    added: r.get(13)?,
+                    browser: Browser::from_code(r.get(2)?),
+                    profile: r.get(3)?,
+                    guid: r.get(4)?,
+                    is_folder: r.get(5)?,
+                    parent_guid: r.get(6)?,
+                    position: r.get(7)?,
+                    root: BookmarkRoot::from_code(r.get(8)?),
+                    folder: split(&r.get::<_, String>(9)?),
+                    title: r.get(10)?,
+                    url: r.get(11)?,
+                    tags: split(&r.get::<_, String>(12)?),
+                    keyword: r.get(13)?,
+                    added: r.get(14)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<Row>>>()?;

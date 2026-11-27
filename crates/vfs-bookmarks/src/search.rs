@@ -5,7 +5,7 @@
 //! least one in its name.
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use vfs_core::matching::{
     contains_within_one, name_tier, tolerates_typo, ParsedQuery, FUZZY_TRIGGER,
@@ -13,7 +13,7 @@ use vfs_core::matching::{
 use vfs_core::{fold_key, FileKind, MatchKind, SearchFilters};
 
 use crate::store::Row;
-use crate::types::{BookmarkHit, BookmarkPlace, BookmarkRoot};
+use crate::types::{BookmarkHit, BookmarkPlace, BookmarkRoot, Browser};
 
 /// Bookmark hits kept per query, like the file list (VFS-1 S7).
 pub const MAX_BOOKMARK_HITS: usize = 2000;
@@ -24,7 +24,10 @@ const MAX_DEPTH: usize = 128;
 pub(crate) struct Entry {
     pub id: i64,
     pub is_folder: bool,
-    pub profile: String,
+    pub profile_id: i64,
+    pub browser: Browser,
+    /// The profile name, only when its browser has several profiles with bookmarks.
+    pub profile: Option<String>,
     pub root: BookmarkRoot,
     pub folder: Vec<String>,
     pub title: String,
@@ -36,12 +39,12 @@ pub(crate) struct Entry {
     other_keys: Vec<String>,
     /// Ids of the folders it is inside, the root included, innermost first.
     ancestors: Vec<i64>,
-    /// Profile, then Firefox's position at every level from the root down: sorting by it
-    /// gives Firefox's own order and nesting.
+    /// Profile, then the browser's position at every level from the root down: sorting by
+    /// it gives the browser's own order and nesting.
     tree_key: Vec<i64>,
 }
 
-/// Only plain web addresses are opened in Firefox (VFS-6 R10): `http`/`https`, with no
+/// Only plain web addresses are opened in a browser (VFS-6 R10): `http`/`https`, with no
 /// space, quote or control character (Firefox stores addresses already percent-encoded), so
 /// the address is one command-line argument that starts with the scheme.
 pub fn is_openable(url: &str) -> bool {
@@ -62,6 +65,15 @@ fn url_key(url: &str) -> String {
 /// Entries for every stored row, with ancestors and tree order resolved through the
 /// folders' guids.
 pub(crate) fn entries(rows: Vec<Row>) -> Vec<Entry> {
+    // A profile is named only when its browser has more than one with bookmarks (R7).
+    let mut with_bookmarks: HashMap<Browser, HashSet<i64>> = HashMap::new();
+    for r in rows.iter().filter(|r| !r.is_folder) {
+        with_bookmarks
+            .entry(r.browser)
+            .or_default()
+            .insert(r.profile_id);
+    }
+    let named = |r: &Row| with_bookmarks.get(&r.browser).is_some_and(|p| p.len() > 1);
     let by_guid: HashMap<(i64, &str), &Row> = rows
         .iter()
         .filter(|r| r.is_folder)
@@ -98,7 +110,9 @@ pub(crate) fn entries(rows: Vec<Row>) -> Vec<Entry> {
         out.push(Entry {
             id: r.id,
             is_folder: r.is_folder,
-            profile: r.profile.clone(),
+            profile_id: r.profile_id,
+            browser: r.browser,
+            profile: named(r).then(|| r.profile.clone()),
             root: r.root,
             folder: r.folder.clone(),
             title: r.title.clone(),
@@ -113,26 +127,28 @@ pub(crate) fn entries(rows: Vec<Row>) -> Vec<Entry> {
     out
 }
 
-/// The roots that hold something, in Firefox's order (the "Carpeta" filter's choices).
-pub(crate) fn places(entries: &[Entry], multi_profile: bool) -> Vec<BookmarkPlace> {
+/// The roots that hold something, by browser, then in the browser's order (the "Carpeta"
+/// filter's choices).
+pub(crate) fn places(entries: &[Entry]) -> Vec<BookmarkPlace> {
     let mut roots: Vec<&Entry> = entries
         .iter()
         .filter(|e| e.is_folder && e.ancestors.is_empty())
         .filter(|r| entries.iter().any(|e| e.ancestors.contains(&r.id)))
         .collect();
-    roots.sort_by(|a, b| a.tree_key.cmp(&b.tree_key));
+    roots.sort_by(|a, b| (a.browser, &a.tree_key).cmp(&(b.browser, &b.tree_key)));
     roots
         .into_iter()
         .map(|r| BookmarkPlace {
             id: r.id,
             root: r.root,
-            profile: multi_profile.then(|| r.profile.clone()),
+            browser: r.browser,
+            profile: r.profile.clone(),
         })
         .collect()
 }
 
 impl Entry {
-    fn hit(&self, matched: MatchKind, multi_profile: bool) -> BookmarkHit {
+    fn hit(&self, matched: MatchKind) -> BookmarkHit {
         BookmarkHit {
             id: self.id,
             is_folder: self.is_folder,
@@ -140,7 +156,9 @@ impl Entry {
             url: self.url.clone(),
             root: self.root,
             folder: self.folder.clone(),
-            profile: multi_profile.then(|| self.profile.clone()),
+            browser: self.browser,
+            also_in: Vec::new(),
+            profile: self.profile.clone(),
             added: self.added,
             matched,
             openable: !self.is_folder && is_openable(&self.url),
@@ -213,12 +231,36 @@ fn in_dates(f: &SearchFilters, added: i64) -> bool {
     f.modified_from.is_none_or(|from| added >= from) && f.modified_to.is_none_or(|to| added < to)
 }
 
+/// One result per address across browsers (VFS-44 R8): a bookmark whose address an
+/// earlier, better ranked result from another browser has is dropped, and its browser is
+/// named on that result. Profiles of one browser keep one row each (VFS-6 D8).
+fn fold_other_browsers(ranked: Vec<Ranked>) -> Vec<Ranked> {
+    let mut out: Vec<Ranked> = Vec::with_capacity(ranked.len());
+    let mut first: HashMap<String, usize> = HashMap::new();
+    for r in ranked {
+        if !r.hit.is_folder {
+            if let Some(&i) = first.get(&r.hit.url) {
+                let kept = &mut out[i].hit;
+                if kept.browser != r.hit.browser {
+                    if !kept.also_in.contains(&r.hit.browser) {
+                        kept.also_in.push(r.hit.browser);
+                    }
+                    continue;
+                }
+            } else {
+                first.insert(r.hit.url.clone(), out.len());
+            }
+        }
+        out.push(r);
+    }
+    out
+}
+
 pub(crate) fn search(
     entries: &[Entry],
     q: &ParsedQuery,
     f: &SearchFilters,
     inside: Option<i64>,
-    multi_profile: bool,
     names: bool,
 ) -> (Vec<Ranked>, bool) {
     let has_date = f.modified_from.is_some() || f.modified_to.is_some();
@@ -232,7 +274,7 @@ pub(crate) fn search(
         .collect();
     let mut out: Vec<Ranked> = Vec::new();
     let rank = |e: &Entry, m: MatchKind, key: MergeKey| Ranked {
-        hit: e.hit(m, multi_profile),
+        hit: e.hit(m),
         key,
         tree_key: e.tree_key.clone(),
     };
@@ -266,6 +308,7 @@ pub(crate) fn search(
         }
     }
     out.sort_by_key(|r| (r.key, r.hit.id));
+    let mut out = fold_other_browsers(out);
     let cut = out.len() > MAX_BOOKMARK_HITS;
     out.truncate(MAX_BOOKMARK_HITS);
     (out, cut)

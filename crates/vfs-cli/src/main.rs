@@ -96,12 +96,15 @@ enum Cmd {
         #[arg(long)]
         names_only: bool,
     },
-    /// Firefox bookmarks as a search source (VFS-6), stored next to the index.
+    /// Browser bookmarks as a search source (VFS-6, VFS-44), stored next to the index.
     Bookmarks {
         #[arg(long)]
         db: PathBuf,
         #[arg(value_enum)]
         action: sources::BookmarksAction,
+        /// The browser `on` and `off` switch.
+        #[arg(long, value_enum, default_value = "firefox")]
+        browser: sources::BrowserArg,
         /// Folders holding Firefox's profiles.ini (default: this system's).
         #[arg(long)]
         firefox_root: Vec<PathBuf>,
@@ -539,8 +542,9 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
         Cmd::Bookmarks {
             db,
             action,
+            browser,
             firefox_root,
-        } => sources::cmd_bookmarks(&db, action, firefox_root)?,
+        } => sources::cmd_bookmarks(&db, action, browser, firefox_root)?,
         #[cfg(feature = "content")]
         Cmd::ContentIndex {
             db,
