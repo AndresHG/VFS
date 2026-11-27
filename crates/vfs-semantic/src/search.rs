@@ -244,9 +244,19 @@ impl Meaning for MeaningIndex {
         st.last_used = Instant::now();
         self.ensure_reaper(&mut st);
         // Loading the rows reads the whole set; it happens in `warm`, never inside a search.
+        // R13: a search may take the query limit, so the first one after «Documentos» opens or
+        // after the idle release (R15) waits that long for the load instead of falling back
+        // to words at once.
         if st.rows.is_none() || !matches!(st.worker, Worker::Ready(_)) {
             drop(st);
             self.warm();
+            if !self.wait_ready(self.inner.cfg.worker.timeout) {
+                return Err(MeaningUnavailable::NotReady);
+            }
+            st = self.lock();
+        }
+        // The reaper may have released them between the wait and the lock.
+        if st.rows.is_none() {
             return Err(MeaningUnavailable::NotReady);
         }
         let Worker::Ready(w) = &mut st.worker else {
