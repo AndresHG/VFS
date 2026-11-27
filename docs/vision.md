@@ -87,6 +87,7 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 - Semantic search with embeddings, so a query finds a concept even when the words differ:
   through the configured model API, or a small local model once issue 41 has measured one
   on the reference machine.
+- «Relacionados»: documents similar to a result, found by meaning (owner, 2026-11-27).
 - Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
@@ -113,8 +114,8 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 ## Boundary with the work copilot
 
 The work copilot is the author's other project: a voice copilot for the workday (dictation,
-commands, tasks, live mail and calendar, meetings, memory). The rule: **what you already have and want
-to find is VFS; what happens today and what you learn or do is the copilot.**
+commands, tasks, live mail and calendar, meetings, memory). The rule: **what you already
+have and want to find is VFS; what happens today and what you learn or do is the copilot.**
 
 | Area | VFS | Work copilot |
 |---|---|---|
