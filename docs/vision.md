@@ -87,7 +87,7 @@ Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6
 - Semantic search with embeddings, so a query finds a concept even when the words differ:
   through the configured model API, or a small local model once issue 41 has measured one
   on the reference machine.
-- «Relacionados»: documents similar to a result, found by meaning (owner, 2026-11-27).
+- «Relacionados»: documents similar to a result, found by meaning (built, VFS-53).
 - Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
