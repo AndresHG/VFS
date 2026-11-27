@@ -298,6 +298,9 @@ impl Store {
 
     /// Deletes the vectors of texts that no chunk has any more (R6).
     pub fn delete(&mut self, set: i64, hashes: &[TextHash]) -> Result<()> {
+        if hashes.is_empty() {
+            return Ok(());
+        }
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -314,8 +317,9 @@ impl Store {
 
     /// Marks whether a set holds a vector for every chunk text.
     pub fn set_complete(&self, set: i64, complete: bool) -> Result<()> {
+        // Written only when it changes, so an unchanged archive writes nothing (VFS-50).
         self.conn.execute(
-            "UPDATE sets SET complete = ?2 WHERE id = ?1",
+            "UPDATE sets SET complete = ?2 WHERE id = ?1 AND complete <> ?2",
             params![set, complete as i64],
         )?;
         Ok(())

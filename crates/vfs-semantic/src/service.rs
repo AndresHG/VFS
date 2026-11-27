@@ -32,7 +32,7 @@ pub const MODELS_DIR: &str = "models";
 /// (VFS-50: work after a change follows the change, not every document).
 pub const CHANGE_QUIET: Duration = Duration::from_secs(120);
 /// The first retry after a failed download or run, doubling up to [`RETRY_MAX`] (R7).
-const RETRY_FIRST: Duration = Duration::from_secs(60);
+pub const RETRY_FIRST: Duration = Duration::from_secs(60);
 const RETRY_MAX: Duration = Duration::from_secs(60 * 60);
 /// A wait longer than this ends the worker, to give its memory back; the next batch starts
 /// it again.
@@ -106,6 +106,8 @@ pub struct ServiceConfig {
     pub pace: PaceConfig,
     /// [`CHANGE_QUIET`] in the app.
     pub change_quiet: Duration,
+    /// [`RETRY_FIRST`] in the app.
+    pub retry_first: Duration,
 }
 
 /// The model folder for a data folder.
@@ -370,7 +372,7 @@ fn searchable(index_db: &Path) -> bool {
 
 /// The service thread: download, then embed, then wait for new text; until switched off.
 fn run_loop(shared: &Shared, mut probes: Box<dyn Probes>) -> Box<dyn Probes> {
-    let mut retry = RETRY_FIRST;
+    let mut retry = shared.cfg.retry_first;
     loop {
         {
             let mut st = shared.lock();
@@ -384,12 +386,18 @@ fn run_loop(shared: &Shared, mut probes: Box<dyn Probes>) -> Box<dyn Probes> {
             wait_poke(shared, None);
             continue;
         }
+        let started = Instant::now();
         let outcome = step(shared, &mut *probes);
         match outcome {
             Step::Done => {
-                retry = RETRY_FIRST;
-                // Nothing runs until content indexing reports new text or the user acts.
-                wait_poke(shared, None);
+                retry = shared.cfg.retry_first;
+                // Nothing runs until content indexing reports new text or the user acts; a
+                // report that came while the run went on (its pace waits clear the poke) is
+                // acted on now, since the run read the archive before it.
+                let reported_meanwhile = shared.lock().changed_at.is_some_and(|t| t >= started);
+                if !reported_meanwhile {
+                    wait_poke(shared, None);
+                }
                 // New text reported: let content indexing settle first (VFS-50).
                 loop {
                     let quiet_for = shared.lock().changed_at.map(|t| t.elapsed());

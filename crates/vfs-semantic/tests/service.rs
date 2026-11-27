@@ -40,10 +40,15 @@ impl Probes for FakeProbes {
     }
 }
 
-struct Server(HashMap<String, Vec<u8>>);
+/// Serves the files; fails the first `fail_first` requests.
+struct Server(HashMap<String, Vec<u8>>, std::sync::atomic::AtomicUsize);
 
 impl Fetch for Server {
     fn get(&self, url: &str) -> std::io::Result<Box<dyn Read + Send>> {
+        if self.1.load(Ordering::SeqCst) > 0 {
+            self.1.fetch_sub(1, Ordering::SeqCst);
+            return Err(std::io::Error::other("unreachable for now"));
+        }
         match self.0.get(url) {
             Some(b) => Ok(Box::new(std::io::Cursor::new(b.clone()))),
             None => Err(std::io::Error::other(format!("404 {url}"))),
@@ -59,6 +64,12 @@ struct App {
     db: PathBuf,
     data: PathBuf,
     busy: Arc<AtomicBool>,
+    log: Arc<std::sync::Mutex<Vec<Status>>>,
+    /// Requests the server fails before it answers.
+    fail_first: usize,
+    /// Raise `busy`, once, when this many texts are embedded (a pace wait part way through a
+    /// run).
+    busy_after: Option<u64>,
 }
 
 impl App {
@@ -75,6 +86,9 @@ impl App {
             db,
             data,
             busy: Arc::new(AtomicBool::new(false)),
+            log: Arc::default(),
+            fail_first: 0,
+            busy_after: None,
         }
     }
 
@@ -114,18 +128,30 @@ impl App {
                 ..PaceConfig::default()
             },
             change_quiet: Duration::from_millis(100),
+            retry_first: Duration::from_millis(100),
         };
-        let server = Server(HashMap::from([(
-            "https://h/model".to_string(),
-            b"model".to_vec(),
-        )]));
+        let server = Server(
+            HashMap::from([("https://h/model".to_string(), b"model".to_vec())]),
+            std::sync::atomic::AtomicUsize::new(self.fail_first),
+        );
+        let log = Arc::clone(&self.log);
+        let busy = Arc::clone(&self.busy);
+        let busy_after = self.busy_after;
+        let armed = AtomicBool::new(true);
         MeaningService::start(
             cfg,
             Box::new(server),
             Box::new(FakeProbes {
                 name_busy: Arc::clone(&self.busy),
             }),
-            Box::new(|_: &Status| {}),
+            Box::new(move |st: &Status| {
+                if busy_after.is_some_and(|n| st.done >= n && st.done < st.total)
+                    && armed.swap(false, Ordering::SeqCst)
+                {
+                    busy.store(true, Ordering::Relaxed);
+                }
+                log.lock().unwrap().push(st.clone());
+            }),
         )
     }
 }
@@ -215,6 +241,18 @@ fn new_documents_are_embedded_without_asking() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert_eq!(store.count(set).unwrap(), before + 1);
+    // The ranker reloads its rows after the run, so the new document is found by meaning.
+    let ranker = svc.ranker().unwrap();
+    let t = Instant::now();
+    loop {
+        match ranker.rank("Un documento nuevo, con otro texto.", 1) {
+            Ok(h) if h.first().map(|h| h.file_id) == Some(50) => break,
+            _ if t.elapsed() < Duration::from_secs(30) => {
+                std::thread::sleep(Duration::from_millis(50))
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 }
 
 /// VFS-29 R7 (VFS-27 R7): the run waits while the name indexer is busy, holds while paused,
@@ -254,4 +292,72 @@ fn a_failed_download_is_reported() {
     assert!(!vfs_semantic::store::exists(&app.db));
     svc.set_enabled(false);
     assert_eq!(svc.status().phase, Phase::Off);
+}
+
+/// VFS-29 R7: while embedding, the status gives the time left; it is cleared at the end.
+#[test]
+fn embedding_shows_the_time_left() {
+    let app = App::new(60);
+    let svc = app.start("https://h/model");
+    svc.set_enabled(true);
+    let end = wait_for(&svc, "finished", |s| s.phase == Phase::Finished);
+    assert_eq!(end.seconds_left, None);
+    let log = app.log.lock().unwrap();
+    assert!(
+        log.iter()
+            .any(|s| s.phase == Phase::Embedding && s.done < s.total && s.seconds_left.is_some()),
+        "no status with the time left"
+    );
+}
+
+/// VFS-29 R7: a failed download is tried again with backoff, and succeeds once the server
+/// answers, with no action from the user.
+#[test]
+fn a_failed_download_is_retried() {
+    let mut app = App::new(2);
+    app.fail_first = 2;
+    let svc = app.start("https://h/model");
+    svc.set_enabled(true);
+    wait_for(&svc, "finished after retries", |s| {
+        s.phase == Phase::Finished && s.searchable
+    });
+    let log = app.log.lock().unwrap();
+    assert!(log.iter().any(|s| matches!(s.phase, Phase::Failed { .. })));
+}
+
+/// VFS-29 AC-4 (R4): content indexing's report arriving while the run waits on the pace is
+/// not lost: the document it reports is embedded after the run.
+#[test]
+fn a_report_during_a_pace_wait_is_not_lost() {
+    let mut app = App::new(60);
+    app.busy_after = Some(16);
+    let svc = app.start("https://h/model");
+    svc.set_enabled(true);
+    wait_for(&svc, "waiting part way", |s| {
+        s.done > 0
+            && s.phase
+                == Phase::Waiting {
+                    reason: WaitKind::NameIndexing,
+                }
+    });
+    vfs_content::testing::write_doc(&app.db, 500, "Documento que llega durante la espera.")
+        .unwrap();
+    svc.notify_content_changed();
+    app.busy.store(false, Ordering::Relaxed);
+    let hash = vfs_semantic::store::text_hash("Documento que llega durante la espera.");
+    let t = Instant::now();
+    loop {
+        let found = vfs_semantic::store::Store::open(&app.db)
+            .ok()
+            .and_then(|s| {
+                let (set, _) = s.search_set().ok()??;
+                Some(s.hashes(set).ok()?.contains(&hash))
+            })
+            .unwrap_or(false);
+        if found {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(60), "{:?}", svc.status());
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

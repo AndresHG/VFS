@@ -28,7 +28,8 @@ log.workspace = true
 vfs-core.workspace = true
 blake3 = { version = "1", default-features = false, features = ["std"] }
 # Checking the downloaded model (pinned SHA-256) and worker (the updater's minisign key),
-# VFS-29 R16; all three are already in the app's graph through tauri-plugin-updater.
+# VFS-29 R16; minisign-verify and base64 are already in the app's graph through
+# tauri-plugin-updater.
 sha2 = { version = "0.10", default-features = false, features = ["std"] }
 base64 = "0.22"
 minisign-verify = "0.3"
@@ -41,5 +42,6 @@ libc.workspace = true
 
 
 [dev-dependencies]
+rusqlite.workspace = true
 vfs-content = { path = "../vfs-content", default-features = false, features = ["test-support"] }
 tempfile.workspace = true

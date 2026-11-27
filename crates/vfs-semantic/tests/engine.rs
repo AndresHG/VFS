@@ -317,3 +317,24 @@ fn a_complete_set_keeps_serving_while_new_texts_wait() {
     let set = s.set_id(&model("m")).unwrap();
     assert_eq!(s.search_set().unwrap(), Some((set, DIM)));
 }
+
+/// VFS-29 R6 (VFS-50): a run over an unchanged archive writes nothing to the vector store;
+/// a changed chunk is written.
+#[test]
+fn an_unchanged_archive_writes_nothing() {
+    let a = Archive::new(&[(1, "Primer documento."), (2, "Segundo documento.")]);
+    embed(&a.db, &mut Fake::new(model("m")));
+    let watch = rusqlite::Connection::open(store::store_path(&a.db)).unwrap();
+    let version = || -> i64 {
+        watch
+            .query_row("PRAGMA data_version", [], |r| r.get(0))
+            .unwrap()
+    };
+    let before = version();
+    let sum = embed(&a.db, &mut Fake::new(model("m")));
+    assert!(sum.complete && sum.embedded == 0);
+    assert_eq!(version(), before, "nothing written");
+    vfs_content::testing::write_doc(&a.db, 2, "Segundo documento, cambiado.").unwrap();
+    embed(&a.db, &mut Fake::new(model("m")));
+    assert_ne!(version(), before, "a changed chunk is written");
+}
