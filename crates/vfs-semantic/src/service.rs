@@ -351,6 +351,11 @@ impl Shared {
         let status = {
             let mut st = self.lock();
             f(&mut st.status);
+            // A run that checked the switch just before it went off may still report a phase;
+            // switched off, the status stays Off (R1).
+            if !st.status.settings.enabled {
+                st.status.phase = Phase::Off;
+            }
             st.status.clone()
         };
         (self.on_status)(&status);
