@@ -8,8 +8,8 @@ come. Nothing here is committed scope until it has a spec (`specs/`) and an issu
 ## Today
 
 VFS is a local, offline desktop app for Windows and macOS that finds any file in a
-multi-terabyte personal archive by its name and folder path, and Firefox bookmarks by
-title, address and folder. It reads; it never changes a source. See the
+multi-terabyte personal archive by its name and folder path, and Firefox, Chrome and Brave
+bookmarks by title, address and folder. It reads; it never changes a source. See the
 [README](../README.md) for what is built and [`docs/decisions.md`](decisions.md) for why.
 
 ## The ambition: access to the knowledge you already have
@@ -69,9 +69,9 @@ direction around them. Each line becomes a spec when it starts.
 
 ### More sources
 
-Each source is read-only, optional and selectable, like Firefox bookmarks (VFS-6):
+Each source is read-only, optional and selectable, like browser bookmarks (VFS-6, VFS-44):
 
-- Other browsers' bookmarks (Chrome, Edge, Safari).
+- Other browsers' bookmarks (Edge, Safari, Vivaldi, Opera, Arc), on request.
 - Chat exports, official exports only (never the Telegram API or WhatsApp database
   decryption): WhatsApp and Telegram (messages, shared links, contacts, and shared photos
   found by name and metadata only, under the no-photo-content rule).

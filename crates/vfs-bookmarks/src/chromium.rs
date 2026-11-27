@@ -161,7 +161,8 @@ pub fn signature(profile_dir: &Path) -> String {
 }
 
 /// Reads one profile: `Bookmarks` (retried while it does not parse or changes) and
-/// `AccountBookmarks`, or else `Bookmarks.bak` (R3).
+/// `AccountBookmarks`, or else `Bookmarks.bak`; an unreadable `AccountBookmarks` fails the
+/// whole read (R3).
 pub fn read_profile(dir: &Path) -> Result<(Tree, Origin)> {
     let main = dir.join(BOOKMARKS);
     let mut tree = Tree::default();
@@ -186,11 +187,8 @@ pub fn read_profile(dir: &Path) -> Result<(Tree, Origin)> {
     };
     let account = dir.join(ACCOUNT);
     if account.is_file() {
-        match read_stable(&account) {
-            Ok(json) => add_file(&json, "account:", &mut tree),
-            Err(e) if tree.folders.is_empty() => return Err(e),
-            Err(e) => log::warn!("{}: {e}", account.display()),
-        }
+        // A failure keeps what was read before; the profile is read again later (R3).
+        add_file(&read_stable(&account)?, "account:", &mut tree);
     }
     Ok((crate::firefox::normalize(tree), origin))
 }

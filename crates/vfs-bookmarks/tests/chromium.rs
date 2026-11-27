@@ -223,7 +223,8 @@ fn reads_every_profile_and_the_account_file_read_only() {
 }
 
 /// VFS-44 AC-3: a truncated `Bookmarks` falls back to `Bookmarks.bak`; with neither
-/// readable, the bookmarks read earlier stay and the state says the read failed.
+/// readable, or a damaged `AccountBookmarks`, the bookmarks read earlier stay and the state
+/// says the read failed.
 #[test]
 fn falls_back_to_the_backup_then_keeps_what_it_had() {
     let mut w = world();
@@ -246,6 +247,12 @@ fn falls_back_to_the_backup_then_keeps_what_it_had() {
 
     std::fs::write(dir.join("Bookmarks"), "{").unwrap();
     std::fs::write(dir.join("Bookmarks.bak"), "{").unwrap();
+    assert_eq!(bm.refresh().unwrap().state, ReadState::Failed);
+    assert_eq!(titles(&w.find(&bm, "flan", None)), ["Flan de huevo"]);
+
+    // A damaged account file fails the read too, and keeps what was read.
+    std::fs::write(dir.join("Bookmarks"), &good).unwrap();
+    std::fs::write(dir.join("AccountBookmarks"), "{").unwrap();
     assert_eq!(bm.refresh().unwrap().state, ReadState::Failed);
     assert_eq!(titles(&w.find(&bm, "flan", None)), ["Flan de huevo"]);
 }

@@ -52,7 +52,9 @@ and costs almost nothing.
   rename a browser file, and SHALL read nothing else from the profile.
 - R3. IF `Bookmarks` cannot be parsed or changes while it is read, THEN THE app SHALL retry
   up to 3 times 500 ms apart, then read `Bookmarks.bak` and say so («copia de seguridad»),
-  then keep what it read before and report the failure, as VFS-6 does for Firefox.
+  then keep what it read before and report the failure, as VFS-6 does for Firefox. An
+  unreadable `AccountBookmarks` (no backup exists) keeps what was read before and reports
+  the failure.
 - R4. THE app SHALL re-read a Chromium profile only when the size or modification time of
   its `Bookmarks` or `AccountBookmarks` changed, on the same occasions as Firefox (start,
   switch turned on, «Buscar cambios ahora», every 30 minutes).

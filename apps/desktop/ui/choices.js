@@ -39,7 +39,7 @@ export function typeChecklistMode(proto) {
   return Object.prototype.hasOwnProperty.call(proto, 'popover') ? TypeChecklist.POPOVER : TypeChecklist.INLINE;
 }
 
-/** The source choice (VFS-6), «Origen» in «Más filtros» (VFS-38 R7), shown while Firefox bookmarks are included. */
+/** The source choice (VFS-6), «Origen» in «Más filtros» (VFS-38 R7), shown while browser bookmarks are included. */
 export const SourceChoice = Object.freeze({
   BOTH: 'both',
   FILES: 'files',
