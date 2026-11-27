@@ -788,6 +788,19 @@ input[type="date"] {
 .chit .page { color: var(--ink-2); padding-inline-start: var(--s2); white-space: nowrap; }
 /* VFS-29 R12: a hit found by meaning alone. */
 .chit .related { color: var(--ink-2); font-size: var(--t-small, 0.85em); padding-inline-start: var(--s2); white-space: nowrap; }
+/* VFS-53: «Relacionados» under a hit and in the Chat source panel. */
+.related-toggle { justify-self: start; font-size: var(--t-meta); }
+.related-box { margin-block-start: var(--s2); padding: var(--s2) var(--s3); border-inline-start: 2px solid var(--line); }
+.related-head { margin: 0 0 var(--s1, 0.25rem); font-weight: 700; font-size: var(--t-meta); }
+.related-note { margin: 0; color: var(--ink-2); font-size: var(--t-meta); }
+.related-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.related-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); align-items: start; }
+.related-item .main { min-width: 0; display: grid; gap: 0.1rem; }
+.related-item .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-item .path { color: var(--ink-2); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-item .fragment { margin: 0; font-size: var(--t-meta); line-height: 1.45; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.related-reasons { color: var(--ink-2); font-size: var(--t-small, 0.85em); }
 .chit mark { background: var(--mark); color: inherit; border-radius: 0.2rem; padding: 0 0.05em; }
 .chit:hover { background: var(--sunk); }
 /* VFS-45 R7, D7: «Mostrar en carpeta» shows on the hit under the pointer or holding the focus;

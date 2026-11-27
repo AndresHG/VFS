@@ -305,6 +305,30 @@ pub fn meaning_warm(runs: State<'_, MeaningRuns>) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// «Relacionados» (VFS-53 R4–R7): the documents closest to `file_id` by meaning, as
+/// document hits with their closest passage; computed now, nothing kept. Unavailable while
+/// search by meaning does not serve (R4, R9: then `vectors.db` is not even opened).
+#[tauri::command(async)]
+pub fn related_documents(
+    runs: State<'_, MeaningRuns>,
+    file_id: i64,
+) -> Result<Vec<vfs_content::ContentHit>, ApiError> {
+    if runs.ranker().is_none() {
+        return Err(unavailable());
+    }
+    let db = runs.index_db().ok_or_else(unavailable)?;
+    let io = |e: String| ApiError::from(vfs_core::Error::Io(std::io::Error::other(e)));
+    let related = vfs_semantic::related::related(&db, file_id, vfs_semantic::related::MAX_RELATED)
+        .map_err(|e| io(e.to_string()))?;
+    let triples: Vec<(i64, u32, f32)> = related
+        .iter()
+        .map(|r| (r.file_id, r.ordinal, r.score))
+        .collect();
+    vfs_content::Searcher::open(&db)
+        .and_then(|s| s.related_hits(&triples))
+        .map_err(|e| io(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

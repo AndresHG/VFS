@@ -290,3 +290,24 @@ fn word_hits_stay_when_meaning_finds_nothing_inside_the_filters() {
     let b: Vec<i64> = want.hits.iter().map(|h| h.id).collect();
     assert_eq!(a, b);
 }
+
+/// VFS-53 AC-5 (R6): related documents become hits found by meaning, in the order given, each
+/// with the given chunk as its passage; a document no longer in the index is left out.
+#[test]
+fn related_documents_become_hits_with_their_passage() {
+    let s = setup();
+    let (dentist, water) = (s.id("dentista.txt"), s.id("agua.txt"));
+    let hits = Searcher::open(&s.db)
+        .unwrap()
+        .related_hits(&[(water, 0, 0.6), (999_999, 0, 0.5), (dentist, 0, 0.4)])
+        .unwrap();
+    let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+    assert_eq!(ids, vec![water, dentist]);
+    assert!(hits.iter().all(|h| h.by_meaning && h.highlights.is_empty()));
+    assert!(
+        hits[1].snippet.starts_with("Clínica dental"),
+        "{}",
+        hits[1].snippet
+    );
+    assert_eq!(hits[1].passages[0].ordinal, 0);
+}

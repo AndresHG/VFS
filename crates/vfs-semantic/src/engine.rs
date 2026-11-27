@@ -69,6 +69,8 @@ pub struct RunSummary {
     pub embedded: u64,
     /// Vectors dropped because no chunk has their text any more.
     pub dropped: u64,
+    /// Document vectors computed again (VFS-53 R2).
+    pub docs_written: u64,
     /// Every chunk text of the whole archive (nothing queued) has a vector in the set.
     pub complete: bool,
     pub stopped: bool,
@@ -217,6 +219,12 @@ pub fn run(
         sum.complete = true;
         store.set_complete(set, true)?;
         store.drop_other_sets(set)?;
+    }
+    // VFS-53 R1, R2: the document vectors follow a complete set, changed documents only (a
+    // set complete before this run, and new texts now embedded, count too).
+    if going && store.search_set()?.is_some_and(|(s, _)| s == set) {
+        let docs = crate::related::update_docs(&mut store, set, stop)?;
+        sum.docs_written = docs.written;
     }
     sum.elapsed_ms = started.elapsed().as_millis() as u64;
     Ok(sum)

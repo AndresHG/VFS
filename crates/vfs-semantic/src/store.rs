@@ -3,7 +3,7 @@
 //! per distinct chunk text, keyed by the hash of that text, holding a 1-bit row for the scan
 //! and an int8 row with its scale for the rescore.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use crate::{quant, ModelId, Result};
 
 /// Version of the schema (`PRAGMA user_version`).
-pub const VECTORS_VERSION: i64 = 2;
+pub const VECTORS_VERSION: i64 = 3;
 
 /// Vectors of a new set from which its mean is taken (the first batch is at least this big).
 pub const MEAN_SAMPLE: usize = 64;
@@ -48,10 +48,26 @@ CREATE TABLE locations(
 ) WITHOUT ROWID;
 "#;
 
+/// Document vectors (VFS-53 R1–R3, added in version 3): per set and document, the mean of its
+/// chunk vectors minus the set's mean, scaled to unit length, as 1-bit and int8 rows; `sig`
+/// identifies the list of chunk texts it was computed from, so only changed documents are
+/// computed again.
+const DOCS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS docs(
+  set_id   INTEGER NOT NULL,
+  file_id  INTEGER NOT NULL,
+  sig      BLOB NOT NULL,
+  bits     BLOB NOT NULL,
+  q8       BLOB NOT NULL,
+  scale    REAL NOT NULL,
+  PRIMARY KEY(set_id, file_id)
+) WITHOUT ROWID;
+"#;
+
 /// Tables of earlier schema versions, dropped before the current schema is created: vectors
 /// can always be embedded again.
 const DROP_ALL: &str = "DROP TABLE IF EXISTS sets; DROP TABLE IF EXISTS vectors;
-                        DROP TABLE IF EXISTS locations;";
+                        DROP TABLE IF EXISTS locations; DROP TABLE IF EXISTS docs;";
 
 /// Hash of one chunk text (D10).
 pub fn text_hash(text: &str) -> TextHash {
@@ -90,10 +106,15 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if v < VECTORS_VERSION {
+        if v < 2 {
             // Version 1 (29c part 1, never released) kept uncentred bits.
             conn.execute_batch(DROP_ALL)?;
             conn.execute_batch(SCHEMA)?;
+            conn.execute_batch(DOCS_SCHEMA)?;
+            conn.pragma_update(None, "user_version", VECTORS_VERSION)?;
+        } else if v == 2 {
+            // VFS-53 R3: version 2 gains the document vectors; its vectors are kept.
+            conn.execute_batch(DOCS_SCHEMA)?;
             conn.pragma_update(None, "user_version", VECTORS_VERSION)?;
         } else if v != VECTORS_VERSION {
             return Err(crate::Error::StoreVersion(v));
@@ -331,6 +352,7 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM vectors WHERE set_id <> ?1", [keep])?;
+        tx.execute("DELETE FROM docs WHERE set_id <> ?1", [keep])?;
         tx.execute("DELETE FROM sets WHERE id <> ?1", [keep])?;
         tx.commit()?;
         Ok(())
@@ -362,6 +384,131 @@ impl Store {
             }
         }
         Ok(out)
+    }
+
+    /// The chunk texts of one document, `(ordinal, hash)` in ordinal order.
+    pub fn chunk_hashes(&self, file_id: i64) -> Result<Vec<(u32, TextHash)>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT ordinal, hash FROM locations WHERE file_id = ?1 ORDER BY ordinal",
+        )?;
+        let rows = st.query_map([file_id], |r| {
+            Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (ordinal, h) = row?;
+            if let Ok(h) = TextHash::try_from(h.as_slice()) {
+                out.push((ordinal, h));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The signature of every stored document vector of a set (VFS-53 R2).
+    pub fn doc_sigs(&self, set: i64) -> Result<HashMap<i64, TextHash>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT file_id, sig FROM docs WHERE set_id = ?1")?;
+        let rows = st.query_map([set], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (id, sig) = row?;
+            if let Ok(sig) = TextHash::try_from(sig.as_slice()) {
+                out.insert(id, sig);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Stores document vectors `(file_id, sig, unit vector)` in one transaction (VFS-53 R1).
+    pub fn put_docs(&mut self, set: i64, docs: &[(i64, TextHash, Vec<f32>)]) -> Result<()> {
+        if docs.is_empty() {
+            return Ok(());
+        }
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut st = tx.prepare_cached(
+                "INSERT OR REPLACE INTO docs(set_id, file_id, sig, bits, q8, scale)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for (file_id, sig, v) in docs {
+                let (q, scale) = quant::int8(v);
+                let q: Vec<u8> = q.into_iter().map(|x| x as u8).collect();
+                st.execute(params![
+                    set,
+                    file_id,
+                    &sig[..],
+                    quant::bits(v),
+                    q,
+                    scale as f64
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Deletes the document vectors of documents gone (VFS-53 R2).
+    pub fn delete_docs(&mut self, set: i64, file_ids: &[i64]) -> Result<()> {
+        if file_ids.is_empty() {
+            return Ok(());
+        }
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        {
+            let mut st =
+                tx.prepare_cached("DELETE FROM docs WHERE set_id = ?1 AND file_id = ?2")?;
+            for id in file_ids {
+                st.execute(params![set, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The document ids and 1-bit document rows of a set, for the related scan (VFS-53 R5):
+    /// the bits of row `i` are `bits[i * dim / 8 ..][.. dim / 8]`. A store without the table
+    /// (version 2, opened read-only before its first run) has none.
+    pub fn doc_bits(&self, set: i64) -> Result<(Vec<i64>, Vec<u8>)> {
+        let mut st = match self
+            .conn
+            .prepare("SELECT file_id, bits FROM docs WHERE set_id = ?1")
+        {
+            Ok(st) => st,
+            Err(_) => return Ok((Vec::new(), Vec::new())),
+        };
+        let rows = st.query_map([set], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        let (mut ids, mut bits) = (Vec::new(), Vec::new());
+        for row in rows {
+            let (id, b) = row?;
+            ids.push(id);
+            bits.extend_from_slice(&b);
+        }
+        Ok((ids, bits))
+    }
+
+    /// The int8 document row and scale of one document (VFS-53 R5).
+    pub fn doc_q8(&self, set: i64, file_id: i64) -> Result<Option<(Vec<i8>, f32)>> {
+        let mut st = match self
+            .conn
+            .prepare_cached("SELECT q8, scale FROM docs WHERE set_id = ?1 AND file_id = ?2")
+        {
+            Ok(st) => st,
+            Err(_) => return Ok(None),
+        };
+        Ok(st
+            .query_row(params![set, file_id], |r| {
+                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, f64>(1)?))
+            })
+            .optional()?
+            .map(|(q, s)| (q.into_iter().map(|x| x as i8).collect(), s as f32)))
     }
 
     /// Number of vectors in a set.
