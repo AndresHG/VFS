@@ -72,6 +72,11 @@ macro_rules! app_commands {
             crate::content::content_search,
             crate::content::content_unread_counts,
             crate::content::content_unread,
+            crate::meaning::meaning_status,
+            crate::meaning::meaning_offer,
+            crate::meaning::meaning_set_enabled,
+            crate::meaning::meaning_set_paused,
+            crate::meaning::meaning_warm,
             $($extra),*
         ]
     };

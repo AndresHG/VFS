@@ -241,7 +241,12 @@ impl MeaningService {
         }
     }
 
+    /// «Pausar» / «Reanudar» while the switch is on; with it off there is nothing to pause
+    /// and no file is written (R15).
     pub fn set_paused(&self, paused: bool) {
+        if !self.shared.lock().status.settings.enabled {
+            return;
+        }
         // The stop flag is raised here and lowered only here or on switching on, never by
         // the thread, so a pause or switch-off cannot slip past a run that is starting.
         self.shared.stop.store(paused, Ordering::SeqCst);
@@ -256,6 +261,15 @@ impl MeaningService {
         st.poked = true;
         drop(st);
         self.shared.wake.notify_all();
+    }
+
+    /// After an update that failed to install: undoes [`MeaningService::shutdown`] and starts
+    /// the thread again if the switch is on.
+    pub fn restart_after_failed_update(&self) {
+        self.shared.lock().shutdown = false;
+        if self.shared.lock().status.settings.enabled {
+            self.spawn();
+        }
     }
 
     /// Ends the thread and the worker; true when it ended within `wait`.
@@ -508,20 +522,24 @@ fn step(shared: &Shared, probes: &mut dyn Probes) -> Step {
             let took = batch_started.elapsed();
             pace.finished(Instant::now(), took);
             let texts = p.done.saturating_sub(prev_done).max(1);
-            prev_done = p.done;
-            for _ in 0..texts {
-                times.push_back(took / texts as u32);
+            // The first batch's time includes the run's read of the archive: not a rate.
+            if prev_done > 0 {
+                for _ in 0..texts {
+                    times.push_back(took / texts as u32);
+                }
             }
+            prev_done = p.done;
             while times.len() > RATE_WINDOW {
                 times.pop_front();
             }
             let per_text = times.iter().sum::<Duration>() / times.len().max(1) as u32;
             let left = per_text * p.total.saturating_sub(p.done) as u32;
+            let left = (!times.is_empty()).then_some(left);
             shared.set(|s| {
                 s.phase = Phase::Embedding;
                 s.done = p.done;
                 s.total = p.total;
-                s.seconds_left = Some(left.as_secs());
+                s.seconds_left = left.map(|l| l.as_secs());
             });
             // The pace rules before the next batch (VFS-27 R7).
             let mut on_long_wait = || worker.borrow_mut().kill();

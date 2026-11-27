@@ -18,7 +18,7 @@ import { takenInBy, newestOnly } from './folders.js';
 import { addPattern, patternErrorText, parseLimit, showContentLimit } from './filefilter.js';
 import {
   ContentAction, contentOn, contentQueryDue, contentStatusLine, createContentSearch, hitPage, offerDue, offerText, sectionNotes, snippetRuns,
-  unreadCandidates, unreadLabel,
+  unreadCandidates, unreadLabel, MeaningAction, meaningOfferText, meaningOn, meaningStatusLine,
 } from './content.js';
 import {
   ContentPhase, DriveKind, ErrorCode, FileKind, IndexerState, LinkKind, MatchKind, ReadState, RevealOutcome, RootStatus,
@@ -134,6 +134,7 @@ function main(L) {
     bookmarks: null, // BookmarkStatus, null until known
     pickedBookmarkFolder: null, // {id, title} chosen with "Ver su contenido"
     content: null, // VFS-27: ContentStatus, null until known
+    meaning: null, // VFS-29: MeaningStatus, null until known
     unread: new Map(), // VFS-27 R14: file id -> UnreadReason|null, for the pages on screen
   };
 
@@ -252,6 +253,8 @@ function main(L) {
   function setTab(tab) {
     if (tab === state.tab) return;
     state.tab = tab;
+    // VFS-29 R13: the vectors and the query model load as «Documentos» opens, not inside a search.
+    if (documentsTab() && state.meaning?.searchable) api.meaningWarm().catch(() => {});
     renderTabs();
     renderSources();
     renderFolderSelect();
@@ -1849,7 +1852,7 @@ function main(L) {
     if (view.loading && !view.hits.length) notes.push(S.contentSearching);
     if (view.failed) notes.push(S.contentFailed);
     // No match is said by the empty view below these notes, with «Buscar en los nombres» (VFS-42 R3).
-    notes.push(...sectionNotes(L, state.content, view.partial));
+    notes.push(...sectionNotes(L, state.content, view.partial, view.meaning));
     $('content-notes').replaceChildren(...notes.map((t) => el('p', null, t)));
     renderSummary(); // the count «· N documentos» in the results header
     $('content-more').hidden = !view.more;
@@ -1877,6 +1880,8 @@ function main(L) {
     }
     const page = hitPage(hit);
     if (page != null) fragment.append(' ', el('span', 'page', S.contentPage(N.count(page))));
+    // VFS-29 R12: found by meaning alone; the fragment is its best passage, nothing marked.
+    if (hit.byMeaning) fragment.append(' ', el('span', 'related', S.meaningRelated));
     main.append(name, path, fragment);
     const show = button(S.revealButton, 'btn', () => revealFile(hit.id, false));
     show.setAttribute('aria-label', `${S.revealButton}: ${S.contentHitLabel(hit.name, hit.dir, page && N.count(page))}`);
@@ -1916,6 +1921,7 @@ function main(L) {
     renderContentStatus();
     $('banner-content-damaged').hidden = st?.phase.kind !== ContentPhase.DAMAGED;
     $('content-on').checked = contentOn(st);
+    renderMeaning(); // VFS-29 R1: available only while content search is on
     showContentLimit($('content-max-row'), contentOn(st)); // VFS-34 R6
     if (settingsDialog.open && before?.phase.kind !== st?.phase.kind) refreshContentStore();
     maybeOffer();
@@ -2029,6 +2035,57 @@ function main(L) {
     refreshContentStore();
   });
 
+  /* VFS-29: «Búsqueda por significado» (R1, R1a, R7): the switch, its confirmation with the
+     download size, the time for this archive and the memory, and the line under it. */
+  const meaningToggle = $('meaning-on');
+  function renderMeaning() {
+    const st = state.meaning;
+    const on = meaningOn(st);
+    meaningToggle.checked = on;
+    // Turning it on needs content search; turning it off is always possible.
+    meaningToggle.disabled = !st || (!on && !contentOn(state.content));
+    $('meaning-needs-content').hidden = on || contentOn(state.content);
+    const line = meaningStatusLine(L, st);
+    $('meaning-status').hidden = !line;
+    $('meaning-status').textContent = line?.text ?? '';
+    const action = $('meaning-action');
+    action.hidden = !line?.action;
+    action.textContent = line?.action === MeaningAction.RESUME ? S.meaningResume : S.meaningPause;
+    action.dataset.action = line?.action ?? '';
+  }
+  function setMeaning(st) {
+    const before = state.meaning;
+    state.meaning = st;
+    renderMeaning();
+    // A search shown before the vectors were ready is run again with them.
+    if (st?.searchable && !before?.searchable && documentsTab()) runContentQuery();
+  }
+  async function meaningCall(call) {
+    try { setMeaning(await call()); } catch (err) { showError(errorText(err)); }
+  }
+  const meaningDialog = $('confirm-meaning');
+  meaningToggle.addEventListener('change', async () => {
+    if (!meaningToggle.checked) { meaningCall(() => api.meaningSetEnabled(false)); return; }
+    meaningToggle.checked = false; // on only once confirmed
+    let offer;
+    try { offer = await api.meaningOffer(); } catch (err) { showError(errorText(err)); return; }
+    $('confirm-meaning-desc').textContent = meaningOfferText(L, offer);
+    meaningDialog.returnValue = '';
+    meaningDialog.showModal();
+  });
+  meaningDialog.addEventListener('close', () => {
+    if (meaningDialog.returnValue === 'enable') meaningCall(() => api.meaningSetEnabled(true));
+  });
+  $('meaning-action').addEventListener('click', (e) => {
+    const paused = e.currentTarget.dataset.action === MeaningAction.PAUSE;
+    meaningCall(() => api.meaningSetPaused(paused));
+  });
+
+  async function startMeaning() {
+    try { await api.onMeaningStatus(setMeaning); } catch { /* status on request only */ }
+    try { setMeaning(await api.meaningStatus()); } catch { /* not started yet */ }
+  }
+
   async function startContent() {
     try { await api.onContentStatus(setContent); } catch { /* status on request only */ }
     try { setContent(await api.contentStatus()); } catch { /* not started yet; asked again with the folders */ }
@@ -2102,6 +2159,7 @@ function main(L) {
     try { onProgress(await api.getProgress()); } catch { /* the event stream will catch up */ }
     renderEmpty();
     startContent();
+    startMeaning();
     if (hasQuery()) runSearch();
   }
 

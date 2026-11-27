@@ -4,7 +4,7 @@
 // (`apps/desktop/ui-dev/content.test.mjs`).
 
 import { TimeUnit } from './choices.js';
-import { ContentPhase, ContentStop, ContentWait, FileKind, RootStatus, Source, UnreadReason } from './contract.js';
+import { ContentPhase, ContentStop, ContentWait, FileKind, MeaningPhase, MeaningUse, RootStatus, Source, UnreadReason } from './contract.js';
 import { showsCloudBadge } from './copies.js';
 
 export { TimeUnit };
@@ -101,8 +101,57 @@ export function contentStatusLine({ S, N }, st) {
   }
 }
 
-/** The lines above the content hits (R13): reading still under way, and a partial result. */
-export function sectionNotes({ S, N }, st, partial) {
+/** What the meaning part of the Ajustes section offers (VFS-29 R7). */
+export const MeaningAction = Object.freeze({ PAUSE: 'pause', RESUME: 'resume' });
+
+/** Search by meaning is switched on in status `st` (a `meaning_status` answer, or null). */
+export function meaningOn(st) {
+  return !!st?.settings?.enabled;
+}
+
+/** The confirmation's sentence before anything is downloaded (VFS-29 R1a). `o` is
+ *  `meaning_offer`'s answer: {downloadBytes, chunks, secondsFast, secondsSlow, ramBytes}. */
+export function meaningOfferText({ S, N }, o) {
+  const t = roughTime(o.secondsFast, o.secondsSlow);
+  const time = S.timeRange[t.unit](N.count(t.lo), N.count(t.hi));
+  return S.meaningConfirmBody(N.size(o.downloadBytes), time, N.size(o.ramBytes));
+}
+
+/** The line under the switch for status `st` (VFS-29 R1a, R7): {text, action} or null. */
+export function meaningStatusLine({ S, N }, st) {
+  if (!meaningOn(st)) return null;
+  const { kind, reason } = st.phase;
+  switch (kind) {
+    case MeaningPhase.DOWNLOADING:
+      return { text: S.meaningDownloading(N.size(st.phase.done), N.size(st.phase.total)), action: MeaningAction.PAUSE };
+    case MeaningPhase.NO_CONTENT:
+      return { text: S.meaningNoContent, action: null };
+    case MeaningPhase.PAUSED:
+      return { text: S.meaningPaused, action: MeaningAction.RESUME };
+    case MeaningPhase.FINISHED:
+      return { text: S.meaningFinished, action: null };
+    case MeaningPhase.FAILED:
+      return { text: S.meaningFailed, action: null };
+    case MeaningPhase.EMBEDDING:
+    case MeaningPhase.WAITING: {
+      const parts = [st.total ? S.meaningEmbedding(N.count(st.done), N.count(st.total)) : S.meaningPreparing];
+      const wait = kind === MeaningPhase.WAITING ? S.contentWaiting[reason] : '';
+      if (wait) {
+        parts.push(wait);
+      } else if (st.secondsLeft != null && st.total) {
+        const t = roughTime(st.secondsLeft);
+        parts.push(S.timeLeft[t.unit](N.count(t.hi)));
+      }
+      return { text: parts.join(' · '), action: MeaningAction.PAUSE };
+    }
+    default:
+      return null;
+  }
+}
+
+/** The lines above the content hits (R13): reading still under way, a partial result, and
+ *  search by meaning unavailable now (VFS-29 R13). */
+export function sectionNotes({ S, N }, st, partial, meaning = MeaningUse.OFF) {
   const notes = [];
   if (st && st.done < st.total) {
     const done = N.count(st.done);
@@ -110,6 +159,7 @@ export function sectionNotes({ S, N }, st, partial) {
     notes.push(st.phase.kind === ContentPhase.FINISHED ? S.contentReadPart(done, total) : S.contentStillReading(done, total));
   }
   if (partial) notes.push(S.contentPartial);
+  if (meaning === MeaningUse.UNAVAILABLE) notes.push(S.meaningUnavailable);
   return notes;
 }
 
@@ -159,7 +209,7 @@ export function unreadLabel(S, hit, reason) {
  * CONTENT_DEBOUNCE_MS after the last call, only when `on` and the text is long enough; each
  * query has a sequence number and an answer to an older one is dropped (`retrieve` itself is
  * not interrupted, D5). `more()` loads the next page. `render(view)` gets null (no section) or
- * {hits, partial, more, loading, failed, total, totalCapped} (`total` is null until an
+ * {hits, partial, more, loading, failed, total, totalCapped, meaning} (`total` is null until an
  * answer). `schedule` and `cancel` are setTimeout and clearTimeout, injected for tests.
  */
 export function createContentSearch({ api, render, schedule = setTimeout, cancel = clearTimeout }) {
@@ -169,7 +219,7 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
 
   const view = () => current && {
     hits: current.hits, partial: current.partial, more: current.more, loading: current.loading, failed: current.failed,
-    total: current.total, totalCapped: current.totalCapped,
+    total: current.total, totalCapped: current.totalCapped, meaning: current.meaning,
   };
 
   async function fetch(mine, offset) {
@@ -183,6 +233,7 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
       if (mine !== seq) return; // a newer query is on its way
       q.hits = offset ? q.hits.concat(res.hits) : res.hits;
       q.partial = res.partial;
+      q.meaning = res.meaning ?? MeaningUse.OFF;
       q.total = res.total;
       q.totalCapped = !!res.totalCapped;
       q.more = q.hits.length < res.total && res.hits.length > 0;
@@ -203,7 +254,10 @@ export function createContentSearch({ api, render, schedule = setTimeout, cancel
       return;
     }
     // The older hits go at once, so they are never read as this query's (R12).
-    current = { text: String(text).trim(), filters, hits: [], partial: false, more: false, loading: true, failed: false, total: null, totalCapped: false };
+    current = {
+      text: String(text).trim(), filters, hits: [], partial: false, more: false, loading: true, failed: false, total: null,
+      totalCapped: false, meaning: MeaningUse.OFF,
+    };
     render(view());
     timer = schedule(() => fetch(mine, 0), CONTENT_DEBOUNCE_MS);
   }

@@ -150,6 +150,8 @@ test('every button and field has an accessible name', () => {
     pause: /pause\.textContent = actions\.paused \? S\.resume : S\.pause/,
     // VFS-21: shown only with an action, whose text it carries.
     'update-action': /action\.hidden = !view\.action;\s*action\.textContent = view\.action/,
+    // VFS-29: shown only with an action, «Pausar» or «Reanudar».
+    'meaning-action': /action\.hidden = !line\?\.action;\s*action\.textContent = line\?\.action === MeaningAction\.RESUME \? S\.meaningResume : S\.meaningPause/,
   };
   for (const m of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
     const [, attrs, inner] = m;

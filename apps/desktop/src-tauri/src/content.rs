@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use vfs_content::pace::PaceConfig;
 use vfs_content::service::{ContentService, Events, Offer, Probes, ServiceConfig, Status};
 use vfs_content::{ContentResponse, IndexOptions, Query, Searcher, UnreadReason};
@@ -89,6 +89,17 @@ impl Probes for AppProbes {
     }
 }
 
+/// The machine's probes for another background service that follows the same pace (VFS-29
+/// R7: search by meaning).
+pub(crate) fn app_probes(vfs: Vfs, data_dir: PathBuf) -> Box<dyn Probes> {
+    Box::new(AppProbes {
+        vfs,
+        data_dir,
+        samplers: HashMap::new(),
+        cpu: CpuSampler::default(),
+    })
+}
+
 /// Status events to the window, diagnostic records to the log (R8, R16).
 struct AppEvents<R: Runtime> {
     app: AppHandle<R>,
@@ -98,6 +109,13 @@ impl<R: Runtime> Events for AppEvents<R> {
     fn status(&self, status: &Status) {
         if let Err(e) = self.app.emit(EVENT_CONTENT_STATUS, status) {
             log::warn!("emit {EVENT_CONTENT_STATUS}: {e}");
+        }
+        // A finished content run may have read new text: search by meaning embeds it once
+        // content indexing is quiet (VFS-29 R4).
+        if status.phase == vfs_content::service::Phase::Finished {
+            if let Some(m) = self.app.try_state::<crate::meaning::MeaningRuns>() {
+                m.notify_content_changed();
+            }
         }
     }
 
@@ -280,14 +298,17 @@ pub fn content_delete_store(runs: State<'_, ContentRuns>) -> Result<Status, ApiE
 }
 
 /// One page of content hits (R12): `retrieve` with `offset`, 20 at a time.
+/// With search by meaning on, the page is the fused list (VFS-29 R11).
 #[tauri::command(async)]
-pub fn content_search(
+pub fn content_search<R: Runtime>(
+    app: AppHandle<R>,
     runs: State<'_, ContentRuns>,
     query: String,
     filters: SearchFilters,
     offset: u32,
 ) -> Result<ContentResponse, ApiError> {
-    runs.searcher()
+    let db = runs.index_db().ok_or_else(unavailable)?;
+    crate::meaning::searcher(&app, &db)
         .map_err(store_error)?
         .retrieve(&Query::Text(query), &filters, PAGE, offset)
         .map_err(store_error)

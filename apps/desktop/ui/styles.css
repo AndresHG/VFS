@@ -786,6 +786,8 @@ input[type="date"] {
 .chit .path { color: var(--ink-2); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chit .fragment { margin: 0; font-size: var(--t-meta); line-height: 1.45; overflow-wrap: anywhere; }
 .chit .page { color: var(--ink-2); padding-inline-start: var(--s2); white-space: nowrap; }
+/* VFS-29 R12: a hit found by meaning alone. */
+.chit .related { color: var(--ink-2); font-size: var(--t-small, 0.85em); padding-inline-start: var(--s2); white-space: nowrap; }
 .chit mark { background: var(--mark); color: inherit; border-radius: 0.2rem; padding: 0 0.05em; }
 .chit:hover { background: var(--sunk); }
 /* VFS-45 R7, D7: «Mostrar en carpeta» shows on the hit under the pointer or holding the focus;

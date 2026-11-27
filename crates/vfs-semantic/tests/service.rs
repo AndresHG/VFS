@@ -181,6 +181,11 @@ fn off_creates_nothing() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(!service::model_dir(&app.data).exists());
     assert!(!vfs_semantic::store::exists(&app.db));
+    svc.set_paused(true);
+    assert!(
+        !app.data.join(service::SETTINGS_FILE).exists(),
+        "nothing to pause while off"
+    );
 }
 
 /// VFS-29 R1, R1a, R7, R11: switched on, the model is downloaded and checked, every chunk

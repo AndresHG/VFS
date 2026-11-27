@@ -57,7 +57,11 @@ Search by meaning (VFS-29) is the crate `crates/vfs-semantic`: `vectors.db` next
 (`vfs-embed`) that alone links ONNX Runtime and the tokenizer (feature `embedder`; the CI
 dependency check covers them too). It reads chunks through `vfs_content::ChunkReader`, and `vfs_content::Searcher::with_meaning` takes its ranker (`MeaningIndex`, behind the `vfs_content::Meaning` trait), so `retrieve` fuses meaning hits with BM25 for every caller, questions included, without `vfs-content` depending on it. The
 worker is not in the installer: it downloads with the model when meaning search is turned on
-(D18).
+(D18, D21), into `models/` in the app data folder; the release workflow builds it per platform
+and signs it with the updater key (`scripts/embed_worker.py`). In the app,
+`src-tauri/src/meaning.rs` starts `vfs_semantic::service::MeaningService` next to the index
+(`meaning.json` holds its switch; with it off nothing is created), and gives every content
+search and chat a searcher with its ranker; a finished content run tells it to embed new text.
 Before the update's installer starts, on both platforms, the app stops the content run (its
 worker gets 5 s, then is killed); the indexer is stopped as VFS-21 R8 says.
 

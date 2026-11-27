@@ -75,6 +75,14 @@ impl ChunkReader {
         Ok(out)
     }
 
+    /// Stored chunks, for estimates (VFS-29 R1a: the time to embed this archive).
+    pub fn chunk_count(&self) -> Result<u64> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT count(*) FROM chunks", [], |r| r.get(0))?;
+        Ok(n.max(0) as u64)
+    }
+
     /// Whether no document waits in the content queue: every document the indexer found has
     /// been read, skipped or failed, so the chunks are the archive's whole text (VFS-29 R6).
     pub fn queue_empty(&self) -> Result<bool> {
