@@ -314,8 +314,8 @@ test('the meaning status line follows the service', () => {
   assert.equal(meaningStatusLine(L, meaning(MeaningPhase.FAILED, { phase: { detail: 'x' } })).text, S.meaningFailed);
 });
 
-/** VFS-29 R12, R13: a hit found by meaning alone says «relacionado por tema»; when search by
- *  meaning cannot answer, the section says so, with the spec's sentence. */
+/** VFS-29 AC-10 (R12), AC-11 (R13): a hit found by meaning alone says «relacionado por tema»;
+ *  when search by meaning cannot answer, the section says so, with the spec's sentence. */
 test('meaning hits are labelled and the fallback is said', () => {
   assert.equal(S.meaningRelated, 'relacionado por tema');
   assert.match(mainJs, /if \(hit\.byMeaning\) fragment\.append\(' ', el\('span', 'related', S\.meaningRelated\)\);/);
@@ -327,7 +327,7 @@ test('meaning hits are labelled and the fallback is said', () => {
   assert.equal(CATALOGS[Lang.EN].meaningRelated, 'related by topic');
 });
 
-/** VFS-29 R11, R13: the content search keeps whether meaning took part for the notes. */
+/** VFS-29 AC-11 (R11, R13): the content search keeps whether meaning took part for the notes. */
 test('the content search keeps whether meaning took part', async () => {
   const views = [];
   const api = { contentSearch: async () => ({ hits: [], partial: false, total: 0, totalCapped: false, meaning: MeaningUse.UNAVAILABLE }) };

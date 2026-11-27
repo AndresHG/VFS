@@ -254,7 +254,6 @@ fn all_error_codes() -> Vec<String> {
     all.iter().map(|e| e.code().to_string()).collect()
 }
 
-/// `Phase` is tagged by `kind`; the set holds the tags (VFS-27 R8).
 /// VFS-29: every `phase.kind` of the search by meaning service; the match makes a new variant
 /// fail to compile here until it is listed.
 fn meaning_phase_kinds() -> Vec<String> {
@@ -307,6 +306,7 @@ fn meaning_uses() -> Vec<String> {
     serde_names(&all)
 }
 
+/// `Phase` is tagged by `kind`; the set holds the tags (VFS-27 R8).
 fn content_phase_kinds() -> Vec<String> {
     let all = vec![
         Phase::Off,

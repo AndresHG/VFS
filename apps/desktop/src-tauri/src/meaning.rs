@@ -23,7 +23,7 @@ use vfs_semantic::LOCAL_MODEL;
 pub const EVENT_MEANING_STATUS: &str = "meaning-status";
 
 /// Where this version's release assets are (the worker, D21).
-const RELEASES: &str = "https://github.com/AndresHG/VFS/releases/download";
+pub const RELEASES: &str = "https://github.com/AndresHG/VFS/releases/download";
 
 /// Threads the background embedding uses (29b measured 2; the rest of the PC stays usable).
 const EMBED_THREADS: usize = 2;

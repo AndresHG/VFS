@@ -692,6 +692,11 @@ impl Searcher {
         self
     }
 
+    /// Whether `retrieve` fuses with a ranker by meaning (VFS-29 R11).
+    pub fn has_meaning(&self) -> bool {
+        self.meaning.is_some()
+    }
+
     /// The stored text of a document; empty when it has none.
     pub(crate) fn doc_text(&self, file_id: i64) -> Result<String> {
         let blob: Option<Vec<u8>> = self

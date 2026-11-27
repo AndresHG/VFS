@@ -63,7 +63,7 @@ and signs it with the updater key (`scripts/embed_worker.py`). In the app,
 (`meaning.json` holds its switch; with it off nothing is created), and gives every content
 search and chat a searcher with its ranker; a finished content run tells it to embed new text.
 Before the update's installer starts, on both platforms, the app stops the content run (its
-worker gets 5 s, then is killed); the indexer is stopped as VFS-21 R8 says.
+worker gets 5 s, then is killed) and search by meaning; the indexer is stopped as VFS-21 R8 says.
 
 The app is one process. The core opens these SQLite connections to the same file
 (`core/lib.rs`, `core/db.rs`):

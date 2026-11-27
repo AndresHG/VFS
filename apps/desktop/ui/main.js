@@ -2057,8 +2057,12 @@ function main(L) {
     const before = state.meaning;
     state.meaning = st;
     renderMeaning();
-    // A search shown before the vectors were ready is run again with them.
-    if (st?.searchable && !before?.searchable && documentsTab()) runContentQuery();
+    // Ready while «Documentos» is open (or the app started on it): load the vectors and the
+    // query model now, and run the search shown before they were ready again with them.
+    if (st?.searchable && !before?.searchable && documentsTab()) {
+      api.meaningWarm().catch(() => {});
+      runContentQuery();
+    }
   }
   async function meaningCall(call) {
     try { setMeaning(await call()); } catch (err) { showError(errorText(err)); }

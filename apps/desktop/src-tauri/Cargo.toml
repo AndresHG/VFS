@@ -80,6 +80,7 @@ tauri-plugin-single-instance = "2"
 vfs-desktop = { path = ".", features = ["ai"] }
 vfs-ai = { path = "../../../crates/vfs-ai", features = ["test-support"] }
 vfs-bookmarks = { workspace = true, features = ["test-support"] }
+vfs-content = { path = "../../../crates/vfs-content", default-features = false, features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 tempfile.workspace = true
 rusqlite.workspace = true
