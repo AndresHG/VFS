@@ -3,7 +3,10 @@
 Companion to [future-lines.md](future-lines.md), which holds the research, costs, sources and
 open questions for each line. This page orders the lines, names what they share, and proposes
 how the ones worth doing could become one coherent later phase. It records the owner's
-decisions of 2026-11-20; nothing else here is scheduled. The deciding question for each open
+decisions of 2026-11-20; nothing else here is scheduled. The version plan now lives in
+[`docs/roadmap.md`](../roadmap.md), and later owner decisions override this page: Telegram
+is read live through its official API (2026-11-27), and «Colecciones» left VFS with the
+other curation features (2026-11-27). The deciding question for each open
 line is in the summary table of [future-lines.md](future-lines.md#summary).
 
 ## Product invariant

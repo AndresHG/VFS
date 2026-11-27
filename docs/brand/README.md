@@ -1,6 +1,6 @@
 # VFS brand
 
-The VFS mark is a folder holding a small graph: files today, connected knowledge tomorrow.
+The VFS mark is a folder holding a small graph: your files and what relates them.
 It uses the app's "Papel" palette (`docs/design/system.md`).
 
 | File | Use |
