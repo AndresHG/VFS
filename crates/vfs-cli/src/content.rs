@@ -329,6 +329,7 @@ pub fn embed_index(
                 eprintln!("{} of {} texts", p.done, p.total);
                 last = Instant::now();
             }
+            true
         },
     )?;
     drop(embedder);
