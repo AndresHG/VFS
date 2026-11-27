@@ -48,18 +48,13 @@ against the v0.3.0 assets, as compressed download sizes: Windows installer 15.2 
 14.6 MB, macOS app (zip and updater tarball) 34.3 MB against 33.7 MB, a gap that also holds
 v0.3.1's settings window. With no key the AI does no background work, makes no network call
 and holds no resident memory beyond an idle `AiState`. The update check is no longer the only
-connection: VFS-28 D15 supersedes VFS-21 R6, R7 and D1's wording. What is
-left before v0.4:
-
-| Order | Step | What | Who | Effort |
-|---|---|---|---|---|
-| 1 | Owner test | A release-candidate build (a `release` dry run) tried on the owner's Mac and, if possible, on the target PC | owner | ½ |
-| 2 | Tag | Tag `v0.4.0`; replace the draft release's generated notes with hand-written ones | session; the owner publishes | ¼ |
+connection: VFS-28 D15 supersedes VFS-21 R6, R7 and D1's wording. v0.4.0 shipped on
+2026-11-26 (#224).
 
 28a, the stable macOS signing identity, shipped in v0.3.1 with the settings window (VFS-45),
 so v0.4 brings one new risk (the AI) and v0.3.1 brought the other (the signature change).
 
-**Gate before release:**
+**Gate it passed before release:**
 - the RAG golden set passes on recordings from a real provider, not the hand-written ones;
 - one manual `--live` run with each provider is recorded in a PR;
 - AC-3 passes on the macOS runner: build B reads the keychain item that build A saved;
@@ -69,8 +64,8 @@ so v0.4 brings one new risk (the AI) and v0.3.1 brought the other (the signature
   network call and no resident memory (CLAUDE.md «Lightweight first»).
 
 **Still open from v0.3:** the real-PC measurement 27m (busy-HDD pacing, the Windows CPU
-probe, index size after compaction) needs the field visit. It does not block v0.4, but if it
-shows a problem, the fix ships first as a 0.3.x.
+probe, index size after compaction) needs the field visit. It does not block v0.5, but if it
+shows a problem, the fix ships first as a patch release.
 
 ## v0.5: search by meaning
 
