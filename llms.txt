@@ -14,7 +14,7 @@ VFS reads only names, sizes and dates from the directory listing. It does not se
 
 ## Direction
 
-- [Vision](https://github.com/AndresHG/VFS/blob/main/docs/vision.md): toward a local personal knowledge base over files, bookmarks, chats and notes, with answers that cite the original files (RAG, through a model API the user configures) and an automatically built knowledge graph
+- [Vision](https://github.com/AndresHG/VFS/blob/main/docs/vision.md): one local place to search and ask over files, bookmarks and chat exports, with answers that cite the original files (RAG, through a model API the user configures); VFS gives access to knowledge and does not grow it (no knowledge graph, memory or notes)
 
 ## Specs
 

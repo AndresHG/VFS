@@ -85,14 +85,14 @@ ordinary or fast machines. The product spec is
 
 ## Where it is heading
 
-The long-term aim is one all-in-one **personal knowledge base** for non-technical Windows
-and Mac users, built from what a person already has: files, bookmarks, chats and notes.
-Find anything across every source, ask questions over it with answers that cite the
-original files (RAG), browse an Obsidian-like graph of connections generated automatically,
-and keep adding notes (stored as Markdown). The data stays on the user's computer; language
-models are reached through an API the user configures (Anthropic, OpenAI or another).
-Sources stay read-only throughout. The direction, principles and future lines of work are
-in [`docs/vision.md`](docs/vision.md).
+The aim is one all-in-one way for non-technical Windows and Mac users to reach the
+knowledge they already have: files, bookmarks and chat exports. Find anything across every
+source by name, content or meaning, and ask questions over it with answers that cite the
+original files (RAG). VFS gives access to knowledge; it does not grow or learn it (no
+knowledge graph, memory or notes: those belong to the author's other project). The data
+stays on the user's computer; language models are reached through an API the user
+configures (Anthropic, OpenAI or another). Sources stay read-only throughout. The direction,
+principles and future lines of work are in [`docs/vision.md`](docs/vision.md).
 
 ## Repository layout
 
@@ -341,9 +341,9 @@ No, only internal disks. The app warns when a chosen folder is on a network or r
 drive.
 
 **Where is it heading?**
-Toward a local personal knowledge base over files, bookmarks, chats and notes: find, ask
-questions with answers that cite the original files, and browse an automatically built graph
-of connections. See [`docs/vision.md`](docs/vision.md).
+Toward one local place to search and ask over files, bookmarks and chat exports: find by
+name, content or meaning, and ask questions with answers that cite the original files.
+See [`docs/vision.md`](docs/vision.md).
 
 ## License
 

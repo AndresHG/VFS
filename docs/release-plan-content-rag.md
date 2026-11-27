@@ -91,4 +91,5 @@ worker files and their `.sig` cannot turn search by meaning on**. What is left b
   per-folder consent (owner, 2026-11-25). Needs its own spec.
 - Model selector in Ajustes (#220): choose the answer and rewrite models and the reasoning
   level, with the cost of each (owner, 2026-11-25). Needs its own spec.
-- MCP connector, knowledge graph, Markdown notes: each with its own spec.
+- MCP connector: its own spec. The knowledge graph and Markdown notes left VFS's scope
+  (owner, 2026-11-27; `docs/vision.md`).
