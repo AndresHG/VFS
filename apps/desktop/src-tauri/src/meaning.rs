@@ -296,7 +296,7 @@ pub fn meaning_set_paused(runs: State<'_, MeaningRuns>, paused: bool) -> Result<
 }
 
 /// The «Documentos» tab opened: the vectors and the query model load ahead of the first
-/// search (R13: no search waits for them).
+/// search, which otherwise waits for them up to the query limit (R13).
 #[tauri::command(async)]
 pub fn meaning_warm(runs: State<'_, MeaningRuns>) -> Result<(), ApiError> {
     if let Some(s) = runs.service() {

@@ -121,8 +121,9 @@ fn both_copies_are_found() {
 
 /// VFS-29 R13: the first search, before the rows are loaded and the query worker is ready,
 /// waits for them up to the query limit instead of falling back to words at once (the 0.5.0
-/// e2e: the first search after «Documentos» opened said «no disponible»); past the limit it
-/// says so; with no complete vector set it never starts a worker and creates no file.
+/// e2e: the first search after «Documentos» opened said «no disponible»), also after new
+/// vectors dropped the rows; past the limit it says so; with no complete vector set it never
+/// starts a worker and creates no file.
 #[test]
 fn the_first_search_waits_for_the_load_within_the_limit() {
     let d = docs();
@@ -135,6 +136,9 @@ fn the_first_search_waits_for_the_load_within_the_limit() {
         Duration::from_secs(600),
     );
     assert_eq!(m.rank(&d[0].1, 5).unwrap()[0].file_id, d[0].0);
+    // New vectors drop the rows but keep the worker: the next search waits for them too.
+    m.reload();
+    assert!(m.rank("hola", 5).is_ok(), "after reload");
 
     let short = ranker(
         &db,

@@ -52,6 +52,8 @@ struct State {
     worker: Worker,
     last_used: Instant,
     reaper: bool,
+    /// A [`MeaningIndex::warm`] load is under way (rows, worker or both).
+    loading: bool,
 }
 
 struct Inner {
@@ -79,6 +81,7 @@ impl MeaningIndex {
                     worker: Worker::None,
                     last_used: Instant::now(),
                     reaper: false,
+                    loading: false,
                 }),
                 ready: Condvar::new(),
             }),
@@ -89,17 +92,19 @@ impl MeaningIndex {
         self.inner.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Loads the rows and starts the query worker in the background, so no search waits for
-    /// either (the «Documentos» tab calls this when it opens; a search that finds them missing
-    /// calls it too). With no complete vector set, nothing is started.
+    /// Loads the rows and starts the query worker in the background: the «Documentos» tab
+    /// calls this when it opens, so the first search finds them loaded; a search that finds
+    /// them missing calls it too and waits for it up to the query limit (R13). With no
+    /// complete vector set, nothing is started.
     pub fn warm(&self) {
         let mut st = self.lock();
         st.last_used = Instant::now();
         self.ensure_reaper(&mut st);
         let worker_ready = matches!(st.worker, Worker::Ready(_));
-        if matches!(st.worker, Worker::Starting) || (worker_ready && st.rows.is_some()) {
+        if st.loading || (worker_ready && st.rows.is_some()) {
             return;
         }
+        st.loading = true;
         st.worker = match std::mem::replace(&mut st.worker, Worker::Starting) {
             Worker::Ready(w) => Worker::Ready(w),
             _ => Worker::Starting,
@@ -133,6 +138,7 @@ impl MeaningIndex {
                     None => Worker::None,
                 };
             }
+            st.loading = false;
             me.inner.ready.notify_all();
         });
     }
@@ -166,10 +172,8 @@ impl MeaningIndex {
         let deadline = Instant::now() + timeout;
         let mut st = self.lock();
         loop {
-            match st.worker {
-                Worker::Ready(_) => return st.rows.is_some(),
-                Worker::None => return false,
-                Worker::Starting => {}
+            if !st.loading {
+                return matches!(st.worker, Worker::Ready(_)) && st.rows.is_some();
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -204,7 +208,7 @@ impl MeaningIndex {
                 (idle / 10).clamp(Duration::from_millis(20), Duration::from_secs(30)),
             );
             let mut st = me.lock();
-            if st.last_used.elapsed() >= idle && !matches!(st.worker, Worker::Starting) {
+            if st.last_used.elapsed() >= idle && !st.loading {
                 st.rows = None;
                 st.worker = Worker::None;
                 st.reaper = false;
@@ -243,10 +247,9 @@ impl Meaning for MeaningIndex {
         let mut st = self.lock();
         st.last_used = Instant::now();
         self.ensure_reaper(&mut st);
-        // Loading the rows reads the whole set; it happens in `warm`, never inside a search.
-        // R13: a search may take the query limit, so the first one after «Documentos» opens or
-        // after the idle release (R15) waits that long for the load instead of falling back
-        // to words at once.
+        // R13: a search may take the query limit, so one that finds the rows or the worker
+        // missing (after the idle release of R15, or new vectors dropped the rows) waits that
+        // long for `warm`'s load instead of falling back to words at once.
         if st.rows.is_none() || !matches!(st.worker, Worker::Ready(_)) {
             drop(st);
             self.warm();
