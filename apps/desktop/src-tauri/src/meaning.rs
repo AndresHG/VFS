@@ -37,33 +37,47 @@ const MS_PER_CHUNK_SLOW: u64 = 230;
 /// Memory the worker needs while embedding (0.64–0.70 GB measured, D18).
 const WORKER_RAM_BYTES: u64 = 700 * 1024 * 1024;
 
-/// The app's HTTP client for the download (the reqwest already in the binary).
-struct HttpFetch(reqwest::blocking::Client);
+/// The app's HTTP client for the download (the reqwest already in the binary), built on the
+/// first request: a blocking client starts a thread, which must not exist while search by
+/// meaning is off (R15).
+#[derive(Default)]
+struct HttpFetch {
+    client: std::sync::OnceLock<Result<reqwest::blocking::Client, String>>,
+}
 
 impl HttpFetch {
-    fn new() -> Result<HttpFetch, String> {
-        if rustls::crypto::CryptoProvider::get_default().is_none() {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        }
-        reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_secs(20))
-            .timeout(None)
-            .build()
-            .map(HttpFetch)
-            .map_err(|e| e.to_string())
+    fn client(&self) -> std::io::Result<&reqwest::blocking::Client> {
+        self.client
+            .get_or_init(|| {
+                if rustls::crypto::CryptoProvider::get_default().is_none() {
+                    let _ = rustls::crypto::ring::default_provider().install_default();
+                }
+                reqwest::blocking::Client::builder()
+                    .connect_timeout(Duration::from_secs(20))
+                    .timeout(None)
+                    .build()
+                    .map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(|e| std::io::Error::other(e.clone()))
     }
 }
 
 impl Fetch for HttpFetch {
     fn get(&self, url: &str) -> std::io::Result<Box<dyn Read + Send>> {
         let r = self
-            .0
+            .client()?
             .get(url)
             .send()
             .and_then(|r| r.error_for_status())
             .map_err(std::io::Error::other)?;
         Ok(Box::new(r))
     }
+}
+
+/// Whether a content status means new text may have been read: a finished content run (R4).
+pub fn content_status_reports_text(status: &vfs_content::service::Status) -> bool {
+    status.phase == vfs_content::service::Phase::Finished
 }
 
 /// The app's search by meaning and the index it serves (managed Tauri state).
@@ -76,13 +90,7 @@ impl MeaningRuns {
         let Some(data_dir) = index_db.parent().map(Path::to_path_buf) else {
             return;
         };
-        let fetch = match HttpFetch::new() {
-            Ok(f) => f,
-            Err(e) => {
-                log::warn!("search by meaning: no http client: {e}");
-                return;
-            }
-        };
+        let fetch = HttpFetch::default();
         let model_dir = service::model_dir(&data_dir);
         let worker = WorkerConfig {
             program: model_dir.join(install::worker_file()),
@@ -249,10 +257,27 @@ pub fn meaning_offer<R: Runtime>(
 /// «Búsqueda por significado» (R1): on, after the confirmation, downloads and embeds; off,
 /// stops and releases (it may wait a few seconds for the run, so never on the main thread).
 #[tauri::command(async)]
-pub fn meaning_set_enabled(runs: State<'_, MeaningRuns>, on: bool) -> Result<Status, ApiError> {
+pub fn meaning_set_enabled(
+    runs: State<'_, MeaningRuns>,
+    content: State<'_, crate::content::ContentRuns>,
+    on: bool,
+) -> Result<Status, ApiError> {
     let s = runs.service().ok_or_else(unavailable)?;
+    // R1: available only while content search is on.
+    if on && !content.enabled() {
+        return Err(vfs_core::Error::Unavailable("content search is off".into()).into());
+    }
     s.set_enabled(on);
     Ok(s.status())
+}
+
+/// Content search was switched off: search by meaning, which needs it, goes off too (R1).
+pub fn content_switched_off<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(s) = app.try_state::<MeaningRuns>().and_then(|m| m.service()) {
+        if s.status().settings.enabled {
+            s.set_enabled(false);
+        }
+    }
 }
 
 #[tauri::command(async)]
@@ -275,6 +300,31 @@ pub fn meaning_warm(runs: State<'_, MeaningRuns>) -> Result<(), ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// VFS-29 AC-1 (R15): the download's HTTP client, and the thread it starts, exist only
+    /// after the first request.
+    #[test]
+    fn the_http_client_waits_for_the_first_request() {
+        let f = HttpFetch::default();
+        assert!(f.client.get().is_none());
+    }
+
+    /// VFS-29 AC-4 (R4): a finished content run reports new text; a run in progress does not.
+    #[test]
+    fn a_finished_content_run_reports_text() {
+        use vfs_content::service::{Phase, Settings, Status as C};
+        let st = |phase| C {
+            settings: Settings::default(),
+            phase,
+            done: 1,
+            total: 1,
+            per_hour: None,
+            seconds_left: None,
+        };
+        assert!(content_status_reports_text(&st(Phase::Finished)));
+        assert!(!content_status_reports_text(&st(Phase::Reading)));
+        assert!(!content_status_reports_text(&st(Phase::Off)));
+    }
 
     /// VFS-29 R1a: the confirmation gives the download size, the time for this archive on a
     /// fast and a slow PC, and the memory needed.

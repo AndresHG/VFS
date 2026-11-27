@@ -112,7 +112,7 @@ impl<R: Runtime> Events for AppEvents<R> {
         }
         // A finished content run may have read new text: search by meaning embeds it once
         // content indexing is quiet (VFS-29 R4).
-        if status.phase == vfs_content::service::Phase::Finished {
+        if crate::meaning::content_status_reports_text(status) {
             if let Some(m) = self.app.try_state::<crate::meaning::MeaningRuns>() {
                 m.notify_content_changed();
             }
@@ -171,6 +171,11 @@ impl ContentRuns {
             Some(svc) => Ok(f(&svc)),
             None => Err(unavailable()),
         }
+    }
+
+    /// Whether content search is switched on (VFS-29 R1: search by meaning needs it).
+    pub fn enabled(&self) -> bool {
+        self.service().is_some_and(|s| s.status().settings.enabled)
     }
 
     /// The name index the service reads; `None` until it is open.
@@ -235,7 +240,14 @@ pub fn content_status(runs: State<'_, ContentRuns>) -> Result<Status, ApiError> 
 
 /// «Buscar también dentro de los documentos» (R5).
 #[tauri::command(async)]
-pub fn content_set_enabled(runs: State<'_, ContentRuns>, on: bool) -> Result<Status, ApiError> {
+pub fn content_set_enabled<R: Runtime>(
+    app: AppHandle<R>,
+    runs: State<'_, ContentRuns>,
+    on: bool,
+) -> Result<Status, ApiError> {
+    if !on {
+        crate::meaning::content_switched_off(&app); // VFS-29 R1
+    }
     runs.with(|s| {
         s.set_enabled(on);
         s.status()
@@ -292,7 +304,11 @@ pub fn content_offer(runs: State<'_, ContentRuns>) -> Result<Offer, ApiError> {
 
 /// «Borrar lo leído de los documentos» (R5).
 #[tauri::command(async)]
-pub fn content_delete_store(runs: State<'_, ContentRuns>) -> Result<Status, ApiError> {
+pub fn content_delete_store<R: Runtime>(
+    app: AppHandle<R>,
+    runs: State<'_, ContentRuns>,
+) -> Result<Status, ApiError> {
+    crate::meaning::content_switched_off(&app); // VFS-29 R1: deleting switches content off
     runs.with(|s| s.delete_store().map(|_| s.status()))?
         .map_err(store_error)
 }

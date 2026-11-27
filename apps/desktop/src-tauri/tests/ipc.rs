@@ -403,6 +403,47 @@ fn content_status_until(webview: &WebviewWindow<MockRuntime>, f: impl Fn(&Value)
     }
 }
 
+/// VFS-29 AC-1 (R1, R1a, R15): search by meaning over IPC. Off by default: its status says off,
+/// pausing writes nothing, warming does nothing, and no model folder or vector store exists;
+/// the offer gives the download size and the memory before anything is downloaded; turning it
+/// on while content search is off is refused.
+#[test]
+fn meaning_commands_over_ipc() {
+    use vfs_desktop_lib::content::ContentRuns;
+    use vfs_desktop_lib::meaning::MeaningRuns;
+    let data = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    app.manage(ContentRuns::default());
+    app.manage(MeaningRuns::default());
+    let db = data.path().join("app").join(INDEX_FILE);
+    init_core(app.handle(), &db).expect("init core");
+    let dir = db.parent().unwrap();
+
+    let st = invoke(&webview, "meaning_status", json!({})).unwrap();
+    assert_eq!(st["phase"]["kind"], json!("off"));
+    assert_eq!(st["settings"]["enabled"], json!(false));
+    assert_eq!(st["searchable"], json!(false));
+    invoke(&webview, "meaning_set_paused", json!({ "paused": true })).unwrap();
+    invoke(&webview, "meaning_warm", json!({})).unwrap();
+    let offer = invoke(&webview, "meaning_offer", json!({})).unwrap();
+    assert!(
+        offer["downloadBytes"].as_u64().unwrap() > 100_000_000,
+        "{offer}"
+    );
+    assert!(offer["ramBytes"].as_u64().unwrap() > 0, "{offer}");
+    assert_eq!(offer["chunks"], json!(0), "content search is off");
+    let refused = invoke(&webview, "meaning_set_enabled", json!({ "on": true }));
+    assert!(refused.is_err(), "{refused:?}");
+    let st = invoke(&webview, "meaning_status", json!({})).unwrap();
+    assert_eq!(st["settings"]["enabled"], json!(false));
+    assert!(
+        !dir.join("meaning.json").exists(),
+        "nothing written while off"
+    );
+    assert!(!dir.join("models").exists());
+    assert!(!dir.join("vectors.db").exists());
+}
+
 /// VFS-27 AC-2, AC-4, AC-5, AC-14 over IPC: the content commands with their exact payloads and
 /// camelCase shapes. Off by default, nothing has a reason and search reports off; switched
 /// on with no worker next to the test binary, the run stops with the worker reason and no
