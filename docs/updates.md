@@ -81,7 +81,10 @@ Spec: [VFS-28](../specs/vfs-28-ask-archive/spec.md) R3, AC-3, D6, D12. Script:
    `Cargo.toml`, merge to `main`.
 2. `git tag v<version> && git push origin v<version>`. `release.yml` builds and signs both
    platforms, writes `latest.json`, and creates a **draft** release with the installer, the
-   macOS zip, `VFS.app.tar.gz`, the `.sig` files, `latest.json` and `SHA256SUMS.txt`.
+   macOS zip, `VFS.app.tar.gz`, the embedding worker per platform (`vfs-embed-windows-x86_64.exe`,
+   `vfs-embed-macos-aarch64`), the `.sig` files, `latest.json` and `SHA256SUMS.txt`. A release
+   without the workers breaks search by meaning for that version: the app downloads its worker
+   from it (VFS-29 D21).
 3. Check the draft, then publish it. From that moment installed apps offer the update.
    Marking it "pre-release" keeps it away from users (the `latest` endpoint skips it).
 

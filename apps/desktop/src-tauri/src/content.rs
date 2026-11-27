@@ -245,13 +245,14 @@ pub fn content_set_enabled<R: Runtime>(
     runs: State<'_, ContentRuns>,
     on: bool,
 ) -> Result<Status, ApiError> {
+    let status = runs.with(|s| {
+        s.set_enabled(on);
+        s.status()
+    })?;
     if !on {
         crate::meaning::content_switched_off(&app); // VFS-29 R1
     }
-    runs.with(|s| {
-        s.set_enabled(on);
-        s.status()
-    })
+    Ok(status)
 }
 
 /// «Pausar» / «Reanudar» (R8).
@@ -308,9 +309,11 @@ pub fn content_delete_store<R: Runtime>(
     app: AppHandle<R>,
     runs: State<'_, ContentRuns>,
 ) -> Result<Status, ApiError> {
+    let status = runs
+        .with(|s| s.delete_store().map(|_| s.status()))?
+        .map_err(store_error)?;
     crate::meaning::content_switched_off(&app); // VFS-29 R1: deleting switches content off
-    runs.with(|s| s.delete_store().map(|_| s.status()))?
-        .map_err(store_error)
+    Ok(status)
 }
 
 /// One page of content hits (R12): `retrieve` with `offset`, 20 at a time.

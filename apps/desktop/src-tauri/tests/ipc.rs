@@ -443,7 +443,11 @@ fn content_searches_use_the_ranker_when_meaning_is_on() {
         serde_json::to_string(&urls).unwrap(),
     )
     .unwrap();
-    std::fs::write(dir.join("meaning.json"), r#"{"enabled":true}"#).unwrap();
+    std::fs::write(
+        dir.join(vfs_semantic::service::SETTINGS_FILE),
+        r#"{"enabled":true}"#,
+    )
+    .unwrap();
 
     init_core(app.handle(), &db).expect("init core");
     let st = invoke(&webview, "meaning_status", json!({})).unwrap();
