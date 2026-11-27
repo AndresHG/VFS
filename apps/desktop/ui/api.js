@@ -119,6 +119,13 @@ function tauriBackend(t) {
     contentUnreadCounts: () => invoke('content_unread_counts'),
     contentUnread: (fileIds) => invoke('content_unread', { fileIds }),
     onContentStatus: (cb) => listen('content-status', (e) => cb(e.payload)),
+    // VFS-29: search by meaning.
+    meaningStatus: () => invoke('meaning_status'),
+    meaningOffer: () => invoke('meaning_offer'),
+    meaningSetEnabled: (on) => invoke('meaning_set_enabled', { on }),
+    meaningSetPaused: (paused) => invoke('meaning_set_paused', { paused }),
+    meaningWarm: () => invoke('meaning_warm'),
+    onMeaningStatus: (cb) => listen('meaning-status', (e) => cb(e.payload)),
     // VFS-28: «Preguntar a sus documentos». The key is sent once, when typed; nothing returns it.
     aiStatus: () => invoke('ai_status'),
     aiSetSettings: (enabled, provider, cheap) => invoke('ai_set_settings', { enabled, provider, cheap }),
@@ -172,6 +179,8 @@ function missingBackend() {
     contentStatus: fail, contentSetEnabled: fail, contentSetPaused: fail, contentRetry: fail, contentRebuild: fail,
     contentMarkOffered: fail, contentOffer: fail, contentDeleteStore: fail, contentSearch: fail,
     contentUnreadCounts: fail, contentUnread: fail, onContentStatus: async () => () => {},
+    meaningStatus: fail, meaningOffer: fail, meaningSetEnabled: fail, meaningSetPaused: fail, meaningWarm: fail,
+    onMeaningStatus: async () => () => {},
     aiStatus: fail, aiSetSettings: fail, aiNoticeSeen: fail, aiSaveKey: fail, aiSaveKeyFallback: fail,
     aiDeleteKey: fail, aiTestKey: fail, aiSetCap: fail, aiRecords: fail, aiClearRecords: fail,
     aiChatSend: fail, aiChats: fail, aiChat: fail, aiChatRename: fail, aiChatDelete: fail, aiChatsClear: fail,

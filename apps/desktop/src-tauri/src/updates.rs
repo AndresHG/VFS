@@ -207,6 +207,11 @@ async fn stop_content<R: Runtime>(app: AppHandle<R>) {
         if let Some(runs) = app.try_state::<ContentRuns>() {
             runs.stop_for_update();
         }
+        // The installer replaces nothing of search by meaning, but its worker must not hold
+        // the index's files open meanwhile (VFS-29).
+        if let Some(runs) = app.try_state::<crate::meaning::MeaningRuns>() {
+            runs.stop_for_update();
+        }
     })
     .await;
     if let Err(e) = stopped {
@@ -320,6 +325,9 @@ pub async fn install_update<R: Runtime>(
         },
         || {
             if let Some(runs) = app.try_state::<ContentRuns>() {
+                runs.restart_after_failed_update();
+            }
+            if let Some(runs) = app.try_state::<crate::meaning::MeaningRuns>() {
                 runs.restart_after_failed_update();
             }
             recover_after_failed_install(&state.index_stopped, || app.restart());

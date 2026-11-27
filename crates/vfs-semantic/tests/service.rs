@@ -181,6 +181,11 @@ fn off_creates_nothing() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(!service::model_dir(&app.data).exists());
     assert!(!vfs_semantic::store::exists(&app.db));
+    svc.set_paused(true);
+    assert!(
+        !app.data.join(service::SETTINGS_FILE).exists(),
+        "nothing to pause while off"
+    );
 }
 
 /// VFS-29 R1, R1a, R7, R11: switched on, the model is downloaded and checked, every chunk
@@ -358,6 +363,47 @@ fn a_report_during_a_pace_wait_is_not_lost() {
             break;
         }
         assert!(t.elapsed() < Duration::from_secs(60), "{:?}", svc.status());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// VFS-29 R7: the time left appears only once a batch past the first has a rate: the first
+/// batch's time includes the run's read of the archive.
+#[test]
+fn the_time_left_waits_for_a_rate() {
+    let app = App::new(60);
+    let svc = app.start("https://h/model");
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |s| s.phase == Phase::Finished);
+    let log = app.log.lock().unwrap();
+    let first = log
+        .iter()
+        .find(|s| s.phase == Phase::Embedding && s.done > 0)
+        .expect("a progress status");
+    assert_eq!(first.seconds_left, None, "{first:?}");
+}
+
+/// VFS-29 (VFS-21 R5): after an update that did not install, the service starts again and
+/// embeds what arrived meanwhile.
+#[test]
+fn it_restarts_after_a_failed_update() {
+    let app = App::new(2);
+    let svc = app.start("https://h/model");
+    svc.set_enabled(true);
+    wait_for(&svc, "finished", |s| s.phase == Phase::Finished);
+    assert!(svc.shutdown(Duration::from_secs(10)));
+    vfs_content::testing::write_doc(&app.db, 70, "Texto que llega durante la actualización.")
+        .unwrap();
+    svc.restart_after_failed_update();
+    let hash = vfs_semantic::store::text_hash("Texto que llega durante la actualización.");
+    let t = Instant::now();
+    loop {
+        let s = vfs_semantic::store::Store::open(&app.db).unwrap();
+        let (set, _) = s.search_set().unwrap().unwrap();
+        if s.hashes(set).unwrap().contains(&hash) {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(30), "{:?}", svc.status());
         std::thread::sleep(Duration::from_millis(50));
     }
 }

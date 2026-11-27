@@ -23,12 +23,14 @@
 // inside an existing one, a parent of an existing one, a network share, then cancel.
 // Content search (VFS-27) is offered once every folder is scanned (`content=offer` skips the
 // scan); `content=on` starts it reading, `content=damaged` and `content=stopped` show those states. A content query with
-// "alguna" is partial; one with "zzzz" finds nothing; one with "fallo" fails. `api.fakeCalls`
+// "alguna" is partial; one with "zzzz" finds nothing; one with "fallo" fails. Search by meaning
+// (VFS-29) starts off; `meaning=on` starts it ready, and then a content query with "sinmodelo"
+// shows the fallback notice. `api.fakeCalls`
 // counts the name searches, content searches and content offers sent (VFS-42 AC-2, AC-4), reveals
 // and the project pages opened from «Acerca de» (VFS-45 AC-6, AC-7). The app version is 0.4.0.
 
 import {
-  BookmarkRoot, ContentPhase, ContentStop, DriveKind, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
+  BookmarkRoot, ContentPhase, ContentStop, DriveKind, MeaningPhase, MeaningUse, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
   ReadState, RevealOutcome, RootStatus, Scope, SortOrder, Source, SuggestionKind, TruncatedBy, UnreadableReason, UnreadReason,
   AiErrorCode, KeyFallback, KeyPlace, KeyState, Provider,
 } from '../ui/contract.js';
@@ -208,8 +210,8 @@ function byteRanges(text, word) {
 }
 
 /** VFS-27: a content run that reads 1.200 documents, content hits and unread reasons. `calls`
- *  counts the content searches and offers. */
-function fakeContent(mode, files, calls) {
+ *  counts the content searches and offers; `meaningSt` is search by meaning's status (VFS-29). */
+function fakeContent(mode, files, calls, meaningSt) {
   const docs = files.filter((f) => f.kind === FileKind.DOCUMENT && !f.isDir);
   const total = 1200;
   const st = {
@@ -269,7 +271,13 @@ function fakeContent(mode, files, calls) {
             snippet, highlights, passages: [{ page: (d.id % 5) ? (d.id % 40) + 1 : null }], title: null, authors: [], created: null,
           };
         });
-        return { hits, partial: words.includes('alguna'), total: pool.length, totalCapped: false, elapsedMs: 40 };
+        // VFS-29: `?meaning=on`: every third hit found by meaning alone; «sinmodelo» shows the
+        // fallback notice.
+        const m = meaningSt;
+        const used = m?.searchable && !words.includes('sinmodelo');
+        if (used) hits.forEach((h, i) => { if (i % 3 === 2) Object.assign(h, { highlights: [], byMeaning: true }); });
+        const meaning = !m?.settings.enabled ? MeaningUse.OFF : used ? MeaningUse.USED : MeaningUse.UNAVAILABLE;
+        return { hits, partial: words.includes('alguna'), total: pool.length, totalCapped: false, elapsedMs: 40, meaning };
       },
       async contentUnreadCounts() {
         if (!st.settings.enabled && st.done === 0) throw { code: ErrorCode.UNAVAILABLE, message: 'content search is off' };
@@ -278,6 +286,57 @@ function fakeContent(mode, files, calls) {
       async contentUnread(ids) {
         return ids.map((id) => [id, st.settings.enabled && id % 6 === 0 ? reasons[(id / 6) % reasons.length] : null]);
       },
+    },
+  };
+}
+/** VFS-29: search by meaning: a download, then the passages prepared, then ready. `on` starts
+ *  it ready. Content hits from it carry `byMeaning` on every third hit while ready. */
+function fakeMeaning(mode) {
+  const st = {
+    settings: { enabled: mode === 'on', paused: false },
+    phase: { kind: mode === 'on' ? MeaningPhase.FINISHED : MeaningPhase.OFF },
+    done: 0, total: 0, secondsLeft: null, searchable: mode === 'on',
+  };
+  const cbs = new Set();
+  const emit = () => { for (const cb of cbs) cb(structuredClone(st)); };
+  const total = 3400;
+  let downloaded = 0;
+  setInterval(() => {
+    if (!st.settings.enabled || st.settings.paused || st.phase.kind === MeaningPhase.FINISHED) return;
+    if (downloaded < 158e6) {
+      downloaded = Math.min(158e6, downloaded + 20e6);
+      st.phase = { kind: MeaningPhase.DOWNLOADING, done: downloaded, total: 158e6 };
+    } else if (st.done < total) {
+      st.total = total;
+      st.done = Math.min(total, st.done + 200);
+      st.secondsLeft = Math.round((total - st.done) * 0.2);
+      st.phase = { kind: MeaningPhase.EMBEDDING };
+    } else {
+      st.phase = { kind: MeaningPhase.FINISHED };
+      st.secondsLeft = null;
+      st.searchable = true;
+    }
+    emit();
+  }, 500);
+  const status = () => {
+    if (!st.settings.enabled) st.phase = { kind: MeaningPhase.OFF };
+    else if (st.settings.paused) st.phase = { kind: MeaningPhase.PAUSED };
+    else if (st.phase.kind === MeaningPhase.OFF || st.phase.kind === MeaningPhase.PAUSED) st.phase = { kind: MeaningPhase.EMBEDDING };
+    emit();
+    return structuredClone(st);
+  };
+  return {
+    st,
+    api: {
+      async meaningStatus() { return structuredClone(st); },
+      async onMeaningStatus(cb) { cbs.add(cb); return () => cbs.delete(cb); },
+      async meaningOffer() {
+        await sleep(40);
+        return { downloadBytes: 158e6, chunks: total, secondsFast: Math.round(total * 0.09), secondsSlow: Math.round(total * 0.23), ramBytes: 700 * 2 ** 20 };
+      },
+      async meaningSetEnabled(on) { st.settings.enabled = on; if (on) st.settings.paused = false; return status(); },
+      async meaningSetPaused(p) { st.settings.paused = p; return status(); },
+      async meaningWarm() {},
     },
   };
 }
@@ -539,7 +598,8 @@ export function createFakeBackend(params) {
   };
   const updateCbs = new Set();
   const fakeCalls = { searchSources: 0, contentSearch: 0, contentOffer: 0, reveal: 0, openProjectPage: 0, lastProjectPage: null };
-  const content = fakeContent(params.get('content'), corpus.files, fakeCalls);
+  const meaning = fakeMeaning(params.get('meaning'));
+  const content = fakeContent(params.get('content'), corpus.files, fakeCalls, meaning.st);
   const bookmarkCbs = new Set();
   const bookmarks = { enabled: false, state: ReadState.NEVER, count: 0, profiles: 0, lastRead: null, roots: [] };
   const readBookmarks = () => Object.assign(bookmarks, {
@@ -855,6 +915,7 @@ export function createFakeBackend(params) {
     async onUpdateProgress(cb) { updateCbs.add(cb); return () => updateCbs.delete(cb); },
 
     ...content.api,
+    ...meaning.api,
     fakeCalls,
     /** Tests: the index-change event the indexer sends while it scans. */
     fakeIndexChanged() { for (const cb of changedCbs) cb(); },

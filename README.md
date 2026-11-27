@@ -186,12 +186,17 @@ macOS runners and produces:
   first run and the user has to choose to run it anyway.
 - `vfs-macos`: a zipped `VFS.app` signed with the stable self-signed identity (`docs/updates.md`), and `VFS.app.tar.gz`, the updater's
   macOS payload.
+- `vfs-embed-Windows`, `vfs-embed-macOS`: the embedding worker for search by meaning
+  (`vfs-embed-windows-x86_64.exe`, `vfs-embed-macos-aarch64`) with its updater signature
+  (`.sig`). It is not in the installer: the app downloads it with the model when search by
+  meaning is turned on (VFS-29 D21).
 - `vfs-release`: every release asset together, the updater signatures (`.sig`),
   `latest.json` for the updater and one combined `SHA256SUMS.txt`. On a tag, the workflow
   also creates a draft GitHub release with these files; publishing it is what makes installed
   apps offer the update.
 
-Each artifact carries a `SHA256SUMS.txt`; check a download with `sha256sum -c` (or
+The installer and macOS artifacts carry a `SHA256SUMS.txt`, and `vfs-release`'s covers every
+asset, the embedding workers included; check a download with `sha256sum -c` (or
 `shasum -a 256 -c` on macOS). Build provenance attestation is not published: for a private
 repository GitHub offers it only on Enterprise Cloud.
 

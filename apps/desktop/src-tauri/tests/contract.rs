@@ -254,6 +254,58 @@ fn all_error_codes() -> Vec<String> {
     all.iter().map(|e| e.code().to_string()).collect()
 }
 
+/// VFS-29: every `phase.kind` of the search by meaning service; the match makes a new variant
+/// fail to compile here until it is listed.
+fn meaning_phase_kinds() -> Vec<String> {
+    use vfs_semantic::service::Phase as M;
+    let all = vec![
+        M::Off,
+        M::Downloading { done: 0, total: 0 },
+        M::NoContent,
+        M::Embedding,
+        M::Waiting {
+            reason: WaitKind::InUse,
+        },
+        M::Paused,
+        M::Finished,
+        M::Failed {
+            detail: String::new(),
+        },
+    ];
+    for p in &all {
+        match p {
+            M::Off
+            | M::Downloading { .. }
+            | M::NoContent
+            | M::Embedding
+            | M::Waiting { .. }
+            | M::Paused
+            | M::Finished
+            | M::Failed { .. } => {}
+        }
+    }
+    all.iter()
+        .map(|p| {
+            serde_json::to_value(p).unwrap()["kind"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+/// VFS-29 R13: every `meaning` value of a content search answer.
+fn meaning_uses() -> Vec<String> {
+    use vfs_content::MeaningUse as U;
+    let all = [U::Off, U::Used, U::Unavailable];
+    for u in &all {
+        match u {
+            U::Off | U::Used | U::Unavailable => {}
+        }
+    }
+    serde_names(&all)
+}
+
 /// `Phase` is tagged by `kind`; the set holds the tags (VFS-27 R8).
 fn content_phase_kinds() -> Vec<String> {
     let all = vec![
@@ -392,6 +444,8 @@ fn contract_js_matches_the_rust_enums() {
         ("PatternReason", serde_names(&all_pattern_reasons())),
         ("Scope", serde_names(&all_scopes())),
         ("ContentPhase", content_phase_kinds()),
+        ("MeaningPhase", meaning_phase_kinds()),
+        ("MeaningUse", meaning_uses()),
         ("ContentWait", serde_names(&all_content_waits())),
         ("ContentStop", serde_names(&all_content_stops())),
         ("UnreadReason", serde_names(&all_unread_reasons())),

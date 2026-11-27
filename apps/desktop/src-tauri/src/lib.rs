@@ -10,6 +10,7 @@ pub mod commands;
 pub mod content;
 pub mod feedback;
 pub mod i18n;
+pub mod meaning;
 pub mod reveal;
 pub mod splash;
 pub mod updates;
@@ -190,6 +191,10 @@ pub fn init_core<R: Runtime>(app: &AppHandle<R>, db_path: &Path) -> Result<(), S
             .map_err(|e| e.to_string())?;
         // VFS-27: the background content indexer; with content search off it creates nothing.
         if let Some(runs) = app.try_state::<content::ContentRuns>() {
+            runs.start(app, vfs.clone(), db_path);
+        }
+        // VFS-29: search by meaning; with its switch off it creates nothing.
+        if let Some(runs) = app.try_state::<meaning::MeaningRuns>() {
             runs.start(app, vfs.clone(), db_path);
         }
         Ok(vfs)
@@ -489,6 +494,7 @@ pub fn run() {
             app.manage(WebviewSuspended::default());
             // VFS-27: the background content indexer, started with the index; an update stops it first.
             app.manage(content::ContentRuns::default());
+            app.manage(meaning::MeaningRuns::default());
             let handle = app.handle().clone();
             // VFS-22 R5: the OS language until the UI sends its own through `set_language`.
             let lang = i18n::Lang::system();
@@ -549,6 +555,9 @@ pub fn run() {
                 let _ = w.hide();
             }
             if let Some(runs) = app.try_state::<content::ContentRuns>() {
+                runs.stop_for_update();
+            }
+            if let Some(runs) = app.try_state::<meaning::MeaningRuns>() {
                 runs.stop_for_update();
             }
             if let Some(vfs) = app.try_state::<AppState>().and_then(|s| s.vfs().ok()) {

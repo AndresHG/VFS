@@ -79,6 +79,23 @@ jobs:
             --config tauri.sidecar.conf.json \
             --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
 
+      # VFS-29 D21: the embedding worker, a release asset the app downloads with the model when
+      # search by meaning is turned on; never in the installer. Signed with the updater key
+      # (the app checks it) and, on macOS, code-signed with the identity above.
+      - name: Build the embedding worker (VFS-29)
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signid.outputs.identity }}
+        run: python3 scripts/embed_worker.py build --out out-embed
+      - name: Upload embedding worker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vfs-embed-${{ runner.os }}
+          path: out-embed/
+          if-no-files-found: error
+
       - name: Check the bundle (worker inside, its version, installer size; VFS-27 AC-1)
         shell: bash
         run: python3 scripts/sidecar.py check
@@ -156,12 +173,13 @@ jobs:
           mkdir -p release
           cp dist/vfs-windows-installer/*-setup.exe dist/vfs-windows-installer/*-setup.exe.sig release/
           cp dist/vfs-macos/VFS-macos-*.zip dist/vfs-macos/VFS.app.tar.gz dist/vfs-macos/VFS.app.tar.gz.sig release/
+          cp dist/vfs-embed-*/vfs-embed-* release/
           win=$(ls release/*-setup.exe)
           python3 scripts/release_manifest.py --version "$version" \
             --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/$tag" \
             --platform "windows-x86_64=$win" --platform "darwin-aarch64=release/VFS.app.tar.gz" \
             --out release/latest.json
-          (cd release && sha256sum -- *-setup.exe VFS-macos-*.zip VFS.app.tar.gz > SHA256SUMS.txt)
+          (cd release && sha256sum -- *-setup.exe VFS-macos-*.zip VFS.app.tar.gz $(ls vfs-embed-* | grep -v '\.sig$') > SHA256SUMS.txt)
           cat release/latest.json
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

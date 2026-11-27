@@ -34,6 +34,11 @@ vfs-bookmarks.workspace = true
 vfs-content = { path = "../../../crates/vfs-content", default-features = false }
 # VFS-28: providers, keys, cost, ai.db and the ask flow.
 vfs-ai = { path = "../../../crates/vfs-ai" }
+# VFS-29: search by meaning, without the embedder: ONNX Runtime stays in the vfs-embed worker.
+vfs-semantic = { path = "../../../crates/vfs-semantic" }
+# VFS-29 D21: the model download, through the reqwest and rustls already in the binary.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde_json.workspace = true
 serde.workspace = true
 log.workspace = true
@@ -75,6 +80,7 @@ tauri-plugin-single-instance = "2"
 vfs-desktop = { path = ".", features = ["ai"] }
 vfs-ai = { path = "../../../crates/vfs-ai", features = ["test-support"] }
 vfs-bookmarks = { workspace = true, features = ["test-support"] }
+vfs-content = { path = "../../../crates/vfs-content", default-features = false, features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 tempfile.workspace = true
 rusqlite.workspace = true

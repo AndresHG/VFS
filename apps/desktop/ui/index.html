@@ -352,6 +352,16 @@
           </div>
           <button id="content-delete" class="btn btn-quiet" type="button" hidden data-s="contentDelete"></button>
         </section>
+        <!-- VFS-29 R1: «Búsqueda por significado», below the content switch, off by default and
+             available only while content search is on. Turning it on asks first (R1a). -->
+        <section class="setting" aria-labelledby="meaning-set-title">
+          <h3 id="meaning-set-title" data-s="meaningSetTitle"></h3>
+          <label class="toggle"><input type="checkbox" id="meaning-on"> <span data-s="meaningToggle"></span></label>
+          <p class="bookmarks-intro bookmarks-status" data-s="meaningIntro"></p>
+          <p class="bookmarks-status" id="meaning-needs-content" data-s="meaningNeedsContent" hidden></p>
+          <p class="bookmarks-status" id="meaning-status" role="status" hidden></p>
+          <button id="meaning-action" class="btn btn-quiet" type="button" hidden></button>
+        </section>
       </div>
       <div id="spanel-ai" class="spanel" role="tabpanel" aria-labelledby="stab-ai" hidden>
         <h3 class="spanel-title" data-s="settingsTabAi"></h3>
@@ -504,6 +514,15 @@
     <form method="dialog" class="confirm-actions">
       <button class="btn" value="cancel" autofocus data-s="cancel"></button>
       <button class="btn btn-primary" value="add" data-s="fileFilterConfirmAdd"></button>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-meaning" class="confirm" aria-labelledby="confirm-meaning-title" aria-describedby="confirm-meaning-desc">
+    <h2 id="confirm-meaning-title" data-s="meaningConfirmTitle"></h2>
+    <p id="confirm-meaning-desc"></p>
+    <form method="dialog" class="confirm-actions">
+      <button class="btn" value="cancel" autofocus data-s="cancel"></button>
+      <button class="btn btn-primary" value="enable" data-s="meaningConfirmYes"></button>
     </form>
   </dialog>
 

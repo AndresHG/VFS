@@ -345,7 +345,7 @@ pub fn ai_chat_send<R: Runtime>(
     let vfs = core.vfs()?;
     let ai: &AiState = &ai;
     off_runtime(|| {
-        let searcher = vfs_content::Searcher::open(&ai.index_db)
+        let searcher = crate::meaning::searcher(&app, &ai.index_db)
             .map_err(|e| ask_error(ask::AskError::Content(e)))?;
         let corpus = LocalCorpus {
             searcher: &searcher,

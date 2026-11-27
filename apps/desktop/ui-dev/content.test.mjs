@@ -7,9 +7,10 @@ import { readFileSync } from 'node:fs';
 import {
   CONTENT_DEBOUNCE_MS, ContentAction, TimeUnit, contentQueryDue, unreadLabel, contentStatusLine, createContentSearch, hitPage,
   offerDue, offerText, roughTime, sectionNotes, snippetRuns, unreadCandidates,
+  MeaningAction, meaningOfferText, meaningOn, meaningStatusLine,
 } from '../ui/content.js';
 import { CATALOGS, Lang, localeFor } from '../ui/strings.js';
-import { ContentPhase, ContentStop, ContentWait, FileKind, RootStatus, Source, UnreadReason } from '../ui/contract.js';
+import { ContentPhase, ContentStop, ContentWait, FileKind, MeaningPhase, MeaningUse, RootStatus, Source, UnreadReason } from '../ui/contract.js';
 
 const L = localeFor(Lang.ES, 'es-ES');
 const { S } = L;
@@ -262,4 +263,76 @@ test('Ajustes has the switch, the size and the delete with confirmation', () => 
   // VFS-34 R6: its content size field follows the switch; it is not repeated here.
   assert.match(mainJs, /showContentLimit\(\$\('content-max-row'\), contentOn\(st\)\)/);
   assert.equal([...html.matchAll(/type="number"[^>]*max="100000"/g)].length, 1, 'one content size field');
+});
+
+const meaning = (kind, extra = {}) => ({
+  settings: { enabled: true, paused: false },
+  done: 0, total: 0, secondsLeft: null, searchable: false,
+  ...extra,
+  phase: { kind, ...(extra.phase || {}) },
+});
+
+/** VFS-29 R1a: the confirmation gives the download size, the time for this archive as a
+ *  range and the memory needed, before anything is downloaded. */
+test('search by meaning asks first, with the size, the time and the memory', () => {
+  const text = meaningOfferText(L, { downloadBytes: 158e6, chunks: 540_000, secondsFast: 48_600, secondsSlow: 124_200, ramBytes: 700 * 2 ** 20 });
+  assert.match(text, /descargará el modelo \(.*MB\)/);
+  assert.match(text, /entre 14 y 35 horas/);
+  assert.match(text, /necesita unos .*MB de memoria/);
+  assert.match(text, /Nada sale de este equipo/);
+  assert.match(html, /<dialog id="confirm-meaning"[\s\S]*?value="enable" data-s="meaningConfirmYes"/);
+  // On only once confirmed: the switch goes back until the dialog says «enable».
+  assert.match(mainJs, /meaningToggle\.checked = false; \/\/ on only once confirmed/);
+  assert.match(mainJs, /meaningDialog\.returnValue === 'enable'\) meaningCall\(\(\) => api\.meaningSetEnabled\(true\)\)/);
+});
+
+/** VFS-29 R1: the switch sits below the content switch, off by default, and turning it on
+ *  needs content search. */
+test('the meaning switch sits below the content switch and needs it', () => {
+  const settings = html.slice(html.indexOf('<dialog id="settings"'), html.indexOf('</dialog>', html.indexOf('<dialog id="settings"')));
+  assert.ok(settings.indexOf('id="meaning-on"') > settings.indexOf('id="content-on"'));
+  assert.equal(S.meaningSetTitle, 'Búsqueda por significado');
+  assert.equal(meaningOn(null), false);
+  assert.equal(meaningOn(meaning(MeaningPhase.OFF, { settings: { enabled: false, paused: false } })), false);
+  assert.match(mainJs, /meaningToggle\.disabled = !st \|\| \(!on && !contentOn\(state\.content\)\);/);
+});
+
+/** VFS-29 R7: the line under the switch: download, progress with time left and pause, waits
+ *  with their reason, paused with resume, ready, a failure. */
+test('the meaning status line follows the service', () => {
+  assert.equal(meaningStatusLine(L, meaning(MeaningPhase.OFF, { settings: { enabled: false } })), null);
+  const dl = meaningStatusLine(L, meaning(MeaningPhase.DOWNLOADING, { phase: { done: 20e6, total: 158e6 } }));
+  assert.match(dl.text, /^Descargando el modelo: /);
+  assert.equal(dl.action, MeaningAction.PAUSE);
+  const run = meaningStatusLine(L, meaning(MeaningPhase.EMBEDDING, { done: 1200, total: 3400, secondsLeft: 7200 }));
+  assert.match(run.text, /1\.200 de 3\.400 fragmentos · quedan unas 2 horas/);
+  assert.equal(run.action, MeaningAction.PAUSE);
+  const wait = meaningStatusLine(L, meaning(MeaningPhase.WAITING, { done: 10, total: 30, phase: { reason: ContentWait.DISK_BUSY } }));
+  assert.match(wait.text, /el disco está ocupado/);
+  assert.deepEqual(meaningStatusLine(L, meaning(MeaningPhase.PAUSED)), { text: S.meaningPaused, action: MeaningAction.RESUME });
+  assert.deepEqual(meaningStatusLine(L, meaning(MeaningPhase.FINISHED)), { text: S.meaningFinished, action: null });
+  assert.equal(meaningStatusLine(L, meaning(MeaningPhase.FAILED, { phase: { detail: 'x' } })).text, S.meaningFailed);
+});
+
+/** VFS-29 AC-10 (R12), AC-11 (R13): a hit found by meaning alone says «relacionado por tema»;
+ *  when search by meaning cannot answer, the section says so, with the spec's sentence. */
+test('meaning hits are labelled and the fallback is said', () => {
+  assert.equal(S.meaningRelated, 'relacionado por tema');
+  assert.match(mainJs, /if \(hit\.byMeaning\) fragment\.append\(' ', el\('span', 'related', S\.meaningRelated\)\);/);
+  assert.equal(S.meaningUnavailable, 'Búsqueda por significado no disponible ahora; se muestran coincidencias por palabras');
+  const st = status(ContentPhase.FINISHED, { done: 100, total: 100 });
+  assert.deepEqual(sectionNotes(L, st, false, MeaningUse.UNAVAILABLE), [S.meaningUnavailable]);
+  assert.deepEqual(sectionNotes(L, st, false, MeaningUse.USED), []);
+  assert.deepEqual(sectionNotes(L, st, false), []);
+  assert.equal(CATALOGS[Lang.EN].meaningRelated, 'related by topic');
+});
+
+/** VFS-29 AC-11 (R11, R13): the content search keeps whether meaning took part for the notes. */
+test('the content search keeps whether meaning took part', async () => {
+  const views = [];
+  const api = { contentSearch: async () => ({ hits: [], partial: false, total: 0, totalCapped: false, meaning: MeaningUse.UNAVAILABLE }) };
+  const cs = createContentSearch({ api, render: (v) => views.push(v), schedule: (f) => { f(); return 1; }, cancel: () => {} });
+  cs.query('gastos médicos', {}, true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(views.at(-1).meaning, MeaningUse.UNAVAILABLE);
 });

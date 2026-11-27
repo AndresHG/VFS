@@ -403,6 +403,121 @@ fn content_status_until(webview: &WebviewWindow<MockRuntime>, f: impl Fn(&Value)
     }
 }
 
+/// VFS-29 AC-10, AC-11 (R11, D15): with search by meaning on and a complete vector set, the
+/// app's content searches and chats get a searcher with the ranker. With no worker able to
+/// start here, the ranker cannot answer, so the «Documentos» answer says meaning was
+/// unavailable (with it off it says off): the fused path is the one taken.
+#[test]
+fn content_searches_use_the_ranker_when_meaning_is_on() {
+    use vfs_desktop_lib::content::ContentRuns;
+    use vfs_desktop_lib::meaning::{MeaningRuns, RELEASES};
+    let data = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    app.manage(ContentRuns::default());
+    app.manage(MeaningRuns::default());
+    let db = data.path().join("app").join(INDEX_FILE);
+    let dir = db.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    // A content store and a complete vector set, as earlier runs left them.
+    vfs_content::testing::write_doc(&db, 1, "Factura de la clínica dental.").unwrap();
+    {
+        let mut store = vfs_semantic::store::Store::open(&db).unwrap();
+        let set = store.set_id(&vfs_semantic::LOCAL_MODEL).unwrap();
+        let v = vec![1.0f32 / (384f32).sqrt(); 384];
+        store
+            .insert(set, &[(vfs_semantic::store::text_hash("x"), v)])
+            .unwrap();
+        store.set_complete(set, true).unwrap();
+    }
+    // The model "installed" (files present, marker written), so nothing is downloaded.
+    let version = app.package_info().version.to_string();
+    let downloads = vfs_semantic::install::local_model(&format!("{RELEASES}/v{version}/"), "");
+    let models = vfs_semantic::service::model_dir(&dir);
+    std::fs::create_dir_all(&models).unwrap();
+    for d in &downloads {
+        std::fs::write(models.join(&d.file), b"not a real file").unwrap();
+    }
+    let urls: Vec<&str> = downloads.iter().map(|d| d.url.as_str()).collect();
+    std::fs::write(
+        models.join("installed.json"),
+        serde_json::to_string(&urls).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(vfs_semantic::service::SETTINGS_FILE),
+        r#"{"enabled":true}"#,
+    )
+    .unwrap();
+
+    init_core(app.handle(), &db).expect("init core");
+    let st = invoke(&webview, "meaning_status", json!({})).unwrap();
+    assert_eq!(st["searchable"], json!(true), "{st}");
+    let res = invoke(
+        &webview,
+        "content_search",
+        json!({ "query": "gastos médicos", "filters": {}, "offset": 0 }),
+    )
+    .unwrap();
+    assert_eq!(res["meaning"], json!("unavailable"), "{res}");
+    // A chat's searcher is the same one (D15).
+    let s = vfs_desktop_lib::meaning::searcher(app.handle(), &db).unwrap();
+    assert!(s.has_meaning());
+
+    // Switched off, searches are BM25 alone and say so.
+    invoke(&webview, "meaning_set_enabled", json!({ "on": false })).unwrap();
+    let res = invoke(
+        &webview,
+        "content_search",
+        json!({ "query": "gastos médicos", "filters": {}, "offset": 0 }),
+    )
+    .unwrap();
+    assert_eq!(res["meaning"], json!("off"), "{res}");
+    assert!(!vfs_desktop_lib::meaning::searcher(app.handle(), &db)
+        .unwrap()
+        .has_meaning());
+}
+
+/// VFS-29 AC-1 (R1, R1a, R15): search by meaning over IPC. Off by default: its status says off,
+/// pausing writes nothing, warming does nothing, and no model folder or vector store exists;
+/// the offer gives the download size and the memory before anything is downloaded; turning it
+/// on while content search is off is refused.
+#[test]
+fn meaning_commands_over_ipc() {
+    use vfs_desktop_lib::content::ContentRuns;
+    use vfs_desktop_lib::meaning::MeaningRuns;
+    let data = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app();
+    app.manage(ContentRuns::default());
+    app.manage(MeaningRuns::default());
+    let db = data.path().join("app").join(INDEX_FILE);
+    init_core(app.handle(), &db).expect("init core");
+    let dir = db.parent().unwrap();
+
+    let st = invoke(&webview, "meaning_status", json!({})).unwrap();
+    assert_eq!(st["phase"]["kind"], json!("off"));
+    assert_eq!(st["settings"]["enabled"], json!(false));
+    assert_eq!(st["searchable"], json!(false));
+    invoke(&webview, "meaning_set_paused", json!({ "paused": true })).unwrap();
+    invoke(&webview, "meaning_warm", json!({})).unwrap();
+    let offer = invoke(&webview, "meaning_offer", json!({})).unwrap();
+    assert!(
+        offer["downloadBytes"].as_u64().unwrap() > 100_000_000,
+        "{offer}"
+    );
+    assert!(offer["ramBytes"].as_u64().unwrap() > 0, "{offer}");
+    assert_eq!(offer["chunks"], json!(0), "content search is off");
+    let refused = invoke(&webview, "meaning_set_enabled", json!({ "on": true }));
+    assert!(refused.is_err(), "{refused:?}");
+    let st = invoke(&webview, "meaning_status", json!({})).unwrap();
+    assert_eq!(st["settings"]["enabled"], json!(false));
+    assert!(
+        !dir.join("meaning.json").exists(),
+        "nothing written while off"
+    );
+    assert!(!dir.join("models").exists());
+    assert!(!dir.join("vectors.db").exists());
+}
+
 /// VFS-27 AC-2, AC-4, AC-5, AC-14 over IPC: the content commands with their exact payloads and
 /// camelCase shapes. Off by default, nothing has a reason and search reports off; switched
 /// on with no worker next to the test binary, the run stops with the worker reason and no

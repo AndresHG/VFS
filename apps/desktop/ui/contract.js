@@ -112,6 +112,21 @@ export const ContentPhase = Object.freeze({
   STOPPED: 'stopped',
 });
 
+/** `phase.kind` of the search by meaning service (VFS-29 R1a, R7). */
+export const MeaningPhase = Object.freeze({
+  OFF: 'off',
+  DOWNLOADING: 'downloading',
+  NO_CONTENT: 'noContent',
+  EMBEDDING: 'embedding',
+  WAITING: 'waiting',
+  PAUSED: 'paused',
+  FINISHED: 'finished',
+  FAILED: 'failed',
+});
+
+/** `meaning` of a content search answer (VFS-29 R13): whether search by meaning took part. */
+export const MeaningUse = Object.freeze({ OFF: 'off', USED: 'used', UNAVAILABLE: 'unavailable' });
+
 /** `phase.reason` of a waiting content run (VFS-27 R6, R7). */
 export const ContentWait = Object.freeze({
   NAME_INDEXING: 'nameIndexing',

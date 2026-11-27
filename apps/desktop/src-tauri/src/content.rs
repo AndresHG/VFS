@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use vfs_content::pace::PaceConfig;
 use vfs_content::service::{ContentService, Events, Offer, Probes, ServiceConfig, Status};
 use vfs_content::{ContentResponse, IndexOptions, Query, Searcher, UnreadReason};
@@ -89,6 +89,17 @@ impl Probes for AppProbes {
     }
 }
 
+/// The machine's probes for another background service that follows the same pace (VFS-29
+/// R7: search by meaning).
+pub(crate) fn app_probes(vfs: Vfs, data_dir: PathBuf) -> Box<dyn Probes> {
+    Box::new(AppProbes {
+        vfs,
+        data_dir,
+        samplers: HashMap::new(),
+        cpu: CpuSampler::default(),
+    })
+}
+
 /// Status events to the window, diagnostic records to the log (R8, R16).
 struct AppEvents<R: Runtime> {
     app: AppHandle<R>,
@@ -98,6 +109,13 @@ impl<R: Runtime> Events for AppEvents<R> {
     fn status(&self, status: &Status) {
         if let Err(e) = self.app.emit(EVENT_CONTENT_STATUS, status) {
             log::warn!("emit {EVENT_CONTENT_STATUS}: {e}");
+        }
+        // A finished content run may have read new text: search by meaning embeds it once
+        // content indexing is quiet (VFS-29 R4).
+        if crate::meaning::content_status_reports_text(status) {
+            if let Some(m) = self.app.try_state::<crate::meaning::MeaningRuns>() {
+                m.notify_content_changed();
+            }
         }
     }
 
@@ -153,6 +171,11 @@ impl ContentRuns {
             Some(svc) => Ok(f(&svc)),
             None => Err(unavailable()),
         }
+    }
+
+    /// Whether content search is switched on (VFS-29 R1: search by meaning needs it).
+    pub fn enabled(&self) -> bool {
+        self.service().is_some_and(|s| s.status().settings.enabled)
     }
 
     /// The name index the service reads; `None` until it is open.
@@ -217,11 +240,19 @@ pub fn content_status(runs: State<'_, ContentRuns>) -> Result<Status, ApiError> 
 
 /// «Buscar también dentro de los documentos» (R5).
 #[tauri::command(async)]
-pub fn content_set_enabled(runs: State<'_, ContentRuns>, on: bool) -> Result<Status, ApiError> {
-    runs.with(|s| {
+pub fn content_set_enabled<R: Runtime>(
+    app: AppHandle<R>,
+    runs: State<'_, ContentRuns>,
+    on: bool,
+) -> Result<Status, ApiError> {
+    let status = runs.with(|s| {
         s.set_enabled(on);
         s.status()
-    })
+    })?;
+    if !on {
+        crate::meaning::content_switched_off(&app); // VFS-29 R1
+    }
+    Ok(status)
 }
 
 /// «Pausar» / «Reanudar» (R8).
@@ -274,20 +305,29 @@ pub fn content_offer(runs: State<'_, ContentRuns>) -> Result<Offer, ApiError> {
 
 /// «Borrar lo leído de los documentos» (R5).
 #[tauri::command(async)]
-pub fn content_delete_store(runs: State<'_, ContentRuns>) -> Result<Status, ApiError> {
-    runs.with(|s| s.delete_store().map(|_| s.status()))?
-        .map_err(store_error)
+pub fn content_delete_store<R: Runtime>(
+    app: AppHandle<R>,
+    runs: State<'_, ContentRuns>,
+) -> Result<Status, ApiError> {
+    let status = runs
+        .with(|s| s.delete_store().map(|_| s.status()))?
+        .map_err(store_error)?;
+    crate::meaning::content_switched_off(&app); // VFS-29 R1: deleting switches content off
+    Ok(status)
 }
 
 /// One page of content hits (R12): `retrieve` with `offset`, 20 at a time.
+/// With search by meaning on, the page is the fused list (VFS-29 R11).
 #[tauri::command(async)]
-pub fn content_search(
+pub fn content_search<R: Runtime>(
+    app: AppHandle<R>,
     runs: State<'_, ContentRuns>,
     query: String,
     filters: SearchFilters,
     offset: u32,
 ) -> Result<ContentResponse, ApiError> {
-    runs.searcher()
+    let db = runs.index_db().ok_or_else(unavailable)?;
+    crate::meaning::searcher(&app, &db)
         .map_err(store_error)?
         .retrieve(&Query::Text(query), &filters, PAGE, offset)
         .map_err(store_error)
