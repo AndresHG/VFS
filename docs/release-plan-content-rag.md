@@ -72,6 +72,21 @@ so v0.4 brings one new risk (the AI) and v0.3.1 brought the other (the signature
 probe, index size after compaction) needs the field visit. It does not block v0.4, but if it
 shows a problem, the fix ships first as a 0.3.x.
 
+## v0.5: search by meaning
+
+VFS-29c shipped in four PRs (#238–#241, plus #242 for the confirmation's copy): the local model
+multilingual-e5-small int8, fused with BM25, off by default, turned on in Ajustes → Documentos
+after a confirmation with the download size, the time for the archive and the memory. The
+`vfs-embed` worker is a release asset, never in the installer (VFS-29 D18, D21): the app
+downloads it from the release of its own version, so **a v0.5 release published without the two
+worker files and their `.sig` cannot turn search by meaning on**. What is left before v0.5:
+
+| Order | Step | What | Who | Effort |
+|---|---|---|---|---|
+| 1 | Tag | Tag `v0.5.0`; the draft release must hold `vfs-embed-windows-x86_64.exe`, `vfs-embed-macos-aarch64` and their `.sig`, listed in `SHA256SUMS.txt` | session | ¼ |
+| 2 | Owner test | The draft's build tried on the owner's Mac; the worker download works only once the release is published | owner | ½ |
+| 3 | Publish | Replace the generated notes with hand-written ones and publish | owner | ¼ |
+
 ## Later
 
 - VFS-29 (hybrid search), after its gate on the golden set.

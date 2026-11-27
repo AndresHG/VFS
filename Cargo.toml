@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/vfs-core", "crates/vfs-bookmarks", "crates/vfs-ai", "crates/vfs-content", "crates/vfs-semantic", "crates/vfs-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.99"  # Xberg 1.4 (vfs-content) needs 1.99; VFS-2 D16
 publish = false
