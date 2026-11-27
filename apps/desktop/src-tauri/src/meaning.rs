@@ -36,6 +36,9 @@ const MS_PER_CHUNK_FAST: u64 = 90;
 const MS_PER_CHUNK_SLOW: u64 = 230;
 /// Memory the worker needs while embedding (0.64–0.70 GB measured, D18).
 const WORKER_RAM_BYTES: u64 = 700 * 1024 * 1024;
+/// Memory the query model needs while «Documentos» or a chat is in use (0.57 GB after load,
+/// measured in 29c), released after [`IDLE_RELEASE`] without a search.
+const SEARCH_RAM_BYTES: u64 = 570 * 1024 * 1024;
 
 /// The app's HTTP client for the download (the reqwest already in the binary), built on the
 /// first request: a blocking client starts a thread, which must not exist while search by
@@ -221,6 +224,9 @@ pub struct MeaningOffer {
     pub seconds_fast: u64,
     pub seconds_slow: u64,
     pub ram_bytes: u64,
+    /// Memory while searching, and the minutes without a search after which it is released.
+    pub search_ram_bytes: u64,
+    pub idle_minutes: u64,
 }
 
 /// The offer for an archive of `chunks` chunks and a download of `download_bytes`.
@@ -231,6 +237,8 @@ pub fn offer_for(chunks: u64, download_bytes: u64) -> MeaningOffer {
         seconds_fast: chunks * MS_PER_CHUNK_FAST / 1000,
         seconds_slow: chunks * MS_PER_CHUNK_SLOW / 1000,
         ram_bytes: WORKER_RAM_BYTES,
+        search_ram_bytes: SEARCH_RAM_BYTES,
+        idle_minutes: IDLE_RELEASE.as_secs() / 60,
     }
 }
 
@@ -327,7 +335,8 @@ mod tests {
     }
 
     /// VFS-29 R1a: the confirmation gives the download size, the time for this archive on a
-    /// fast and a slow PC, and the memory needed.
+    /// fast and a slow PC, the memory needed while preparing and while searching, and when the
+    /// search memory is released (R15).
     #[test]
     fn the_offer_scales_with_the_archive() {
         let o = offer_for(540_000, 158_000_000);
@@ -337,6 +346,9 @@ mod tests {
         assert!((12 * 3600..15 * 3600).contains(&o.seconds_fast), "{o:?}");
         assert!((30 * 3600..36 * 3600).contains(&o.seconds_slow), "{o:?}");
         assert!(o.ram_bytes > 600 << 20);
+        // The memory while searching and when it is released (VFS-29 R15).
+        assert!(o.search_ram_bytes > 500 << 20 && o.search_ram_bytes < o.ram_bytes);
+        assert_eq!(o.idle_minutes, IDLE_RELEASE.as_secs() / 60);
         assert_eq!(offer_for(0, 1).seconds_slow, 0);
     }
 }

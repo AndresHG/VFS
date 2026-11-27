@@ -272,13 +272,16 @@ const meaning = (kind, extra = {}) => ({
   phase: { kind, ...(extra.phase || {}) },
 });
 
-/** VFS-29 R1a: the confirmation gives the download size, the time for this archive as a
- *  range and the memory needed, before anything is downloaded. */
+/** VFS-29 R1a, R15: the confirmation gives the download size, the time for this archive as a
+ *  range, the memory needed while preparing and while searching, and when the search memory is
+ *  released, before anything is downloaded. */
 test('search by meaning asks first, with the size, the time and the memory', () => {
-  const text = meaningOfferText(L, { downloadBytes: 158e6, chunks: 540_000, secondsFast: 48_600, secondsSlow: 124_200, ramBytes: 700 * 2 ** 20 });
+  const offer = { downloadBytes: 158e6, chunks: 540_000, secondsFast: 48_600, secondsSlow: 124_200, ramBytes: 700 * 2 ** 20, searchRamBytes: 570 * 2 ** 20, idleMinutes: 5 };
+  const text = meaningOfferText(L, offer);
   assert.match(text, /descargará el modelo \(.*MB\)/);
   assert.match(text, /entre 14 y 35 horas/);
-  assert.match(text, /necesita unos .*MB de memoria/);
+  assert.match(text, /Mientras prepara necesita unos 700 MB de memoria; al buscar, unos 570 MB, que se liberan tras 5 minutos sin buscar\./);
+  assert.match(meaningOfferText(localeFor(Lang.EN, 'en-GB'), offer), /while you search, about 570 MB, released after 5 minutes without a search\./);
   assert.match(text, /Nada sale de este equipo/);
   assert.match(html, /<dialog id="confirm-meaning"[\s\S]*?value="enable" data-s="meaningConfirmYes"/);
   // On only once confirmed: the switch goes back until the dialog says «enable».

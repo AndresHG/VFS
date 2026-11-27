@@ -339,7 +339,7 @@ export const es = {
   meaningIntro: 'Encuentra documentos por el tema del que tratan, aunque no contengan las palabras que escribe: «gastos médicos» encuentra la factura del dentista. VFS descarga un modelo de lenguaje que trabaja en este equipo; nada sale de él.',
   meaningNeedsContent: 'Primero active la búsqueda dentro de los documentos.',
   meaningConfirmTitle: '¿Activar la búsqueda por significado?',
-  meaningConfirmBody: (size, time, ram) => `VFS descargará el modelo (${size}) y preparará sus documentos en segundo plano. Para este archivo tardará ${time} con el equipo sin usar, más mientras lo use. Mientras trabaja necesita unos ${ram} de memoria. Nada sale de este equipo.`,
+  meaningConfirmBody: (size, time, ram, searchRam, minutes) => `VFS descargará el modelo (${size}) y preparará sus documentos en segundo plano. Para este archivo tardará ${time} con el equipo sin usar, más mientras lo use. Mientras prepara necesita unos ${ram} de memoria; al buscar, unos ${searchRam}, que se liberan tras ${minutes} minutos sin buscar. Nada sale de este equipo.`,
   meaningConfirmYes: 'Descargar y activar',
   meaningDownloading: (done, total) => `Descargando el modelo: ${done} de ${total}`,
   meaningNoContent: 'Esperando a que se lea el texto de los documentos.',

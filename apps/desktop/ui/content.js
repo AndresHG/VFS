@@ -110,11 +110,12 @@ export function meaningOn(st) {
 }
 
 /** The confirmation's sentence before anything is downloaded (VFS-29 R1a). `o` is
- *  `meaning_offer`'s answer: {downloadBytes, chunks, secondsFast, secondsSlow, ramBytes}. */
+ *  `meaning_offer`'s answer: {downloadBytes, chunks, secondsFast, secondsSlow, ramBytes,
+ *  searchRamBytes, idleMinutes}. */
 export function meaningOfferText({ S, N }, o) {
   const t = roughTime(o.secondsFast, o.secondsSlow);
   const time = S.timeRange[t.unit](N.count(t.lo), N.count(t.hi));
-  return S.meaningConfirmBody(N.size(o.downloadBytes), time, N.size(o.ramBytes));
+  return S.meaningConfirmBody(N.size(o.downloadBytes), time, N.size(o.ramBytes), N.size(o.searchRamBytes), N.count(o.idleMinutes));
 }
 
 /** The line under the switch for status `st` (VFS-29 R1a, R7): {text, action} or null. */
