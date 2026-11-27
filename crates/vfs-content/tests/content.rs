@@ -1081,7 +1081,7 @@ fn ac20_worker_exits_when_the_parent_pipe_closes() {
         if child.try_wait().unwrap().is_some() {
             break;
         }
-        // R18 says 2 s; a loaded CI runner can delay the exit past it (seen on macOS), so
+        // AC-20 says 2 s; a loaded CI runner can delay the exit past it (seen on macOS), so
         // the check allows 5 s: an orphaned worker never exits at all.
         if t.elapsed() > Duration::from_secs(5) {
             let _ = child.kill();
