@@ -1,10 +1,10 @@
-# Release plan: content search (v0.3) and "ask your archive" (v0.4)
+# Release plan: content search (v0.3), "ask your archive" (v0.4) and search by meaning (v0.5)
 
 The owner decided on 2026-11-22 to ship RAG v1 in v0.4, shortly after v0.3. The specs are
 [VFS-2](../specs/vfs-2-content-search/spec.md), [VFS-27](../specs/vfs-27-content-in-app/spec.md),
 [VFS-28](../specs/vfs-28-ask-archive/spec.md), [VFS-34](../specs/vfs-34-file-filter/spec.md)
 (file filter, added to v0.3 at the owner's request) and
-[VFS-29](../specs/vfs-29-hybrid-search/spec.md) (outline) and
+[VFS-29](../specs/vfs-29-hybrid-search/spec.md) (search by meaning, v0.5) and
 [VFS-38](../specs/vfs-38-search-modes/spec.md) («Buscar en» and the shorter filter line). Efforts are working days of one session **[estimate]**.
 
 ## Why not both in v0.3
@@ -89,10 +89,10 @@ worker files and their `.sig` cannot turn search by meaning on**. What is left b
 
 ## Later
 
-- VFS-29 (hybrid search), after its gate on the golden set.
+- VFS-29a (optional): the API embedder (OpenAI, Voyage), with its key and per-folder consent.
 - OCR (#28).
 - Which folders have their content read (#198): every indexed folder by default, with a
-  «Leer contenido» switch per folder row to leave one out, in the same row as VFS-29's
+  «Leer contenido» switch per folder row to leave one out, in the same row as VFS-29a's
   per-folder consent (owner, 2026-11-25). Needs its own spec.
 - Model selector in Ajustes (#220): choose the answer and rewrite models and the reasoning
   level, with the cost of each (owner, 2026-11-25). Needs its own spec.
