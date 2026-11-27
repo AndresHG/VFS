@@ -106,7 +106,12 @@ pub fn run(
             }
         }
     }
-    store.set_locations(&locations)?;
+    // Rewritten only when a chunk moved, appeared or went: an unchanged archive writes
+    // nothing (VFS-50).
+    locations.sort_unstable();
+    if store.locations()? != locations {
+        store.set_locations(&locations)?;
+    }
     drop(locations);
     // A new set's first batch fixes its mean (store::MEAN_SAMPLE).
     let mut batch_size = if store.mean(set)?.is_none() {

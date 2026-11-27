@@ -31,8 +31,6 @@ pub const MODELS_DIR: &str = "models";
 /// After content indexing reports new text, a run waits this long without a further report
 /// (VFS-50: work after a change follows the change, not every document).
 pub const CHANGE_QUIET: Duration = Duration::from_secs(120);
-/// With nothing reported, the thread looks again this often.
-const IDLE_RECHECK: Duration = Duration::from_secs(10 * 60);
 /// The first retry after a failed download or run, doubling up to [`RETRY_MAX`] (R7).
 const RETRY_FIRST: Duration = Duration::from_secs(60);
 const RETRY_MAX: Duration = Duration::from_secs(60 * 60);
@@ -224,9 +222,7 @@ impl MeaningService {
     /// «Búsqueda por significado» (R1). On: the download and the embedding start (R1a);
     /// off: they stop, and the rows and workers are released.
     pub fn set_enabled(&self, on: bool) {
-        if !on {
-            self.shared.stop.store(true, Ordering::SeqCst);
-        }
+        self.shared.stop.store(!on, Ordering::SeqCst);
         self.change(|st| {
             st.status.settings.enabled = on;
             if on {
@@ -244,9 +240,9 @@ impl MeaningService {
     }
 
     pub fn set_paused(&self, paused: bool) {
-        if paused {
-            self.shared.stop.store(true, Ordering::SeqCst);
-        }
+        // The stop flag is raised here and lowered only here or on switching on, never by
+        // the thread, so a pause or switch-off cannot slip past a run that is starting.
+        self.shared.stop.store(paused, Ordering::SeqCst);
         self.change(|st| st.status.settings.paused = paused);
     }
 
@@ -385,16 +381,15 @@ fn run_loop(shared: &Shared, mut probes: Box<dyn Probes>) -> Box<dyn Probes> {
         }
         if shared.lock().status.settings.paused {
             shared.set(|s| s.phase = Phase::Paused);
-            shared.stop.store(false, Ordering::SeqCst);
-            wait_poke(shared, IDLE_RECHECK);
+            wait_poke(shared, None);
             continue;
         }
-        shared.stop.store(false, Ordering::SeqCst);
         let outcome = step(shared, &mut *probes);
         match outcome {
             Step::Done => {
                 retry = RETRY_FIRST;
-                wait_poke(shared, IDLE_RECHECK);
+                // Nothing runs until content indexing reports new text or the user acts.
+                wait_poke(shared, None);
                 // New text reported: let content indexing settle first (VFS-50).
                 loop {
                     let quiet_for = shared.lock().changed_at.map(|t| t.elapsed());
@@ -413,19 +408,30 @@ fn run_loop(shared: &Shared, mut probes: Box<dyn Probes>) -> Box<dyn Probes> {
             Step::Failed(detail) => {
                 log::warn!("search by meaning: {detail}");
                 shared.set(|s| s.phase = Phase::Failed { detail });
-                wait_poke(shared, retry);
+                wait_poke(shared, Some(retry));
                 retry = (retry * 2).min(RETRY_MAX);
             }
         }
     }
 }
 
-fn wait_poke(shared: &Shared, d: Duration) {
+/// Waits for a poke (a change of settings, new text, shutdown), at most `d` when given.
+fn wait_poke(shared: &Shared, d: Option<Duration>) {
     let st = shared.lock();
-    let _ = shared
-        .wake
-        .wait_timeout_while(st, d, |s| !s.poked)
-        .unwrap_or_else(|e| e.into_inner());
+    match d {
+        Some(d) => drop(
+            shared
+                .wake
+                .wait_timeout_while(st, d, |s| !s.poked)
+                .unwrap_or_else(|e| e.into_inner()),
+        ),
+        None => drop(
+            shared
+                .wake
+                .wait_while(st, |s| !s.poked)
+                .unwrap_or_else(|e| e.into_inner()),
+        ),
+    }
 }
 
 enum Step {
@@ -475,6 +481,10 @@ fn step(shared: &Shared, probes: &mut dyn Probes) -> Step {
     let mut times: VecDeque<Duration> = VecDeque::new();
     let mut batch_started = Instant::now();
     let mut prev_done = 0u64;
+    // The pace applies before the run reads the archive too, not only between batches.
+    if !pace_wait(shared, &mut pace, probes, &data_dir, &mut || {}) {
+        return Step::Held;
+    }
     shared.set(|s| {
         s.phase = Phase::Embedding;
         s.done = 0;
@@ -506,42 +516,9 @@ fn step(shared: &Shared, probes: &mut dyn Probes) -> Step {
                 s.seconds_left = Some(left.as_secs());
             });
             // The pace rules before the next batch (VFS-27 R7).
-            let mut waited = Duration::ZERO;
-            loop {
-                if shared.holding() || shared.stop.load(Ordering::Relaxed) {
-                    return false;
-                }
-                // Embedding reads the app data drive (content.db, vectors.db).
-                let mut disk = probes.disk_queue(&data_dir);
-                let mut cpu = probes.cpu();
-                let decision = pace.decide(
-                    Instant::now(),
-                    Readings {
-                        name_busy: probes.name_busy(),
-                        idle: probes.idle(),
-                        free_bytes: probes.free_bytes(),
-                        disk: &mut || disk.take(),
-                        cpu: &mut || cpu.take(),
-                    },
-                );
-                match decision {
-                    Decision::Read => break,
-                    Decision::Wait(d, reason) => {
-                        shared.set(|s| {
-                            s.phase = Phase::Waiting {
-                                reason: reason.into(),
-                            }
-                        });
-                        waited += d;
-                        if waited > KILL_WORKER_AFTER {
-                            worker.borrow_mut().kill();
-                        }
-                        if !shared.sleep(d) {
-                            return false;
-                        }
-                        shared.lock().poked = false;
-                    }
-                }
+            let mut on_long_wait = || worker.borrow_mut().kill();
+            if !pace_wait(shared, &mut pace, probes, &data_dir, &mut on_long_wait) {
+                return false;
             }
             shared.set(|s| s.phase = Phase::Embedding);
             batch_started = Instant::now();
@@ -569,6 +546,55 @@ fn step(shared: &Shared, probes: &mut dyn Probes) -> Step {
                 s.searchable = searchable;
             });
             Step::Done
+        }
+    }
+}
+
+/// Waits until the pace rules let the next batch run (VFS-27 R7), showing why it waits;
+/// `on_long_wait` runs once a wait has lasted [`KILL_WORKER_AFTER`]. False when the service
+/// is paused, switched off or stopped meanwhile.
+fn pace_wait(
+    shared: &Shared,
+    pace: &mut Pace,
+    probes: &mut dyn Probes,
+    data_dir: &Path,
+    on_long_wait: &mut dyn FnMut(),
+) -> bool {
+    let mut waited = Duration::ZERO;
+    loop {
+        if shared.holding() || shared.stop.load(Ordering::Relaxed) {
+            return false;
+        }
+        // Embedding reads the app data drive (content.db, vectors.db).
+        let mut disk = probes.disk_queue(data_dir);
+        let mut cpu = probes.cpu();
+        let decision = pace.decide(
+            Instant::now(),
+            Readings {
+                name_busy: probes.name_busy(),
+                idle: probes.idle(),
+                free_bytes: probes.free_bytes(),
+                disk: &mut || disk.take(),
+                cpu: &mut || cpu.take(),
+            },
+        );
+        match decision {
+            Decision::Read => return true,
+            Decision::Wait(d, reason) => {
+                shared.set(|s| {
+                    s.phase = Phase::Waiting {
+                        reason: reason.into(),
+                    }
+                });
+                waited += d;
+                if waited > KILL_WORKER_AFTER {
+                    on_long_wait();
+                }
+                if !shared.sleep(d) {
+                    return false;
+                }
+                shared.lock().poked = false;
+            }
         }
     }
 }

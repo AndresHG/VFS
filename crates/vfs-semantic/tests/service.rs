@@ -190,7 +190,7 @@ fn switched_on_it_downloads_embeds_and_serves() {
 }
 
 /// VFS-29 AC-4 (R4): with the switch on, a document content indexing reads later is
-/// embedded without asking again.
+/// embedded without asking again, once content indexing reports it; with no report, no run.
 #[test]
 fn new_documents_are_embedded_without_asking() {
     let app = App::new(2);
@@ -201,6 +201,10 @@ fn new_documents_are_embedded_without_asking() {
     let (set, _) = store.search_set().unwrap().unwrap();
     let before = store.count(set).unwrap();
     vfs_content::testing::write_doc(&app.db, 50, "Un documento nuevo, con otro texto.").unwrap();
+    // Nothing runs on its own: only content indexing's report starts a run (VFS-50).
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(store.count(set).unwrap(), before, "no run without a report");
+    assert_eq!(svc.status().phase, Phase::Finished);
     svc.notify_content_changed();
     let t = Instant::now();
     while store.count(set).unwrap() == before {

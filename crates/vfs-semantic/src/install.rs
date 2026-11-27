@@ -1,8 +1,9 @@
 //! Downloading the local model on request (VFS-29 R1a, R16, D18): the model and its
 //! tokenizer from Hugging Face at a pinned revision, checked against pinned SHA-256 digests,
 //! and the `vfs-embed` worker from this version's release, checked against the release
-//! signature made with the updater's key. Nothing is installed until every file is complete
-//! and checked; a stopped or failed download leaves no file behind but its `.part`.
+//! signature made with the updater's key. Nothing counts as installed until every file is
+//! complete and checked: a file that fails is removed, and one already in place that passes
+//! its check is not downloaded again, so a retry fetches only what is missing.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -85,7 +86,19 @@ pub fn worker_asset() -> String {
 pub fn local_model(release_base: &str, pubkey: &str) -> Vec<Download> {
     let hf = format!("https://huggingface.co/intfloat/multilingual-e5-small/resolve/{E5_REVISION}");
     let asset = worker_asset();
+    // The worker first: if this platform has no worker in the release, nothing larger is
+    // fetched in vain.
     vec![
+        Download {
+            file: worker_file(),
+            url: format!("{release_base}{asset}"),
+            check: Check::Signed {
+                sig_url: format!("{release_base}{asset}.sig"),
+                pubkey: pubkey.into(),
+            },
+            bytes: None,
+            executable: true,
+        },
         Download {
             file: LOCAL_MODEL.model_file.into(),
             url: format!("{hf}/onnx/model_qint8_avx512_vnni.onnx"),
@@ -99,16 +112,6 @@ pub fn local_model(release_base: &str, pubkey: &str) -> Vec<Download> {
             check: Check::Sha256(E5_TOKENIZER_SHA256),
             bytes: Some(E5_TOKENIZER_BYTES),
             executable: false,
-        },
-        Download {
-            file: worker_file(),
-            url: format!("{release_base}{asset}"),
-            check: Check::Signed {
-                sig_url: format!("{release_base}{asset}.sig"),
-                pubkey: pubkey.into(),
-            },
-            bytes: None,
-            executable: true,
         },
     ]
 }
@@ -151,6 +154,16 @@ pub fn install(
     let total = download_bytes(downloads);
     let mut done = 0u64;
     for d in downloads {
+        if let (Check::Sha256(hex), Some(bytes)) = (&d.check, d.bytes) {
+            let path = dir.join(&d.file);
+            if std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes)
+                && sha256_file(&path)? == *hex
+            {
+                done += bytes;
+                progress(done, total.max(done));
+                continue;
+            }
+        }
         let part = dir.join(format!("{}.part", d.file));
         let result = fetch_one(d, &part, fetch, stop, &mut |n| {
             done += n;
@@ -252,4 +265,18 @@ pub fn verify_signature(data: &[u8], sig_b64: &str, pubkey_b64: &str) -> bool {
         (Ok(pk), Ok(sig)) => pk.verify(data, &sig, false).is_ok(),
         _ => false,
     }
+}
+
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    let mut f = std::fs::File::open(path)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }

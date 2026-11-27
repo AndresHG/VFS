@@ -168,3 +168,28 @@ fn the_local_model_lists_its_files_and_size() {
     assert!(worker.url.ends_with(&install::worker_asset()));
     assert!(matches!(&worker.check, Check::Signed { sig_url, .. } if sig_url.ends_with(".sig")));
 }
+
+/// VFS-29 R7: a retry downloads only what is missing: a file already in place that passes
+/// its check is kept.
+#[test]
+fn a_retry_keeps_checked_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = downloads();
+    std::fs::write(dir.path().join("model.onnx"), b"model").unwrap();
+    let worker_only = Fake(HashMap::from([
+        ("https://r/worker".to_string(), WORKER.to_vec()),
+        (
+            "https://r/worker.sig".to_string(),
+            TEST_SIG.as_bytes().to_vec(),
+        ),
+    ]));
+    install::install(
+        dir.path(),
+        &d,
+        &worker_only,
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert!(install::installed(dir.path(), &d));
+}
