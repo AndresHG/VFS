@@ -119,11 +119,13 @@ fn both_copies_are_found() {
     assert_eq!(first, vec![d[3].0, 40]);
 }
 
-/// VFS-29 R13: before the rows are loaded and the query worker is ready, the ranker says so
-/// at once instead of making the search wait; with no complete vector set it never starts a
-/// worker and creates no file.
+/// VFS-29 R13: the first search, before the rows are loaded and the query worker is ready,
+/// waits for them up to the query limit instead of falling back to words at once (the 0.5.0
+/// e2e: the first search after «Documentos» opened said «no disponible»), also after new
+/// vectors dropped the rows; past the limit it says so; with no complete vector set it says
+/// so, never starts a worker and creates no file.
 #[test]
-fn not_ready_answers_at_once() {
+fn the_first_search_waits_for_the_load_within_the_limit() {
     let d = docs();
     let refs: Vec<(i64, &str)> = d.iter().map(|(i, t)| (*i, t.as_str())).collect();
     let (_t, db) = index(&refs);
@@ -133,11 +135,21 @@ fn not_ready_answers_at_once() {
         Duration::from_secs(5),
         Duration::from_secs(600),
     );
+    assert_eq!(m.rank(&d[0].1, 5).unwrap()[0].file_id, d[0].0);
+    // New vectors drop the rows but keep the worker: the next search waits for them too.
+    m.reload();
+    assert!(m.rank("hola", 5).is_ok(), "after reload");
+
+    // A load slower than the limit: the search falls back to words within it.
+    let slow = ranker(
+        &db,
+        &["fake:32", "slow-start:5000"],
+        Duration::from_millis(300),
+        Duration::from_secs(600),
+    );
     let t = Instant::now();
-    assert_eq!(m.rank("hola", 5), Err(MeaningUnavailable::NotReady));
-    assert!(t.elapsed() < Duration::from_millis(500));
-    assert!(m.wait_ready(Duration::from_secs(30)));
-    assert!(m.rank("hola", 5).is_ok());
+    assert_eq!(slow.rank("hola", 5), Err(MeaningUnavailable::NotReady));
+    assert!(t.elapsed() < Duration::from_secs(2));
 
     let empty = tempfile::tempdir().unwrap();
     let none = ranker(
@@ -200,7 +212,8 @@ fn unused_rows_and_worker_are_released() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(!m.is_loaded(), "released after the idle time");
-    assert_eq!(m.rank("hola", 5), Err(MeaningUnavailable::NotReady));
-    assert!(m.wait_ready(Duration::from_secs(30)));
-    assert!(m.rank("hola", 5).is_ok());
+    assert!(
+        m.rank("hola", 5).is_ok(),
+        "the next search loads them again (R13 wait)"
+    );
 }
