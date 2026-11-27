@@ -27,7 +27,7 @@
 // (VFS-29) starts off; `meaning=on` starts it ready, and then a content query with "sinmodelo"
 // shows the fallback notice. `api.fakeCalls`
 // counts the name searches, content searches and content offers sent (VFS-42 AC-2, AC-4), reveals
-// and the project pages opened from «Acerca de» (VFS-45 AC-6, AC-7). The app version is 0.4.0.
+// and the project pages opened from «Acerca de» (VFS-45 AC-6, AC-7). The app version is 0.5.0.
 
 import {
   BookmarkRoot, ContentPhase, ContentStop, DriveKind, MeaningPhase, MeaningUse, ErrorCode, FileKind, PatternReason, IndexerState, LinkKind, MatchKind,
@@ -897,7 +897,7 @@ export function createFakeBackend(params) {
     async setContentMaxMb(mb) { contentMaxMb = mb; return contentMaxMb; },
     async getUpdateSettings() { return { ...updateSettings }; },
     async setUpdateCheck(enabled) { updateSettings.checkOnOpen = enabled; return { ...updateSettings }; },
-    async appVersion() { return '0.4.0'; },
+    async appVersion() { return '0.5.0'; },
     async openProjectPage(page) { fakeCalls.openProjectPage++; fakeCalls.lastProjectPage = page; },
     async checkForUpdate() {
       await sleep(50);

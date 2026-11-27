@@ -120,7 +120,7 @@ test('the version shows under the sections', async () => {
   await page.load();
   await openSettings();
   await until(`document.getElementById('settings-version').textContent !== ''`, 'the version');
-  assert.equal(await evaluate(`document.getElementById('settings-version').textContent`), S.appVersion('0.4.0'));
+  assert.equal(await evaluate(`document.getElementById('settings-version').textContent`), S.appVersion('0.5.0'));
   assert.equal(await evaluate(`document.querySelector('.settings-nav').lastElementChild.id`), 'settings-version');
   await closeSettings();
 });
@@ -134,7 +134,7 @@ test('«Acerca de» shows the version, the update state and the credits', async 
   await openSettings();
   await evaluate(`document.getElementById('stab-about').click()`);
   const text = await evaluate(`document.getElementById('spanel-about').innerText`);
-  for (const s of [S.aboutVersion('0.4.0'), S.aboutAuthor, S.aboutLicenseName, S.aboutSourceOpen]) assert.ok(text.includes(s), s);
+  for (const s of [S.aboutVersion('0.5.0'), S.aboutAuthor, S.aboutLicenseName, S.aboutSourceOpen]) assert.ok(text.includes(s), s);
   assert.equal(await evaluate(`document.getElementById('about-update-action').textContent`), S.aboutCheck);
   await evaluate(`document.getElementById('about-update-action').click()`);
   await until(`document.getElementById('about-update').textContent === ${JSON.stringify(S.aboutUpToDate)}`, '«Está al día»');
