@@ -90,7 +90,7 @@ fn embed(db: &Path, e: &mut Fake) -> RunSummary {
         e,
         &RunOptions { batch: 2 },
         &AtomicBool::new(false),
-        &mut |_| {},
+        &mut |_| true,
     )
     .unwrap()
 }

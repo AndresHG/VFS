@@ -26,7 +26,7 @@ CREATE TABLE sets(
   provider  TEXT NOT NULL,
   model     TEXT NOT NULL,
   dim       INTEGER NOT NULL,
-  complete  INTEGER NOT NULL DEFAULT 0,   -- every chunk text of the archive has a vector
+  complete  INTEGER NOT NULL DEFAULT 0,   -- has covered every chunk text of the archive once (D20)
   mean      BLOB,                         -- f32 × dim, from the set's first batch; bits are taken from v - mean
   UNIQUE(provider, model, dim)
 );

@@ -78,13 +78,14 @@ pub struct RunSummary {
 }
 
 /// Embeds what the vector set of `embedder`'s model lacks (see the module docs). `progress`
-/// is called after every stored batch.
+/// is called after every stored batch; it may wait (the pace, VFS-27 R7) and returns whether
+/// to go on.
 pub fn run(
     index_db: &Path,
     embedder: &mut dyn Embedder,
     opts: &RunOptions,
     stop: &AtomicBool,
-    progress: &mut dyn FnMut(Progress),
+    progress: &mut dyn FnMut(Progress) -> bool,
 ) -> Result<RunSummary> {
     let started = Instant::now();
     let content = vfs_content::ChunkReader::open(index_db)?;
@@ -138,11 +139,14 @@ pub fn run(
                     batch.drain(..).map(|(h, _)| h).zip(vectors).collect();
                 store.insert(set, &rows)?;
                 sum.embedded += rows.len() as u64;
-                progress(Progress {
+                let go_on = progress(Progress {
                     done: sum.embedded,
                     total: sum.pending,
                 });
-                Ok(true)
+                if !go_on {
+                    sum.stopped = true;
+                }
+                Ok(go_on)
             }
             Ok(_) => {
                 sum.error = Some("the worker returned a wrong number of vectors".into());

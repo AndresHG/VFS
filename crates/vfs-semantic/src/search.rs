@@ -137,6 +137,29 @@ impl MeaningIndex {
         });
     }
 
+    /// Drops the loaded rows, so new vectors are found (an embedding run stored some), and
+    /// loads them again in the background when the ranker is in use.
+    pub fn reload(&self) {
+        let in_use = {
+            let mut st = self.lock();
+            let in_use = st.rows.is_some();
+            st.rows = None;
+            in_use
+        };
+        if in_use {
+            self.warm();
+        }
+    }
+
+    /// Releases the rows and the query worker now (meaning search switched off).
+    pub fn release(&self) {
+        let mut st = self.lock();
+        st.rows = None;
+        if !matches!(st.worker, Worker::Starting) {
+            st.worker = Worker::None;
+        }
+    }
+
     /// Waits up to `timeout` for [`MeaningIndex::warm`] to finish; true when the rows are
     /// loaded and the worker is ready.
     pub fn wait_ready(&self, timeout: Duration) -> bool {

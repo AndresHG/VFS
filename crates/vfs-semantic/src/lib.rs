@@ -7,9 +7,11 @@
 
 pub mod client;
 pub mod engine;
+pub mod install;
 pub mod protocol;
 pub mod quant;
 pub mod search;
+pub mod service;
 pub mod store;
 pub mod worker;
 

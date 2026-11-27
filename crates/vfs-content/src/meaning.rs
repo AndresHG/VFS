@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use rusqlite::types::Value;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use vfs_core::SearchFilters;
 
@@ -219,7 +220,7 @@ impl Searcher {
                 .query_row(rusqlite::params![file_id, ordinal], |r| {
                     Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
                 })
-                .ok();
+                .optional()?;
             let Some((page, sb, eb, sc, ec)) = row else {
                 continue;
             };

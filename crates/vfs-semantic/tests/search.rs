@@ -48,7 +48,7 @@ fn index(docs: &[(i64, &str)]) -> (tempfile::TempDir, PathBuf) {
         &mut Fake,
         &RunOptions::default(),
         &AtomicBool::new(false),
-        &mut |_| {},
+        &mut |_| true,
     )
     .unwrap();
     assert!(sum.complete);
