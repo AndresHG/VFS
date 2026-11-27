@@ -86,7 +86,16 @@ impl WorkerEmbedder {
         }
     }
 
-    fn start(&mut self) -> Result<(), String> {
+    /// Starts the worker now, if it is not running, and waits for its hello; `stop` abandons
+    /// the wait.
+    pub fn start_now(&mut self, stop: &AtomicBool) -> Result<(), String> {
+        if self.running.is_some() {
+            return Ok(());
+        }
+        self.start(stop)
+    }
+
+    fn start(&mut self, stop: &AtomicBool) -> Result<(), String> {
         let mut cmd = Command::new(&self.cfg.program);
         cmd.args(&self.cfg.args)
             .arg("--model-dir")
@@ -151,8 +160,7 @@ impl WorkerEmbedder {
             #[cfg(windows)]
             _job: job,
         });
-        let never = AtomicBool::new(false);
-        let line = self.wait_line(HELLO_TIMEOUT, &never).map_err(|e| match e {
+        let line = self.wait_line(HELLO_TIMEOUT, stop).map_err(|e| match e {
             EmbedError::Failed(m) => m,
             EmbedError::Stopped => "stopped".into(),
         })?;
@@ -232,7 +240,13 @@ impl Embedder for WorkerEmbedder {
         stop: &AtomicBool,
     ) -> Result<Vec<Vec<f32>>, EmbedError> {
         if self.running.is_none() {
-            self.start().map_err(EmbedError::Failed)?;
+            self.start(stop).map_err(|e| {
+                if stop.load(Ordering::Relaxed) {
+                    EmbedError::Stopped
+                } else {
+                    EmbedError::Failed(e)
+                }
+            })?;
         }
         let req = serde_json::to_string(&Request {
             texts: texts.to_vec(),

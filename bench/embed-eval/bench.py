@@ -5,6 +5,8 @@
     bench.py bm25   --vfs PATH/TO/vfs    # BM25 ranking of every query from `vfs content-search`
     bench.py embed  MODEL [--threads N]  # vectors for every chunk of content.db and every query
     bench.py eval   [MODEL ...]          # gate table; writes work/results.json
+    bench.py vfs-gate --vfs PATH/TO/vfs --model-dir DIR [--db INDEX]
+                                         # VFS-29 AC-12 through the shipped retrieve
 
 Everything is written under work/ (not committed). The chunks are the ones the real engine
 stored in content.db (VFS-2 R11, ~2,000 characters, never crossing a page), and the BM25
@@ -262,6 +264,52 @@ def cmd_eval(a):
               f"{r['strict_es']:3d}/{r['strict_en']}/{r['strict_keyword']}")
 
 
+def cmd_vfs_gate(a):
+    """AC-12 through the shipped code: `vfs embed-index` must have run on the index; each
+    query goes through `vfs content-search --meaning-model-dir`, the fused `retrieve`."""
+    db = Path(a.db) if a.db else DB
+    bm25 = json.loads((WORK / "bm25.json").read_text())
+    hyb, by_meaning = {}, {}
+    for q in queries():
+        r = subprocess.run([a.vfs, "content-search", "--db", str(db), "--json", "--limit",
+                            str(K), "--meaning-model-dir", a.model_dir, q["q"]],
+                           check=True, capture_output=True, text=True)
+        content = json.loads(r.stdout)["content"]
+        if content.get("meaning") != "used":
+            raise SystemExit(f"meaning search did not take part for «{q['q']}»: {content.get('meaning')}")
+        hyb[q["id"]] = [h["name"] for h in content["hits"]]
+        by_meaning[q["id"]] = [h["name"] for h in content["hits"] if h.get("byMeaning")]
+    qs = queries()
+
+    def count(sel, ranks):
+        return sum(hit(ranks[q["id"]], q["want"]) for q in qs if sel(q))
+
+    es = lambda q: q["set"] == MEANING_SET and q["lang"] == ES  # noqa: E731
+    en = lambda q: q["set"] == MEANING_SET and q["lang"] == EN  # noqa: E731
+    kw = lambda q: q["set"] == KEYWORD  # noqa: E731
+    losses = [q["q"] for q in qs if kw(q) and hit(bm25[q["id"]], q["want"])
+              and not hit(hyb[q["id"]], q["want"])]
+    res = {
+        "bm25": {"meaning_es": count(es, bm25), "meaning_en": count(en, bm25),
+                 "keyword": count(kw, bm25)},
+        "hybrid": {"meaning_es": count(es, hyb), "meaning_en": count(en, hyb),
+                   "keyword": count(kw, hyb), "keyword_losses": losses},
+        "n": {"meaning_es": sum(map(es, qs)), "meaning_en": sum(map(en, qs)),
+              "keyword": sum(map(kw, qs))},
+        "meaning_hits": {q["q"]: hit(hyb[q["id"]], q["want"]) for q in qs if not kw(q)},
+    }
+    b, h = res["bm25"], res["hybrid"]
+    res["passes"] = (h["meaning_es"] - b["meaning_es"] >= 4
+                     and h["meaning_en"] - b["meaning_en"] >= 1 and not losses)
+    (WORK / "vfs-gate.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
+    n = res["n"]
+    print(f"BM25:   es {b['meaning_es']}/{n['meaning_es']}, en {b['meaning_en']}/{n['meaning_en']}, "
+          f"keyword {b['keyword']}/{n['keyword']}")
+    print(f"hybrid: es {h['meaning_es']}/{n['meaning_es']}, en {h['meaning_en']}/{n['meaning_en']}, "
+          f"keyword {h['keyword']}/{n['keyword']}, losses {losses}")
+    print("gate:", "PASS" if res["passes"] else "fail")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -273,8 +321,13 @@ def main():
     p.add_argument("--threads", type=int, default=4)
     p = sub.add_parser("eval")
     p.add_argument("models", nargs="*")
+    p = sub.add_parser("vfs-gate")
+    p.add_argument("--vfs", required=True)
+    p.add_argument("--model-dir", required=True)
+    p.add_argument("--db")
     a = ap.parse_args()
-    {"build": cmd_build, "bm25": cmd_bm25, "embed": cmd_embed, "eval": cmd_eval}[a.cmd](a)
+    {"build": cmd_build, "bm25": cmd_bm25, "embed": cmd_embed, "eval": cmd_eval,
+     "vfs-gate": cmd_vfs_gate}[a.cmd](a)
 
 
 if __name__ == "__main__":

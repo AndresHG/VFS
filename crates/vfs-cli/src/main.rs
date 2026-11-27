@@ -179,6 +179,13 @@ enum Cmd {
         /// Repeat the query this many times on one connection and report the median time.
         #[arg(long, default_value_t = 1)]
         runs: u32,
+        /// Fuse with search by meaning (VFS-29): the local model's folder; needs
+        /// `embed-index` run first.
+        #[arg(long)]
+        meaning_model_dir: Option<PathBuf>,
+        /// The `vfs-embed` worker (default: next to this executable).
+        #[arg(long)]
+        embed_worker: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -563,6 +570,8 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
             offset,
             layout,
             runs,
+            meaning_model_dir,
+            embed_worker,
             json,
         } => {
             let filters = build_filters(kind, from, to, min_size, max_size, folder)?;
@@ -574,7 +583,11 @@ fn run(cli: Cli) -> AnyResult<ExitCode> {
                 sort: Default::default(),
                 scope: Default::default(),
             };
-            content::search(&db, &q, layout, runs, json)?;
+            let meaning = meaning_model_dir.map(|dir| content::Meaning {
+                model_dir: dir,
+                worker: embed_worker,
+            });
+            content::search(&db, &q, layout, runs, meaning, json)?;
         }
         #[cfg(feature = "content")]
         Cmd::Ask {

@@ -95,22 +95,31 @@ pub fn run(
     // Pass 1: hash every chunk; note the first chunk of each text the set lacks.
     let mut seen: HashSet<TextHash> = HashSet::new();
     let mut pending: Vec<(i64, u32)> = Vec::new();
+    let mut locations: Vec<(TextHash, i64, u32)> = Vec::new();
     for file_id in content.doc_ids()? {
         for (ordinal, text) in content.chunk_texts(file_id)? {
             let h = text_hash(&text);
+            locations.push((h, file_id, ordinal));
             if seen.insert(h) && !stored.contains(&h) {
                 pending.push((file_id, ordinal));
             }
         }
     }
+    store.set_locations(&locations)?;
+    drop(locations);
+    // A new set's first batch fixes its mean (store::MEAN_SAMPLE).
+    let mut batch_size = if store.mean(set)?.is_none() {
+        opts.batch.max(crate::store::MEAN_SAMPLE)
+    } else {
+        opts.batch.max(1)
+    };
     let mut sum = RunSummary {
         texts: seen.len() as u64,
         pending: pending.len() as u64,
         ..RunSummary::default()
     };
-    if !pending.is_empty() {
-        store.set_complete(set, false)?;
-    }
+    // A set that once covered the archive keeps serving searches while new texts are
+    // embedded (D20): until then those documents are found by their words alone.
 
     // Pass 2: embed the pending texts, one document's text read at a time.
     let mut done_now: HashSet<TextHash> = HashSet::new();
@@ -168,7 +177,8 @@ pub fn run(
                 continue;
             }
             batch.push((h, text));
-            if batch.len() >= opts.batch.max(1) {
+            if batch.len() >= batch_size {
+                batch_size = opts.batch.max(1);
                 if stop.load(Ordering::Relaxed) {
                     sum.stopped = true;
                     going = false;

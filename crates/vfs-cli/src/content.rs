@@ -163,7 +163,12 @@ fn print_content(r: &ContentResponse, skip: &[i64]) {
             h.dir,
             h.name
         );
-        println!("            {}", marked(&h.snippet, &h.highlights));
+        let tag = if h.by_meaning {
+            "  [relacionado por tema]"
+        } else {
+            ""
+        };
+        println!("            {}{tag}", marked(&h.snippet, &h.highlights));
     }
 }
 
@@ -180,14 +185,61 @@ fn print_names(r: &SearchResponse) {
     }
 }
 
-pub fn search(db: &Path, q: &SearchQuery, layout: Layout, runs: u32, json: bool) -> AnyResult<()> {
+/// Search by meaning for `content-search` (VFS-29): the model folder and the worker.
+pub struct Meaning {
+    pub model_dir: std::path::PathBuf,
+    pub worker: Option<std::path::PathBuf>,
+}
+
+/// The `vfs-embed` worker: the given path, or the one next to this executable.
+fn embed_worker(worker: Option<std::path::PathBuf>) -> AnyResult<std::path::PathBuf> {
+    Ok(match worker {
+        Some(p) => p,
+        None => std::env::current_exe()?
+            .with_file_name(format!("vfs-embed{}", std::env::consts::EXE_SUFFIX)),
+    })
+}
+
+pub fn search(
+    db: &Path,
+    q: &SearchQuery,
+    layout: Layout,
+    runs: u32,
+    meaning: Option<Meaning>,
+    json: bool,
+) -> AnyResult<()> {
     let t = Instant::now();
-    let searcher = match vfs_content::Searcher::open(db) {
+    let mut searcher = match vfs_content::Searcher::open(db) {
         Err(vfs_content::Error::Off) => {
             return Err("content search is off for this index (run `vfs content-index`)".into())
         }
         r => r?,
     };
+    if let Some(m) = meaning {
+        let worker = vfs_semantic::client::WorkerConfig {
+            program: embed_worker(m.worker)?,
+            args: Vec::new(),
+            model_dir: m.model_dir,
+            model: vfs_semantic::LOCAL_MODEL,
+            threads: 1,
+            foreground: true,
+            mem_cap: vfs_semantic::client::DEFAULT_MEM_CAP,
+            timeout: vfs_semantic::search::QUERY_TIMEOUT,
+        };
+        let index = vfs_semantic::search::MeaningIndex::new(
+            db.to_path_buf(),
+            vfs_semantic::search::MeaningConfig {
+                worker,
+                idle: vfs_semantic::search::IDLE_RELEASE,
+            },
+        );
+        // The CLI waits for the model, as the app's warm-up on opening «Documentos» does.
+        index.warm();
+        if !index.wait_ready(Duration::from_secs(120)) {
+            return Err("the embedding worker did not start".into());
+        }
+        searcher = searcher.with_meaning(std::sync::Arc::new(index));
+    }
     let mut content = searcher.search(q)?;
     // CPU time of the query, which a busy machine does not inflate the way it does wall time.
     let mut cpu_ms = Vec::new();
@@ -232,6 +284,9 @@ pub fn search(db: &Path, q: &SearchQuery, layout: Layout, runs: u32, json: bool)
     if content.partial {
         println!("(no document has every word: these have some of them)");
     }
+    if content.meaning == vfs_content::MeaningUse::Unavailable {
+        println!("(search by meaning not available now: word matches only)");
+    }
     let more = if content.total_capped { "+" } else { "" };
     println!(
         "{} of {}{more} content hits; {} ms in the engine, {wall:.1} ms wall",
@@ -251,15 +306,8 @@ pub fn embed_index(
     threads: usize,
     json: bool,
 ) -> AnyResult<()> {
-    let program = match worker {
-        Some(p) => p,
-        None => {
-            let exe = std::env::current_exe()?;
-            exe.with_file_name(format!("vfs-embed{}", std::env::consts::EXE_SUFFIX))
-        }
-    };
     let cfg = vfs_semantic::client::WorkerConfig {
-        program,
+        program: embed_worker(worker)?,
         args: Vec::new(),
         model_dir: model_dir.to_path_buf(),
         model: vfs_semantic::LOCAL_MODEL,

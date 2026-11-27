@@ -30,7 +30,7 @@ const BODY_WEIGHT: f64 = 1.0;
 const SNIPPET_LEAD: usize = 8;
 const SNIPPET_WORDS: usize = 32;
 /// Passages returned per document hit (VFS-46 R8, superseding VFS-2 R11's three).
-const MAX_PASSAGES: usize = 6;
+pub(crate) const MAX_PASSAGES: usize = 6;
 
 /// A matching chunk of a document (VFS-2 R11): where it is, so a caller can cite or fetch
 /// it, and a highlighted snippet of it.
@@ -76,6 +76,10 @@ pub struct ContentHit {
     pub title: Option<String>,
     pub authors: Vec<String>,
     pub created: Option<String>,
+    /// Found by meaning alone, not by its words (VFS-29 R12): «relacionado por tema», and the
+    /// snippet is the best passage with nothing highlighted.
+    #[serde(default)]
+    pub by_meaning: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +92,20 @@ pub struct ContentResponse {
     pub total: u64,
     pub total_capped: bool,
     pub elapsed_ms: u64,
+    /// Whether search by meaning took part (VFS-29 R13).
+    #[serde(default)]
+    pub meaning: crate::meaning::MeaningUse,
+}
+
+/// The start of a passage as a snippet: its first words, whitespace collapsed (VFS-29 R12,
+/// a hit found by meaning shows its best passage).
+pub(crate) fn collapse_snippet(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut s = words[..words.len().min(SNIPPET_WORDS)].join(" ");
+    if words.len() > SNIPPET_WORDS {
+        s.push('…');
+    }
+    s
 }
 
 /// Snippet around the window with the most distinct query keys, with highlight offsets.
@@ -296,7 +314,10 @@ fn resolve_scopes(conn: &Connection, folder: &str) -> Result<Vec<Scope>> {
 
 /// SQL predicate (starting with ` AND`) for the filters, with its parameters; `None` when
 /// the filters exclude every document. Same semantics as name search's `file_clause`.
-fn filter_clause(conn: &Connection, f: &SearchFilters) -> Result<Option<(String, Vec<Value>)>> {
+pub(crate) fn filter_clause(
+    conn: &Connection,
+    f: &SearchFilters,
+) -> Result<Option<(String, Vec<Value>)>> {
     let mut sql = String::new();
     let mut params = Vec::new();
     if !f.kinds.is_empty() && !f.kinds.contains(&FileKind::Document) {
@@ -613,7 +634,9 @@ impl UnreadReason {
 /// cache stays warm between queries). These calls are the only way into `content.db` for
 /// every other crate (VFS-2 R15).
 pub struct Searcher {
-    conn: Connection,
+    pub(crate) conn: Connection,
+    /// The ranker by meaning, when meaning search is on (VFS-29 R11).
+    meaning: Option<std::sync::Arc<dyn crate::meaning::Meaning>>,
     /// The indexed-document count and when it was read: counted at most every
     /// [`DOC_COUNT_TTL`], not on every query (VFS-27 hand-off from VFS-2).
     doc_count: std::sync::Mutex<Option<(Instant, u64)>>,
@@ -655,8 +678,32 @@ impl Searcher {
         }
         Ok(Searcher {
             conn: store::open_index_ro(index_db)?,
+            meaning: None,
             doc_count: std::sync::Mutex::new(None),
         })
+    }
+
+    /// The same searcher, fusing `retrieve`'s results with `meaning`'s (VFS-29 R11).
+    pub fn with_meaning(
+        mut self,
+        meaning: std::sync::Arc<dyn crate::meaning::Meaning>,
+    ) -> Searcher {
+        self.meaning = Some(meaning);
+        self
+    }
+
+    /// The stored text of a document; empty when it has none.
+    pub(crate) fn doc_text(&self, file_id: i64) -> Result<String> {
+        let blob: Option<Vec<u8>> = self
+            .conn
+            .query_row(
+                "SELECT text FROM c.docs WHERE file_id = ?1",
+                [file_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(blob.as_deref().map(store::decompress).unwrap_or_default())
     }
 
     /// Ranked documents for `query` under `filters`, from `offset`, at most `k` (R15).
@@ -668,7 +715,14 @@ impl Searcher {
         offset: u32,
     ) -> Result<ContentResponse> {
         let docs = self.doc_count()?;
-        retrieve_conn(&self.conn, docs, query, filters, None, k, offset)
+        let Some(meaning) = self.meaning.as_deref() else {
+            return retrieve_conn(&self.conn, docs, query, filters, None, k, offset);
+        };
+        let started = Instant::now();
+        let bm25 = retrieve_conn(&self.conn, docs, query, filters, None, offset + k, 0)?;
+        let mut resp = self.retrieve_fused(meaning, bm25, query, filters, k, offset)?;
+        resp.elapsed_ms = started.elapsed().as_millis() as u64;
+        Ok(resp)
     }
 
     fn doc_count(&self) -> Result<u64> {
@@ -725,6 +779,7 @@ impl Searcher {
                             title: r.get(6)?,
                             authors: Vec::new(),
                             created: r.get(8)?,
+                            by_meaning: false,
                         },
                         r.get::<_, i64>(5)?,
                         r.get::<_, Option<String>>(7)?,
@@ -913,6 +968,7 @@ fn retrieve_conn(
         total: 0,
         total_capped: false,
         elapsed_ms: 0,
+        meaning: Default::default(),
     };
     if plan.is_empty() {
         return Ok(ContentResponse {
@@ -1057,6 +1113,7 @@ fn run_plan(
                 title: r.get(8)?,
                 authors: Vec::new(),
                 created: r.get(10)?,
+                by_meaning: false,
             };
             Ok((hit, r.get(5)?, r.get(7)?, r.get(9)?))
         })?;
@@ -1103,6 +1160,7 @@ fn run_plan(
         total: total.min(TOTAL_CAP) as u64,
         total_capped: total > TOTAL_CAP,
         elapsed_ms: 0,
+        meaning: Default::default(),
     })
 }
 
