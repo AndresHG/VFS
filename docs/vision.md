@@ -7,9 +7,12 @@ come. Nothing here is committed scope until it has a spec (`specs/`) and an issu
 
 ## Today
 
-VFS is a local, offline desktop app for Windows and macOS that finds any file in a
-multi-terabyte personal archive by its name and folder path, and Firefox, Chrome and Brave
-bookmarks by title, address and folder. It reads; it never changes a source. See the
+VFS is a local desktop app for Windows and macOS that finds any file in a
+multi-terabyte personal archive by its name, folder and the text inside its documents, and
+Firefox, Chrome and Brave bookmarks by title, address and folder. With the user's own AI
+key it answers questions over the archive in the Chat tab, citing the files used (0.4), and
+0.5, in release, adds search by meaning with a small local model. It reads; it never
+changes a source. See the
 [README](../README.md) for what is built and [`docs/decisions.md`](decisions.md) for why.
 
 ## The ambition: access to the knowledge you already have
@@ -61,33 +64,35 @@ copilot](#boundary-with-the-work-copilot). VFS is not a "second brain".
 
 ## Future lines of work
 
-Grouped by theme, not ordered. The decided order of the lines that came from user
-feedback, with costs and research, is in
-[`docs/research/future-lines-roadmap.md`](research/future-lines-roadmap.md) and
-[`docs/research/future-lines.md`](research/future-lines.md); this page adds the longer-term
-direction around them. Each line becomes a spec when it starts.
+Grouped by theme, not ordered. Which version ships what is in
+[`docs/roadmap.md`](roadmap.md); the research and costs behind the lines that came from user
+feedback are in [`docs/research/future-lines.md`](research/future-lines.md). Each line
+becomes a spec when it starts.
 
 ### More sources
 
 Each source is read-only, optional and selectable, like browser bookmarks (VFS-6, VFS-44):
 
-- Other browsers' bookmarks (Edge, Safari, Vivaldi, Opera, Arc), on request.
-- Chat exports, official exports only (never the Telegram API or WhatsApp database
-  decryption): WhatsApp and Telegram (messages, shared links, contacts, and shared photos
-  found by name and metadata only, under the no-photo-content rule).
+- Other browsers' bookmarks (Edge, Safari, Vivaldi, Opera, Arc), on request; Firefox
+  history, off by default.
+- Chats: Telegram live, opt-in and read-only through its official client API, with its
+  messages never sent to the AI (VFS-52, owner, 2026-11-27); WhatsApp from its per-chat
+  exports only, never by decrypting its database. Shared photos are found by name and
+  metadata only, under the no-photo-content rule.
 - Notes and lists: Google Keep and similar note or list apps, from their exports.
 - Private YouTube playlists and other saved-link services.
-- Plain Markdown folders, and perhaps an existing Obsidian vault (depends on the research
-  in issue 119).
+- Plain Markdown folders are already searchable as files; VFS does not read an Obsidian
+  vault's links or graph.
 
 ### Content and concept search
 
 - Text inside documents (Word, PDF): milestone Fase 3, designed in
   [`docs/content-search-design.md`](content-search-design.md).
-- Semantic search with embeddings, so a query finds a concept even when the words differ:
-  through the configured model API, or a small local model once issue 41 has measured one
-  on the reference machine.
-- «Relacionados»: documents similar to a result, found by meaning (built, VFS-53).
+- Search by meaning, so a query finds a concept even when the words differ: a small local
+  model (multilingual e5-small) the user downloads from Ajustes, in 0.5 (VFS-29c); an
+  embedding API stays optional for later (VFS-29a).
+- «Relacionados»: documents similar to a result, from the same vectors (VFS-53). It is a
+  query by similarity, not a graph.
 - Extend the existing sort by date and by source to every new source.
 - A bibliographic list built from the documents found (issue 84).
 
@@ -125,11 +130,11 @@ have and want to find is VFS; what happens today and what you learn or do is the
 | Actions (tickets, drafts, tasks) | Never writes | Owns it, behind a preview |
 | Knowledge graph, memory, learned facts, notes | Does not build them | Owns them |
 
-Later, and not planned: VFS may expose a local read-only MCP server so the copilot (or the
-user's AI app) can search the archive, and VFS may query the copilot's knowledge through
-its own MCP server. Neither project depends on the other's code.
+A local read-only MCP server, so the copilot (or the user's AI app) can search the archive,
+is proposed for 0.8 and waits on the owner ([roadmap](roadmap.md), D2). VFS querying the
+copilot's knowledge through the copilot's own MCP server is not planned. Neither project depends on the other's code.
 
 ## Open questions
 
-- Chats: which apps and phones hold what the user wants (they are read only from official
-  exports; see the roadmap).
+- Chats: which apps and phones hold what the user wants beyond Telegram, which is read
+  live (VFS-52); WhatsApp is read only from its exports. See the [roadmap](roadmap.md).
