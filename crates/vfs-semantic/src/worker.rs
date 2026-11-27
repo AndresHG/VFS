@@ -22,6 +22,8 @@ pub enum TestHook {
     Hang,
     /// Allocate and touch memory without bound on the first request.
     Alloc,
+    /// Wait this many milliseconds before saying hello, as a slow model load does.
+    SlowStart(u64),
 }
 
 /// Command-line options of the worker binary.
@@ -48,6 +50,9 @@ impl Args {
             if let Some(h) = arg.strip_prefix("--test-hook=") {
                 a.hooks.push(match h.split_once(':') {
                     Some(("fake", dim)) => TestHook::Fake(dim.parse().map_err(|_| "bad fake dim")?),
+                    Some(("slow-start", ms)) => {
+                        TestHook::SlowStart(ms.parse().map_err(|_| "bad slow-start ms")?)
+                    }
                     None if h == "hang" => TestHook::Hang,
                     None if h == "alloc" => TestHook::Alloc,
                     _ => return Err(format!("unknown test hook {h}")),
@@ -252,6 +257,11 @@ pub fn worker_main() {
             std::process::exit(3);
         }
     };
+    for h in &args.hooks {
+        if let TestHook::SlowStart(ms) = h {
+            std::thread::sleep(std::time::Duration::from_millis(*ms));
+        }
+    }
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     let hello = Hello {
