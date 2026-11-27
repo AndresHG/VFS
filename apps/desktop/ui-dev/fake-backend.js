@@ -337,6 +337,16 @@ function fakeMeaning(mode) {
       async meaningSetEnabled(on) { st.settings.enabled = on; if (on) st.settings.paused = false; return status(); },
       async meaningSetPaused(p) { st.settings.paused = p; return status(); },
       async meaningWarm() {},
+      // VFS-53: two related documents, the first in the same folder as document 1.
+      async relatedDocuments(fileId) {
+        await sleep(60);
+        if (!st.settings.enabled || !st.searchable) throw { code: 'unavailable', message: 'search by meaning' };
+        const base = { kind: 'document', size: 1000, modified: 0, score: 0.5, highlights: [], passages: [], title: null, authors: [], created: null, byMeaning: true };
+        return [
+          { ...base, id: fileId + 1000, name: 'factura_dentista_2023.pdf', dir: '/Users/ana/Documentos/Salud', snippet: 'Limpieza bucal y empaste, 400 € …' },
+          { ...base, id: fileId + 2000, name: 'seguro_medico.pdf', dir: '/Users/ana/Documentos/Seguros', snippet: 'Cobertura dental: revisiones y limpiezas …' },
+        ];
+      },
     },
   };
 }

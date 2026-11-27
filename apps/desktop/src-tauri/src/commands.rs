@@ -77,6 +77,7 @@ macro_rules! app_commands {
             crate::meaning::meaning_set_enabled,
             crate::meaning::meaning_set_paused,
             crate::meaning::meaning_warm,
+            crate::meaning::related_documents,
             $($extra),*
         ]
     };

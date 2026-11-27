@@ -182,6 +182,19 @@ impl Searcher {
         })
     }
 
+    /// Documents related to another (VFS-53 R6): `(file_id, ordinal, score)` each, best first,
+    /// as hits found by meaning, with that chunk as the passage. Documents no longer in the
+    /// index are left out.
+    pub fn related_hits(&self, related: &[(i64, u32, f32)]) -> Result<Vec<ContentHit>> {
+        let mut out = Vec::with_capacity(related.len());
+        for &(file_id, ordinal, score) in related {
+            if let Some(h) = self.meaning_hit(file_id, &[(ordinal, score)])? {
+                out.push(h);
+            }
+        }
+        Ok(out)
+    }
+
     /// The ids among `ids` that are stored documents inside `filters`.
     fn inside_filters(&self, ids: &[i64], filters: &SearchFilters) -> Result<Vec<i64>> {
         if ids.is_empty() {

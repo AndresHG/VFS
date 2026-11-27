@@ -125,6 +125,8 @@ function tauriBackend(t) {
     meaningSetEnabled: (on) => invoke('meaning_set_enabled', { on }),
     meaningSetPaused: (paused) => invoke('meaning_set_paused', { paused }),
     meaningWarm: () => invoke('meaning_warm'),
+    // VFS-53: «Relacionados».
+    relatedDocuments: (fileId) => invoke('related_documents', { fileId }),
     onMeaningStatus: (cb) => listen('meaning-status', (e) => cb(e.payload)),
     // VFS-28: «Preguntar a sus documentos». The key is sent once, when typed; nothing returns it.
     aiStatus: () => invoke('ai_status'),
@@ -179,7 +181,7 @@ function missingBackend() {
     contentStatus: fail, contentSetEnabled: fail, contentSetPaused: fail, contentRetry: fail, contentRebuild: fail,
     contentMarkOffered: fail, contentOffer: fail, contentDeleteStore: fail, contentSearch: fail,
     contentUnreadCounts: fail, contentUnread: fail, onContentStatus: async () => () => {},
-    meaningStatus: fail, meaningOffer: fail, meaningSetEnabled: fail, meaningSetPaused: fail, meaningWarm: fail,
+    meaningStatus: fail, meaningOffer: fail, meaningSetEnabled: fail, meaningSetPaused: fail, meaningWarm: fail, relatedDocuments: fail,
     onMeaningStatus: async () => () => {},
     aiStatus: fail, aiSetSettings: fail, aiNoticeSeen: fail, aiSaveKey: fail, aiSaveKeyFallback: fail,
     aiDeleteKey: fail, aiTestKey: fail, aiSetCap: fail, aiRecords: fail, aiClearRecords: fail,

@@ -4,6 +4,7 @@
 // R7a, R8): nothing here builds HTML from answer, passage or title text; every string goes
 // through textContent or a text node.
 
+import { relatedBox, relatedToggle } from './related.js';
 import { AiErrorCode, KeyState, Provider } from './contract.js';
 import { aiErrorText, formatUsd, providerName } from './ai.js';
 
@@ -158,7 +159,7 @@ export function bibLine(S, e) {
  */
 export function setupChat({
   api, S, lang, $, el, aiStatus, updateAi, refreshAi, setCheap, revealFile, toast, folders,
-  showChat, openAiSettings,
+  showChat, openAiSettings, relatedOn = () => false,
 }) {
   const input = $('chat-input');
   const form = $('chat-form');
@@ -410,6 +411,14 @@ export function setupChat({
     reveal.type = 'button';
     reveal.addEventListener('click', () => revealFile(source.fileId, false));
     box.append(el('p', 'ai-source-title', sourceTitle(S, source)), el('p', 'ai-source-text', source.text), reveal);
+    // VFS-53 R4: «Ver relacionados» on a cited document while search by meaning serves.
+    if (relatedOn()) {
+      box.append(relatedToggle({
+        label: S.relatedOpen,
+        el,
+        open: () => box.appendChild(relatedBox({ api, S, el, revealFile, fileId: source.fileId, dir: source.dir })),
+      }));
+    }
     return box;
   }
 

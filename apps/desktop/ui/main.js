@@ -12,6 +12,7 @@ import { wantsSuggestion, suggestionLabel, folderAfterClear } from './suggest.js
 import { setupFeedback } from './feedback.js';
 import { setupAiSettings } from './ai.js';
 import { chatReady, setupChat } from './chat.js';
+import { relatedAvailable, relatedBox, relatedToggle } from './related.js';
 import { lightDismiss } from './dismiss.js';
 import { statusText, firstScanRunning as firstScanOf, viewFor, footerActions, rootAction, RootAction } from './status.js';
 import { takenInBy, newestOnly } from './folders.js';
@@ -1409,6 +1410,7 @@ function main(L) {
     aiStatus: () => ai.status(), updateAi: (st) => ai.update(st), refreshAi: () => ai.refresh(),
     setCheap: (cheap) => ai.setCheap(cheap),
     folders: () => state.roots.map((r) => r.path),
+    relatedOn: () => relatedAvailable(state.meaning),
     showChat: () => showView(WindowTab.CHAT),
     openAiSettings: () => {
       $('language').value = choiceFor(savedLanguage());
@@ -1883,6 +1885,14 @@ function main(L) {
     // VFS-29 R12: found by meaning alone; the fragment is its best passage, nothing marked.
     if (hit.byMeaning) fragment.append(' ', el('span', 'related', S.meaningRelated));
     main.append(name, path, fragment);
+    // VFS-53 R4: «Relacionados» while search by meaning serves.
+    if (relatedAvailable(state.meaning)) {
+      main.append(relatedToggle({
+        label: S.relatedButton,
+        el,
+        open: () => main.appendChild(relatedBox({ api, S, el, revealFile, fileId: hit.id, dir: hit.dir })),
+      }));
+    }
     const show = button(S.revealButton, 'btn', () => revealFile(hit.id, false));
     show.setAttribute('aria-label', `${S.revealButton}: ${S.contentHitLabel(hit.name, hit.dir, page && N.count(page))}`);
     li.append(ico, main, show);
